@@ -26,8 +26,10 @@ export function releaseCompletionGuard(state: CadRunState): string | null {
 export const releaseWorkflow: WorkflowSpec = {
   name: "release",
   nextAfterRequirements: "audit",
-  sourcePhases: [],
-  candidateReviewPhase: "review",
+  // Gap closure is the productive engineering phase of release work:
+  // edit CAD source, commit a candidate, and let the harness rebuild/observe.
+  sourcePhases: ["gap_closure"],
+  candidateReviewPhase: "audit",
   planNext: {},
   planStayPhases: ["audit", "gap_closure", "package"],
   transitions: {
@@ -36,7 +38,6 @@ export const releaseWorkflow: WorkflowSpec = {
       workstreams_structurally_closed: "package",
     },
     gap_closure: {
-      engineering_changed: "audit",
       workstreams_structurally_closed: "package",
     },
     package: { package_prepared: "final_review" },
@@ -47,11 +48,17 @@ export const releaseWorkflow: WorkflowSpec = {
     },
   },
   acceptedPhases: ["final_review"],
-  acceptedEvidence: () => ["visual", "geometry"],
-  finishEvidence: () => ["visual", "geometry"],
+  acceptedEvidence: (state) =>
+    state.baselineArtifactHash
+      ? ["visual", "geometry", "compare"]
+      : ["visual", "geometry"],
+  finishEvidence: (state) =>
+    state.baselineArtifactHash
+      ? ["visual", "geometry", "compare"]
+      : ["visual", "geometry"],
   requiresBaselineInput: false,
   baselineEvidenceRequired: false,
-  mutationPolicies: { package: "allowed" },
-  updatesHeadOnAccept: false,
+  mutationPolicies: { gap_closure: "allowed", package: "allowed" },
+  updatesHeadOnAccept: true,
   completionGuard: releaseCompletionGuard,
 };

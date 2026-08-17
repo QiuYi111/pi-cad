@@ -60,8 +60,16 @@ export function toolsForPhase(phase: CadPhase): string[] {
     case "domain_analysis":
       return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
     case "audit":
-    case "gap_closure":
       return [...COGNITIVE_TOOLS, ...CAPABILITY_TOOLS, "cad_commit_plan", "cad_wait_for_user"];
+    case "gap_closure":
+      return [
+        ...BUILTIN_SOURCE,
+        ...CAPABILITY_TOOLS,
+        "cad_commit_candidate",
+        "cad_commit_plan",
+        "cad_transition",
+        "cad_wait_for_user",
+      ];
     case "package":
       return [...BUILTIN_READONLY, "bash", "edit", "write", ...CAPABILITY_TOOLS, "cad_commit_plan", "cad_transition", "cad_wait_for_user"];
     case "final_review":

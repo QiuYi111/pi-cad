@@ -47,7 +47,7 @@ src/core/
 - `greenfield` — concept, optional domain analysis, intent, build
 - `hybrid` — legacy baseline plus greenfield concept merge
 - `convert` — source baseline, transform plan, conversion, compare
-- `release` — audit, gap closure, package, final review with nine workstream statuses
+- `release` — audit → writable gap closure (engineering changes + candidate loop) → audit → package → final review, with nine workstream statuses
 
 ## Control protocol
 

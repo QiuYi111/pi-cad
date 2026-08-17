@@ -282,8 +282,9 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       "Commit authored build123d sources, or a STEP conversion in convert workflow. The harness runs build/visual/geometry/compare automatically.",
     promptSnippet: "Commit model source or conversion; harness observes and binds evidence automatically",
     promptGuidelines: [
-      "Only call from build, modify, or convert phases.",
+      "Call only when the current workflow phase exposes cad_commit_candidate as an active tool.",
       "In convert workflow with STEP/STP source, provide format and optional output.",
+      "In release gap_closure, commit the revised engineering source; the harness compares against the project head automatically.",
     ],
     parameters: Type.Object({
       sources: Type.Array(Type.String(), { minItems: 1 }),
@@ -354,21 +355,20 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
 
       const spec = workflowSpec(state);
       if (params.event === "accepted" && spec?.acceptedPhases.includes(state.phase)) {
-        if (state.workflow === "release" && state.phase === "final_review") {
-          const guard = spec.completionGuard?.(state);
-          if (guard) return errTool(`cannot accept: ${guard}`);
-        } else {
-          const verification = await verifyCurrentArtifacts(ctx.cwd, state);
-          if (verification) return errTool(`cannot accept: ${verification}`);
-          if (!state.currentArtifactHash) return errTool("cannot accept: current artifact hash is not bound");
-          const evidenceVerification = verifyEvidenceFilesForHash(
-            ctx.cwd,
-            state,
-            state.currentArtifactHash,
-            acceptedEvidenceKinds(state),
-          );
-          if (evidenceVerification) return errTool(`cannot accept: ${evidenceVerification}`);
+        const verification = await verifyCurrentArtifacts(ctx.cwd, state);
+        if (verification) return errTool(`cannot accept: ${verification}`);
+        if (!state.currentArtifactHash) {
+          return errTool("cannot accept: current artifact hash is not bound");
         }
+        const evidenceVerification = verifyEvidenceFilesForHash(
+          ctx.cwd,
+          state,
+          state.currentArtifactHash,
+          acceptedEvidenceKinds(state),
+        );
+        if (evidenceVerification) return errTool(`cannot accept: ${evidenceVerification}`);
+        const guard = spec.completionGuard?.(state);
+        if (guard) return errTool(`cannot accept: ${guard}`);
       }
       if (
         params.event === "baseline_understood" &&

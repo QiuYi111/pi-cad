@@ -287,21 +287,16 @@ export function transition(
   if (!spec) return { ok: false, reason: "workflow is not routed" };
 
   if (event === "accepted" && spec.acceptedPhases.includes(state.phase)) {
-    if (state.workflow === "release" && state.phase === "final_review") {
-      const guard = spec.completionGuard?.(state);
-      if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
-    } else {
-      if (!state.currentArtifactHash) {
-        return { ok: false, reason: "cannot accept: no current artifact is bound" };
-      }
-      for (const kind of spec.acceptedEvidence(state)) {
-        if (!hasCurrentEvidence(state, kind)) {
-          return { ok: false, reason: `cannot accept: current ${kind} evidence is missing` };
-        }
-      }
-      const guard = spec.completionGuard?.(state);
-      if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
+    if (!state.currentArtifactHash) {
+      return { ok: false, reason: "cannot accept: no current artifact is bound" };
     }
+    for (const kind of spec.acceptedEvidence(state)) {
+      if (!hasCurrentEvidence(state, kind)) {
+        return { ok: false, reason: `cannot accept: current ${kind} evidence is missing` };
+      }
+    }
+    const guard = spec.completionGuard?.(state);
+    if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
     const next: CadRunState = {
       ...state,
       phase: "ready",

@@ -166,7 +166,11 @@ test("release path requires all workstream statuses before finish", () => {
   state = p.state;
   let t = transition(state, "audit_complete", "gaps closed");
   assert.equal(t.ok, true); if (!t.ok) return;
-  t = transition(t.state, "workstreams_structurally_closed", "closed");
+  assert.equal(t.state.phase, "gap_closure");
+  state = candidate(t.state);
+  assert.equal(state.phase, "audit");
+  state = withEvidence(state, ["visual", "geometry"]);
+  t = transition(state, "workstreams_structurally_closed", "closed");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "package");
   t = transition(t.state, "package_prepared", "package ready");

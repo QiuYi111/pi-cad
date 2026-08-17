@@ -172,7 +172,7 @@ export async function runCandidateAuto(
   }
 
   if (
-    (state.workflow === "modify" || state.workflow === "convert") &&
+    ["modify", "convert", "release"].includes(state.workflow ?? "") &&
     state.baselineArtifactPath &&
     existsSync(resolve(cwd, state.baselineArtifactPath))
   ) {
