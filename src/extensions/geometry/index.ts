@@ -216,11 +216,21 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       before: Type.String({ description: "Before STEP path" }),
       after: Type.String({ description: "After STEP path" }),
       metrics: Type.Optional(Type.Array(Type.String())),
+      transformBefore: Type.Optional(Type.String({ description: "Optional JSON 4x4 matrix applied to before" })),
+      transformAfter: Type.Optional(Type.String({ description: "Optional JSON 4x4 matrix applied to after" })),
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const output = params.output ?? resolve(ctx.cwd, ".pi-cad", "evidence", "compare", `${Date.now().toString(36)}.json`);
-      const envelope = await compareGeometry(ctx.cwd, params.before, params.after, output, { metrics: params.metrics ?? undefined });
+      let transformBefore: number[][] | undefined;
+      let transformAfter: number[][] | undefined;
+      if (params.transformBefore) transformBefore = JSON.parse(params.transformBefore) as number[][];
+      if (params.transformAfter) transformAfter = JSON.parse(params.transformAfter) as number[][];
+      const envelope = await compareGeometry(ctx.cwd, params.before, params.after, output, {
+        metrics: params.metrics ?? undefined,
+        transformBefore,
+        transformAfter,
+      });
       const payload = envelope.payload as { error?: string; delta?: unknown };
       const text = envelope.ok
         ? `cad_compare_geometry succeeded. delta=${JSON.stringify(payload.delta ?? {})}`

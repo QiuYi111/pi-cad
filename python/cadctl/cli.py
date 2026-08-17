@@ -194,11 +194,15 @@ def _cmd_compare(args: argparse.Namespace) -> int:
     started = time.monotonic()
     before, after = Path(args.before), Path(args.after)
     try:
+        import json as _json
+
+        transform_before = _json.loads(args.transform_before) if args.transform_before else None
+        transform_after = _json.loads(args.transform_after) if args.transform_after else None
         payload = compare_geometry(
             before,
             after,
-            transform_before=None,
-            transform_after=None,
+            transform_before=transform_before,
+            transform_after=transform_after,
             metrics=args.metrics.split(",") if args.metrics else None,
             diff_output=args.output,
         )
@@ -410,6 +414,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--before", required=True)
     p.add_argument("--after", required=True)
     p.add_argument("--metrics", default=None)
+    p.add_argument("--transform-before", default=None)
+    p.add_argument("--transform-after", default=None)
     p.add_argument("--output", default=None)
     p.set_defaults(func=_cmd_compare)
 

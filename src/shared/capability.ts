@@ -197,6 +197,8 @@ export async function compareGeometry(
     resolve(cwd, after),
   ];
   if (options.metrics?.length) args.push("--metrics", options.metrics.join(","));
+  if (options.transformBefore) args.push("--transform-before", JSON.stringify(options.transformBefore));
+  if (options.transformAfter) args.push("--transform-after", JSON.stringify(options.transformAfter));
   if (output) args.push("--output", resolve(cwd, output));
   return runCadctl(args, { cwd, timeoutMs });
 }

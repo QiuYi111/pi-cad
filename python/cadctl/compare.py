@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import build123d as bd
+from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+from OCP.gp import gp_Trsf
 
 
 def _summary(shape: bd.Shape) -> dict[str, Any]:
@@ -28,8 +30,16 @@ def _apply_transform(shape: bd.Shape, matrix: list[list[float]] | None) -> bd.Sh
         return shape
     if len(matrix) != 4 or any(len(row) != 4 for row in matrix):
         raise ValueError("transform must be a 4x4 matrix")
-    flat = [float(value) for row in matrix for value in row]
-    return shape.transform_shape(bd.Matrix(*flat))
+    trsf = gp_Trsf()
+    # OCC SetValues is row-major: three rows of [R|t].
+    trsf.SetValues(
+        float(matrix[0][0]), float(matrix[0][1]), float(matrix[0][2]), float(matrix[0][3]),
+        float(matrix[1][0]), float(matrix[1][1]), float(matrix[1][2]), float(matrix[1][3]),
+        float(matrix[2][0]), float(matrix[2][1]), float(matrix[2][2]), float(matrix[2][3]),
+    )
+    api = BRepBuilderAPI_Transform(shape.wrapped, trsf, True)
+    transformed = api.Shape()
+    return bd.Compound(transformed)
 
 
 def compare_geometry(
