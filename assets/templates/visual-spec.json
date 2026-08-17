@@ -1,0 +1,14 @@
+{
+  "artifact": "build/part.glb",
+  "directions": [
+    { "name": "hero", "reference": "reference/hero.jpg" },
+    { "name": "detail", "reference": "reference/detail.jpg" }
+  ],
+  "materials": [
+    { "pattern": "body_*", "family": "aluminum" },
+    { "pattern": "grip_*", "family": "rubber" }
+  ],
+  "lighting": { "key": "softbox", "fill": "white", "rim": "cool" },
+  "camera": { "lens": "85mm", "composition": "rule-of-thirds" },
+  "outputs": { "hero": "presentation/hero.png", "turntable": "presentation/turntable_frames" }
+}

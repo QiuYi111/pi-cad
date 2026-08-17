@@ -143,6 +143,127 @@ class CadctlBackendTests(unittest.TestCase):
         )
         self.assertEqual(diagonal["payload"]["value"], 100.0)
 
+
+    def test_section_and_compare_and_assembly_tree(self) -> None:
+        self._build_plate()
+        step = self.build / "plate.step"
+
+        section = run_cadctl(
+            "section",
+            "--artifact",
+            str(step),
+            "--out-dir",
+            str(self.evidence / "section"),
+            "--origin",
+            "0,0,0",
+            "--normal",
+            "0,1,0",
+            "--display",
+            "hidden_edges",
+            "--width",
+            "320",
+            "--height",
+            "240",
+            cwd=self.cwd,
+        )
+        self.assertTrue(section["ok"])
+        self.assertEqual(section["payload"]["sectionFaceCount"], 1)
+        self.assertTrue((self.evidence / "section" / "section.png").exists())
+
+        compare = run_cadctl(
+            "compare",
+            "--before",
+            str(step),
+            "--after",
+            str(step),
+            "--output",
+            str(self.evidence / "compare.json"),
+            cwd=self.cwd,
+        )
+        self.assertTrue(compare["ok"])
+        self.assertEqual(compare["payload"]["delta"]["volume"], 0.0)
+        self.assertTrue((self.evidence / "compare.json").exists())
+
+        tree = run_cadctl("assembly-tree", "--artifact", str(step), cwd=self.cwd)
+        self.assertTrue(tree["ok"])
+        self.assertGreaterEqual(tree["payload"]["leafCount"], 1)
+
+    def test_export_and_capability(self) -> None:
+        self._build_plate()
+        step = self.build / "plate.step"
+        exported = run_cadctl(
+            "export",
+            "--source",
+            str(step),
+            "--output",
+            str(self.build / "plate.stl"),
+            "--format",
+            "stl",
+            cwd=self.cwd,
+        )
+        self.assertTrue(exported["ok"])
+        self.assertTrue((self.build / "plate.stl").exists())
+
+        caps = run_cadctl("capability", cwd=self.cwd)
+        self.assertTrue(caps["ok"])
+        self.assertIn("geometry", caps["payload"]["capabilities"])
+
+    def test_drawing_generate_and_simulation_unavailable(self) -> None:
+        self._build_plate()
+        step = self.build / "plate.step"
+        spec = self.cwd / "drawing-spec.json"
+        spec.write_text(
+            json.dumps(
+                {
+                    "artifact": str(step),
+                    "units": "mm",
+                    "sheet": {"width": 297, "height": 210},
+                    "views": [{"name": "front"}],
+                    "dimensions": [{"p1": [10, 10], "p2": [60, 10], "text": "50", "feature_refs": ["#c0"]}],
+                    "notes": ["V0 drawing test"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        drawing = run_cadctl(
+            "drawing",
+            "generate",
+            "--spec",
+            str(spec),
+            "--output-dir",
+            str(self.evidence / "drawing"),
+            cwd=self.cwd,
+        )
+        self.assertTrue(drawing["ok"])
+        self.assertTrue((self.evidence / "drawing" / "drawing.dxf").exists())
+
+        analysis = self.cwd / "analysis-spec.json"
+        analysis.write_text(
+            json.dumps(
+                {
+                    "artifact": str(step),
+                    "solver": "calculix",
+                    "analysis": "static",
+                    "materials": "materials.json",
+                    "loads": "loads.json",
+                    "constraints": "bc.json",
+                    "mesh": "mesh.json",
+                }
+            ),
+            encoding="utf-8",
+        )
+        sim = run_cadctl(
+            "simulate",
+            "run",
+            "--spec",
+            str(analysis),
+            "--output-dir",
+            str(self.evidence / "fea"),
+            cwd=self.cwd,
+        )
+        self.assertTrue(sim["ok"])
+        self.assertEqual(sim["payload"]["status"], "unavailable")
+
     def test_failed_model_returns_envelope_not_traceback(self) -> None:
         bad = self.cwd / "bad.py"
         bad.write_text("this is not python", encoding="utf-8")

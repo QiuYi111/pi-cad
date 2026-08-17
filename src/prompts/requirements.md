@@ -11,5 +11,6 @@ Reach a shared, actionable understanding for the requested maturity before execu
 - Do not grill for information that does not affect the requested maturity or next meaningful design decision.
 - Keep explicit assumptions reversible and visible.
 - If the task is already fully specified (the V0 plate is an example), do not ask ceremonial questions: call cad_commit_requirements directly.
+- For workflows that start from supplied STEP/CAD (analyze, modify, hybrid, convert), put every supplied artifact path in inputs[].
 
 When the task is sufficiently defined, call cad_commit_requirements instead of starting CAD work directly.

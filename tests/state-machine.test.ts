@@ -85,7 +85,7 @@ test("cad_route creates intake -> requirements and rejects unknown workflow", ()
     assert.equal(result.state.phase, "requirements");
     assert.equal(result.state.mutationPolicy, "read_only");
   }
-  const bad = routeQuick(null, "greenfield", "not in V0");
+  const bad = routeQuick(null, "not-a-workflow" as never, "invalid");
   assert.equal(bad.ok, false);
 });
 

@@ -1,0 +1,25 @@
+{
+  "artifact": "build/part.step",
+  "units": "mm",
+  "sheet": { "width": 297, "height": 210 },
+  "views": [
+    { "name": "front", "scale": 1.0 },
+    { "name": "top", "scale": 1.0 },
+    { "name": "right", "scale": 1.0 }
+  ],
+  "dimensions": [
+    {
+      "p1": [20, 20],
+      "p2": [120, 20],
+      "text": "100",
+      "feature_refs": ["#p0", "#p1"],
+      "tolerance": { "lower": -0.2, "upper": 0.2 },
+      "inspection_method": "calipers",
+      "ctq": false
+    }
+  ],
+  "notes": [
+    "Remove all burrs.",
+    "Material and finish are defined in the release BOM."
+  ]
+}

@@ -171,6 +171,152 @@ export async function measure(
   return runCadctl(args, { cwd, timeoutMs });
 }
 
+
+export interface CompareOptions {
+  before: string;
+  after: string;
+  transformBefore?: number[][];
+  transformAfter?: number[][];
+  metrics?: string[];
+  output?: string;
+}
+
+export async function compareGeometry(
+  cwd: string,
+  before: string,
+  after: string,
+  output?: string,
+  options: Omit<CompareOptions, "before" | "after" | "output"> = {},
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  const args = [
+    "compare",
+    "--before",
+    resolve(cwd, before),
+    "--after",
+    resolve(cwd, after),
+  ];
+  if (options.metrics?.length) args.push("--metrics", options.metrics.join(","));
+  if (output) args.push("--output", resolve(cwd, output));
+  return runCadctl(args, { cwd, timeoutMs });
+}
+
+export interface SectionOptions {
+  origin: [number, number, number];
+  normal: [number, number, number];
+  display?: "solid" | "hidden_edges" | "solid_with_hidden";
+  labels?: boolean;
+  width?: number;
+  height?: number;
+}
+
+export async function inspectSection(
+  cwd: string,
+  artifact: string,
+  outDir: string,
+  options: SectionOptions,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  const args = [
+    "section",
+    "--artifact",
+    resolve(cwd, artifact),
+    "--out-dir",
+    resolve(cwd, outDir),
+    "--origin",
+    options.origin.join(","),
+    "--normal",
+    options.normal.join(","),
+    "--display",
+    options.display ?? "solid",
+    "--width",
+    String(options.width ?? 640),
+    "--height",
+    String(options.height ?? 480),
+  ];
+  if (options.labels) args.push("--labels");
+  return runCadctl(args, { cwd, timeoutMs });
+}
+
+export async function assemblyTree(
+  cwd: string,
+  artifact: string,
+  output?: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  const args = ["assembly-tree", "--artifact", resolve(cwd, artifact)];
+  if (output) args.push("--output", resolve(cwd, output));
+  return runCadctl(args, { cwd, timeoutMs });
+}
+
+export interface ExportOptions {
+  source: string;
+  output: string;
+  format: string;
+}
+
+export async function exportArtifact(
+  cwd: string,
+  options: ExportOptions,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    [
+      "export",
+      "--source",
+      resolve(cwd, options.source),
+      "--output",
+      resolve(cwd, options.output),
+      "--format",
+      options.format,
+    ],
+    { cwd, timeoutMs },
+  );
+}
+
+export async function cadctlCapabilities(cwd: string, timeoutMs?: number): Promise<CadEventEnvelope> {
+  return runCadctl(["capability"], { cwd, timeoutMs });
+}
+
+
+export async function drawingCommand(
+  cwd: string,
+  stage: "validate" | "generate",
+  spec: string,
+  outputDir?: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  const args = ["drawing", stage, "--spec", resolve(cwd, spec)];
+  if (outputDir) args.push("--output-dir", resolve(cwd, outputDir));
+  return runCadctl(args, { cwd, timeoutMs });
+}
+
+export async function simulationCommand(
+  cwd: string,
+  stage: "validate" | "run",
+  spec: string,
+  outputDir: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    ["simulate", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
+    { cwd, timeoutMs },
+  );
+}
+
+export async function presentationCommand(
+  cwd: string,
+  stage: "validate" | "generate" | "run",
+  spec: string,
+  outputDir: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    ["present", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
+    { cwd, timeoutMs },
+  );
+}
+
 export async function imageContent(
   path: string,
 ): Promise<{ type: "image"; data: string; mimeType: string }> {

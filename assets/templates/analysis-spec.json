@@ -1,0 +1,13 @@
+{
+  "artifact": "build/part.step",
+  "solver": "calculix",
+  "analysis": "static",
+  "materials": "spec/materials.json",
+  "loads": "spec/loads.json",
+  "constraints": "spec/bc.json",
+  "mesh": "spec/mesh.json",
+  "acceptance": {
+    "equilibrium_relative_error_max": 0.02,
+    "screening_only": true
+  }
+}

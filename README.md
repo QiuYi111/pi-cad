@@ -1,35 +1,68 @@
-# Pi-CAD V0 Walking Skeleton
+# Pi-CAD
 
-This repository implements the V0 walking skeleton described in
-`pi-cad-whitepaper.md` §17: **Quick workflow only**, with a real deterministic
-build123d/STEP backend and Pi harness control.
+Harness-native agentic mechanical CAD on Pi, implemented from
+`pi-cad-whitepaper.md`.
 
-## What V0 contains
+> Tools expose reality. Agent interprets reality. Workflow defines process.
+> Harness enforces workflow. Skills improve reasoning.
+
+## Implemented architecture
 
 | Layer | Path |
 | --- | --- |
 | Pi-CAD core harness | `src/extensions/core/index.ts` |
-| Geometry tools (`cad_build_step`, `cad_inspect_geometry`, `cad_measure`) | `src/extensions/geometry/index.ts` |
-| Visual tool (`cad_inspect_visual`) | `src/extensions/visual/index.ts` |
-| Shared protocol / state / capability runner | `src/shared/` |
-| Quick workflow state machine | `src/workflows/quick.ts` |
+| Geometry tools | `src/extensions/geometry/index.ts` |
+| Visual/section tools | `src/extensions/visual/index.ts` |
+| Drawing plugin | `src/extensions/drawing/index.ts` |
+| Simulation plugin | `src/extensions/simulation/index.ts` |
+| Presentation plugin | `src/extensions/presentation/index.ts` |
+| Read-only UI/status | `src/extensions/ui/index.ts` |
+| Shared protocol/state/capability | `src/shared/` |
+| Workflow registry | `src/workflows/registry.ts` |
 | Layered state prompts | `src/prompts/` |
 | Deterministic Python backend | `python/cadctl/` |
+| Spec templates | `assets/templates/` |
 
-## Workflow
+## Workflows
+
+- `quick` — fully specified direct geometry
+- `analyze` — read-only STEP/CAD diagnosis
+- `modify` — baseline, plan, controlled redesign, before/after compare
+- `greenfield` — concept, optional domain analysis, intent, build
+- `hybrid` — legacy baseline plus greenfield concept merge
+- `convert` — source baseline, transform plan, conversion, compare
+- `release` — audit, gap closure, package, final review with nine workstream statuses
+
+## Control protocol
 
 ```text
-/cad  (or cad_route)
-Intake -> Requirements -> Build -> Review -> Ready -> Done
+cad_route
+cad_commit_requirements
+cad_commit_plan
+cad_commit_candidate
+cad_transition
+cad_wait_for_user
+cad_finish
 ```
 
-- Agent calls `cad_route(quick)`.
-- Agent calls `cad_commit_requirements`.
-- Agent writes `models/*.py` and calls `cad_commit_candidate`.
-- Harness automatically runs `build -> inspect_visual -> inspect_geometry`,
-  binds evidence to current artifact/source hashes, and enters REVIEW.
-- Agent reviews the images, calls `cad_measure` for critical facts, then
-  `cad_transition(accepted)` and `cad_finish`.
+`cad_commit_candidate` owns the automatic loop:
+build → visual views → geometry facts → (modify/convert) deterministic compare
+→ evidence bound to source/artifact hashes → review.
+
+## Deterministic capability tools
+
+```text
+cad_build_step              cad_inspect_visual
+cad_inspect_geometry        cad_inspect_section
+cad_measure                 cad_compare_geometry
+cad_assembly_tree           cad_export
+cad_generate_drawing        cad_run_simulation
+cad_render_scene
+```
+
+Unavailable optional backends are returned explicitly (`simulation.run`,
+Blender/FFmpeg presentation, PDF drawing, standards-compliant GD&T). The
+harness never substitutes a fake verifier or upgrades unavailable evidence.
 
 ## Python backend setup
 
@@ -37,13 +70,11 @@ Intake -> Requirements -> Build -> Review -> Ready -> Done
 scripts/bootstrap-python.sh
 ```
 
-The bootstrap prefers a normal `.venv`. On read-only-home machines or
-systems without `ensurepip`, it falls back to a repository-local
-`.python/site-packages` installation.
+The bootstrap prefers `.venv`; on systems without ensurepip it installs into
+repository-local `.python/site-packages`. Set `PI_CAD_PYTHON` to override the
+Python binary used by the harness.
 
-Set `PI_CAD_PYTHON` to override the Python binary used by the harness.
-
-## Smoke test
+## Test
 
 ```bash
 npm install
@@ -52,28 +83,54 @@ npm run test
 bash scripts/test.sh
 ```
 
-## Load in Pi
+Coverage:
+
+- pure workflow state machine: all seven workflows
+- harness integration: quick candidate loop, convert candidate loop
+- mutation policy, evidence guards, restart recovery
+- Python backend: STEP build/inspect/render/section/compare/assembly/export/drawing/capability
+
+## Run in Pi
 
 ```bash
 pi -e src/extensions/core/index.ts \
    -e src/extensions/geometry/index.ts \
-   -e src/extensions/visual/index.ts
+   -e src/extensions/visual/index.ts \
+   -e src/extensions/drawing/index.ts \
+   -e src/extensions/simulation/index.ts \
+   -e src/extensions/presentation/index.ts \
+   -e src/extensions/ui/index.ts
 ```
 
-When the package is installed as a Pi package, the `pi` key in `package.json`
-loads all three extensions automatically.
+When installed as a Pi package, the `pi` key in `package.json` loads all
+seven extensions automatically.
 
-## V0 acceptance criteria
+Use `/cad` to activate, or let the Agent call `cad_route` from intake.
+Use `/cad-status` for the canonical state and `/cad-abort` to abort.
 
-1. `/cad` or CAD flow activation — implemented by `/cad` and `cad_route`.
-2. Agent must explicitly route — `cad_route(quick)` is a blocking tool action.
-3. Quick requirements can commit with zero extra questions.
-4. Agent does not run the old `scripts/step -> snapshot -> inspect` chain.
-5. `cad_commit_candidate` auto-builds, renders, and inspects.
-6. Review views are bound to the current artifact hash.
-7. Source changes mark old evidence stale.
-8. Agent can query geometry with `cad_measure`.
-9. Harness blocks illegal transitions.
-10. `cad_finish` fails unless READY and current evidence exists.
-11. Project state survives session restart in `.pi-cad/state.json`.
-12. Final delivery is source + STEP.
+## Canonical project state
+
+```text
+.pi-cad/
+├── task.json / state.json
+├── events.jsonl
+├── records/
+├── evidence/{visual,geometry,compare,section,drawing,fea,presentation}
+└── artifacts/manifest.json
+```
+
+State persists across session restart and is the only workflow authority.
+Session entries and UI are projections of `.pi-cad/state.json`.
+
+## Real-model validation performed
+
+With `openai-codex/gpt-5.6-luna` (`thinking=medium`):
+
+- `quick` plate: 100×80×5, four Ø6 holes, delivered STEP + source, state done.
+- `analyze` plate inspection: read-only, verified all dimensions, state done.
+- `modify` old plate: 5 mm → 4 mm height, holes preserved, compare evidence, state done.
+- `greenfield` pen stand: concept → intent → build → review, STEP + source, state done.
+- `release` plate supplier handoff: workstreams closed/blocked honestly, state done.
+
+`convert` is covered by harness integration tests (STEP → STL sidecar), and
+all seven workflows are covered by pure state-machine tests.

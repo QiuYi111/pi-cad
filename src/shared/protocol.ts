@@ -1,35 +1,67 @@
 /**
- * V0 wire and state types for Pi-CAD.
+ * Pi-CAD wire, state, and workflow types.
  *
- * These types deliberately describe process and evidence only.  They do not
- * contain engineering semantics ("this is a motor mount", "the design is
- * safe") because tools expose reality and only the Agent interprets it.
+ * The state describes process and evidence only.  It never contains
+ * engineering semantics ("this is a motor mount", "the design is safe").
  */
 
-export const CAD_STATE_SCHEMA_VERSION = 1;
-export const V0_WORKFLOW = "quick" as const;
-export const V0_CONTROL_TOOLS = [
+export const CAD_STATE_SCHEMA_VERSION = 2;
+export const ALL_WORKFLOWS = [
+  "quick",
+  "analyze",
+  "modify",
+  "greenfield",
+  "hybrid",
+  "convert",
+  "release",
+] as const;
+export const CONTROL_TOOLS = [
   "cad_route",
   "cad_commit_requirements",
+  "cad_commit_plan",
   "cad_commit_candidate",
   "cad_transition",
+  "cad_wait_for_user",
   "cad_finish",
 ] as const;
-export const V0_CAPABILITY_TOOLS = [
+export const CAPABILITY_TOOLS = [
   "cad_build_step",
   "cad_inspect_visual",
   "cad_inspect_geometry",
+  "cad_inspect_section",
   "cad_measure",
+  "cad_compare_geometry",
+  "cad_assembly_tree",
+  "cad_export",
+  "cad_run_simulation",
+  "cad_generate_drawing",
+  "cad_render_scene",
 ] as const;
 
-export type CadWorkflow = "quick";
+export type CadWorkflow = (typeof ALL_WORKFLOWS)[number];
 export type CadPhase =
   | "intake"
   | "requirements"
   | "build"
   | "review"
   | "ready"
-  | "done";
+  | "done"
+  | "baseline"
+  | "investigate"
+  | "explain"
+  | "plan"
+  | "modify"
+  | "concept"
+  | "domain_analysis"
+  | "intent"
+  | "source_baseline"
+  | "transform_plan"
+  | "convert"
+  | "compare"
+  | "audit"
+  | "gap_closure"
+  | "package"
+  | "final_review";
 export type CadStatus = "active" | "waiting_user" | "ready" | "done" | "aborted";
 export type CadMaturity =
   | "review"
@@ -42,7 +74,17 @@ export type MutationPolicy = "read_only" | "source_only" | "allowed";
 
 export interface EvidenceRef {
   id: string;
-  kind: "visual" | "geometry" | "build";
+  kind:
+    | "visual"
+    | "geometry"
+    | "build"
+    | "compare"
+    | "section"
+    | "drawing"
+    | "simulation"
+    | "presentation"
+    | "convert"
+    | "assembly";
   tool: string;
   artifactHash: string;
   sourceHash?: string;
@@ -58,6 +100,20 @@ export interface CadRequirements {
   assumptions: string[];
   openUnknowns: string[];
   maturity: CadMaturity;
+  /** Artifacts supplied by the user and bound by the baseline auto-action. */
+  inputs?: string[];
+}
+
+export interface CadPlan {
+  summary: string;
+  protected: string[];
+  plannedChanges: string[];
+  interfaces: Array<Record<string, unknown>>;
+  datums: string[];
+  reviewPlan: string[];
+  architecture?: string[];
+  selectionRationale?: string;
+  workstreams?: Array<{ name: string; status: "open" | "complete" | "not_applicable" | "blocked_external" }>;
 }
 
 export interface CadProjectState {
@@ -76,10 +132,18 @@ export interface CadProjectState {
   currentSourceHash?: string;
   currentArtifactPath?: string;
   currentArtifactHash?: string;
+  baselineSourcePath?: string;
+  baselineSourceHash?: string;
+  baselineArtifactPath?: string;
+  baselineArtifactHash?: string;
 
   evidence: EvidenceRef[];
   staleEvidence: EvidenceRef[];
   activeWorkstreams: string[];
+  workstreamStatuses?: Record<
+    string,
+    "open" | "complete" | "not_applicable" | "blocked_external"
+  >;
   updatedAt: string;
 }
 

@@ -4,16 +4,21 @@ import { Type } from "typebox";
 
 import {
   artifactPathForKind,
+  assemblyTree,
   buildPayload,
   buildStep,
+  compareGeometry,
   defaultBuildOutput,
   defaultGeometryEvidencePath,
   envelopeArtifactHash,
+  exportArtifact,
   geometryPayload,
   hashOrEmpty,
   inspectGeometry,
+  inspectSection,
   measure,
   measurePayload,
+  readImageContents,
 } from "../../shared/capability.ts";
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
 
@@ -144,6 +149,152 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
           envelope,
           artifactHash: envelope.inputHashes.artifact,
           kind: "measure" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_inspect_section",
+    label: "CAD Inspect Section",
+    description:
+      "Render a deterministic section plane through a STEP artifact and return the image plus intersection facts. The tool does not name the section or explain it.",
+    promptSnippet: "Render an explicit plane section through a STEP artifact",
+    promptGuidelines: [
+      "Use sections through bores, cavities, shells, and mating interfaces.",
+      "The plane is explicit in model coordinates: origin + normal.",
+    ],
+    parameters: Type.Object({
+      artifact: artifactParam,
+      origin: Type.Tuple([Type.Number(), Type.Number(), Type.Number()]),
+      normal: Type.Tuple([Type.Number(), Type.Number(), Type.Number()]),
+      display: Type.Optional(Type.Enum({ solid: "solid", hidden_edges: "hidden_edges", solid_with_hidden: "solid_with_hidden" })),
+      width: Type.Optional(Type.Integer({ minimum: 160, maximum: 1600 })),
+      height: Type.Optional(Type.Integer({ minimum: 120, maximum: 1200 })),
+      labels: Type.Optional(Type.Boolean()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const outDir = resolve(ctx.cwd, ".pi-cad", "evidence", "section");
+      const envelope = await inspectSection(ctx.cwd, params.artifact, outDir, {
+        origin: params.origin as [number, number, number],
+        normal: params.normal as [number, number, number],
+        display: params.display ?? "solid",
+        width: params.width ?? 640,
+        height: params.height ?? 480,
+        labels: params.labels ?? true,
+      });
+      const payload = envelope.payload as { views?: Array<{ path: string; name: string }>; error?: string; intersectionCurves?: number; sectionFaceCount?: number };
+      if (!envelope.ok || !payload.views?.length) {
+        return { content: [{ type: "text", text: `cad_inspect_section failed: ${payload.error ?? "no section returned"}` }], details: { envelope } };
+      }
+      const images = await readImageContents(payload.views.map((view) => view.path));
+      return {
+        content: [
+          { type: "text", text: `cad_inspect_section succeeded. intersectionCurves=${payload.intersectionCurves ?? "?"} sectionFaces=${payload.sectionFaceCount ?? "?"}` },
+          ...images,
+        ],
+        details: {
+          envelope,
+          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
+          kind: "section" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_compare_geometry",
+    label: "CAD Compare Geometry",
+    description:
+      "Return a deterministic before/after geometry diff: bbox, volume, surface area, entity counts, center delta, and common volume. No engineering interpretation.",
+    promptSnippet: "Return deterministic geometry diff between two STEP artifacts",
+    promptGuidelines: [
+      "Inspect each artifact in its native frame first.",
+      "The harness automatically runs this in modify/convert review.",
+    ],
+    parameters: Type.Object({
+      before: Type.String({ description: "Before STEP path" }),
+      after: Type.String({ description: "After STEP path" }),
+      metrics: Type.Optional(Type.Array(Type.String())),
+      output: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const output = params.output ?? resolve(ctx.cwd, ".pi-cad", "evidence", "compare", `${Date.now().toString(36)}.json`);
+      const envelope = await compareGeometry(ctx.cwd, params.before, params.after, output, { metrics: params.metrics ?? undefined });
+      const payload = envelope.payload as { error?: string; delta?: unknown };
+      const text = envelope.ok
+        ? `cad_compare_geometry succeeded. delta=${JSON.stringify(payload.delta ?? {})}`
+        : `cad_compare_geometry failed: ${payload.error ?? "unknown error"}`;
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          envelope,
+          artifactHash: envelope.inputHashes.after ?? (await hashOrEmpty(resolve(ctx.cwd, params.after))),
+          kind: "compare" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_assembly_tree",
+    label: "CAD Assembly Tree",
+    description:
+      "Return occurrence labels, parent/child paths, local transforms, world transforms, and leaf count for a STEP assembly. Labels are only those present in the file.",
+    promptSnippet: "Return assembly occurrence tree and transforms",
+    promptGuidelines: [
+      "Use for hierarchy-safe conversion and assembly diagnosis.",
+      "Do not infer that an occurrence is a motor/bearing unless the source label says so.",
+    ],
+    parameters: Type.Object({
+      artifact: artifactParam,
+      output: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const output = params.output ?? resolve(ctx.cwd, ".pi-cad", "evidence", "assembly", `${Date.now().toString(36)}.json`);
+      const envelope = await assemblyTree(ctx.cwd, params.artifact, output);
+      const payload = envelope.payload as { error?: string; leafCount?: number; occurrences?: unknown[] };
+      const text = envelope.ok
+        ? `cad_assembly_tree succeeded. leafCount=${payload.leafCount ?? "?"} occurrences=${(payload.occurrences ?? []).length}`
+        : `cad_assembly_tree failed: ${payload.error ?? "unknown error"}`;
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          envelope,
+          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
+          kind: "assembly" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_export",
+    label: "CAD Export",
+    description:
+      "Export a STEP artifact or build123d source to an explicit format. Supported deterministic formats: step, stl, glb, brep. Unsupported formats fail explicitly.",
+    promptSnippet: "Export a source/artifact to an explicit format",
+    promptGuidelines: [
+      "STEP remains the primary artifact; other formats are sidecars.",
+      "Do not use export to patch design intent into a mesh.",
+    ],
+    parameters: Type.Object({
+      source: Type.String(),
+      output: Type.String(),
+      format: Type.Enum({ step: "step", stl: "stl", glb: "glb", brep: "brep" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const envelope = await exportArtifact(ctx.cwd, { source: params.source, output: params.output, format: params.format });
+      const payload = envelope.payload as { error?: string; output?: string };
+      const text = envelope.ok
+        ? `cad_export succeeded: ${payload.output ?? params.output}`
+        : `cad_export failed: ${payload.error ?? "unknown error"}`;
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          envelope,
+          artifactHash: envelope.artifacts[0]?.sha256 ?? envelope.inputHashes.source,
+          kind: "export" as const,
         },
       };
     },

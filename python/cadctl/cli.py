@@ -7,10 +7,18 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__
+from .assembly import assembly_tree
+from .capability import capabilities
 from .common import emit, emit_error, sha256_file, write_json
+from .compare import compare_geometry
+from .drawing import generate_drawing, validate_drawing_spec
+from .export import export_artifact
 from .geometry import inspect_geometry, measure
 from .model import run_source
+from .presentation import run_presentation
 from .render import VIEW_NAMES, render_views
+from .section import render_section
+from .simulation import run_simulation
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -145,6 +153,215 @@ def _cmd_measure(args: argparse.Namespace) -> int:
         return 0
 
 
+
+def _cmd_section(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    try:
+        payload = render_section(
+            artifact,
+            args.out_dir,
+            origin=tuple(float(x) for x in args.origin.split(",")),
+            normal=tuple(float(x) for x in args.normal.split(",")),
+            width=args.width,
+            height=args.height,
+            display=args.display,
+            labels=args.labels,
+        )
+        artifacts = [
+            {"path": view["path"], "kind": "section", "sha256": sha256_file(view["path"])}
+            for view in payload["views"]
+        ]
+        emit(
+            "cad_inspect_section",
+            payload,
+            input_hashes={"artifact": sha256_file(artifact)},
+            artifacts=artifacts,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_inspect_section",
+            str(exc),
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_compare(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    before, after = Path(args.before), Path(args.after)
+    try:
+        payload = compare_geometry(
+            before,
+            after,
+            transform_before=None,
+            transform_after=None,
+            metrics=args.metrics.split(",") if args.metrics else None,
+            diff_output=args.output,
+        )
+        artifacts = []
+        if args.output and Path(args.output).exists():
+            artifacts.append({"path": args.output, "kind": "compare", "sha256": sha256_file(args.output)})
+        emit(
+            "cad_compare_geometry",
+            payload,
+            input_hashes={
+                "before": sha256_file(before),
+                "after": sha256_file(after),
+            },
+            artifacts=artifacts,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_compare_geometry",
+            str(exc),
+            input_hashes={
+                "before": sha256_file(before) if before.exists() else "",
+                "after": sha256_file(after) if after.exists() else "",
+            },
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_assembly_tree(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    try:
+        payload = assembly_tree(artifact)
+        artifacts = []
+        if args.output:
+            write_json(args.output, payload)
+            artifacts.append({"path": args.output, "kind": "assembly_tree", "sha256": sha256_file(args.output)})
+        emit(
+            "cad_assembly_tree",
+            payload,
+            input_hashes={"artifact": sha256_file(artifact)},
+            artifacts=artifacts,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_assembly_tree",
+            str(exc),
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_export(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    source = Path(args.source)
+    try:
+        payload = export_artifact(source, args.output, args.format)
+        output = Path(args.output)
+        emit(
+            "cad_export",
+            payload,
+            input_hashes={"source": sha256_file(source)},
+            artifacts=[{"path": args.output, "kind": args.format, "sha256": sha256_file(output)}],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_export",
+            str(exc),
+            input_hashes={"source": sha256_file(source) if source.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_capability(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    emit(
+        "cadctl_capability",
+        {"capabilities": capabilities()},
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
+    return 0
+
+
+def _load_spec(spec_path: str) -> dict:
+    import json
+    return json.loads(Path(spec_path).read_text(encoding="utf-8"))
+
+
+def _cmd_drawing(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    try:
+        spec = _load_spec(args.spec)
+        if args.stage == "validate":
+            ok, errors = validate_drawing_spec(spec)
+            payload = {"status": "validated" if ok else "invalid", "errors": errors}
+            emit("cad_generate_drawing", payload, input_hashes={"spec": sha256_file(args.spec)}, duration_ms=int((time.monotonic() - started) * 1000))
+        else:
+            payload = generate_drawing(args.spec, args.output_dir)
+            artifacts = [
+                {"path": p, "kind": "drawing", "sha256": sha256_file(p)}
+                for p in payload["outputs"]
+            ]
+            emit(
+                "cad_generate_drawing",
+                payload,
+                input_hashes={"spec": sha256_file(args.spec)},
+                artifacts=artifacts,
+                warnings=payload.get("warnings", []),
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        return 0
+    except Exception as exc:
+        emit_error("cad_generate_drawing", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
+        return 0
+
+
+def _cmd_simulate(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    try:
+        payload = run_simulation(args.spec, args.output_dir, stage=args.stage)
+        emit(
+            "cad_run_simulation",
+            payload,
+            input_hashes={"spec": sha256_file(args.spec)},
+            warnings=["simulation capability is optional and may be unavailable"] if payload.get("status") == "unavailable" else [],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error("cad_run_simulation", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
+        return 0
+
+
+def _cmd_present(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    try:
+        payload = run_presentation(args.spec, args.output_dir, stage=args.stage)
+        artifacts = [
+            {"path": p, "kind": "presentation", "sha256": sha256_file(p)}
+            for p in payload.get("outputs", [])
+            if Path(p).exists()
+        ]
+        emit(
+            "cad_render_scene",
+            payload,
+            input_hashes={"spec": sha256_file(args.spec)},
+            artifacts=artifacts,
+            warnings=["presentation run is optional and may be unavailable"] if payload.get("status") in {"unavailable", "script-generated"} else [],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error("cad_render_scene", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
+        return 0
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cadctl", description="Pi-CAD deterministic CAD backend (V0)")
     parser.add_argument("--version", action="version", version=f"cadctl {__version__}")
@@ -177,6 +394,56 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--a", required=True)
     p.add_argument("--b", default=None)
     p.set_defaults(func=_cmd_measure)
+
+    p = sub.add_parser("section", help="Render a deterministic section view")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--out-dir", required=True)
+    p.add_argument("--origin", required=True)
+    p.add_argument("--normal", required=True)
+    p.add_argument("--display", default="solid", choices=("solid", "hidden_edges", "solid_with_hidden"))
+    p.add_argument("--width", type=int, default=640)
+    p.add_argument("--height", type=int, default=480)
+    p.add_argument("--labels", action="store_true")
+    p.set_defaults(func=_cmd_section)
+
+    p = sub.add_parser("compare", help="Return deterministic before/after geometry diff")
+    p.add_argument("--before", required=True)
+    p.add_argument("--after", required=True)
+    p.add_argument("--metrics", default=None)
+    p.add_argument("--output", default=None)
+    p.set_defaults(func=_cmd_compare)
+
+    p = sub.add_parser("assembly-tree", help="Return occurrence tree and world transforms")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--output", default=None)
+    p.set_defaults(func=_cmd_assembly_tree)
+
+    p = sub.add_parser("export", help="Export STEP/STL/GLB/BREP deterministically")
+    p.add_argument("--source", required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--format", required=True)
+    p.set_defaults(func=_cmd_export)
+
+    p = sub.add_parser("capability", help="Report installed deterministic backend capabilities")
+    p.set_defaults(func=_cmd_capability)
+
+    p = sub.add_parser("drawing", help="Validate or generate a spec-driven drawing")
+    p.add_argument("stage", choices=("validate", "generate"))
+    p.add_argument("--spec", required=True)
+    p.add_argument("--output-dir", required=False)
+    p.set_defaults(func=_cmd_drawing)
+
+    p = sub.add_parser("simulate", help="Validate or run a spec-driven simulation")
+    p.add_argument("stage", choices=("validate", "run"))
+    p.add_argument("--spec", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.set_defaults(func=_cmd_simulate)
+
+    p = sub.add_parser("present", help="Validate, generate, or run a spec-driven presentation")
+    p.add_argument("stage", choices=("validate", "generate", "run"))
+    p.add_argument("--spec", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.set_defaults(func=_cmd_present)
 
     return parser
 
