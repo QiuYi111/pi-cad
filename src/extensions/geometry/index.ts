@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { Type } from "typebox";
 
 import {
@@ -8,8 +8,9 @@ import {
   buildPayload,
   buildStep,
   compareGeometry,
+  currentGeometryEvidencePath,
+  currentTaskEvidenceRoot,
   defaultBuildOutput,
-  defaultGeometryEvidencePath,
   envelopeArtifactHash,
   exportArtifact,
   geometryPayload,
@@ -89,7 +90,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String({ description: "Optional JSON evidence output path" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const output = params.output ?? defaultGeometryEvidencePath(ctx.cwd, params.artifact);
+      const output = params.output ?? (await currentGeometryEvidencePath(ctx.cwd, params.artifact));
       const envelope = await inspectGeometry(ctx.cwd, params.artifact, output);
       const payload = geometryPayload(envelope);
       const text = envelope.ok
@@ -174,7 +175,8 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       labels: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const outDir = resolve(ctx.cwd, ".pi-cad", "evidence", "section");
+      const root = await currentTaskEvidenceRoot(ctx.cwd);
+      const outDir = root ? join(root, "section") : resolve(ctx.cwd, ".pi-cad", "evidence", "section");
       const envelope = await inspectSection(ctx.cwd, params.artifact, outDir, {
         origin: params.origin as [number, number, number],
         normal: params.normal as [number, number, number],
@@ -221,7 +223,8 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const output = params.output ?? resolve(ctx.cwd, ".pi-cad", "evidence", "compare", `${Date.now().toString(36)}.json`);
+      const root = await currentTaskEvidenceRoot(ctx.cwd);
+      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "compare", `${Date.now().toString(36)}.json`);
       let transformBefore: number[][] | undefined;
       let transformAfter: number[][] | undefined;
       if (params.transformBefore) transformBefore = JSON.parse(params.transformBefore) as number[][];
@@ -261,7 +264,8 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const output = params.output ?? resolve(ctx.cwd, ".pi-cad", "evidence", "assembly", `${Date.now().toString(36)}.json`);
+      const root = await currentTaskEvidenceRoot(ctx.cwd);
+      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "assembly", `${Date.now().toString(36)}.json`);
       const envelope = await assemblyTree(ctx.cwd, params.artifact, output);
       const payload = envelope.payload as { error?: string; leafCount?: number; occurrences?: unknown[] };
       const text = envelope.ok

@@ -30,10 +30,20 @@ export function mutationPolicyForPhase(
   return "read_only";
 }
 
-export function createIntakeState(): CadProjectState {
+export interface CreateIntakeOptions {
+  taskId?: string;
+  parentTaskId?: string;
+}
+
+export function createIntakeState(options: CreateIntakeOptions = {}): CadProjectState {
+  const createdAt = nowIso();
   return {
-    schemaVersion: 2,
-    taskId: `cad-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    schemaVersion: 3,
+    taskId:
+      options.taskId ??
+      `cad-${createdAt.slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8)}`,
+    parentTaskId: options.parentTaskId,
+    createdAt,
     workflow: null,
     phase: "intake",
     status: "active",
@@ -42,7 +52,7 @@ export function createIntakeState(): CadProjectState {
     evidence: [],
     staleEvidence: [],
     activeWorkstreams: [],
-    updatedAt: nowIso(),
+    updatedAt: createdAt,
   };
 }
 

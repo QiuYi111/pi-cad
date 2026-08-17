@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { CadProjectState } from "../shared/protocol.ts";
-import type { ProjectStateStore } from "../shared/store.ts";
+import type { CadProjectStore } from "../shared/store.ts";
 import { stateSummary } from "./context.ts";
 
 const nudgedVersions = new Set<string>();
@@ -9,7 +9,7 @@ const SOURCE_OR_REVIEW_PHASES = ["build", "modify", "convert", "review", "compar
 
 export async function maybeAutoContinue(
   pi: ExtensionAPI,
-  store: ProjectStateStore,
+  store: CadProjectStore,
   state: CadProjectState,
   _ctx: ExtensionContext,
 ): Promise<void> {

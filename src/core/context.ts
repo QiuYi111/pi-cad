@@ -47,6 +47,7 @@ export async function composeSystemPrompt(
   base: string,
   state: CadProjectState | null,
   unavailableCapabilities: string[] = [],
+  parentState: CadProjectState | null = null,
 ): Promise<string> {
   const invariants = await loadPrompt("invariants");
   if (!state) {
@@ -65,6 +66,17 @@ export async function composeSystemPrompt(
     unavailableCapabilities.length > 0
       ? `\n\n## Unavailable optional capabilities\n${unavailableCapabilities.join(", ")} — report their workstream status as blocked_external or not_applicable, never as complete.`
       : "";
+  const inherited = parentState
+    ? [
+        "## Inherited from parent task (references only, not workflow state)",
+        `parentTaskId=${parentState.taskId}`,
+        `parentWorkflow=${parentState.workflow ?? "none"} parentStatus=${parentState.status}`,
+        parentState.currentSourcePath ? `source=${parentState.currentSourcePath}@${parentState.currentSourceHash?.slice(0, 12)}` : "",
+        parentState.currentArtifactPath ? `artifact=${parentState.currentArtifactPath}@${parentState.currentArtifactHash?.slice(0, 12)}` : "",
+        `parentEvidence=${parentState.evidence.map((e) => e.kind).join(",") || "none"}`,
+        "Use these as inputs/artifacts for the new task; never copy workflow phase or status.",
+      ].filter(Boolean).join("\n")
+    : "";
   return [
     base,
     invariants,
@@ -73,6 +85,7 @@ export async function composeSystemPrompt(
     stateSummary(state),
     "Use cad_* control tools to move the workflow. Do not claim completion without the corresponding state and evidence.",
     statusNote,
+    inherited,
     unavailable,
   ].join("\n\n");
 }

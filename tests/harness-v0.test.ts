@@ -52,6 +52,8 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
   core(pi);
 
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-harness-"));
+  const project = new (await import("../src/shared/store.ts")).CadProjectStore(cwd);
+  await project.createTask({ taskId: "v0-task" });
   const ctx = { cwd } as { cwd: string };
   const fixture = readFileSync(new URL("./fixtures/plate.py", import.meta.url), "utf-8");
   try {
@@ -94,7 +96,7 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
     assert.match(committedCandidate.content[0].text!, /REVIEW/);
     assert.equal(committedCandidate.content.filter((part) => part.type === "image").length, 7);
 
-    const statePath = join(cwd, ".pi-cad", "state.json");
+    const statePath = join(cwd, ".pi-cad", "tasks", "v0-task", "state.json");
     assert.ok(existsSync(statePath));
     const reviewState = JSON.parse(readFileSync(statePath, "utf-8"));
     assert.equal(reviewState.phase, "review");
@@ -102,8 +104,8 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
     assert.ok(reviewState.currentSourceHash);
     assert.ok(reviewState.currentArtifactHash);
     assert.ok(existsSync(join(cwd, "build", "plate.step")));
-    assert.ok(existsSync(join(cwd, ".pi-cad", "records", "requirements.json")));
-    assert.ok(existsSync(join(cwd, ".pi-cad", "events.jsonl")));
+    assert.ok(existsSync(join(cwd, ".pi-cad", "tasks", "v0-task", "records", "requirements.json")));
+    assert.ok(existsSync(join(cwd, ".pi-cad", "tasks", "v0-task", "events.jsonl")));
 
     const prematureFinish = await finish.execute("t4", {}, undefined, undefined, ctx);
     assert.match(prematureFinish.content[0].text!, /only valid in ready/);

@@ -189,9 +189,12 @@ function expectedFound(task, workdir) {
 }
 
 function piCadDone(workdir) {
-  const statePath = join(workdir, ".pi-cad", "state.json");
-  if (!existsSync(statePath)) return false;
+  const currentPath = join(workdir, ".pi-cad", "current.json");
+  if (!existsSync(currentPath)) return false;
   try {
+    const { activeTaskId } = JSON.parse(readFileSync(currentPath, "utf-8"));
+    const statePath = join(workdir, ".pi-cad", "tasks", activeTaskId, "state.json");
+    if (!existsSync(statePath)) return false;
     const state = JSON.parse(readFileSync(statePath, "utf-8"));
     return state.phase === "done" && state.status === "done";
   } catch {
@@ -239,8 +242,15 @@ for (const taskName of tasks) {
       wallMs: JSON.parse(readFileSync(join(workdir, "run.json"), "utf-8")).wallMs,
       metrics,
       missing,
-      piCadPhase: config === "pi-cad" && existsSync(join(workdir, ".pi-cad", "state.json"))
-        ? JSON.parse(readFileSync(join(workdir, ".pi-cad", "state.json"), "utf-8")).phase
+      piCadPhase: config === "pi-cad"
+        ? (() => {
+            try {
+              const { activeTaskId } = JSON.parse(readFileSync(join(workdir, ".pi-cad", "current.json"), "utf-8"));
+              return JSON.parse(readFileSync(join(workdir, ".pi-cad", "tasks", activeTaskId, "state.json"), "utf-8")).phase;
+            } catch {
+              return null;
+            }
+          })()
         : null,
     });
   }

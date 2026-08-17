@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { Type } from "typebox";
 
 import {
+  currentVisualEvidenceDir,
   DEFAULT_VIEWS,
-  defaultVisualEvidenceDir,
   hashOrEmpty,
   inspectVisual,
   readImageContents,
@@ -44,7 +44,7 @@ export default function cadVisualExtension(pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const views = params.views?.length ? params.views : VIEW_NAMES;
-      const outDir = defaultVisualEvidenceDir(ctx.cwd, params.artifact);
+      const outDir = await currentVisualEvidenceDir(ctx.cwd, params.artifact);
       const envelope = await inspectVisual(ctx.cwd, params.artifact, outDir, {
         views,
         width: params.width ?? 640,

@@ -5,7 +5,7 @@
  * engineering semantics ("this is a motor mount", "the design is safe").
  */
 
-export const CAD_STATE_SCHEMA_VERSION = 2;
+export const CAD_STATE_SCHEMA_VERSION = 3;
 export const ALL_WORKFLOWS = [
   "quick",
   "analyze",
@@ -119,6 +119,8 @@ export interface CadPlan {
 export interface CadProjectState {
   schemaVersion: number;
   taskId: string;
+  parentTaskId?: string;
+  createdAt: string;
   workflow: CadWorkflow | null;
   phase: CadPhase;
   status: CadStatus;

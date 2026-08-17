@@ -38,10 +38,11 @@ test("before_agent_start restores canonical state and active tool policy after r
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-restore-"));
   try {
     const store = new ProjectStateStore(cwd);
+    await store.createTask({ taskId: "restore-task" });
     const routed = routeQuick(null, "quick", "fully specified plate");
     assert.ok(routed.ok);
     if (!routed.ok) return;
-    await store.save(routed.state);
+    await store.save({ ...routed.state, taskId: "restore-task" });
     await store.appendEvent("WorkflowRouted", { workflow: "quick" });
 
     const handler = pi.handlers.get("before_agent_start")![0] as Function;

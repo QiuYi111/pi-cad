@@ -18,6 +18,7 @@ Harness-native agentic mechanical CAD on Pi, implemented from
 | Optional simulation plugin | `src/extensions/simulation/index.ts` |
 | Optional presentation plugin | `src/extensions/presentation/index.ts` |
 | Optional aggregate entry | `src/extensions/optional/index.ts` |
+| Project store / task store | `src/shared/store.ts` (`CadProjectStore`, `CadTaskStore`) |
 | Shared protocol/state/capability | `src/shared/` |
 | Workflow data modules | `src/workflows/{quick,analyze,modify,greenfield,hybrid,convert,release}.ts` |
 | Layered state prompts | `src/prompts/` |
@@ -120,22 +121,36 @@ pi -e src/extensions/core/index.ts \
 When installed as a Pi package, the `pi` key in `package.json` loads all
 seven extensions automatically.
 
-Use `/cad` to activate, or let the Agent call `cad_route` from intake.
-Use `/cad-status` for the canonical state and `/cad-abort` to abort.
+Use `/cad` to open the current task (it archives terminal tasks and starts a
+new INTAKE automatically), `/cad-new` to force a fresh task, `/cad-reroute`
+to reset a pre-source task, `/cad-status` for canonical state, and
+`/cad-abort` to abort only the current task.
 
 ## Canonical project state
 
+Project and task state are separate. A working directory can contain many
+CAD tasks over time.
+
 ```text
 .pi-cad/
-├── task.json / state.json
-├── events.jsonl
-├── records/
-├── evidence/{visual,geometry,compare,section,drawing,fea,presentation}
-└── artifacts/manifest.json
+├── current.json
+└── tasks/
+    ├── cad-20260817-001/
+    │   ├── state.json
+    │   ├── events.jsonl
+    │   ├── records/
+    │   ├── evidence/
+    │   └── artifacts/manifest.json
+    └── cad-20260817-002/
+        ├── state.json
+        └── ...
 ```
 
-State persists across session restart and is the only workflow authority.
-Session entries and UI are projections of `.pi-cad/state.json`.
+- `current.json` is only `{ "activeTaskId": "..." }`.
+- A new task may reference `parentTaskId` for artifact/source/evidence
+  inheritance; it never inherits workflow phase or status.
+- Legacy V0 single-state layouts are migrated into `tasks/<id>/`
+  automatically on first load.
 
 ## Real-model validation performed
 

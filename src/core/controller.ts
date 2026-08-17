@@ -11,11 +11,12 @@ import {
   type CadWorkflow,
   type EvidenceRef,
 } from "../shared/protocol.ts";
-import { ProjectStateStore } from "../shared/store.ts";
+import { CadProjectStore } from "../shared/store.ts";
 import { workflowSpec } from "./state-machine.ts";
 import {
   commitPlan,
   commitRequirements,
+  createIntakeState,
   finish,
   route,
   transition,
@@ -30,14 +31,14 @@ export interface ControllerDeps {
   persist: PersistFn;
   runBaselineAuto: (
     pi: ExtensionAPI,
-    store: ProjectStateStore,
+    store: CadProjectStore,
     state: CadProjectState,
     artifactRel: string,
     persist: PersistFn,
   ) => Promise<{ state: CadProjectState; images: Array<{ type: "image"; data: string; mimeType: string }>; warnings: string[] }>;
   runCandidateAuto: (
     pi: ExtensionAPI,
-    store: ProjectStateStore,
+    store: CadProjectStore,
     state: CadProjectState,
     source: string,
     label: string,
@@ -45,7 +46,7 @@ export interface ControllerDeps {
   ) => Promise<{ ok: boolean; text?: string; images?: Array<{ type: "image"; data: string; mimeType: string }>; details?: unknown }>;
   runConvertCandidateAuto: (
     pi: ExtensionAPI,
-    store: ProjectStateStore,
+    store: CadProjectStore,
     state: CadProjectState,
     source: string,
     label: string,
@@ -63,7 +64,7 @@ function errTool(text: string, details?: unknown): AgentToolResult<unknown> {
   return { content: [{ type: "text", text }], details };
 }
 
-async function guardState(store: ProjectStateStore): Promise<CadProjectState | null> {
+async function guardState(store: CadProjectStore): Promise<CadProjectState | null> {
   const state = await store.load();
   if (!state || state.status === "done" || state.status === "aborted") return null;
   return state;
@@ -109,8 +110,18 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       reason: Type.String({ description: "Why this task matches the selected workflow" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new ProjectStateStore(ctx.cwd);
-      const state = await store.load();
+      const store = new CadProjectStore(ctx.cwd);
+      let state = await store.load();
+      if (!state) {
+        let taskId = await store.currentTaskId();
+        if (!taskId) {
+          const task = await store.createTask();
+          taskId = task.taskId;
+        }
+        state = createIntakeState({ taskId });
+        await store.save(state);
+        await store.appendEvent("CadStarted", { taskId });
+      }
       const result = route(state, params.workflow as CadWorkflow, params.reason);
       if (!result.ok) return errTool(result.reason);
       await deps.persist(pi, store, result.state, result.events);
@@ -150,7 +161,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       inputs: Type.Optional(Type.Array(Type.String())),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new ProjectStateStore(ctx.cwd);
+      const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const record = params as unknown as CadRequirements;
@@ -222,7 +233,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new ProjectStateStore(ctx.cwd);
+      const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const record = params as unknown as CadPlan;
@@ -254,7 +265,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new ProjectStateStore(ctx.cwd);
+      const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const source = params.sources[0];
@@ -310,7 +321,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       note: Type.String(),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new ProjectStateStore(ctx.cwd);
+      const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
 
@@ -365,7 +376,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptGuidelines: ["Ask one decision per pause and give your recommended answer."],
     parameters: Type.Object({ reason: Type.String() }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new ProjectStateStore(ctx.cwd);
+      const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const result = waitForUser(state, params.reason);
@@ -387,7 +398,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptGuidelines: ["Only call after cad_transition(accepted) and delivery."],
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const store = new ProjectStateStore(ctx.cwd);
+      const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const verification = await verifyCurrentArtifacts(ctx.cwd, state);
