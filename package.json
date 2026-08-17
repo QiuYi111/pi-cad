@@ -15,13 +15,10 @@
       "./src/extensions/core/index.ts",
       "./src/extensions/geometry/index.ts",
       "./src/extensions/visual/index.ts",
-      "./src/extensions/ui/index.ts"
-    ],
-    "optionalExtensions": [
+      "./src/extensions/ui/index.ts",
       "./src/extensions/drawing/index.ts",
       "./src/extensions/simulation/index.ts",
-      "./src/extensions/presentation/index.ts",
-      "./src/extensions/optional/index.ts"
+      "./src/extensions/presentation/index.ts"
     ]
   },
   "scripts": {
@@ -51,5 +48,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/QiuYi111/pi-cad.git"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
   }
 }

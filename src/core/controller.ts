@@ -17,8 +17,6 @@ import {
   commitPlan,
   commitRequirements,
   finish,
-  releaseWorkstreamsClosed,
-  resumeFromUser,
   route,
   transition,
   waitForUser,
@@ -319,8 +317,8 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const spec = workflowSpec(state);
       if (params.event === "accepted" && spec?.acceptedPhases.includes(state.phase)) {
         if (state.workflow === "release" && state.phase === "final_review") {
-          const closed = releaseWorkstreamsClosed(state);
-          if (closed) return errTool(`cannot accept: ${closed}`);
+          const guard = spec.completionGuard?.(state);
+          if (guard) return errTool(`cannot accept: ${guard}`);
         } else {
           const verification = await verifyCurrentArtifacts(ctx.cwd, state);
           if (verification) return errTool(`cannot accept: ${verification}`);

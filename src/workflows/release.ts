@@ -1,4 +1,27 @@
+import type { CadProjectState } from "../shared/protocol.ts";
 import type { WorkflowSpec } from "./types.ts";
+
+const RELEASE_WORKSTREAMS = [
+  "design_definition",
+  "manufacturing_definition",
+  "bom",
+  "assembly_service",
+  "inspection_acceptance",
+  "engineering_analysis",
+  "risk_quality",
+  "configuration",
+  "presentation",
+] as const;
+
+export function releaseCompletionGuard(state: CadProjectState): string | null {
+  for (const name of RELEASE_WORKSTREAMS) {
+    const value = state.workstreamStatuses?.[name];
+    if (!value || value === "open") {
+      return `release workstream ${name} has no non-open status`;
+    }
+  }
+  return null;
+}
 
 export const releaseWorkflow: WorkflowSpec = {
   name: "release",
@@ -29,4 +52,5 @@ export const releaseWorkflow: WorkflowSpec = {
   requiresBaselineInput: false,
   baselineEvidenceRequired: false,
   mutationPolicies: { package: "allowed" },
+  completionGuard: releaseCompletionGuard,
 };

@@ -15,18 +15,6 @@ import type { WorkflowSpec } from "../workflows/types.ts";
 export const WORKFLOWS: Record<CadWorkflow, WorkflowSpec> = WORKFLOW_SPECS;
 
 const SOURCE_PHASES = new Set<CadPhase>(["build", "modify", "convert"]);
-const RELEASE_WORKSTREAMS = [
-  "design_definition",
-  "manufacturing_definition",
-  "bom",
-  "assembly_service",
-  "inspection_acceptance",
-  "engineering_analysis",
-  "risk_quality",
-  "configuration",
-  "presentation",
-];
-
 export function workflowSpec(state: CadProjectState): WorkflowSpec | null {
   return state.workflow ? WORKFLOWS[state.workflow] : null;
 }
@@ -265,16 +253,6 @@ export function evidenceFromEnvelope(
   };
 }
 
-export function releaseWorkstreamsClosed(state: CadProjectState): string | null {
-  for (const name of RELEASE_WORKSTREAMS) {
-    const value = state.workstreamStatuses?.[name];
-    if (!value || value === "open") {
-      return `release workstream ${name} has no non-open status`;
-    }
-  }
-  return null;
-}
-
 export function transitionTarget(
   state: CadProjectState,
   event: string,
@@ -300,8 +278,8 @@ export function transition(
 
   if (event === "accepted" && spec.acceptedPhases.includes(state.phase)) {
     if (state.workflow === "release" && state.phase === "final_review") {
-      const closed = releaseWorkstreamsClosed(state);
-      if (closed) return { ok: false, reason: `cannot accept: ${closed}` };
+      const guard = spec.completionGuard?.(state);
+      if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
     } else {
       if (!state.currentArtifactHash) {
         return { ok: false, reason: "cannot accept: no current artifact is bound" };
@@ -311,6 +289,8 @@ export function transition(
           return { ok: false, reason: `cannot accept: current ${kind} evidence is missing` };
         }
       }
+      const guard = spec.completionGuard?.(state);
+      if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
     }
     const next: CadProjectState = {
       ...state,
@@ -386,10 +366,8 @@ export function finish(state: CadProjectState): ActionResult {
       }
     }
   }
-  if (state.workflow === "release") {
-    const closed = releaseWorkstreamsClosed(state);
-    if (closed) return { ok: false, reason: closed };
-  }
+  const completionGuard = spec.completionGuard?.(state);
+  if (completionGuard) return { ok: false, reason: completionGuard };
   const next: CadProjectState = {
     ...state,
     phase: "done",

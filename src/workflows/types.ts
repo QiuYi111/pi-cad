@@ -34,4 +34,9 @@ export interface WorkflowSpec {
   baselineEvidenceRequired: boolean;
   /** Mutation policy overrides (defaults are derived from phase type). */
   mutationPolicies?: Partial<Record<CadPhase, MutationPolicy>>;
+  /**
+   * Optional workflow-specific completion guard. The generic engine calls it
+   * on accepted/finish and only understands a non-null error string.
+   */
+  completionGuard?: (state: CadProjectState) => string | null;
 }

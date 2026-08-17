@@ -1,0 +1,32 @@
+{
+  "quick-plate": {
+    "prompt": "Make a 100 x 80 x 5 mm mounting plate with four 6 mm through holes, hole centers 10 mm from the edges. Deliver STEP and source.",
+    "fixtures": [],
+    "expected": ["build/plate.step", "models/plate.py"]
+  },
+  "analyze-plate": {
+    "prompt": "Read-only analysis: inspect plate.step and tell me whether it is 100 x 80 x 5 mm with four 6 mm holes whose centers are 10 mm from the edges. Do not modify any file.",
+    "fixtures": ["plate.step"],
+    "expected": []
+  },
+  "modify-plate": {
+    "prompt": "Modify old_plate.step: keep the 100x80 footprint and four 6 mm holes exactly, but reduce total height from 5 mm to 4 mm. Deliver the new STEP and Python source.",
+    "fixtures": ["old_plate.step"],
+    "expected": ["build/modified_plate.step"]
+  },
+  "greenfield-pen-stand": {
+    "prompt": "Design a simple 3D-printable single-part desk stand for a 20 mm diameter pen. The stand base must fit inside a 60 x 60 mm footprint and be no taller than 40 mm. Deliver STEP and source.",
+    "fixtures": [],
+    "expected": ["build/pen_desk_stand.step", "models/pen_desk_stand.py"]
+  },
+  "convert-plate": {
+    "prompt": "Convert plate.step to an STL sidecar using the convert workflow. Preserve the solid; STL has no hierarchy, so state that in the handoff.",
+    "fixtures": ["plate.step"],
+    "expected": ["plate.stl"]
+  },
+  "release-plate": {
+    "prompt": "Prepare plate.step for a small-batch supplier handoff. Use the release workflow, keep claims honest, and produce the package you can with available tools.",
+    "fixtures": ["plate.step"],
+    "expected": []
+  }
+}
