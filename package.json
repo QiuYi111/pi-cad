@@ -3,7 +3,13 @@
   "version": "0.1.0",
   "description": "Harness-native agentic mechanical CAD on Pi. V0 walking skeleton: Quick workflow with deterministic build/visual/geometry tools.",
   "type": "module",
-  "keywords": ["pi-package", "cad", "build123d", "step", "mechanical-engineering"],
+  "keywords": [
+    "pi-package",
+    "cad",
+    "build123d",
+    "step",
+    "mechanical-engineering"
+  ],
   "private": true,
   "pi": {
     "extensions": [
@@ -13,10 +19,16 @@
     ]
   },
   "scripts": {
-    "test:py": "PYTHONPATH=.python/site-packages:python python3 -m unittest discover -s tests -p 'test_*.py'",
-    "test:ts": "node tests/run-ts-tests.mjs"
+    "test": "bash scripts/test.sh",
+    "test:py": "bash scripts/test.sh",
+    "test:ts": "node tests/run-ts-tests.mjs",
+    "setup:python": "bash scripts/bootstrap-python.sh"
   },
   "engines": {
     "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "jiti": "^2.7.0",
+    "typebox": "^1.3.15"
   }
 }

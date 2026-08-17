@@ -33,30 +33,23 @@ Intake -> Requirements -> Build -> Review -> Ready -> Done
 
 ## Python backend setup
 
-The checked-in V0 test environment uses a private `.python/site-packages`.
-For a normal machine:
-
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -r python/requirements.txt
-# or
-.venv/bin/pip install -e python
+scripts/bootstrap-python.sh
 ```
+
+The bootstrap prefers a normal `.venv`. On read-only-home machines or
+systems without `ensurepip`, it falls back to a repository-local
+`.python/site-packages` installation.
 
 Set `PI_CAD_PYTHON` to override the Python binary used by the harness.
 
 ## Smoke test
 
 ```bash
-# Python backend
-python3 -m pip install -r python/requirements.txt   # with your preferred env
-PYTHONPATH=.python/site-packages:python python3 -m cadctl --help
-
-# Harness unit tests (state machine, persistence)
-node tests/run-ts-tests.mjs
-
-# Backend integration tests
-PYTHONPATH=.python/site-packages:python python3 -m unittest discover -s tests -p 'test_*.py'
+npm install
+npm run test
+# or
+bash scripts/test.sh
 ```
 
 ## Load in Pi
