@@ -1,18 +1,25 @@
 import type { WorkflowSpec } from "./types.ts";
 
-export const quickWorkflow: WorkflowSpec = {
-  name: "quick",
-  nextAfterRequirements: "build",
+export const greenfieldWorkflow: WorkflowSpec = {
+  name: "greenfield",
+  nextAfterRequirements: "concept",
   sourcePhases: ["build"],
   candidateReviewPhase: "review",
-  planNext: {},
+  planNext: { intent: "build" },
   planStayPhases: [],
   transitions: {
+    concept: {
+      domain_work_needed: "domain_analysis",
+      explore_more: "concept",
+      direction_selected: "intent",
+    },
+    domain_analysis: { domain_question_answered: "concept" },
+    intent: { plan_committed: "build" },
     review: {
       revise: "build",
       local_geometry_issue: "build",
-      intent_issue: "build",
-      architecture_issue: "build",
+      interface_or_detail_issue: "intent",
+      architecture_issue: "concept",
       accepted: "ready",
     },
   },

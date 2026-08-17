@@ -1,145 +1,45 @@
 import {
   ALL_WORKFLOWS,
-  CAPABILITY_TOOLS,
   type CadPhase,
   type CadPlan,
   type CadProjectState,
   type CadRequirements,
-  type CadStatus,
   type CadWorkflow,
   type EvidenceRef,
   type MutationPolicy,
 } from "../shared/protocol.ts";
 import { hashRecord, makeEvidenceId, nowIso } from "../shared/store.ts";
+import { WORKFLOW_SPECS } from "../workflows/index.ts";
+import type { WorkflowSpec } from "../workflows/types.ts";
 
-export const BUILTIN_READONLY = ["read", "grep", "find", "ls"];
-export const BUILTIN_SOURCE = [...BUILTIN_READONLY, "bash", "edit", "write"];
+export const WORKFLOWS: Record<CadWorkflow, WorkflowSpec> = WORKFLOW_SPECS;
 
-const REVIEW_TOOLS = [
-  ...BUILTIN_READONLY,
-  "bash",
-  "cad_inspect_visual",
-  "cad_inspect_geometry",
-  "cad_inspect_section",
-  "cad_measure",
-  "cad_compare_geometry",
-  "cad_assembly_tree",
-  "cad_transition",
+const SOURCE_PHASES = new Set<CadPhase>(["build", "modify", "convert"]);
+const RELEASE_WORKSTREAMS = [
+  "design_definition",
+  "manufacturing_definition",
+  "bom",
+  "assembly_service",
+  "inspection_acceptance",
+  "engineering_analysis",
+  "risk_quality",
+  "configuration",
+  "presentation",
 ];
 
-const COGNITIVE_TOOLS = [
-  ...BUILTIN_READONLY,
-  "bash",
-  "cad_inspect_visual",
-  "cad_inspect_geometry",
-  "cad_inspect_section",
-  "cad_measure",
-  "cad_compare_geometry",
-  "cad_assembly_tree",
-  "cad_transition",
-];
-
-const SOURCE_PHASES: CadPhase[] = ["build", "modify", "convert"];
-const READ_ONLY_PHASES: CadPhase[] = [
-  "intake",
-  "requirements",
-  "baseline",
-  "investigate",
-  "explain",
-  "plan",
-  "concept",
-  "domain_analysis",
-  "intent",
-  "source_baseline",
-  "transform_plan",
-  "review",
-  "compare",
-  "audit",
-  "gap_closure",
-  "final_review",
-  "ready",
-  "done",
-];
-
-export function mutationPolicyForPhase(phase: CadPhase): MutationPolicy {
-  if (SOURCE_PHASES.includes(phase)) return "source_only";
-  if (phase === "package") return "allowed";
-  return "read_only";
+export function workflowSpec(state: CadProjectState): WorkflowSpec | null {
+  return state.workflow ? WORKFLOWS[state.workflow] : null;
 }
 
-export function toolsForPhase(phase: CadPhase): string[] {
-  switch (phase) {
-    case "intake":
-      return [...BUILTIN_READONLY, "cad_route"];
-    case "requirements":
-      return [
-        ...BUILTIN_READONLY,
-        "bash",
-        "cad_commit_requirements",
-        "cad_wait_for_user",
-      ];
-    case "build":
-    case "modify":
-    case "convert":
-      return [
-        ...BUILTIN_SOURCE,
-        ...CAPABILITY_TOOLS,
-        "cad_commit_candidate",
-        "cad_transition",
-        "cad_wait_for_user",
-      ];
-    case "review":
-    case "compare":
-      return [
-        ...REVIEW_TOOLS,
-        "cad_wait_for_user",
-        "cad_commit_plan",
-      ];
-    case "plan":
-    case "intent":
-    case "transform_plan":
-      return [...COGNITIVE_TOOLS, "cad_commit_plan", "cad_wait_for_user"];
-    case "baseline":
-    case "source_baseline":
-      return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
-    case "investigate":
-      return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
-    case "explain":
-      return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
-    case "concept":
-    case "domain_analysis":
-      return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
-    case "audit":
-    case "gap_closure":
-      return [
-        ...COGNITIVE_TOOLS,
-        ...CAPABILITY_TOOLS,
-        "cad_commit_plan",
-        "cad_wait_for_user",
-      ];
-    case "package":
-      return [
-        ...BUILTIN_READONLY,
-        "bash",
-        "edit",
-        "write",
-        ...CAPABILITY_TOOLS,
-        "cad_commit_plan",
-        "cad_transition",
-        "cad_wait_for_user",
-      ];
-    case "final_review":
-      return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
-    case "ready":
-      return [
-        ...BUILTIN_READONLY,
-        "bash",
-        ...CAPABILITY_TOOLS,
-        "cad_finish",
-      ];
-    case "done":
-      return BUILTIN_READONLY;
-  }
+export function mutationPolicyForPhase(
+  phase: CadPhase,
+  workflow?: CadWorkflow,
+): MutationPolicy {
+  const spec = workflow ? WORKFLOWS[workflow] : undefined;
+  const override = spec?.mutationPolicies?.[phase];
+  if (override) return override;
+  if (SOURCE_PHASES.has(phase)) return "source_only";
+  return "read_only";
 }
 
 export function createIntakeState(): CadProjectState {
@@ -193,16 +93,6 @@ export function route(
   };
 }
 
-const REQUIREMENTS_NEXT: Record<CadWorkflow, CadPhase> = {
-  quick: "build",
-  analyze: "baseline",
-  modify: "baseline",
-  greenfield: "concept",
-  hybrid: "baseline",
-  convert: "source_baseline",
-  release: "audit",
-};
-
 export function commitRequirements(
   state: CadProjectState,
   record: CadRequirements,
@@ -210,17 +100,18 @@ export function commitRequirements(
   if (state.phase !== "requirements") {
     return { ok: false, reason: `cad_commit_requirements is only valid in requirements; current phase is ${state.phase}` };
   }
-  if (!state.workflow) return { ok: false, reason: "workflow is not routed" };
+  const spec = workflowSpec(state);
+  if (!spec) return { ok: false, reason: "workflow is not routed" };
   if (!record.goal.trim()) return { ok: false, reason: "requirements.goal is required" };
   if (!Array.isArray(record.deliverables) || record.deliverables.length === 0) {
     return { ok: false, reason: "requirements.deliverables must contain at least one deliverable" };
   }
-  const nextPhase = REQUIREMENTS_NEXT[state.workflow];
+  const nextPhase = spec.nextAfterRequirements;
   const next: CadProjectState = {
     ...state,
     phase: nextPhase,
     status: "active",
-    mutationPolicy: mutationPolicyForPhase(nextPhase),
+    mutationPolicy: mutationPolicyForPhase(nextPhase, state.workflow ?? undefined),
     requirementsVersion: hashRecord(record),
     maturity: record.maturity,
     updatedAt: nowIso(),
@@ -232,22 +123,20 @@ export function commitRequirements(
   };
 }
 
-const PLAN_NEXT: Partial<Record<CadPhase, CadPhase>> = {
-  plan: "modify",
-  intent: "build",
-  transform_plan: "convert",
-};
-
 export function commitPlan(state: CadProjectState, record: CadPlan): ActionResult {
-  if (!PLAN_NEXT[state.phase] && !["audit", "gap_closure", "package"].includes(state.phase)) {
+  const spec = workflowSpec(state);
+  if (!spec) return { ok: false, reason: "workflow is not routed" };
+  const moveTo = spec.planNext[state.phase];
+  const canStay = spec.planStayPhases.includes(state.phase);
+  if (!moveTo && !canStay) {
     return { ok: false, reason: `cad_commit_plan is not valid in phase ${state.phase}` };
   }
   if (!record.summary.trim()) return { ok: false, reason: "plan.summary is required" };
-  const moveTo = PLAN_NEXT[state.phase];
+  const nextPhase = moveTo ?? state.phase;
   const next: CadProjectState = {
     ...state,
-    phase: moveTo ?? state.phase,
-    mutationPolicy: mutationPolicyForPhase(moveTo ?? state.phase),
+    phase: nextPhase,
+    mutationPolicy: mutationPolicyForPhase(nextPhase, state.workflow ?? undefined),
     planVersion: hashRecord(record),
     workstreamStatuses: record.workstreams?.length
       ? Object.fromEntries(record.workstreams.map((w) => [w.name, w.status]))
@@ -260,7 +149,7 @@ export function commitPlan(state: CadProjectState, record: CadPlan): ActionResul
   return {
     ok: true,
     state: next,
-    events: [{ type: "PlanCommitted", data: { record, phase: next.phase } }],
+    events: [{ type: "PlanCommitted", data: { record, phase: nextPhase } }],
   };
 }
 
@@ -277,16 +166,17 @@ export function acceptCandidate(
   receipt: CandidateReceipt,
   artifactHash: string,
 ): ActionResult {
-  if (!["build", "modify", "convert"].includes(state.phase)) {
-    return { ok: false, reason: `cad_commit_candidate is only valid in a source phase; current phase is ${state.phase}` };
+  const spec = workflowSpec(state);
+  if (!spec) return { ok: false, reason: "workflow is not routed" };
+  if (!spec.sourcePhases.includes(state.phase)) {
+    return { ok: false, reason: `cad_commit_candidate is only valid in ${spec.sourcePhases.join("/")}; current phase is ${state.phase}` };
   }
   if (!receipt.label.trim() || receipt.sources.length === 0) {
     return { ok: false, reason: "candidate label and at least one source are required" };
   }
-  const nextPhase: CadPhase = state.workflow === "convert" ? "compare" : "review";
   const next: CadProjectState = {
     ...state,
-    phase: nextPhase,
+    phase: spec.candidateReviewPhase,
     status: "active",
     mutationPolicy: "read_only",
     candidateLabel: receipt.label,
@@ -299,52 +189,8 @@ export function acceptCandidate(
   return {
     ok: true,
     state: next,
-    events: [{ type: "CandidateCommitted", data: { ...receipt, artifactHash, phase: nextPhase } }],
+    events: [{ type: "CandidateCommitted", data: { ...receipt, artifactHash, phase: next.phase } }],
   };
-}
-
-interface TransitionDef {
-  from: CadPhase;
-  event: string;
-  to: CadPhase;
-}
-
-export function transitionTarget(state: CadProjectState, event: string): CadPhase | null {
-  const wf = state.workflow;
-  if (state.phase === "baseline" && event === "baseline_understood") {
-    if (wf === "analyze") return "investigate";
-    if (wf === "modify") return "plan";
-    if (wf === "hybrid") return "concept";
-  }
-  if (state.phase === "source_baseline" && event === "baseline_understood") {
-    return "transform_plan";
-  }
-  if (state.phase === "review") {
-    if (event === "revise" || event === "local_geometry_issue") {
-      return wf === "modify" ? "modify" : "build";
-    }
-    if (event === "intent_issue") return wf === "modify" ? "plan" : "intent";
-    if (event === "architecture_issue") return "concept";
-    if (event === "accepted") return "ready";
-  }
-  if (state.phase === "compare" && event === "repair") return "convert";
-  if (state.phase === "compare" && event === "accepted") return "ready";
-  if (state.phase === "investigate" && event === "more_probe") return "investigate";
-  if (state.phase === "investigate" && event === "cause_understood") return "explain";
-  if (state.phase === "explain" && event === "findings_delivered") return "ready";
-  if (state.phase === "concept" && event === "domain_work_needed") return "domain_analysis";
-  if (state.phase === "domain_analysis" && event === "domain_question_answered") return "concept";
-  if (state.phase === "concept" && event === "explore_more") return "concept";
-  if (state.phase === "concept" && event === "direction_selected") return "intent";
-  if (state.phase === "intent" && event === "plan_committed") return "build";
-  if (state.phase === "audit" && event === "audit_complete") return "gap_closure";
-  if (state.phase === "gap_closure" && event === "engineering_changed") return "audit";
-  if ((state.phase === "audit" || state.phase === "gap_closure") && event === "workstreams_structurally_closed") return "package";
-  if (state.phase === "package" && event === "package_prepared") return "final_review";
-  if (state.phase === "final_review" && event === "artifact_issue") return "package";
-  if (state.phase === "final_review" && event === "engineering_issue") return "gap_closure";
-  if (state.phase === "final_review" && event === "accepted") return "ready";
-  return null;
 }
 
 export function markEvidenceStale(state: CadProjectState): CadProjectState {
@@ -419,18 +265,6 @@ export function evidenceFromEnvelope(
   };
 }
 
-const RELEASE_WORKSTREAMS = [
-  "design_definition",
-  "manufacturing_definition",
-  "bom",
-  "assembly_service",
-  "inspection_acceptance",
-  "engineering_analysis",
-  "risk_quality",
-  "configuration",
-  "presentation",
-];
-
 export function releaseWorkstreamsClosed(state: CadProjectState): string | null {
   for (const name of RELEASE_WORKSTREAMS) {
     const value = state.workstreamStatuses?.[name];
@@ -441,13 +275,13 @@ export function releaseWorkstreamsClosed(state: CadProjectState): string | null 
   return null;
 }
 
-function acceptedKindsFor(state: CadProjectState): EvidenceRef["kind"][] {
-  if (state.workflow === "modify") return ["visual", "geometry", "compare"];
-  if (state.workflow === "convert") {
-    const isStep = /\.(step|stp)$/i.test(state.currentArtifactPath ?? "");
-    return isStep ? ["visual", "geometry", "compare"] : ["convert"];
-  }
-  return ["visual", "geometry"];
+export function transitionTarget(
+  state: CadProjectState,
+  event: string,
+): CadPhase | null {
+  const spec = workflowSpec(state);
+  if (!spec) return null;
+  return spec.transitions[state.phase]?.[event] ?? null;
 }
 
 export function transition(
@@ -458,22 +292,25 @@ export function transition(
   if (!note.trim() && event !== "accepted") {
     return { ok: false, reason: "cad_transition requires a note" };
   }
-
   if (state.phase === "requirements") {
     return { ok: false, reason: `transition ${event} is not valid in phase ${state.phase}` };
   }
+  const spec = workflowSpec(state);
+  if (!spec) return { ok: false, reason: "workflow is not routed" };
 
-  if (event === "accepted" && (state.phase === "review" || state.phase === "compare" || state.phase === "final_review")) {
-    if (state.phase !== "final_review") {
-      if (!state.currentArtifactHash) return { ok: false, reason: "cannot accept: no current artifact is bound" };
-      for (const kind of acceptedKindsFor(state)) {
+  if (event === "accepted" && spec.acceptedPhases.includes(state.phase)) {
+    if (state.workflow === "release" && state.phase === "final_review") {
+      const closed = releaseWorkstreamsClosed(state);
+      if (closed) return { ok: false, reason: `cannot accept: ${closed}` };
+    } else {
+      if (!state.currentArtifactHash) {
+        return { ok: false, reason: "cannot accept: no current artifact is bound" };
+      }
+      for (const kind of spec.acceptedEvidence(state)) {
         if (!hasCurrentEvidence(state, kind)) {
           return { ok: false, reason: `cannot accept: current ${kind} evidence is missing` };
         }
       }
-    } else if (state.workflow === "release") {
-      const closed = releaseWorkstreamsClosed(state);
-      if (closed) return { ok: false, reason: `cannot accept: ${closed}` };
     }
     const next: CadProjectState = {
       ...state,
@@ -486,14 +323,16 @@ export function transition(
   }
 
   if (event === "baseline_understood" && (state.phase === "baseline" || state.phase === "source_baseline")) {
-    if (!state.baselineArtifactHash) {
+    if (spec.requiresBaselineInput && !state.baselineArtifactHash) {
       return { ok: false, reason: "cannot leave baseline: no baseline artifact is bound" };
     }
-    if (!hasEvidenceForArtifact(state, state.baselineArtifactHash, "visual")) {
-      return { ok: false, reason: "cannot leave baseline: current baseline visual evidence is missing" };
-    }
-    if (!hasEvidenceForArtifact(state, state.baselineArtifactHash, "geometry")) {
-      return { ok: false, reason: "cannot leave baseline: current baseline geometry evidence is missing" };
+    if (spec.baselineEvidenceRequired && state.baselineArtifactHash) {
+      if (!hasEvidenceForArtifact(state, state.baselineArtifactHash, "visual")) {
+        return { ok: false, reason: "cannot leave baseline: current baseline visual evidence is missing" };
+      }
+      if (!hasEvidenceForArtifact(state, state.baselineArtifactHash, "geometry")) {
+        return { ok: false, reason: "cannot leave baseline: current baseline geometry evidence is missing" };
+      }
     }
   }
 
@@ -505,7 +344,7 @@ export function transition(
     ...state,
     phase: target,
     status: "active",
-    mutationPolicy: mutationPolicyForPhase(target),
+    mutationPolicy: mutationPolicyForPhase(target, state.workflow ?? undefined),
     updatedAt: nowIso(),
   };
   return { ok: true, state: next, events: [{ type: "TransitionRequested", data: { event, note, to: target } }] };
@@ -531,6 +370,8 @@ export function finish(state: CadProjectState): ActionResult {
   if (state.phase !== "ready") {
     return { ok: false, reason: `cad_finish is only valid in ready; current phase is ${state.phase}` };
   }
+  const spec = workflowSpec(state);
+  if (!spec) return { ok: false, reason: "workflow is not routed" };
   if (state.workflow === "analyze") {
     if (!state.baselineArtifactHash) {
       return { ok: false, reason: "cad_finish requires a bound baseline artifact for analyze workflow" };
@@ -539,7 +380,7 @@ export function finish(state: CadProjectState): ActionResult {
     if (!state.currentSourceHash || !state.currentArtifactHash) {
       return { ok: false, reason: "cad_finish requires current source and artifact hashes" };
     }
-    for (const kind of acceptedKindsFor(state)) {
+    for (const kind of spec.finishEvidence(state)) {
       if (!hasCurrentEvidence(state, kind)) {
         return { ok: false, reason: `cad_finish requires current ${kind} evidence` };
       }

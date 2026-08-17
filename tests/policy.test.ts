@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { ProjectStateStore } from "../src/shared/store.ts";
-import { routeQuick, commitRequirements } from "../src/workflows/quick.ts";
+import { commitRequirements, route as routeQuick } from "../src/core/state-machine.ts";
 import type { CadRequirements } from "../src/shared/protocol.ts";
 
 test("tool_call policy blocks writes outside source_only and mutating bash in read_only", async () => {

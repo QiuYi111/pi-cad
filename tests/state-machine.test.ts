@@ -8,11 +8,11 @@ import {
   acceptCandidate,
   commitRequirements,
   createIntakeState,
-  finishQuick,
+  finish as finishQuick,
   markEvidenceStale,
-  routeQuick,
-  transitionQuick,
-} from "../src/workflows/quick.ts";
+  route as routeQuick,
+  transition as transitionQuick,
+} from "../src/core/state-machine.ts";
 import { ProjectStateStore } from "../src/shared/store.ts";
 import { CAD_STATE_SCHEMA_VERSION, type CadRequirements } from "../src/shared/protocol.ts";
 

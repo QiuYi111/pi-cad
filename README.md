@@ -10,18 +10,33 @@ Harness-native agentic mechanical CAD on Pi, implemented from
 
 | Layer | Path |
 | --- | --- |
-| Pi-CAD core harness | `src/extensions/core/index.ts` |
+| Pi-CAD core harness | `src/core/` + `src/extensions/core/index.ts` |
 | Geometry tools | `src/extensions/geometry/index.ts` |
 | Visual/section tools | `src/extensions/visual/index.ts` |
-| Drawing plugin | `src/extensions/drawing/index.ts` |
-| Simulation plugin | `src/extensions/simulation/index.ts` |
-| Presentation plugin | `src/extensions/presentation/index.ts` |
 | Read-only UI/status | `src/extensions/ui/index.ts` |
+| Optional drawing plugin | `src/extensions/drawing/index.ts` |
+| Optional simulation plugin | `src/extensions/simulation/index.ts` |
+| Optional presentation plugin | `src/extensions/presentation/index.ts` |
+| Optional aggregate entry | `src/extensions/optional/index.ts` |
 | Shared protocol/state/capability | `src/shared/` |
-| Workflow registry | `src/workflows/registry.ts` |
+| Workflow data modules | `src/workflows/{quick,analyze,modify,greenfield,hybrid,convert,release}.ts` |
 | Layered state prompts | `src/prompts/` |
 | Deterministic Python backend | `python/cadctl/` |
 | Spec templates | `assets/templates/` |
+
+`cad-core` is deliberately not a God Object:
+
+```text
+src/core/
+├── runtime.ts          # Pi lifecycle glue
+├── controller.ts       # cad_* control-action tools
+├── state-machine.ts    # data-driven workflow engine
+├── policies.ts         # mutation / active-tool policy
+├── auto-actions.ts     # baseline/candidate observation loop
+├── continuation.ts     # agent_settled auto-resume
+├── context.ts          # layered prompt composition
+└── evidence.ts         # hash binding, stale tracking, file guards
+```
 
 ## Workflows
 

@@ -10,7 +10,7 @@ import {
   transition,
   waitForUser,
   resumeFromUser,
-} from "../src/workflows/registry.ts";
+} from "../src/core/state-machine.ts";
 import type { CadProjectState, CadRequirements } from "../src/shared/protocol.ts";
 
 const req: CadRequirements = {

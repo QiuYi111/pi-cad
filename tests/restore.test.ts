@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { ProjectStateStore } from "../src/shared/store.ts";
-import { routeQuick } from "../src/workflows/quick.ts";
+import { route as routeQuick } from "../src/core/state-machine.ts";
 
 test("before_agent_start restores canonical state and active tool policy after restart", async () => {
   const pi = {
