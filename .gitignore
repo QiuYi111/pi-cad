@@ -15,3 +15,5 @@ node_modules/
 # Read-only reference material (separate upstream clones)
 ref/
 *.tgz
+benchmarks/results/*
+!benchmarks/results/.gitkeep
