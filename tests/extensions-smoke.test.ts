@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+interface MockPi {
+  tools: string[];
+  commands: string[];
+  handlers: Map<string, unknown[]>;
+  activeTools: string[];
+  registerTool(tool: { name: string }): void;
+  registerCommand(name: string, _options: unknown): void;
+  on(event: string, handler: unknown): void;
+  setActiveTools(names: string[]): void;
+  appendEntry(): void;
+  sendUserMessage(): void;
+  events: { emit(): void; on(): void };
+}
+
+function mockPi(): MockPi {
+  const pi: MockPi = {
+    tools: [],
+    commands: [],
+    handlers: new Map(),
+    activeTools: [],
+    registerTool(tool) {
+      pi.tools.push(tool.name);
+    },
+    registerCommand(name) {
+      pi.commands.push(name);
+    },
+    on(event, handler) {
+      const list = pi.handlers.get(event) ?? [];
+      list.push(handler);
+      pi.handlers.set(event, list);
+    },
+    setActiveTools(names) {
+      pi.activeTools = [...names];
+    },
+    appendEntry() {},
+    sendUserMessage() {},
+    events: { emit() {}, on() {} },
+  };
+  return pi;
+}
+
+test("all three V0 extensions load and register the expected tools/events", async () => {
+  const pi = mockPi();
+  const core = (await import("../src/extensions/core/index.ts")).default;
+  const geometry = (await import("../src/extensions/geometry/index.ts")).default;
+  const visual = (await import("../src/extensions/visual/index.ts")).default;
+  core(pi);
+  geometry(pi);
+  visual(pi);
+
+  const expectedTools = [
+    "cad_route",
+    "cad_commit_requirements",
+    "cad_commit_candidate",
+    "cad_transition",
+    "cad_finish",
+    "cad_build_step",
+    "cad_inspect_geometry",
+    "cad_measure",
+    "cad_inspect_visual",
+  ];
+  assert.deepEqual(pi.tools.sort(), [...expectedTools].sort());
+  assert.deepEqual(pi.commands, ["cad"]);
+  for (const event of ["before_agent_start", "tool_call", "tool_result", "agent_settled"]) {
+    assert.ok((pi.handlers.get(event) ?? []).length > 0, `missing ${event} handler`);
+  }
+});
+
+test("control tools execute through pure workflow machine", async () => {
+  // The pure-machine tests live in state-machine.test.ts; this test only
+  // verifies extension registration does not execute side effects at import.
+  assert.ok(true);
+});

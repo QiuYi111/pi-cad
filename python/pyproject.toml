@@ -1,0 +1,13 @@
+[project]
+name = "pi-cad-cadctl"
+version = "0.1.0"
+description = "Deterministic build123d/STEP backend for the Pi-CAD V0 walking skeleton."
+requires-python = ">=3.10"
+dependencies = [
+  "build123d>=0.11.1",
+  "numpy>=2.0",
+  "pillow>=11",
+]
+
+[project.scripts]
+cadctl = "cadctl.cli:main"

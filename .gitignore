@@ -1,0 +1,16 @@
+.python/
+.venv/
+__pycache__/
+*.pyc
+*.tmp
+.pi-cad/
+models/
+build/
+node_modules/
+.npm-cache/
+.pi-agent/
+.pi-sessions/
+*Zone.Identifier*
+
+# Read-only reference material (separate upstream clones)
+ref/
