@@ -121,36 +121,36 @@ pi -e src/extensions/core/index.ts \
 When installed as a Pi package, the `pi` key in `package.json` loads all
 seven extensions automatically.
 
-Use `/cad` to open the current task (it archives terminal tasks and starts a
-new INTAKE automatically), `/cad-new` to force a fresh task, `/cad-reroute`
-to reset a pre-source task, `/cad-status` for canonical state, and
-`/cad-abort` to abort only the current task.
+Use `/cad` to show the workspace, `/cad-status` for canonical state, and
+`/cad-abort` to abort only the active workflow run. `cad_route` creates a run
+implicitly when the project is IDLE; users do not manage task IDs.
 
 ## Canonical project state
 
-Project and task state are separate. A working directory can contain many
-CAD tasks over time.
+A working directory is a long-lived **design project**. Workflow activity is
+stored as short-lived **runs**.
 
 ```text
 .pi-cad/
-├── current.json
-└── tasks/
-    ├── cad-20260817-001/
-    │   ├── state.json
-    │   ├── events.jsonl
-    │   ├── records/
-    │   ├── evidence/
-    │   └── artifacts/manifest.json
-    └── cad-20260817-002/
-        ├── state.json
-        └── ...
+├── project.json            # projectId + current design head + currentRunId
+├── runs/
+│   ├── run-20260817-001/
+│   │   ├── state.json
+│   │   ├── events.jsonl
+│   │   ├── records/
+│   │   ├── evidence/
+│   │   └── artifacts/manifest.json
+│   └── run-20260817-002/
+│       └── ...
+└── artifacts/              # optional future project-level package area
 ```
 
-- `current.json` is only `{ "activeTaskId": "..." }`.
-- A new task may reference `parentTaskId` for artifact/source/evidence
-  inheritance; it never inherits workflow phase or status.
-- Legacy V0 single-state layouts are migrated into `tasks/<id>/`
-  automatically on first load.
+- `project.json.head` is the current design: source/STEP/hash + accepted evidence.
+- `project.json.currentRunId` is `null` in the normal IDLE state.
+- `cad_route` creates a run when the project is IDLE.
+- `cad_transition(accepted)` updates the design head for design-producing workflows.
+- `cad_finish` and `/cad-abort` clear `currentRunId`; the head remains intact.
+- Legacy task/single-state layouts are migrated into runs automatically.
 
 ## Real-model validation performed
 

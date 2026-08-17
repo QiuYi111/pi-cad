@@ -21,4 +21,5 @@ export const quickWorkflow: WorkflowSpec = {
   finishEvidence: () => ["visual", "geometry"],
   requiresBaselineInput: false,
   baselineEvidenceRequired: false,
+  updatesHeadOnAccept: true,
 };

@@ -1,4 +1,4 @@
-import type { CadProjectState } from "../shared/protocol.ts";
+import type { CadRunState } from "../shared/protocol.ts";
 import type { WorkflowSpec } from "./types.ts";
 
 const RELEASE_WORKSTREAMS = [
@@ -13,7 +13,7 @@ const RELEASE_WORKSTREAMS = [
   "presentation",
 ] as const;
 
-export function releaseCompletionGuard(state: CadProjectState): string | null {
+export function releaseCompletionGuard(state: CadRunState): string | null {
   for (const name of RELEASE_WORKSTREAMS) {
     const value = state.workstreamStatuses?.[name];
     if (!value || value === "open") {
@@ -52,5 +52,6 @@ export const releaseWorkflow: WorkflowSpec = {
   requiresBaselineInput: false,
   baselineEvidenceRequired: false,
   mutationPolicies: { package: "allowed" },
+  updatesHeadOnAccept: false,
   completionGuard: releaseCompletionGuard,
 };

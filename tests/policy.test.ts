@@ -29,7 +29,7 @@ test("tool_call policy blocks writes outside source_only and mutating bash in re
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-policy-"));
   try {
     const store = new ProjectStateStore(cwd);
-    await store.createTask({ taskId: "policy-task" });
+    await store.createRun({ runId: "policy-run" });
     const routed = routeQuick(null, "quick", "test");
     assert.ok(routed.ok);
     if (!routed.ok) return;
@@ -45,7 +45,7 @@ test("tool_call policy blocks writes outside source_only and mutating bash in re
     const built = commitRequirements(routed.state, record);
     assert.ok(built.ok);
     if (!built.ok) return;
-    await store.save({ ...routed.state, taskId: "policy-task" });
+    await store.save({ ...routed.state, runId: "policy-run" });
 
     const toolCall = pi.handlers.get("tool_call")![0] as Function;
     const readOnlyBlock = (await toolCall(
@@ -55,7 +55,7 @@ test("tool_call policy blocks writes outside source_only and mutating bash in re
     assert.equal(readOnlyBlock.block, true);
 
     // source_only build phase allows model source writes but not harness-owned files.
-    await store.save({ ...built.state, taskId: "policy-task" });
+    await store.save({ ...built.state, runId: "policy-run" });
     const allowed = (await toolCall(
       { toolName: "write", input: { path: "models/plate.py" } },
       { cwd },
@@ -69,7 +69,7 @@ test("tool_call policy blocks writes outside source_only and mutating bash in re
     assert.equal(blockedHarnessFile.block, true);
 
     // Review is read_only; mutating bash must be blocked as well.
-    await store.save({ ...routed.state, phase: "review" as const, taskId: "policy-task" });
+    await store.save({ ...routed.state, phase: "review" as const, runId: "policy-run" });
     const readOnlyBashBlocked = (await toolCall(
       { toolName: "bash", input: { command: "cp model.py other.py" } },
       { cwd },

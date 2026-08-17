@@ -25,68 +25,63 @@ function mockPi() {
   return pi;
 }
 
-test("/cad archives terminal tasks and starts a new parent-linked task", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-commands-"));
+test("/cad is an IDLE display command and cad_route creates runs", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-idle-"));
   const pi = mockPi();
   try {
     const runtime = (await import("../src/core/runtime.ts")).default;
     runtime(pi);
-    const ctx = {
-      cwd,
-      hasUI: true,
-      ui: { notify() {} },
-    } as any;
-
+    const ctx = { cwd, hasUI: true, ui: { notify() {} } } as any;
     const store = new CadProjectStore(cwd);
-    const first = await store.createTask();
-    const done = createIntakeState({ taskId: first.taskId });
-    done.workflow = "greenfield";
-    done.phase = "done";
-    done.status = "done";
-    await first.save(done);
 
     await pi.commands.get("cad").handler("", ctx);
-    const currentId = await store.currentTaskId();
-    assert.ok(currentId);
-    assert.notEqual(currentId, first.taskId);
-    const currentState = await store.load();
-    assert.equal(currentState?.phase, "intake");
-    assert.equal(currentState?.parentTaskId, first.taskId);
+    const project = await store.loadProject();
+    assert.ok(project);
+    assert.equal(project.currentRunId, null);
 
-    await pi.commands.get("cad").handler("new prompt", ctx);
-    assert.deepEqual(pi.sent, ["new prompt"]);
+    // Agent calls cad_route; controller creates the run internally.
+    const controller = (await import("../src/core/controller.ts"));
+    const piTools: any = { tools: new Map(), activeTools: [], events: { emit() {} } };
+    // Reuse the real core tool definitions by loading runtime with a richer mock.
+    const corePi = {
+      ...pi,
+      tools: new Map(),
+      registerTool(tool: any) { corePi.tools.set(tool.name, tool); },
+    };
+    const core = (await import("../src/core/runtime.ts")).default;
+    core(corePi);
+    const routeTool = corePi.tools.get("cad_route");
+    await routeTool.execute("r1", { workflow: "quick", reason: "test" }, undefined, undefined, ctx);
+    const state = await store.load();
+    assert.equal(state?.phase, "requirements");
+    assert.ok(state?.runId);
+    assert.equal(await store.currentRunId(), state.runId);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("/cad-new refuses an active task and /cad-reroute resets a safe phase", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-commands2-"));
+test("/cad-abort clears only the run and leaves project head untouched", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-abort-"));
   const pi = mockPi();
   try {
     const runtime = (await import("../src/core/runtime.ts")).default;
     runtime(pi);
-    const ctx = {
-      cwd,
-      hasUI: true,
-      ui: { notify() {} },
-    } as any;
-
+    const ctx = { cwd, hasUI: true, ui: { notify() {} } } as any;
     const store = new CadProjectStore(cwd);
-    const task = await store.createTask();
-    const active = createIntakeState({ taskId: task.taskId });
-    active.workflow = "greenfield";
-    active.phase = "concept";
-    await task.save(active);
+    const run = await store.createRun();
+    const state = createIntakeState({ runId: run.runId, projectId: store.projectId });
+    state.workflow = "greenfield";
+    state.phase = "concept";
+    await run.save(state);
+    await store.updateHead({ artifactPath: "build/head.step", artifactHash: "head-hash" });
 
-    await pi.commands.get("cad-new").handler("x", ctx);
-    assert.equal(await store.currentTaskId(), task.taskId);
-    assert.equal(pi.sent.length, 0);
-
-    await pi.commands.get("cad-reroute").handler("", ctx);
-    const state = await store.load();
-    assert.equal(state?.workflow, null);
-    assert.equal(state?.phase, "intake");
+    await pi.commands.get("cad-abort").handler("", ctx);
+    assert.equal(await store.currentRunId(), null);
+    const project = await store.loadProject();
+    assert.equal(project?.head.artifactPath, "build/head.step");
+    const aborted = await run.load();
+    assert.equal(aborted?.status, "aborted");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

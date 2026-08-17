@@ -2,7 +2,7 @@ import {
   ALL_WORKFLOWS,
   type CadPhase,
   type CadPlan,
-  type CadProjectState,
+  type CadRunState,
   type CadRequirements,
   type CadWorkflow,
   type EvidenceRef,
@@ -15,7 +15,7 @@ import type { WorkflowSpec } from "../workflows/types.ts";
 export const WORKFLOWS: Record<CadWorkflow, WorkflowSpec> = WORKFLOW_SPECS;
 
 const SOURCE_PHASES = new Set<CadPhase>(["build", "modify", "convert"]);
-export function workflowSpec(state: CadProjectState): WorkflowSpec | null {
+export function workflowSpec(state: CadRunState): WorkflowSpec | null {
   return state.workflow ? WORKFLOWS[state.workflow] : null;
 }
 
@@ -31,18 +31,18 @@ export function mutationPolicyForPhase(
 }
 
 export interface CreateIntakeOptions {
-  taskId?: string;
-  parentTaskId?: string;
+  runId?: string;
+  projectId?: string;
 }
 
-export function createIntakeState(options: CreateIntakeOptions = {}): CadProjectState {
+export function createIntakeState(options: CreateIntakeOptions = {}): CadRunState {
   const createdAt = nowIso();
   return {
     schemaVersion: 3,
-    taskId:
-      options.taskId ??
-      `cad-${createdAt.slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8)}`,
-    parentTaskId: options.parentTaskId,
+    runId:
+      options.runId ??
+      `run-${createdAt.slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8)}`,
+    projectId: options.projectId ?? "project",
     createdAt,
     workflow: null,
     phase: "intake",
@@ -56,12 +56,12 @@ export function createIntakeState(options: CreateIntakeOptions = {}): CadProject
   };
 }
 
-export type ActionResult<T = CadProjectState> =
+export type ActionResult<T = CadRunState> =
   | { ok: true; state: T; events: Array<{ type: string; data?: unknown }> }
   | { ok: false; reason: string };
 
 export function route(
-  state: CadProjectState | null,
+  state: CadRunState | null,
   workflow: CadWorkflow,
   reason: string,
 ): ActionResult {
@@ -73,7 +73,7 @@ export function route(
   }
   if (!reason.trim()) return { ok: false, reason: "cad_route requires a routing reason" };
   const base = state ?? createIntakeState();
-  const next: CadProjectState = {
+  const next: CadRunState = {
     ...base,
     workflow,
     phase: "requirements",
@@ -85,14 +85,14 @@ export function route(
     ok: true,
     state: next,
     events: [
-      ...(state ? [] : [{ type: "CadStarted", data: { taskId: next.taskId } }]),
+      ...(state ? [] : [{ type: "CadStarted", data: { runId: next.runId } }]),
       { type: "WorkflowRouted", data: { workflow, reason } },
     ],
   };
 }
 
 export function commitRequirements(
-  state: CadProjectState,
+  state: CadRunState,
   record: CadRequirements,
 ): ActionResult {
   if (state.phase !== "requirements") {
@@ -105,7 +105,7 @@ export function commitRequirements(
     return { ok: false, reason: "requirements.deliverables must contain at least one deliverable" };
   }
   const nextPhase = spec.nextAfterRequirements;
-  const next: CadProjectState = {
+  const next: CadRunState = {
     ...state,
     phase: nextPhase,
     status: "active",
@@ -121,7 +121,7 @@ export function commitRequirements(
   };
 }
 
-export function commitPlan(state: CadProjectState, record: CadPlan): ActionResult {
+export function commitPlan(state: CadRunState, record: CadPlan): ActionResult {
   const spec = workflowSpec(state);
   if (!spec) return { ok: false, reason: "workflow is not routed" };
   const moveTo = spec.planNext[state.phase];
@@ -131,7 +131,7 @@ export function commitPlan(state: CadProjectState, record: CadPlan): ActionResul
   }
   if (!record.summary.trim()) return { ok: false, reason: "plan.summary is required" };
   const nextPhase = moveTo ?? state.phase;
-  const next: CadProjectState = {
+  const next: CadRunState = {
     ...state,
     phase: nextPhase,
     mutationPolicy: mutationPolicyForPhase(nextPhase, state.workflow ?? undefined),
@@ -160,7 +160,7 @@ export interface CandidateReceipt {
 }
 
 export function acceptCandidate(
-  state: CadProjectState,
+  state: CadRunState,
   receipt: CandidateReceipt,
   artifactHash: string,
 ): ActionResult {
@@ -172,7 +172,7 @@ export function acceptCandidate(
   if (!receipt.label.trim() || receipt.sources.length === 0) {
     return { ok: false, reason: "candidate label and at least one source are required" };
   }
-  const next: CadProjectState = {
+  const next: CadRunState = {
     ...state,
     phase: spec.candidateReviewPhase,
     status: "active",
@@ -191,7 +191,7 @@ export function acceptCandidate(
   };
 }
 
-export function markEvidenceStale(state: CadProjectState): CadProjectState {
+export function markEvidenceStale(state: CadRunState): CadRunState {
   return {
     ...state,
     staleEvidence: [...state.staleEvidence, ...state.evidence],
@@ -201,14 +201,14 @@ export function markEvidenceStale(state: CadProjectState): CadProjectState {
 }
 
 export function addEvidence(
-  state: CadProjectState,
+  state: CadRunState,
   evidence: EvidenceRef,
-): CadProjectState {
+): CadRunState {
   return { ...state, evidence: [...state.evidence, evidence], updatedAt: nowIso() };
 }
 
 export function evidenceForArtifact(
-  state: CadProjectState,
+  state: CadRunState,
   artifactHash: string,
   kind: EvidenceRef["kind"],
 ): EvidenceRef[] {
@@ -218,14 +218,14 @@ export function evidenceForArtifact(
 }
 
 export function hasEvidenceForArtifact(
-  state: CadProjectState,
+  state: CadRunState,
   artifactHash: string | undefined,
   kind: EvidenceRef["kind"],
 ): boolean {
   return Boolean(artifactHash && evidenceForArtifact(state, artifactHash, kind).length > 0);
 }
 
-export function hasCurrentEvidence(state: CadProjectState, kind: EvidenceRef["kind"]): boolean {
+export function hasCurrentEvidence(state: CadRunState, kind: EvidenceRef["kind"]): boolean {
   return hasEvidenceForArtifact(state, state.currentArtifactHash, kind);
 }
 
@@ -264,7 +264,7 @@ export function evidenceFromEnvelope(
 }
 
 export function transitionTarget(
-  state: CadProjectState,
+  state: CadRunState,
   event: string,
 ): CadPhase | null {
   const spec = workflowSpec(state);
@@ -273,7 +273,7 @@ export function transitionTarget(
 }
 
 export function transition(
-  state: CadProjectState,
+  state: CadRunState,
   event: string,
   note: string,
 ): ActionResult {
@@ -302,7 +302,7 @@ export function transition(
       const guard = spec.completionGuard?.(state);
       if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
     }
-    const next: CadProjectState = {
+    const next: CadRunState = {
       ...state,
       phase: "ready",
       status: "ready",
@@ -330,7 +330,7 @@ export function transition(
   if (!target) {
     return { ok: false, reason: `transition ${event} is not valid in phase ${state.phase} for workflow ${state.workflow ?? "unset"}` };
   }
-  const next: CadProjectState = {
+  const next: CadRunState = {
     ...state,
     phase: target,
     status: "active",
@@ -340,10 +340,10 @@ export function transition(
   return { ok: true, state: next, events: [{ type: "TransitionRequested", data: { event, note, to: target } }] };
 }
 
-export function waitForUser(state: CadProjectState, reason: string): ActionResult {
+export function waitForUser(state: CadRunState, reason: string): ActionResult {
   if (state.phase === "done") return { ok: false, reason: "workflow is already done" };
   if (!reason.trim()) return { ok: false, reason: "cad_wait_for_user requires a reason" };
-  const next: CadProjectState = { ...state, status: "waiting_user", updatedAt: nowIso() };
+  const next: CadRunState = { ...state, status: "waiting_user", updatedAt: nowIso() };
   return {
     ok: true,
     state: next,
@@ -351,12 +351,12 @@ export function waitForUser(state: CadProjectState, reason: string): ActionResul
   };
 }
 
-export function resumeFromUser(state: CadProjectState): CadProjectState {
+export function resumeFromUser(state: CadRunState): CadRunState {
   if (state.status !== "waiting_user") return state;
   return { ...state, status: "active", updatedAt: nowIso() };
 }
 
-export function finish(state: CadProjectState): ActionResult {
+export function finish(state: CadRunState): ActionResult {
   if (state.phase !== "ready") {
     return { ok: false, reason: `cad_finish is only valid in ready; current phase is ${state.phase}` };
   }
@@ -378,7 +378,7 @@ export function finish(state: CadProjectState): ActionResult {
   }
   const completionGuard = spec.completionGuard?.(state);
   if (completionGuard) return { ok: false, reason: completionGuard };
-  const next: CadProjectState = {
+  const next: CadRunState = {
     ...state,
     phase: "done",
     status: "done",
@@ -388,6 +388,6 @@ export function finish(state: CadProjectState): ActionResult {
   return {
     ok: true,
     state: next,
-    events: [{ type: "Finished", data: { taskId: state.taskId } }],
+    events: [{ type: "Finished", data: { runId: state.runId } }],
   };
 }

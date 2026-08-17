@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import type { CadProjectState } from "../shared/protocol.ts";
+import type { CadProjectState, CadRunState } from "../shared/protocol.ts";
 
 const PROMPT_DIR = new URL("../prompts/", import.meta.url);
 const promptCache = new Map<string, string>();
@@ -21,7 +21,7 @@ export async function loadPrompt(name: string): Promise<string> {
   }
 }
 
-export function stateSummary(state: CadProjectState): string {
+export function stateSummary(state: CadRunState): string {
   const lines = [
     `workflow=${state.workflow ?? "unset"} phase=${state.phase} status=${state.status}`,
     `mutationPolicy=${state.mutationPolicy}`,
@@ -45,9 +45,9 @@ export function stateSummary(state: CadProjectState): string {
 
 export async function composeSystemPrompt(
   base: string,
-  state: CadProjectState | null,
+  state: CadRunState | null,
   unavailableCapabilities: string[] = [],
-  parentState: CadProjectState | null = null,
+  project: CadProjectState | null = null,
 ): Promise<string> {
   const invariants = await loadPrompt("invariants");
   if (!state) {
@@ -66,15 +66,14 @@ export async function composeSystemPrompt(
     unavailableCapabilities.length > 0
       ? `\n\n## Unavailable optional capabilities\n${unavailableCapabilities.join(", ")} — report their workstream status as blocked_external or not_applicable, never as complete.`
       : "";
-  const inherited = parentState
+  const projectHead = project?.head
     ? [
-        "## Inherited from parent task (references only, not workflow state)",
-        `parentTaskId=${parentState.taskId}`,
-        `parentWorkflow=${parentState.workflow ?? "none"} parentStatus=${parentState.status}`,
-        parentState.currentSourcePath ? `source=${parentState.currentSourcePath}@${parentState.currentSourceHash?.slice(0, 12)}` : "",
-        parentState.currentArtifactPath ? `artifact=${parentState.currentArtifactPath}@${parentState.currentArtifactHash?.slice(0, 12)}` : "",
-        `parentEvidence=${parentState.evidence.map((e) => e.kind).join(",") || "none"}`,
-        "Use these as inputs/artifacts for the new task; never copy workflow phase or status.",
+        "## Current design head (the design, not the workflow)",
+        `project=${project.projectId}`,
+        project.head.sourcePath ? `source=${project.head.sourcePath}@${project.head.sourceHash?.slice(0, 12)}` : "",
+        project.head.artifactPath ? `artifact=${project.head.artifactPath}@${project.head.artifactHash?.slice(0, 12)}` : "",
+        `headEvidence=${project.head.evidence.map((e) => e.kind).join(",") || "none"}`,
+        "Use this as the current design input when starting a new workflow run. Do not carry over phase/status from previous runs.",
       ].filter(Boolean).join("\n")
     : "";
   return [
@@ -85,7 +84,7 @@ export async function composeSystemPrompt(
     stateSummary(state),
     "Use cad_* control tools to move the workflow. Do not claim completion without the corresponding state and evidence.",
     statusNote,
-    inherited,
+    projectHead,
     unavailable,
   ].join("\n\n");
 }

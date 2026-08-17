@@ -1,38 +1,18 @@
-import type {
-  ExtensionAPI,
-  ToolResultEvent,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
+
 import {
   CAPABILITY_TOOLS,
-  type CadProjectState,
+  type CadRunState,
   type EvidenceRef,
 } from "../shared/protocol.ts";
-import {
-  CadProjectStore,
-  nowIso,
-} from "../shared/store.ts";
-import { maybeAutoContinue } from "./continuation.ts";
+import { CadProjectStore, nowIso } from "../shared/store.ts";
+import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
 import { composeSystemPrompt } from "./context.ts";
-import {
-  registerControlTools,
-  type ControllerDeps,
-} from "./controller.ts";
-import {
-  EVIDENCE_KINDS,
-  recordToolEvidence,
-} from "./evidence.ts";
+import { maybeAutoContinue } from "./continuation.ts";
+import { registerControlTools, type ControllerDeps } from "./controller.ts";
+import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
 import { isMutatingBash, toolsForPhase, writePathAllowed } from "./policies.ts";
-import {
-  createIntakeState,
-  resumeFromUser,
-  workflowSpec,
-} from "./state-machine.ts";
-import {
-  runBaselineAuto,
-  runCandidateAuto,
-  runConvertCandidateAuto,
-  type PersistFn,
-} from "./auto-actions.ts";
+import { resumeFromUser } from "./state-machine.ts";
 
 const OPTIONAL_TOOL_NAMES = [
   "cad_generate_drawing",
@@ -43,7 +23,7 @@ const OPTIONAL_TOOL_NAMES = [
 async function persist(
   pi: ExtensionAPI,
   store: CadProjectStore,
-  state: CadProjectState,
+  state: CadRunState,
   events: Array<{ type: string; data?: unknown }>,
 ): Promise<void> {
   await store.save(state);
@@ -53,13 +33,13 @@ async function persist(
   pi.setActiveTools(toolsForPhase(state.phase));
   pi.events.emit("pi-cad:state-changed", state);
   try {
-    pi.appendEntry<CadProjectState>("pi-cad-state", state);
+    pi.appendEntry<CadRunState>("pi-cad-run-state", state);
   } catch {
-    // Canonical state remains .pi-cad/state.json.
+    // Canonical state remains .pi-cad/project.json + .pi-cad/runs/<runId>/.
   }
 }
 
-async function guardState(store: CadProjectStore): Promise<CadProjectState | null> {
+async function guardState(store: CadProjectStore): Promise<CadRunState | null> {
   const state = await store.load();
   if (!state || state.status === "done" || state.status === "aborted") return null;
   return state;
@@ -68,7 +48,15 @@ async function guardState(store: CadProjectStore): Promise<CadProjectState | nul
 function customToolDetails(event: ToolResultEvent) {
   if (!("details" in event)) return undefined;
   return event.details as
-    | { envelope?: { inputHashes?: Record<string, string>; artifacts?: Array<{ path: string }>; tool?: string }; kind?: string; artifactHash?: string }
+    | {
+        envelope?: {
+          inputHashes?: Record<string, string>;
+          artifacts?: Array<{ path: string }>;
+          tool?: string;
+        };
+        kind?: string;
+        artifactHash?: string;
+      }
     | undefined;
 }
 
@@ -110,49 +98,6 @@ function unavailableCapabilities(pi: ExtensionAPI): string[] {
   );
 }
 
-const REROUTE_SAFE_PHASES = new Set([
-  "requirements",
-  "concept",
-  "domain_analysis",
-  "baseline",
-  "source_baseline",
-  "plan",
-  "intent",
-  "transform_plan",
-  "investigate",
-  "explain",
-  "audit",
-  "gap_closure",
-]);
-
-async function createTask(
-  pi: ExtensionAPI,
-  project: CadProjectStore,
-  previous: CadProjectState | null,
-  reason: string,
-): Promise<CadProjectState | null> {
-  const task = await project.createTask({
-    parentTaskId: previous?.taskId,
-  });
-  const state = createIntakeState({
-    taskId: task.taskId,
-    parentTaskId: previous?.taskId,
-  });
-  await task.save(state);
-  await project.setCurrentTask(task.taskId);
-  await persist(pi, project, state, [
-    {
-      type: "CadStarted",
-      data: {
-        taskId: state.taskId,
-        parentTaskId: previous?.taskId,
-        reason,
-      },
-    },
-  ]);
-  return state;
-}
-
 export default function cadCore(pi: ExtensionAPI) {
   const deps: ControllerDeps = {
     pi,
@@ -163,98 +108,45 @@ export default function cadCore(pi: ExtensionAPI) {
   };
 
   pi.registerCommand("cad", {
-    description: "Open the current CAD task, or archive a finished one and start a new INTAKE task",
+    description: "Show the Pi-CAD workspace: project, design head, and active run",
     handler: async (args, ctx) => {
       const store = new CadProjectStore(ctx.cwd);
       await store.migrateLegacyProject();
-      const state = await store.load();
-      if (!state) {
-        await createTask(pi, store, null, "command /cad");
-        if (ctx.hasUI) ctx.ui.notify("Pi-CAD workflow activated: INTAKE", "info");
-      } else if (state.status === "done" || state.status === "aborted") {
-        const next = await createTask(pi, store, state, "command /cad after terminal task");
-        if (ctx.hasUI && next) {
-          ctx.ui.notify(
-            `Previous task ${state.taskId} (${state.workflow}/${state.status}) archived. New task ${next.taskId}: INTAKE`,
-            "info",
-          );
-        }
-      } else if (ctx.hasUI) {
-        ctx.ui.notify(`Pi-CAD already active: ${state.workflow}/${state.phase}`, "warning");
+      const project = await store.ensureProject();
+      const run = await store.load();
+      if (ctx.hasUI) {
+        const lines = [
+          "Pi-CAD workspace",
+          `project=${project.projectId}`,
+          project.head.artifactPath
+            ? `head=${project.head.artifactPath} @ ${project.head.artifactHash?.slice(0, 12)}`
+            : "head=none",
+          run
+            ? `activeRun=${run.runId} workflow=${run.workflow ?? "intake"} phase=${run.phase}`
+            : "activeRun=none (IDLE)",
+        ];
+        ctx.ui.notify(lines.join(" · "), run ? "info" : "info");
       }
       if (args.trim()) pi.sendUserMessage(args, { expandPromptTemplates: false });
-    },
-  });
-
-  pi.registerCommand("cad-new", {
-    description: "Explicitly start a new CAD task; refuses while a task is active",
-    handler: async (args, ctx) => {
-      const store = new CadProjectStore(ctx.cwd);
-      await store.migrateLegacyProject();
-      const state = await store.load();
-      if (state && state.status === "active" && state.phase !== "intake") {
-        if (ctx.hasUI) {
-          ctx.ui.notify(
-            `Current task ${state.taskId} is still active (${state.workflow}/${state.phase}). Abort it before /cad-new.`,
-            "error",
-          );
-        }
-        return;
-      }
-      const previous = state && state.status !== "active" ? state : null;
-      const next = await createTask(pi, store, previous, "command /cad-new");
-      if (ctx.hasUI && next) ctx.ui.notify(`New task ${next.taskId}: INTAKE`, "info");
-      if (args.trim()) pi.sendUserMessage(args, { expandPromptTemplates: false });
-    },
-  });
-
-  pi.registerCommand("cad-reroute", {
-    description: "Reset an active but pre-source task back to INTAKE so the Agent can route again",
-    handler: async (_args, ctx) => {
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await store.load();
-      if (!state) {
-        if (ctx.hasUI) ctx.ui.notify("No current CAD task", "warning");
-        return;
-      }
-      if (!REROUTE_SAFE_PHASES.has(state.phase) || state.status !== "active") {
-        if (ctx.hasUI) {
-          ctx.ui.notify(
-            `Reroute is only allowed before source/destructive stages. Current: ${state.workflow}/${state.phase} (${state.status})`,
-            "error",
-          );
-        }
-        return;
-      }
-      const next: CadProjectState = {
-        ...state,
-        workflow: null,
-        phase: "intake",
-        status: "active",
-        mutationPolicy: "read_only",
-        candidateLabel: undefined,
-        currentSourcePath: undefined,
-        currentSourceHash: undefined,
-        currentArtifactPath: undefined,
-        currentArtifactHash: undefined,
-        updatedAt: nowIso(),
-      };
-      await persist(pi, store, next, [
-        { type: "TaskRerouted", data: { taskId: state.taskId, previousWorkflow: state.workflow } },
-      ]);
-      if (ctx.hasUI) ctx.ui.notify(`Task ${state.taskId} reset to INTAKE`, "info");
     },
   });
 
   pi.registerCommand("cad-abort", {
-    description: "Abort only the current CAD task",
+    description: "Abort the active workflow run only; project head is untouched",
     handler: async (_args, ctx) => {
       const store = new CadProjectStore(ctx.cwd);
       const state = await store.load();
       if (!state) return;
-      const next = { ...state, status: "aborted" as const, updatedAt: nowIso() };
-      await persist(pi, store, next, [{ type: "Aborted", data: { taskId: state.taskId } }]);
-      if (ctx.hasUI) ctx.ui.notify(`Task ${state.taskId} aborted`, "warning");
+      const next: CadRunState = {
+        ...state,
+        status: "aborted",
+        updatedAt: nowIso(),
+      };
+      await persist(pi, store, next, [
+        { type: "Aborted", data: { runId: state.runId } },
+      ]);
+      await store.setCurrentRun(null);
+      if (ctx.hasUI) ctx.ui.notify(`Run ${state.runId} aborted; project head unchanged`, "warning");
     },
   });
 
@@ -263,6 +155,7 @@ export default function cadCore(pi: ExtensionAPI) {
   pi.on("before_agent_start", async (event, ctx) => {
     const store = new CadProjectStore(ctx.cwd);
     await store.migrateLegacyProject();
+    const project = await store.ensureProject();
     let state = await store.load();
     if (state && state.status === "waiting_user") {
       state = resumeFromUser(state);
@@ -271,16 +164,10 @@ export default function cadCore(pi: ExtensionAPI) {
       ]);
     }
     const active = state && state.status !== "done" && state.status !== "aborted";
-    if (active && state) {
-      pi.setActiveTools(toolsForPhase(state.phase));
-    }
+    if (active && state) pi.setActiveTools(toolsForPhase(state.phase));
     const missing = unavailableCapabilities(pi);
-    let parentState: CadProjectState | null = null;
-    if (active && state?.parentTaskId) {
-      parentState = await store.task(state.parentTaskId).then((task) => task.load());
-    }
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${await composeSystemPrompt("", active ? state : null, missing, parentState)}`,
+      systemPrompt: `${event.systemPrompt}\n\n${await composeSystemPrompt("", active ? state : null, missing, project)}`,
     };
   });
 
@@ -328,4 +215,3 @@ export default function cadCore(pi: ExtensionAPI) {
     await maybeAutoContinue(pi, store, state, ctx);
   });
 }
-

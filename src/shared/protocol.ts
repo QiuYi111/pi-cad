@@ -116,10 +116,10 @@ export interface CadPlan {
   workstreams?: Array<{ name: string; status: "open" | "complete" | "not_applicable" | "blocked_external" }>;
 }
 
-export interface CadProjectState {
+export interface CadRunState {
   schemaVersion: number;
-  taskId: string;
-  parentTaskId?: string;
+  runId: string;
+  projectId: string;
   createdAt: string;
   workflow: CadWorkflow | null;
   phase: CadPhase;
@@ -146,6 +146,28 @@ export interface CadProjectState {
     string,
     "open" | "complete" | "not_applicable" | "blocked_external"
   >;
+  updatedAt: string;
+}
+
+export interface CadProjectHead {
+  sourcePath?: string;
+  sourceHash?: string;
+  artifactPath?: string;
+  artifactHash?: string;
+  evidence: EvidenceRef[];
+  updatedAt: string;
+}
+
+/**
+ * Long-lived design project state. The head says what the design currently
+ * is; runs/ say what the Agent has done to it.
+ */
+export interface CadProjectState {
+  schemaVersion: number;
+  projectId: string;
+  head: CadProjectHead;
+  currentRunId: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 

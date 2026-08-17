@@ -9,9 +9,9 @@ import {
   buildStep,
   compareGeometry,
   defaultBuildOutput,
-  taskCompareEvidencePath,
-  taskGeometryEvidencePath,
-  taskVisualEvidenceDir,
+  runCompareEvidencePath,
+  runGeometryEvidencePath,
+  runVisualEvidenceDir,
   envelopeArtifactHash,
   exportArtifact,
   geometryPayload,
@@ -20,7 +20,7 @@ import {
   readImageContents,
   visualPayload,
 } from "../shared/capability.ts";
-import type { CadProjectState } from "../shared/protocol.ts";
+import type { CadRunState } from "../shared/protocol.ts";
 import {
   CadProjectStore,
   cloneState,
@@ -38,12 +38,12 @@ import {
 export type PersistFn = (
   pi: ExtensionAPI,
   store: CadProjectStore,
-  state: CadProjectState,
+  state: CadRunState,
   events: Array<{ type: string; data?: unknown }>,
 ) => Promise<void>;
 
 export interface AutoActionResult {
-  state: CadProjectState;
+  state: CadRunState;
   images: Array<{ type: "image"; data: string; mimeType: string }>;
   warnings: string[];
 }
@@ -51,15 +51,15 @@ export interface AutoActionResult {
 export async function runBaselineAuto(
   pi: ExtensionAPI,
   store: CadProjectStore,
-  state: CadProjectState,
+  state: CadRunState,
   artifactRel: string,
   persist: PersistFn,
 ): Promise<AutoActionResult> {
   const cwd = store.cwd;
   const artifactAbs = resolve(cwd, artifactRel);
   const artifactHash = await sha256File(artifactAbs);
-  const visualDir = taskVisualEvidenceDir(cwd, state.taskId, artifactAbs);
-  const geometryPath = taskGeometryEvidencePath(cwd, state.taskId, artifactAbs);
+  const visualDir = runVisualEvidenceDir(cwd, state.runId, artifactAbs);
+  const geometryPath = runGeometryEvidencePath(cwd, state.runId, artifactAbs);
   const warnings: string[] = [];
   const events: Array<{ type: string; data?: unknown }> = [];
 
@@ -116,7 +116,7 @@ export async function runBaselineAuto(
 export async function runCandidateAuto(
   pi: ExtensionAPI,
   store: CadProjectStore,
-  state: CadProjectState,
+  state: CadRunState,
   source: string,
   label: string,
   persist: PersistFn,
@@ -138,8 +138,8 @@ export async function runCandidateAuto(
   const stepPath = artifactPathForKind(buildEnvelope, "step") ?? output;
   const artifactHash =
     envelopeArtifactHash(buildEnvelope, "step") ?? (await sha256File(stepPath));
-  const visualDir = taskVisualEvidenceDir(cwd, state.taskId, stepPath);
-  const geometryPath = taskGeometryEvidencePath(cwd, state.taskId, stepPath);
+  const visualDir = runVisualEvidenceDir(cwd, state.runId, stepPath);
+  const geometryPath = runGeometryEvidencePath(cwd, state.runId, stepPath);
 
   let next = markEvidenceStale(cloneState(state));
   next = addEvidence(next, evidenceFromBuild(buildEnvelope, artifactHash, sourceHash));
@@ -176,7 +176,7 @@ export async function runCandidateAuto(
     state.baselineArtifactPath &&
     existsSync(resolve(cwd, state.baselineArtifactPath))
   ) {
-    const compareOutput = taskCompareEvidencePath(cwd, state.taskId, label);
+    const compareOutput = runCompareEvidencePath(cwd, state.runId, label);
     const compareEnvelope = await compareGeometry(cwd, state.baselineArtifactPath, stepPath, compareOutput);
     if (compareEnvelope.ok) {
       next = addEvidence(
@@ -245,7 +245,7 @@ export async function runCandidateAuto(
 export async function runConvertCandidateAuto(
   pi: ExtensionAPI,
   store: CadProjectStore,
-  state: CadProjectState,
+  state: CadRunState,
   source: string,
   label: string,
   format: string,
@@ -300,7 +300,7 @@ export async function runConvertCandidateAuto(
     } else {
       warnings.push(`converted assembly-tree failed: ${String(assemblyAfter.payload.error ?? "unknown")}`);
     }
-    const visualAfter = await inspectVisual(cwd, outputAbs, taskVisualEvidenceDir(cwd, state.taskId, outputAbs));
+    const visualAfter = await inspectVisual(cwd, outputAbs, runVisualEvidenceDir(cwd, state.runId, outputAbs));
     if (visualAfter.ok) {
       next = addEvidence(
         next,
@@ -310,7 +310,7 @@ export async function runConvertCandidateAuto(
     } else {
       warnings.push(`converted visual failed: ${String(visualPayload(visualAfter).error ?? "unknown")}`);
     }
-    const geometryAfter = await inspectGeometry(cwd, outputAbs, taskGeometryEvidencePath(cwd, state.taskId, outputAbs));
+    const geometryAfter = await inspectGeometry(cwd, outputAbs, runGeometryEvidencePath(cwd, state.runId, outputAbs));
     if (geometryAfter.ok) {
       next = addEvidence(
         next,
@@ -324,7 +324,7 @@ export async function runConvertCandidateAuto(
       cwd,
       source,
       outputAbs,
-      taskCompareEvidencePath(cwd, state.taskId, label),
+      runCompareEvidencePath(cwd, state.runId, label),
     );
     if (compareEnv.ok) {
       next = addEvidence(

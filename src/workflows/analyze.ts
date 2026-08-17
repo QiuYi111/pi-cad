@@ -17,4 +17,5 @@ export const analyzeWorkflow: WorkflowSpec = {
   finishEvidence: () => ["visual", "geometry"],
   requiresBaselineInput: true,
   baselineEvidenceRequired: true,
+  updatesHeadOnAccept: false,
 };

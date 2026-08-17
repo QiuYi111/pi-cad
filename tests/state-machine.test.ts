@@ -178,13 +178,13 @@ test("ProjectStateStore persists and reloads state", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pi-cad-store-"));
   try {
     const store = new ProjectStateStore(dir);
-    const task = await store.createTask({ taskId: "test-task" });
-    const state = createIntakeState({ taskId: "test-task" });
-    await task.save(state);
-    await store.appendEvent("CadStarted", { taskId: state.taskId });
+    const run = await store.createRun({ runId: "test-run" });
+    const state = createIntakeState({ runId: "test-run" });
+    await run.save(state);
+    await store.appendEvent("CadStarted", { runId: state.runId });
     const loaded = await store.load();
     assert.ok(loaded);
-    assert.equal(loaded?.taskId, state.taskId);
+    assert.equal(loaded?.runId, state.runId);
     assert.equal(loaded?.phase, "intake");
   } finally {
     rmSync(dir, { recursive: true, force: true });

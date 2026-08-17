@@ -9,7 +9,7 @@ import {
   buildStep,
   compareGeometry,
   currentGeometryEvidencePath,
-  currentTaskEvidenceRoot,
+  currentRunEvidenceRoot,
   defaultBuildOutput,
   envelopeArtifactHash,
   exportArtifact,
@@ -175,7 +175,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       labels: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentTaskEvidenceRoot(ctx.cwd);
+      const root = await currentRunEvidenceRoot(ctx.cwd);
       const outDir = root ? join(root, "section") : resolve(ctx.cwd, ".pi-cad", "evidence", "section");
       const envelope = await inspectSection(ctx.cwd, params.artifact, outDir, {
         origin: params.origin as [number, number, number],
@@ -223,7 +223,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentTaskEvidenceRoot(ctx.cwd);
+      const root = await currentRunEvidenceRoot(ctx.cwd);
       const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "compare", `${Date.now().toString(36)}.json`);
       let transformBefore: number[][] | undefined;
       let transformAfter: number[][] | undefined;
@@ -264,7 +264,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentTaskEvidenceRoot(ctx.cwd);
+      const root = await currentRunEvidenceRoot(ctx.cwd);
       const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "assembly", `${Date.now().toString(36)}.json`);
       const envelope = await assemblyTree(ctx.cwd, params.artifact, output);
       const payload = envelope.payload as { error?: string; leafCount?: number; occurrences?: unknown[] };

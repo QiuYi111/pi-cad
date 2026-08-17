@@ -22,4 +22,5 @@ export const modifyWorkflow: WorkflowSpec = {
   finishEvidence: () => ["visual", "geometry", "compare"],
   requiresBaselineInput: true,
   baselineEvidenceRequired: true,
+  updatesHeadOnAccept: true,
 };

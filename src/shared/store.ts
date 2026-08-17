@@ -8,11 +8,13 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import {
   CAD_STATE_SCHEMA_VERSION,
+  type CadProjectHead,
   type CadProjectState,
+  type CadRunState,
   type EvidenceRef,
 } from "./protocol.ts";
 
@@ -22,12 +24,11 @@ export interface CadJournalEvent {
   data?: unknown;
 }
 
-export interface CadTaskRef {
-  taskId: string;
-  parentTaskId?: string;
-  workflow: CadProjectState["workflow"];
-  phase: CadProjectState["phase"];
-  status: CadProjectState["status"];
+export interface CadRunRef {
+  runId: string;
+  workflow: CadRunState["workflow"];
+  phase: CadRunState["phase"];
+  status: CadRunState["status"];
   createdAt: string;
   updatedAt: string;
 }
@@ -64,25 +65,25 @@ function atomicWrite(path: string, content: string): Promise<void> {
   });
 }
 
-export class CadTaskStore {
+export class CadRunStore {
   readonly cwd: string;
-  readonly taskId: string;
-  readonly taskDir: string;
+  readonly runId: string;
+  readonly runDir: string;
   readonly statePath: string;
   readonly eventsPath: string;
   readonly recordsDir: string;
   readonly evidenceDir: string;
   readonly artifactsDir: string;
 
-  constructor(cwd: string, taskId: string) {
+  constructor(cwd: string, runId: string) {
     this.cwd = resolve(cwd);
-    this.taskId = taskId;
-    this.taskDir = join(this.cwd, ".pi-cad", "tasks", taskId);
-    this.statePath = join(this.taskDir, "state.json");
-    this.eventsPath = join(this.taskDir, "events.jsonl");
-    this.recordsDir = join(this.taskDir, "records");
-    this.evidenceDir = join(this.taskDir, "evidence");
-    this.artifactsDir = join(this.taskDir, "artifacts");
+    this.runId = runId;
+    this.runDir = join(this.cwd, ".pi-cad", "runs", runId);
+    this.statePath = join(this.runDir, "state.json");
+    this.eventsPath = join(this.runDir, "events.jsonl");
+    this.recordsDir = join(this.runDir, "records");
+    this.evidenceDir = join(this.runDir, "evidence");
+    this.artifactsDir = join(this.runDir, "artifacts");
   }
 
   async ensureDirs(): Promise<void> {
@@ -94,10 +95,10 @@ export class CadTaskStore {
     await mkdir(join(this.artifactsDir), { recursive: true });
   }
 
-  async load(): Promise<CadProjectState | null> {
+  async load(): Promise<CadRunState | null> {
     try {
       const raw = await readFile(this.statePath, "utf-8");
-      const state = JSON.parse(raw) as CadProjectState;
+      const state = JSON.parse(raw) as CadRunState;
       if (!state || state.schemaVersion !== CAD_STATE_SCHEMA_VERSION) return null;
       return state;
     } catch {
@@ -105,7 +106,7 @@ export class CadTaskStore {
     }
   }
 
-  async save(state: CadProjectState): Promise<void> {
+  async save(state: CadRunState): Promise<void> {
     await this.ensureDirs();
     await atomicWrite(this.statePath, `${JSON.stringify(state, null, 2)}\n`);
   }
@@ -130,12 +131,11 @@ export class CadTaskStore {
     return path;
   }
 
-  async taskRef(): Promise<CadTaskRef | null> {
+  async runRef(): Promise<CadRunRef | null> {
     const state = await this.load();
     if (!state) return null;
     return {
-      taskId: state.taskId,
-      parentTaskId: state.parentTaskId,
+      runId: state.runId,
       workflow: state.workflow,
       phase: state.phase,
       status: state.status,
@@ -145,97 +145,132 @@ export class CadTaskStore {
   }
 }
 
-export interface CreateTaskOptions {
-  taskId?: string;
-  parentTaskId?: string;
+export interface CreateRunOptions {
+  runId?: string;
 }
 
 export class CadProjectStore {
   readonly cwd: string;
   readonly piCadDir: string;
-  readonly tasksDir: string;
-  readonly currentPath: string;
+  readonly runsDir: string;
+  readonly projectPath: string;
+  readonly projectId: string;
 
   constructor(cwd: string) {
     this.cwd = resolve(cwd);
+    this.projectId = basename(this.cwd) || "project";
     this.piCadDir = join(this.cwd, ".pi-cad");
-    this.tasksDir = join(this.piCadDir, "tasks");
-    this.currentPath = join(this.piCadDir, "current.json");
+    this.runsDir = join(this.piCadDir, "runs");
+    this.projectPath = join(this.piCadDir, "project.json");
   }
 
   async ensure(): Promise<void> {
-    await mkdir(this.tasksDir, { recursive: true });
+    await mkdir(this.runsDir, { recursive: true });
   }
 
-  async currentTaskId(): Promise<string | null> {
-    await this.ensure();
+  async loadProject(): Promise<CadProjectState | null> {
     try {
-      const raw = JSON.parse(await readFile(this.currentPath, "utf-8")) as {
-        activeTaskId?: string;
-      };
-      return raw.activeTaskId ?? null;
+      const raw = await readFile(this.projectPath, "utf-8");
+      const project = JSON.parse(raw) as CadProjectState;
+      if (!project || project.schemaVersion !== CAD_STATE_SCHEMA_VERSION) return null;
+      return project;
     } catch {
       return null;
     }
   }
 
-  async currentTask(): Promise<CadTaskStore | null> {
-    const taskId = await this.currentTaskId();
-    return taskId ? new CadTaskStore(this.cwd, taskId) : null;
-  }
-
-  async setCurrentTask(taskId: string): Promise<void> {
+  async ensureProject(): Promise<CadProjectState> {
+    const existing = await this.loadProject();
+    if (existing) return existing;
+    const createdAt = nowIso();
+    const project: CadProjectState = {
+      schemaVersion: CAD_STATE_SCHEMA_VERSION,
+      projectId: this.projectId,
+      head: { evidence: [], updatedAt: createdAt },
+      currentRunId: null,
+      createdAt,
+      updatedAt: createdAt,
+    };
     await this.ensure();
-    await atomicWrite(
-      this.currentPath,
-      `${JSON.stringify({ activeTaskId: taskId }, null, 2)}\n`,
-    );
+    await this.saveProject(project);
+    return project;
   }
 
-  async createTask(options: CreateTaskOptions = {}): Promise<CadTaskStore> {
+  async saveProject(project: CadProjectState): Promise<void> {
     await this.ensure();
-    const taskId =
-      options.taskId ?? (await this.generateTaskId());
-    const task = new CadTaskStore(this.cwd, taskId);
-    await task.ensureDirs();
-    await this.setCurrentTask(taskId);
-    return task;
+    await atomicWrite(this.projectPath, `${JSON.stringify(project, null, 2)}\n`);
   }
 
-  async listTasks(): Promise<CadTaskRef[]> {
+  async currentRunId(): Promise<string | null> {
+    const project = await this.ensureProject();
+    return project.currentRunId;
+  }
+
+  async currentRun(): Promise<CadRunStore | null> {
+    const runId = await this.currentRunId();
+    return runId ? new CadRunStore(this.cwd, runId) : null;
+  }
+
+  async createRun(options: CreateRunOptions = {}): Promise<CadRunStore> {
+    const runId = options.runId ?? (await this.generateRunId());
+    const run = new CadRunStore(this.cwd, runId);
+    await run.ensureDirs();
+    const project = await this.ensureProject();
+    project.currentRunId = runId;
+    project.updatedAt = nowIso();
+    await this.saveProject(project);
+    return run;
+  }
+
+  async setCurrentRun(runId: string | null): Promise<void> {
+    const project = await this.ensureProject();
+    project.currentRunId = runId;
+    project.updatedAt = nowIso();
+    await this.saveProject(project);
+  }
+
+  async updateHead(head: Partial<CadProjectHead>): Promise<CadProjectState> {
+    const project = await this.ensureProject();
+    project.head = {
+      ...project.head,
+      ...head,
+      evidence: head.evidence ?? project.head.evidence ?? [],
+      updatedAt: nowIso(),
+    };
+    project.updatedAt = nowIso();
+    await this.saveProject(project);
+    return project;
+  }
+
+  async listRuns(): Promise<CadRunRef[]> {
     await this.ensure();
     let names: string[] = [];
     try {
-      names = await readdir(this.tasksDir);
+      names = await readdir(this.runsDir);
     } catch {
       return [];
     }
-    const refs: CadTaskRef[] = [];
+    const refs: CadRunRef[] = [];
     for (const name of names.sort()) {
-      const task = new CadTaskStore(this.cwd, name);
-      const ref = await task.taskRef();
+      const ref = await new CadRunStore(this.cwd, name).runRef();
       if (ref) refs.push(ref);
     }
     return refs;
   }
 
-  async task(taskId: string): Promise<CadTaskStore> {
-    return new CadTaskStore(this.cwd, taskId);
+  run(runId: string): CadRunStore {
+    return new CadRunStore(this.cwd, runId);
   }
 
-  async removeTask(taskId: string): Promise<void> {
-    await rm(join(this.tasksDir, taskId), { recursive: true, force: true });
-  }
-
-  private async generateTaskId(): Promise<string> {
+  private async generateRunId(): Promise<string> {
     const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     let names: string[] = [];
     try {
-      names = await readdir(this.tasksDir);
+      names = await readdir(this.runsDir);
     } catch {
       names = [];
     }
-    const prefix = `cad-${date}-`;
+    const prefix = `run-${date}-`;
     const sequence =
       names
         .filter((name) => name.startsWith(prefix))
@@ -244,35 +279,34 @@ export class CadProjectStore {
     return `${prefix}${String(sequence + 1).padStart(3, "0")}`;
   }
 
-  // Convenience methods for current-task call sites. These do not make the
-  // project store own task state; they delegate to the active task store.
-  async load(): Promise<CadProjectState | null> {
-    const task = await this.currentTask();
-    return task ? task.load() : null;
+  // Convenience current-run delegation used by existing control tools.
+  async load(): Promise<CadRunState | null> {
+    const run = await this.currentRun();
+    return run ? run.load() : null;
   }
 
-  async save(state: CadProjectState): Promise<void> {
-    const task = await this.currentTask();
-    if (!task) throw new Error("no active CAD task");
-    await task.save(state);
+  async save(state: CadRunState): Promise<void> {
+    const run = await this.currentRun();
+    if (!run) throw new Error("no active workflow run");
+    await run.save(state);
   }
 
   async appendEvent(type: string, data?: unknown): Promise<void> {
-    const task = await this.currentTask();
-    if (!task) throw new Error("no active CAD task");
-    await task.appendEvent(type, data);
+    const run = await this.currentRun();
+    if (!run) throw new Error("no active workflow run");
+    await run.appendEvent(type, data);
   }
 
   async writeRecord(name: string, data: unknown): Promise<string> {
-    const task = await this.currentTask();
-    if (!task) throw new Error("no active CAD task");
-    return task.writeRecord(name, data);
+    const run = await this.currentRun();
+    if (!run) throw new Error("no active workflow run");
+    return run.writeRecord(name, data);
   }
 
   async writeManifest(data: unknown): Promise<string> {
-    const task = await this.currentTask();
-    if (!task) throw new Error("no active CAD task");
-    return task.writeManifest(data);
+    const run = await this.currentRun();
+    if (!run) throw new Error("no active workflow run");
+    return run.writeManifest(data);
   }
 
   resolve(relativePath: string): string {
@@ -286,52 +320,104 @@ export class CadProjectStore {
     return rel || ".";
   }
 
-  /** One-time migration from the V0 single-state layout. */
+  /** Migrate V0 single-state and V0.4 task layouts into project + runs. */
   async migrateLegacyProject(): Promise<boolean> {
     await this.ensure();
-    const legacyState = join(this.piCadDir, "state.json");
-    let legacy: CadProjectState;
+    let migrated = false;
+
+    const legacyTaskCurrent = join(this.piCadDir, "current.json");
+    const legacyTasks = join(this.piCadDir, "tasks");
     try {
-      legacy = JSON.parse(await readFile(legacyState, "utf-8")) as CadProjectState;
-    } catch {
-      return false;
-    }
-    const taskId =
-      legacy.taskId && legacy.taskId !== "legacy-task"
-        ? legacy.taskId
-        : `cad-legacy-${Date.now().toString(36)}`;
-    const task = await this.createTask({ taskId });
-    const normalized: CadProjectState = {
-      ...legacy,
-      schemaVersion: CAD_STATE_SCHEMA_VERSION,
-      taskId,
-      createdAt: legacy.updatedAt ?? nowIso(),
-    };
-    await task.save(normalized);
-    for (const [from, to] of [
-      [join(this.piCadDir, "events.jsonl"), task.eventsPath],
-      [join(this.piCadDir, "records"), task.recordsDir],
-      [join(this.piCadDir, "evidence"), task.evidenceDir],
-      [join(this.piCadDir, "artifacts"), task.artifactsDir],
-    ] as const) {
-      try {
-        await rename(from, to);
-      } catch {
-        // Missing optional directory.
+      const names = await readdir(legacyTasks);
+      const currentRaw = JSON.parse(await readFile(legacyTaskCurrent, "utf-8")) as {
+        activeTaskId?: string;
+      };
+      let headSource: CadProjectHead = { evidence: [], updatedAt: nowIso() };
+      let currentRunId: string | null = null;
+      for (const [index, name] of names.sort().entries()) {
+        const taskState = JSON.parse(
+          await readFile(join(legacyTasks, name, "state.json"), "utf-8"),
+        ) as CadRunState & { taskId?: string };
+        const runId = `run-migrated-${String(index + 1).padStart(3, "0")}`;
+        const run = new CadRunStore(this.cwd, runId);
+        await run.ensureDirs();
+        const runState: CadRunState = {
+          ...taskState,
+          schemaVersion: CAD_STATE_SCHEMA_VERSION,
+          runId,
+          projectId: this.projectId,
+          createdAt: taskState.createdAt ?? taskState.updatedAt,
+        };
+        await run.save(runState);
+        await rename(join(legacyTasks, name, "events.jsonl"), run.eventsPath).catch(() => {});
+        await rename(join(legacyTasks, name, "records"), run.recordsDir).catch(() => {});
+        await rename(join(legacyTasks, name, "evidence"), run.evidenceDir).catch(() => {});
+        await rename(join(legacyTasks, name, "artifacts"), run.artifactsDir).catch(() => {});
+
+        if (taskState.taskId === currentRaw.activeTaskId && taskState.status === "active") {
+          currentRunId = runId;
+        }
+        if (taskState.currentArtifactHash) {
+          headSource = {
+            sourcePath: taskState.currentSourcePath,
+            sourceHash: taskState.currentSourceHash,
+            artifactPath: taskState.currentArtifactPath,
+            artifactHash: taskState.currentArtifactHash,
+            evidence: taskState.evidence,
+            updatedAt: nowIso(),
+          };
+        }
       }
-    }
-    try {
-      await rm(legacyState, { force: true });
+      await this.saveProject({
+        schemaVersion: CAD_STATE_SCHEMA_VERSION,
+        projectId: this.projectId,
+        head: headSource,
+        currentRunId,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      });
+      await rm(legacyTasks, { recursive: true, force: true });
+      await rm(legacyTaskCurrent, { force: true });
+      migrated = true;
     } catch {
-      // Already absent.
+      // fall through to legacy single-state migration
     }
-    return true;
+
+    const legacyState = join(this.piCadDir, "state.json");
+    try {
+      const legacy = JSON.parse(await readFile(legacyState, "utf-8")) as CadRunState & {
+        taskId?: string;
+      };
+      const run = await this.createRun({ runId: "run-migrated-legacy" });
+      const runState: CadRunState = {
+        ...legacy,
+        schemaVersion: CAD_STATE_SCHEMA_VERSION,
+        runId: run.runId,
+        projectId: this.projectId,
+        createdAt: legacy.createdAt ?? legacy.updatedAt,
+      };
+      await run.save(runState);
+      await this.updateHead({
+        sourcePath: legacy.currentSourcePath,
+        sourceHash: legacy.currentSourceHash,
+        artifactPath: legacy.currentArtifactPath,
+        artifactHash: legacy.currentArtifactHash,
+        evidence: legacy.evidence,
+      });
+      await this.setCurrentRun(legacy.status === "active" ? run.runId : null);
+      await rm(legacyState, { force: true });
+      await rename(join(this.piCadDir, "events.jsonl"), run.eventsPath).catch(() => {});
+      migrated = true;
+    } catch {
+      // no legacy layout
+    }
+    return migrated;
   }
 }
 
 /** @deprecated use CadProjectStore */
 export const ProjectStateStore = CadProjectStore;
 
-export function cloneState(state: CadProjectState): CadProjectState {
+export function cloneState<T>(state: T): T {
   return structuredClone(state);
 }

@@ -352,35 +352,35 @@ export function defaultGeometryEvidencePath(cwd: string, artifact: string): stri
   );
 }
 
-export function taskEvidenceRoot(cwd: string, taskId: string): string {
-  return join(cwd, ".pi-cad", "tasks", taskId, "evidence");
+export function runEvidenceRoot(cwd: string, runId: string): string {
+  return join(cwd, ".pi-cad", "runs", runId, "evidence");
 }
 
-export function taskVisualEvidenceDir(cwd: string, taskId: string, artifact: string): string {
-  return join(taskEvidenceRoot(cwd, taskId), "visual", basename(artifact).replace(/\.[^.]+$/, ""));
+export function runVisualEvidenceDir(cwd: string, runId: string, artifact: string): string {
+  return join(runEvidenceRoot(cwd, runId), "visual", basename(artifact).replace(/\.[^.]+$/, ""));
 }
 
-export function taskGeometryEvidencePath(cwd: string, taskId: string, artifact: string): string {
-  return join(taskEvidenceRoot(cwd, taskId), "geometry", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
+export function runGeometryEvidencePath(cwd: string, runId: string, artifact: string): string {
+  return join(runEvidenceRoot(cwd, runId), "geometry", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
 }
 
-export function taskCompareEvidencePath(cwd: string, taskId: string, label: string): string {
-  return join(taskEvidenceRoot(cwd, taskId), "compare", `${label.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`);
+export function runCompareEvidencePath(cwd: string, runId: string, label: string): string {
+  return join(runEvidenceRoot(cwd, runId), "compare", `${label.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`);
 }
 
-export async function currentTaskEvidenceRoot(cwd: string): Promise<string | null> {
-  const taskId = await new CadProjectStore(cwd).currentTaskId();
-  return taskId ? taskEvidenceRoot(cwd, taskId) : null;
+export async function currentRunEvidenceRoot(cwd: string): Promise<string | null> {
+  const runId = await new CadProjectStore(cwd).currentRunId();
+  return runId ? runEvidenceRoot(cwd, runId) : null;
 }
 
 export async function currentVisualEvidenceDir(cwd: string, artifact: string): Promise<string> {
-  const taskId = await new CadProjectStore(cwd).currentTaskId();
-  return taskId ? taskVisualEvidenceDir(cwd, taskId, artifact) : defaultVisualEvidenceDir(cwd, artifact);
+  const runId = await new CadProjectStore(cwd).currentRunId();
+  return runId ? runVisualEvidenceDir(cwd, runId, artifact) : defaultVisualEvidenceDir(cwd, artifact);
 }
 
 export async function currentGeometryEvidencePath(cwd: string, artifact: string): Promise<string> {
-  const taskId = await new CadProjectStore(cwd).currentTaskId();
-  return taskId ? taskGeometryEvidencePath(cwd, taskId, artifact) : defaultGeometryEvidencePath(cwd, artifact);
+  const runId = await new CadProjectStore(cwd).currentRunId();
+  return runId ? runGeometryEvidencePath(cwd, runId, artifact) : defaultGeometryEvidencePath(cwd, artifact);
 }
 
 export async function hashOrEmpty(path: string): Promise<string> {

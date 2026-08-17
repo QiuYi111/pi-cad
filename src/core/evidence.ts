@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-import type { CadEventEnvelope, CadProjectState, EvidenceRef } from "../shared/protocol.ts";
+import type { CadEventEnvelope, CadRunState, EvidenceRef } from "../shared/protocol.ts";
 import { sha256File } from "../shared/store.ts";
 import {
   addEvidence,
@@ -26,7 +26,7 @@ export const EVIDENCE_KINDS: EvidenceRef["kind"][] = [
 
 export function verifyEvidenceFilesForHash(
   cwd: string,
-  state: CadProjectState,
+  state: CadRunState,
   hash: string,
   kinds: EvidenceRef["kind"][],
 ): string | null {
@@ -44,7 +44,7 @@ export function verifyEvidenceFilesForHash(
 
 export async function verifyCurrentArtifacts(
   cwd: string,
-  state: CadProjectState,
+  state: CadRunState,
 ): Promise<string | null> {
   if (state.workflow === "analyze") {
     if (!state.baselineArtifactPath) return "baseline artifact path is not bound";
@@ -72,11 +72,11 @@ export async function verifyCurrentArtifacts(
 }
 
 export function recordToolEvidence(
-  state: CadProjectState,
+  state: CadRunState,
   envelope: CadEventEnvelope,
   kind: EvidenceRef["kind"],
   artifactHash: string,
-): CadProjectState {
+): CadRunState {
   let next = { ...state };
   next.evidence = next.evidence.filter(
     (ref) => !(ref.kind === kind && ref.artifactHash === artifactHash),

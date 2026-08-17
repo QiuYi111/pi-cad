@@ -29,4 +29,5 @@ export const hybridWorkflow: WorkflowSpec = {
   finishEvidence: () => ["visual", "geometry"],
   requiresBaselineInput: true,
   baselineEvidenceRequired: true,
+  updatesHeadOnAccept: true,
 };

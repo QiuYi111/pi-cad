@@ -6,7 +6,7 @@ import { Type } from "typebox";
 import {
   ALL_WORKFLOWS,
   type CadPlan,
-  type CadProjectState,
+  type CadRunState,
   type CadRequirements,
   type CadWorkflow,
   type EvidenceRef,
@@ -32,14 +32,14 @@ export interface ControllerDeps {
   runBaselineAuto: (
     pi: ExtensionAPI,
     store: CadProjectStore,
-    state: CadProjectState,
+    state: CadRunState,
     artifactRel: string,
     persist: PersistFn,
-  ) => Promise<{ state: CadProjectState; images: Array<{ type: "image"; data: string; mimeType: string }>; warnings: string[] }>;
+  ) => Promise<{ state: CadRunState; images: Array<{ type: "image"; data: string; mimeType: string }>; warnings: string[] }>;
   runCandidateAuto: (
     pi: ExtensionAPI,
     store: CadProjectStore,
-    state: CadProjectState,
+    state: CadRunState,
     source: string,
     label: string,
     persist: PersistFn,
@@ -47,7 +47,7 @@ export interface ControllerDeps {
   runConvertCandidateAuto: (
     pi: ExtensionAPI,
     store: CadProjectStore,
-    state: CadProjectState,
+    state: CadRunState,
     source: string,
     label: string,
     format: string,
@@ -64,7 +64,7 @@ function errTool(text: string, details?: unknown): AgentToolResult<unknown> {
   return { content: [{ type: "text", text }], details };
 }
 
-async function guardState(store: CadProjectStore): Promise<CadProjectState | null> {
+async function guardState(store: CadProjectStore): Promise<CadRunState | null> {
   const state = await store.load();
   if (!state || state.status === "done" || state.status === "aborted") return null;
   return state;
@@ -73,13 +73,16 @@ async function guardState(store: CadProjectStore): Promise<CadProjectState | nul
 async function baselineArtifactCandidate(
   record: CadRequirements,
   cwd: string,
+  store: CadProjectStore,
 ): Promise<string | null> {
-  return (
-    (record.inputs ?? []).find((input) => /\.(step|stp)$/i.test(input)) ?? null
-  );
+  const input = (record.inputs ?? []).find((item) => /\.(step|stp)$/i.test(item));
+  if (input) return input;
+  const project = await store.loadProject();
+  const head = project?.head.artifactPath;
+  return head && /\.(step|stp)$/i.test(head) ? head : null;
 }
 
-function acceptedEvidenceKinds(state: CadProjectState): EvidenceRef["kind"][] {
+function acceptedEvidenceKinds(state: CadRunState): EvidenceRef["kind"][] {
   const spec = workflowSpec(state);
   return spec?.acceptedEvidence(state) ?? ["visual", "geometry"];
 }
@@ -111,16 +114,40 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
+      await store.migrateLegacyProject();
+      const project = await store.ensureProject();
       let state = await store.load();
       if (!state) {
-        let taskId = await store.currentTaskId();
-        if (!taskId) {
-          const task = await store.createTask();
-          taskId = task.taskId;
+        const existingRunId = await store.currentRunId();
+        const run = existingRunId
+          ? store.run(existingRunId)
+          : await store.createRun();
+        await run.ensureDirs();
+        state = createIntakeState({
+          runId: run.runId,
+          projectId: project.projectId,
+        });
+        const head = project.head;
+        if (head.artifactPath) {
+          state = {
+            ...state,
+            baselineSourcePath: head.sourcePath,
+            baselineSourceHash: head.sourceHash,
+            baselineArtifactPath: head.artifactPath,
+            baselineArtifactHash: head.artifactHash,
+          };
         }
-        state = createIntakeState({ taskId });
-        await store.save(state);
-        await store.appendEvent("CadStarted", { taskId });
+        if (params.workflow === "release" && head.artifactPath) {
+          state = {
+            ...state,
+            currentSourcePath: head.sourcePath,
+            currentSourceHash: head.sourceHash,
+            currentArtifactPath: head.artifactPath,
+            currentArtifactHash: head.artifactHash,
+          };
+        }
+        await run.save(state);
+        await run.appendEvent("RunStarted", { runId: run.runId, projectId: project.projectId });
       }
       const result = route(state, params.workflow as CadWorkflow, params.reason);
       if (!result.ok) return errTool(result.reason);
@@ -170,7 +197,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       await store.writeRecord("requirements", record);
       let next = result.state;
       const spec = workflowSpec(next);
-      const baselineInput = await baselineArtifactCandidate(record, ctx.cwd);
+      const baselineInput = await baselineArtifactCandidate(record, ctx.cwd, store);
       if (spec?.requiresBaselineInput && !baselineInput) {
         return errTool(
           `${next.workflow} workflow requires requirements.inputs[] to reference an existing .step/.stp baseline artifact.`,
@@ -359,6 +386,21 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
 
       const result = transition(state, params.event, params.note);
       if (!result.ok) return errTool(result.reason);
+      if (
+        params.event === "accepted" &&
+        spec?.updatesHeadOnAccept &&
+        result.state.currentArtifactPath &&
+        result.state.currentArtifactHash &&
+        /\.(step|stp)$/i.test(result.state.currentArtifactPath)
+      ) {
+        await store.updateHead({
+          sourcePath: result.state.currentSourcePath,
+          sourceHash: result.state.currentSourceHash,
+          artifactPath: store.relative(result.state.currentArtifactPath),
+          artifactHash: result.state.currentArtifactHash,
+          evidence: result.state.evidence,
+        });
+      }
       await deps.persist(pi, store, result.state, result.events);
       return okTool(
         `Transition ${params.event} accepted. Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
@@ -424,8 +466,9 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const result = finish(state);
       if (!result.ok) return errTool(result.reason);
       await deps.persist(pi, store, result.state, result.events);
+      await store.setCurrentRun(null);
       return okTool(
-        `Workflow ${result.state.workflow} finished. taskId=${result.state.taskId}. Deliver evidence-version-consistent source and artifacts.`,
+        `Workflow run ${result.state.runId} (${result.state.workflow}) finished. Project head is unchanged unless this run accepted a new candidate.`,
         { state: result.state },
       );
     },

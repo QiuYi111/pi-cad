@@ -7,41 +7,47 @@ import { test } from "node:test";
 import { CadProjectStore } from "../src/shared/store.ts";
 import { createIntakeState } from "../src/core/state-machine.ts";
 
-test("project supports multiple tasks with thin current.json and parent references", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-lifecycle-"));
+test("project head persists across runs and current run can return to idle", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-project-runs-"));
   try {
     const project = new CadProjectStore(cwd);
-    const first = await project.createTask();
-    const firstState = createIntakeState({ taskId: first.taskId });
+    const first = await project.createRun();
+    const firstState = createIntakeState({ runId: first.runId, projectId: project.projectId });
     firstState.workflow = "greenfield";
     firstState.phase = "done";
     firstState.status = "done";
     firstState.currentSourcePath = "models/planetary.py";
+    firstState.currentSourceHash = "source-hash";
     firstState.currentArtifactPath = "build/planetary.step";
+    firstState.currentArtifactHash = "artifact-hash";
     await first.save(firstState);
+    await project.updateHead({
+      sourcePath: firstState.currentSourcePath,
+      sourceHash: firstState.currentSourceHash,
+      artifactPath: firstState.currentArtifactPath,
+      artifactHash: firstState.currentArtifactHash,
+      evidence: firstState.evidence,
+    });
+    await project.setCurrentRun(null);
 
-    assert.equal(await project.currentTaskId(), first.taskId);
-    assert.equal(existsSync(join(cwd, ".pi-cad", "current.json")), true);
-    assert.equal(existsSync(join(cwd, ".pi-cad", "state.json")), false);
+    const projectState = await project.loadProject();
+    assert.equal(projectState?.currentRunId, null);
+    assert.equal(projectState?.head.artifactPath, "build/planetary.step");
+    assert.equal(projectState?.head.artifactHash, "artifact-hash");
+    assert.equal(existsSync(join(cwd, ".pi-cad", "project.json")), true);
+    assert.equal(existsSync(join(cwd, ".pi-cad", "current.json")), false);
 
-    const second = await project.createTask({ parentTaskId: first.taskId });
-    const secondState = createIntakeState({ taskId: second.taskId, parentTaskId: first.taskId });
-    await second.save(secondState);
-    assert.equal(await project.currentTaskId(), second.taskId);
-
-    const tasks = await project.listTasks();
-    assert.equal(tasks.length, 2);
-    assert.equal(tasks.find((t) => t.taskId === second.taskId)?.parentTaskId, first.taskId);
-    assert.equal(tasks.find((t) => t.taskId === first.taskId)?.phase, "done");
-
-    const current = JSON.parse(readFileSync(join(cwd, ".pi-cad", "current.json"), "utf-8"));
-    assert.deepEqual(current, { activeTaskId: second.taskId });
+    const second = await project.createRun();
+    assert.equal(await project.currentRunId(), second.runId);
+    const runs = await project.listRuns();
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].runId, first.runId);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("legacy V0 single-state layout migrates into a task directory", async () => {
+test("legacy V0 single-state layout migrates into project + runs", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-migrate-"));
   try {
     mkdirSync(join(cwd, ".pi-cad"), { recursive: true });
@@ -57,6 +63,10 @@ test("legacy V0 single-state layout migrates into a task directory", async () =>
       staleEvidence: [],
       activeWorkstreams: [],
       updatedAt: "2026-08-17T00:00:00Z",
+      currentSourcePath: "models/plate.py",
+      currentSourceHash: "source-hash",
+      currentArtifactPath: "build/plate.step",
+      currentArtifactHash: "artifact-hash",
     };
     writeFileSync(join(cwd, ".pi-cad", "state.json"), JSON.stringify(legacy));
     writeFileSync(join(cwd, ".pi-cad", "events.jsonl"), '{"at":"2026-08-17T00:00:00Z","type":"Finished"}\n');
@@ -64,15 +74,14 @@ test("legacy V0 single-state layout migrates into a task directory", async () =>
 
     const project = new CadProjectStore(cwd);
     assert.equal(await project.migrateLegacyProject(), true);
-    const taskId = await project.currentTaskId();
-    assert.ok(taskId);
-    assert.ok(taskId.startsWith("cad-legacy-"));
-    const task = await project.task(taskId!);
-    const migrated = await task.load();
-    assert.equal(migrated?.schemaVersion, 3);
-    assert.equal(migrated?.phase, "done");
+    const projectState = await project.loadProject();
+    assert.ok(projectState);
+    assert.equal(projectState?.currentRunId, null);
+    assert.equal(projectState?.head.artifactPath, "build/plate.step");
     assert.equal(existsSync(join(cwd, ".pi-cad", "state.json")), false);
-    assert.ok(task.eventsPath.endsWith("events.jsonl"));
+    const runs = await project.listRuns();
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].phase, "done");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

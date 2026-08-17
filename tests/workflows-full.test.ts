@@ -11,7 +11,7 @@ import {
   waitForUser,
   resumeFromUser,
 } from "../src/core/state-machine.ts";
-import type { CadProjectState, CadRequirements } from "../src/shared/protocol.ts";
+import type { CadRunState, CadRequirements } from "../src/shared/protocol.ts";
 
 const req: CadRequirements = {
   goal: "full workflow test",
@@ -30,7 +30,7 @@ function routeTo(wf: Parameters<typeof route>[1]) {
   return commitRequirements(r.state, req);
 }
 
-function candidate(state: CadProjectState) {
+function candidate(state: CadRunState) {
   const r = acceptCandidate(
     state,
     {
@@ -47,7 +47,7 @@ function candidate(state: CadProjectState) {
   return r.state;
 }
 
-function withEvidence(state: CadProjectState, kinds: Array<"visual" | "geometry" | "compare">, hash = "artifact-hash") {
+function withEvidence(state: CadRunState, kinds: Array<"visual" | "geometry" | "compare">, hash = "artifact-hash") {
   return {
     ...state,
     evidence: kinds.map((kind) => ({
@@ -64,7 +64,7 @@ function withEvidence(state: CadProjectState, kinds: Array<"visual" | "geometry"
 test("analyze path: baseline -> investigate -> explain -> ready -> done", () => {
   const c = routeTo("analyze");
   assert.equal(c.ok, true); if (!c.ok) return;
-  let state: CadProjectState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
+  let state: CadRunState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
   let t = transition(state, "baseline_understood", "understood");
   assert.equal(t.ok, true); if (!t.ok) return;
@@ -85,7 +85,7 @@ test("analyze path: baseline -> investigate -> explain -> ready -> done", () => 
 test("modify path: plan -> modify -> review -> accepted requires compare evidence", () => {
   const c = routeTo("modify");
   assert.equal(c.ok, true); if (!c.ok) return;
-  let state: CadProjectState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
+  let state: CadRunState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
   let t = transition(state, "baseline_understood", "understood");
   assert.equal(t.ok, true); if (!t.ok) return;
@@ -128,7 +128,7 @@ test("greenfield path: concept -> intent -> build -> review -> accepted", () => 
 test("convert path: source_baseline -> transform_plan -> convert -> compare -> accepted", () => {
   const c = routeTo("convert");
   assert.equal(c.ok, true); if (!c.ok) return;
-  let state: CadProjectState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
+  let state: CadRunState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
   assert.equal(state.phase, "source_baseline");
   let t = transition(state, "baseline_understood", "understood");
@@ -175,7 +175,7 @@ test("release path requires all workstream statuses before finish", () => {
   t = transition(t.state, "accepted", "release accepted");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "ready");
-  const readyWithArtifact: CadProjectState = {
+  const readyWithArtifact: CadRunState = {
     ...t.state,
     currentSourcePath: "models/release.py",
     currentSourceHash: "source-hash",

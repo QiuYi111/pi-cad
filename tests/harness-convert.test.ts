@@ -39,7 +39,7 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-convert-"));
   const { CadProjectStore } = await import("../src/shared/store.ts");
   const project = new CadProjectStore(cwd);
-  await project.createTask({ taskId: "convert-task" });
+  await project.createRun({ runId: "convert-run" });
   const ctx = { cwd };
   try {
   // Generate the baseline STEP in-process with the Python fixture and cadctl,
@@ -80,7 +80,7 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
   const r5 = await candidate.execute("5", { sources: ["plate.step"], label: "stl-sidecar", format: "stl", output: "plate.stl" }, undefined, undefined, ctx);
   assert.match(r5.content[0].text, /COMPARE/);
   assert.ok(existsSync(join(cwd, "plate.stl")));
-  const state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "tasks", "convert-task", "state.json"), "utf-8"));
+  const state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", "convert-run", "state.json"), "utf-8"));
   assert.equal(state.phase, "compare");
   assert.ok(state.evidence.some((e: { kind: string }) => e.kind === "convert"));
   const r6 = await transition.execute("6", { event: "accepted", note: "STL sidecar exported; hierarchy intentionally baked" }, undefined, undefined, ctx);

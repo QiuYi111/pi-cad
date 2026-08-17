@@ -28,4 +28,5 @@ export const greenfieldWorkflow: WorkflowSpec = {
   finishEvidence: () => ["visual", "geometry"],
   requiresBaselineInput: false,
   baselineEvidenceRequired: false,
+  updatesHeadOnAccept: true,
 };

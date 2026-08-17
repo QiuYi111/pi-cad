@@ -1,12 +1,12 @@
 import type {
   CadPhase,
-  CadProjectState,
+  CadRunState,
   CadWorkflow,
   EvidenceRef,
   MutationPolicy,
 } from "../shared/protocol.ts";
 
-export type EvidenceKindsResolver = (state: CadProjectState) => EvidenceRef["kind"][];
+export type EvidenceKindsResolver = (state: CadRunState) => EvidenceRef["kind"][];
 
 export interface WorkflowSpec {
   name: CadWorkflow;
@@ -38,5 +38,7 @@ export interface WorkflowSpec {
    * Optional workflow-specific completion guard. The generic engine calls it
    * on accepted/finish and only understands a non-null error string.
    */
-  completionGuard?: (state: CadProjectState) => string | null;
+  completionGuard?: (state: CadRunState) => string | null;
+  /** True when accepted candidate should become the new Project Head. */
+  updatesHeadOnAccept?: boolean;
 }

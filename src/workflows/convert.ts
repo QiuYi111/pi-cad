@@ -22,4 +22,5 @@ export const convertWorkflow: WorkflowSpec = {
       : ["convert"],
   requiresBaselineInput: true,
   baselineEvidenceRequired: true,
+  updatesHeadOnAccept: true,
 };
