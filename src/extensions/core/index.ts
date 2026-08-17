@@ -189,6 +189,20 @@ async function verifyCurrentArtifacts(
   return null;
 }
 
+function verifyCurrentEvidenceFiles(cwd: string, state: CadProjectState): string | null {
+  if (!state.currentArtifactHash) return "current artifact hash is not bound";
+  for (const kind of ["visual", "geometry"] as const) {
+    const refs = state.evidence.filter(
+      (ref) => ref.kind === kind && ref.artifactHash === state.currentArtifactHash,
+    );
+    if (refs.length === 0) return `current ${kind} evidence is missing`;
+    if (refs.some((ref) => ref.paths.some((path) => !existsSync(resolve(cwd, path))))) {
+      return `current ${kind} evidence files are missing`;
+    }
+  }
+  return null;
+}
+
 async function guardState(store: ProjectStateStore): Promise<CadProjectState | null> {
   const state = await store.load();
   if (!state || state.status === "done" || state.status === "aborted") return null;
@@ -457,6 +471,8 @@ export default function cadCore(pi: ExtensionAPI) {
       if (params.event === "accepted" && state.phase === "review") {
         const verification = await verifyCurrentArtifacts(ctx.cwd, state);
         if (verification) return errTool(`cannot accept: ${verification}`);
+        const evidenceVerification = verifyCurrentEvidenceFiles(ctx.cwd, state);
+        if (evidenceVerification) return errTool(`cannot accept: ${evidenceVerification}`);
         if (!state.currentArtifactHash || !state.currentSourceHash) {
           return errTool("cannot accept: current source/artifact hashes are not bound");
         }
@@ -494,6 +510,8 @@ export default function cadCore(pi: ExtensionAPI) {
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const verification = await verifyCurrentArtifacts(ctx.cwd, state);
       if (verification) return errTool(`cad_finish blocked: ${verification}`);
+      const evidenceVerification = verifyCurrentEvidenceFiles(ctx.cwd, state);
+      if (evidenceVerification) return errTool(`cad_finish blocked: ${evidenceVerification}`);
       const result = finishQuick(state);
       if (!result.ok) return errTool(result.reason);
       await persist(pi, store, result.state, result.events);

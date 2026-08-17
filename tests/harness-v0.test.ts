@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync, existsSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -117,8 +117,21 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
     );
     assert.match(illegalRoute.content[0].text!, /only valid from intake/);
 
-    const accepted = await transition.execute(
+    const visualPath = reviewState.evidence.find((ref: { kind: string }) => ref.kind === "visual").paths[0];
+    const hiddenPath = `${visualPath}.hidden`;
+    renameSync(visualPath, hiddenPath);
+    const blockedByMissingEvidence = await transition.execute(
       "t6",
+      { event: "accepted", note: "trying before evidence is restored" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(blockedByMissingEvidence.content[0].text!, /files are missing/);
+    renameSync(hiddenPath, visualPath);
+
+    const accepted = await transition.execute(
+      "t7",
       { event: "accepted", note: "reviewed all seven views and measured hole facts" },
       undefined,
       undefined,
@@ -126,7 +139,7 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
     );
     assert.match(accepted.content[0].text!, /READY/);
 
-    const finished = await finish.execute("t7", {}, undefined, undefined, ctx);
+    const finished = await finish.execute("t8", {}, undefined, undefined, ctx);
     assert.match(finished.content[0].text!, /finished/);
 
     const doneState = JSON.parse(readFileSync(statePath, "utf-8"));
