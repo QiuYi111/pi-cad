@@ -7,9 +7,30 @@ from typing import Any
 from .base import SimulationBackendError
 from .torch_fem_backend import TorchFemBackend
 
+# Key whitelists: the harness tool schema already rejects unknown keys
+# (additionalProperties: false), but a spec handed straight to
+# `cadctl simulate --spec` must fail closed the same way. A typo like
+# "distribut" or "dof" must never silently fall back to a default.
+_SPEC_KEYS = {"units", "backend", "device", "artifact", "physics", "mesh", "materials", "constraints", "loads"}
+_PHYSICS_KEYS = {"type"}
+_MATERIAL_KEYS = {"name", "E", "nu", "density", "youngs_modulus", "poisson_ratio"}
+_MESH_KEYS = {"element", "size", "box"}
+_LOAD_KEYS = {"type", "region", "vector", "distribute"}
+_CONSTRAINT_KEYS = {"type", "region", "dofs"}
+
+
+def _reject_unknown_keys(obj: Any, allowed: set[str], where: str, errors: list[str]) -> None:
+    if isinstance(obj, dict):
+        unknown = sorted(set(obj) - allowed)
+        if unknown:
+            errors.append(f"{where} has unknown keys {unknown}; allowed keys are {sorted(allowed)}")
+
 
 def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     errors: list[str] = []
+    if not isinstance(spec, dict):
+        return False, ["spec must be an object"]
+    _reject_unknown_keys(spec, _SPEC_KEYS, "spec", errors)
     if spec.get("units", "mm_N_MPa") != "mm_N_MPa":
         errors.append("units must be mm_N_MPa in V1 (length=mm, force=N, stress/modulus=MPa)")
     if spec.get("backend", "torch-fem") != "torch-fem":
@@ -21,6 +42,8 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     mesh = spec.get("mesh")
     if not artifact and not (mesh or {}).get("box"):
         errors.append("artifact or mesh.box is required")
+    if artifact and (mesh or {}).get("box"):
+        errors.append("artifact and mesh.box are mutually exclusive in V1; the ignored one would silently change the mesh source")
     if artifact:
         artifact_path = Path(artifact)
         if not artifact_path.is_file():
@@ -28,7 +51,9 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
         elif artifact_path.suffix.lower() not in (".step", ".stp"):
             errors.append("artifact must be .step or .stp in V1")
 
-    if (spec.get("physics") or {}).get("type") != "linear_elasticity":
+    physics = spec.get("physics")
+    _reject_unknown_keys(physics, _PHYSICS_KEYS, "physics", errors)
+    if (physics or {}).get("type") != "linear_elasticity":
         errors.append('physics.type must be "linear_elasticity"')
 
     materials = spec.get("materials")
@@ -36,6 +61,7 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
         errors.append("materials must contain exactly one homogeneous material in V1")
     else:
         material = materials[0]
+        _reject_unknown_keys(material, _MATERIAL_KEYS, "materials[0]", errors)
         try:
             E = float(material.get("E", material.get("youngs_modulus", 0)))
             nu = float(material.get("nu", material.get("poisson_ratio", 0)))
@@ -47,6 +73,7 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     if not mesh:
         errors.append("mesh is required")
     else:
+        _reject_unknown_keys(mesh, _MESH_KEYS, "mesh", errors)
         try:
             size = float(mesh.get("size", 0))
             if size <= 0:
@@ -86,6 +113,7 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     else:
         for index, load in enumerate(loads or []):
             where = f"loads[{index}]"
+            _reject_unknown_keys(load, _LOAD_KEYS, where, errors)
             if load.get("type") != "nodal_force":
                 errors.append(f"{where}.type must be nodal_force in V1")
             validate_region(load.get("region"), where)
@@ -101,6 +129,7 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     else:
         for index, constraint in enumerate(constraints or []):
             where = f"constraints[{index}]"
+            _reject_unknown_keys(constraint, _CONSTRAINT_KEYS, where, errors)
             if constraint.get("type") != "fixed":
                 errors.append(f"{where}.type must be fixed in V1")
             validate_region(constraint.get("region"), where)

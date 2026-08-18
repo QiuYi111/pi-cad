@@ -28,40 +28,55 @@ export default function cadDrawingExtension(pi: ExtensionAPI) {
       "A projection without complete manufacturing definition is not a release drawing.",
       "Treat generated files as execution evidence, not automatic drawing completeness.",
     ],
-    parameters: Type.Object({
-      stage: Type.Enum({ validate: "validate", generate: "generate" }),
-      artifact: Type.String({ description: "STEP artifact the drawing documents" }),
-      units: Type.Optional(Type.Literal("mm")),
-      sheet: Type.Optional(
-        Type.Object({
-          width: Type.Number({ exclusiveMinimum: 0 }),
-          height: Type.Number({ exclusiveMinimum: 0 }),
-        }),
-      ),
-      views: Type.Array(
-        Type.Object({
-          name: ViewName,
-          scale: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
-        }),
-        { minItems: 1 },
-      ),
-      dimensions: Type.Optional(
-        Type.Array(
-          Type.Object({
-            p1: Type.Tuple([Type.Number(), Type.Number()]),
-            p2: Type.Tuple([Type.Number(), Type.Number()]),
-            text: Type.String({ minLength: 1 }),
-            featureRefs: Type.Optional(Type.Array(Type.String())),
-            tolerance: Type.Optional(
-              Type.Object({ lower: Type.Number(), upper: Type.Number() }),
-            ),
-            inspectionMethod: Type.Optional(Type.String()),
-            ctq: Type.Optional(Type.Boolean()),
-          }),
+    parameters: Type.Object(
+      {
+        stage: Type.Enum({ validate: "validate", generate: "generate" }),
+        artifact: Type.String({ description: "STEP artifact the drawing documents" }),
+        units: Type.Optional(Type.Literal("mm")),
+        sheet: Type.Optional(
+          Type.Object(
+            {
+              width: Type.Number({ exclusiveMinimum: 0 }),
+              height: Type.Number({ exclusiveMinimum: 0 }),
+            },
+            { additionalProperties: false },
+          ),
         ),
-      ),
-      notes: Type.Optional(Type.Array(Type.String())),
-    }),
+        views: Type.Array(
+          Type.Object(
+            {
+              name: ViewName,
+              scale: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 1 },
+        ),
+        dimensions: Type.Optional(
+          Type.Array(
+            Type.Object(
+              {
+                p1: Type.Tuple([Type.Number(), Type.Number()]),
+                p2: Type.Tuple([Type.Number(), Type.Number()]),
+                text: Type.String({ minLength: 1 }),
+                featureRefs: Type.Optional(Type.Array(Type.String())),
+                tolerance: Type.Optional(
+                  Type.Object(
+                    { lower: Type.Number(), upper: Type.Number() },
+                    { additionalProperties: false },
+                  ),
+                ),
+                inspectionMethod: Type.Optional(Type.String()),
+                ctq: Type.Optional(Type.Boolean()),
+              },
+              { additionalProperties: false },
+            ),
+          ),
+        ),
+        notes: Type.Optional(Type.Array(Type.String())),
+      },
+      { additionalProperties: false },
+    ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`drawing artifact does not exist: ${params.artifact}`);

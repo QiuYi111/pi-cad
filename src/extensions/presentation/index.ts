@@ -18,39 +18,57 @@ export default function cadPresentationExtension(pi: ExtensionAPI) {
       "A technically correct default render is not release-quality presentation.",
       "script-generated and unavailable are honest evidence states.",
     ],
-    parameters: Type.Object({
-      stage: Type.Enum({ validate: "validate", generate: "generate", run: "run" }),
-      artifact: Type.String({ description: "Artifact (e.g. GLB export) the scene presents" }),
-      directions: Type.Array(
-        Type.Object({
-          name: Type.String({ minLength: 1 }),
-          reference: Type.String({ description: "Path to a reference image backing this direction" }),
-        }),
-        { minItems: 2 },
-      ),
-      materials: Type.Array(
-        Type.Object({
-          pattern: Type.String(),
-          family: Type.String(),
-        }),
-        { minItems: 1 },
-      ),
-      lighting: Type.Object({
-        key: Type.String(),
-        fill: Type.String(),
-        rim: Type.String(),
-      }),
-      camera: Type.Object({
-        lens: Type.String(),
-        composition: Type.String(),
-      }),
-      outputs: Type.Optional(
-        Type.Object({
-          hero: Type.Optional(Type.String()),
-          turntable: Type.Optional(Type.String()),
-        }),
-      ),
-    }),
+    parameters: Type.Object(
+      {
+        stage: Type.Enum({ validate: "validate", generate: "generate", run: "run" }),
+        artifact: Type.String({ description: "Artifact (e.g. GLB export) the scene presents" }),
+        directions: Type.Array(
+          Type.Object(
+            {
+              name: Type.String({ minLength: 1 }),
+              reference: Type.String({ description: "Path to a reference image backing this direction" }),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 2 },
+        ),
+        materials: Type.Array(
+          Type.Object(
+            {
+              pattern: Type.String(),
+              family: Type.String(),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 1 },
+        ),
+        lighting: Type.Object(
+          {
+            key: Type.String(),
+            fill: Type.String(),
+            rim: Type.String(),
+          },
+          { additionalProperties: false },
+        ),
+        camera: Type.Object(
+          {
+            lens: Type.String(),
+            composition: Type.String(),
+          },
+          { additionalProperties: false },
+        ),
+        outputs: Type.Optional(
+          Type.Object(
+            {
+              hero: Type.Optional(Type.String()),
+              turntable: Type.Optional(Type.String()),
+            },
+            { additionalProperties: false },
+          ),
+        ),
+      },
+      { additionalProperties: false },
+    ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`presentation artifact does not exist: ${params.artifact}`);

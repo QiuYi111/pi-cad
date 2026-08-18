@@ -28,21 +28,32 @@ function sitePackages(): string | null {
   return existsSync(path) ? path : null;
 }
 
-function pythonBinary(): string {
-  const override = process.env.PI_CAD_PYTHON;
-  if (override) return override;
+function venvPythonPath(): string {
   const venvRoot = process.env.PI_CAD_VENV ?? join(packageRoot(), ".venv");
-  const venv = process.platform === "win32"
+  return process.platform === "win32"
     ? join(venvRoot, "Scripts", "python.exe")
     : join(venvRoot, "bin", "python");
+}
+
+/** Resolve the Python binary the harness uses for cadctl (PI_CAD_PYTHON > PI_CAD_VENV > .venv > PATH). */
+export function pythonBinary(): string {
+  const override = process.env.PI_CAD_PYTHON;
+  if (override) return override;
+  const venv = venvPythonPath();
   if (existsSync(venv)) return venv;
   return process.platform === "win32" ? "python" : "python3";
 }
 
-function cadctlEnv(): NodeJS.ProcessEnv {
-  const entries = [join(packageRoot(), "python"), sitePackages()].filter(
-    (entry): entry is string => Boolean(entry),
-  );
+/** Env (PYTHONPATH) for spawning cadctl with pythonBinary(). */
+export function cadctlEnv(): NodeJS.ProcessEnv {
+  const entries = [join(packageRoot(), "python")];
+  // The package venv is self-contained. Never let the target-mode fallback
+  // layout shadow it: .python/site-packages may hold extensions built for a
+  // different Python version, which would break imports inside the venv.
+  if (!existsSync(venvPythonPath())) {
+    const site = sitePackages();
+    if (site) entries.push(site);
+  }
   const previous = process.env.PYTHONPATH;
   const pythonPath = previous ? [...entries, previous].join(delimiter) : entries.join(delimiter);
   return { ...process.env, PYTHONPATH: pythonPath };

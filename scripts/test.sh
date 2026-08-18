@@ -21,9 +21,11 @@ if [ -z "$PYTHON_BIN" ]; then
   exit 1
 fi
 
-if [ -d .python/site-packages ]; then
-  export PYTHONPATH="$(pwd)/.python/site-packages:$(pwd)/python${PYTHONPATH:+:$PYTHONPATH}"
-elif [ -x .venv/bin/python ]; then
+# The venv is self-contained: never let the .python/site-packages fallback
+# layout shadow it (those extensions may be built for another Python).
+if [ -x .venv/bin/python ]; then
   export PYTHONPATH="$(pwd)/python${PYTHONPATH:+:$PYTHONPATH}"
+elif [ -d .python/site-packages ]; then
+  export PYTHONPATH="$(pwd)/.python/site-packages:$(pwd)/python${PYTHONPATH:+:$PYTHONPATH}"
 fi
 "${PYTHON_BIN}" -m unittest discover -s tests -p 'test_*.py'

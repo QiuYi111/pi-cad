@@ -43,14 +43,15 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
   const ctx = { cwd };
   try {
   // Generate the baseline STEP in-process with the Python fixture and cadctl,
-  // then feed it to the workflow as the user-supplied STEP.
+  // then feed it to the workflow as the user-supplied STEP. Spawn through the
+  // same Python resolution the harness itself uses (venv when present) so the
+  // test passes on fresh installs and CI, not only on a dev checkout.
   const { execFileSync } = await import("node:child_process");
-  execFileSync("python3", ["-m", "cadctl", "build", "--source", "/home/jingyi/pi-cad/tests/fixtures/plate.py", "--output", join(cwd, "plate.step")], {
+  const { cadctlEnv, pythonBinary } = await import("../src/shared/capability.ts");
+  const repoRoot = process.cwd();
+  execFileSync(pythonBinary(), ["-m", "cadctl", "build", "--source", join(repoRoot, "tests", "fixtures", "plate.py"), "--output", join(cwd, "plate.step")], {
     cwd,
-    env: {
-      ...process.env,
-      PYTHONPATH: ["/home/jingyi/pi-cad/python", "/home/jingyi/pi-cad/.python/site-packages", process.env.PYTHONPATH ?? ""].filter(Boolean).join(":"),
-    },
+    env: cadctlEnv(),
   });
 
   const route = pi.tools.get("cad_route");

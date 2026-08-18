@@ -14,9 +14,17 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "plate.py"
 def run_cadctl(*args: str, cwd: Path) -> dict:
     env = os.environ.copy()
     root = Path(__file__).resolve().parents[1]
-    env["PYTHONPATH"] = os.pathsep.join(
-        str(p) for p in (root / "python", root / ".python" / "site-packages") if p.exists()
-    ) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    entries = [str(root / "python")]
+    # The package venv is self-contained; only fall back to the target-mode
+    # layout when it does not exist (its extensions may target another Python).
+    if not (root / ".venv" / "bin" / "python").exists():
+        site = root / ".python" / "site-packages"
+        if site.exists():
+            entries.append(str(site))
+    env["PYTHONPATH"] = (
+        os.pathsep.join(entries)
+        + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    )
     proc = subprocess.run(
         [sys.executable, "-m", "cadctl", *args],
         cwd=cwd,

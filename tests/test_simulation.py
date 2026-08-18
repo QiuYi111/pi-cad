@@ -12,9 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def cadctl_env() -> dict:
     env = os.environ.copy()
-    site = ROOT / ".python" / "site-packages"
     entries = [str(ROOT / "python")]
-    if site.exists():
+    # The package venv is self-contained; only fall back to the target-mode
+    # layout when it does not exist (its extensions may target another Python).
+    venv = ROOT / ".venv" / "bin" / "python"
+    site = ROOT / ".python" / "site-packages"
+    if site.exists() and not venv.exists():
         entries.append(str(site))
     if env.get("PYTHONPATH"):
         entries.append(env["PYTHONPATH"])
@@ -307,6 +310,70 @@ class SimulationSemanticsTests(unittest.TestCase):
         spec = copy.deepcopy(base)
         spec["artifact"] = "does-not-exist.step"
         expect_error(spec, "artifact does not exist")
+
+    def test_validate_spec_rejects_unknown_keys_and_artifact_box_xor(self) -> None:
+        from cadctl.simulation.api import validate_spec
+
+        def expect_error(spec: dict, fragment: str) -> None:
+            ok, errors = validate_spec(spec)
+            self.assertFalse(ok, errors)
+            self.assertTrue(any(fragment in e for e in errors), (fragment, errors))
+
+        base = {
+            "physics": {"type": "linear_elasticity"},
+            "mesh": {"element": "tet", "box": [100, 10, 10], "size": 5.0},
+            "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
+            "constraints": [{"type": "fixed", "region": FACE_MIN}],
+            "loads": [{"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -100.0]}],
+        }
+        ok, _ = validate_spec(base)
+        self.assertTrue(ok)
+
+        import copy
+
+        # A typo'd key must never fall through to a silent default
+        # ("distribut" would otherwise default distribute to total).
+        spec = copy.deepcopy(base)
+        spec["loads"][0]["distribut"] = "per_node"
+        expect_error(spec, "loads[0] has unknown keys ['distribut']")
+
+        # A typo'd "dof" would otherwise default dofs to [0, 1, 2] and
+        # silently over-constrain the model.
+        spec = copy.deepcopy(base)
+        spec["constraints"][0]["dof"] = [2]
+        expect_error(spec, "constraints[0] has unknown keys ['dof']")
+
+        spec = copy.deepcopy(base)
+        spec["loads"][0]["region"] = {"axis": "x", "side": "max", "tolerance": 2.0}
+        expect_error(spec, "either indices or exactly axis+side")
+
+        spec = copy.deepcopy(base)
+        spec["materials"][0]["youngs"] = 210000.0
+        expect_error(spec, "materials[0] has unknown keys ['youngs']")
+
+        spec = copy.deepcopy(base)
+        spec["mesh"]["mesgSize"] = 5.0
+        expect_error(spec, "mesh has unknown keys ['mesgSize']")
+
+        spec = copy.deepcopy(base)
+        spec["physics"]["regime"] = "static"
+        expect_error(spec, "physics has unknown keys ['regime']")
+
+        spec = copy.deepcopy(base)
+        spec["timestep"] = 0.1
+        expect_error(spec, "spec has unknown keys ['timestep']")
+
+        # Alias keys the backend actually reads stay accepted.
+        spec = copy.deepcopy(base)
+        spec["materials"][0] = {"name": "steel", "youngs_modulus": 210000.0, "poisson_ratio": 0.3}
+        ok, errors = validate_spec(spec)
+        self.assertTrue(ok, errors)
+
+        # artifact + mesh.box together are mutually exclusive: the backend
+        # would mesh from the artifact and silently ignore the box.
+        spec = copy.deepcopy(base)
+        spec["artifact"] = "somewhere/bracket.step"
+        expect_error(spec, "mutually exclusive")
 
     def test_overlapping_loads_add(self) -> None:
         single = beam_spec(

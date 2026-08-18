@@ -11,20 +11,29 @@ import {
 import { writeRunSpec } from "../../shared/run-spec.ts";
 import { sha256File } from "../../shared/store.ts";
 
-const RegionSchema = Type.Union([
-  Type.Object({
-    axis: Type.Enum({ x: "x", y: "y", z: "z" }),
-    side: Type.Enum({ min: "min", max: "max" }),
-  }),
-  Type.Object({
-    indices: Type.Array(Type.Integer({ minimum: 0 }), { minItems: 1 }),
-  }),
-], {
-  description:
-    "axis+side selects the axis-extreme node slab (all nodes within 0.75x mesh size of the "
-    + "bounding-box extreme along that axis) — a simple V1 boundary selector, NOT arbitrary "
-    + "CAD face selection; indices selects explicit mesh node indices",
-});
+const RegionSchema = Type.Union(
+  [
+    Type.Object(
+      {
+        axis: Type.Enum({ x: "x", y: "y", z: "z" }),
+        side: Type.Enum({ min: "min", max: "max" }),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        indices: Type.Array(Type.Integer({ minimum: 0 }), { minItems: 1 }),
+      },
+      { additionalProperties: false },
+    ),
+  ],
+  {
+    description:
+      "axis+side selects the axis-extreme node slab (all nodes within 0.75x mesh size of the "
+      + "bounding-box extreme along that axis) — a simple V1 boundary selector, NOT arbitrary "
+      + "CAD face selection; indices selects explicit mesh node indices",
+  },
+);
 
 function shortSimulationText(envelope: any): string {
   const p = envelope.payload ?? {};
@@ -55,47 +64,68 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       "Treat simulation evidence as version-bound; current candidate changes stale previous simulation.",
       "Never claim safety from a stress plot; interpret the raw fields yourself.",
     ],
-    parameters: Type.Object({
-      artifact: Type.Optional(Type.String({ description: "STEP/STP artifact to simulate; required unless mesh.box is supplied" })),
-      units: Type.Optional(Type.Literal("mm_N_MPa")),
-      backend: Type.Optional(Type.Literal("torch-fem")),
-      device: Type.Optional(Type.Enum({ auto: "auto", cpu: "cpu", cuda: "cuda", mps: "mps" })),
-      physics: Type.Object({ type: Type.Literal("linear_elasticity") }),
-      materials: Type.Array(
-        Type.Object({
-          name: Type.Optional(Type.String()),
-          E: Type.Number(),
-          nu: Type.Number(),
-          density: Type.Optional(Type.Number()),
-        }),
-        { minItems: 1, maxItems: 1 },
-      ),
-      mesh: Type.Object({
-        element: Type.Optional(Type.Literal("tet")),
-        size: Type.Number({ exclusiveMinimum: 0 }),
-        box: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number()])),
-      }),
-      constraints: Type.Array(
-        Type.Object({
-          type: Type.Literal("fixed"),
-          region: RegionSchema,
-          dofs: Type.Optional(Type.Array(Type.Integer({ minimum: 0, maximum: 2 }), { minItems: 1 })),
-        }),
-        { minItems: 1 },
-      ),
-      loads: Type.Array(
-        Type.Object({
-          type: Type.Literal("nodal_force"),
-          region: RegionSchema,
-          vector: Type.Tuple([Type.Number(), Type.Number(), Type.Number()]),
-          distribute: Type.Optional(Type.Enum({ total: "total", per_node: "per_node" })),
-        }),
-        { minItems: 1 },
-      ),
-    }),
+    parameters: Type.Object(
+      {
+        artifact: Type.Optional(Type.String({ description: "STEP/STP artifact to simulate; required unless mesh.box is supplied (exactly one of the two)" })),
+        units: Type.Optional(Type.Literal("mm_N_MPa")),
+        backend: Type.Optional(Type.Literal("torch-fem")),
+        device: Type.Optional(Type.Enum({ auto: "auto", cpu: "cpu", cuda: "cuda", mps: "mps" })),
+        physics: Type.Object({ type: Type.Literal("linear_elasticity") }, { additionalProperties: false }),
+        materials: Type.Array(
+          Type.Object(
+            {
+              name: Type.Optional(Type.String()),
+              E: Type.Number(),
+              nu: Type.Number(),
+              density: Type.Optional(Type.Number()),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 1, maxItems: 1 },
+        ),
+        mesh: Type.Object(
+          {
+            element: Type.Optional(Type.Literal("tet")),
+            size: Type.Number({ exclusiveMinimum: 0 }),
+            box: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number()])),
+          },
+          { additionalProperties: false },
+        ),
+        constraints: Type.Array(
+          Type.Object(
+            {
+              type: Type.Literal("fixed"),
+              region: RegionSchema,
+              dofs: Type.Optional(Type.Array(Type.Integer({ minimum: 0, maximum: 2 }), { minItems: 1 })),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 1 },
+        ),
+        loads: Type.Array(
+          Type.Object(
+            {
+              type: Type.Literal("nodal_force"),
+              region: RegionSchema,
+              vector: Type.Tuple([Type.Number(), Type.Number(), Type.Number()]),
+              distribute: Type.Optional(Type.Enum({ total: "total", per_node: "per_node" })),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 1 },
+        ),
+      },
+      // Unknown keys (e.g. a "distribut" typo falling back to the
+      // distribute default) must fail closed at the tool boundary, matching
+      // the backend's fail-closed philosophy.
+      { additionalProperties: false },
+    ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!params.artifact && !params.mesh.box) {
         throw new Error("cad_simulate requires artifact or mesh.box");
+      }
+      if (params.artifact && params.mesh.box) {
+        throw new Error("cad_simulate accepts artifact or mesh.box, not both; the ignored one would silently change the mesh source");
       }
       if (params.artifact && !existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`simulation artifact does not exist: ${params.artifact}`);
@@ -154,27 +184,42 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       "Optimization output is not CAD: interpret it, then reconstruct/modify build123d CAD and cad_commit_candidate.",
       "Accepted CAD after optimization must be simulated again before acceptance.",
     ],
-    parameters: Type.Object({
-      mode: Type.Optional(Type.Literal("topology_2d_rect_v0")),
-      designDomain: Type.Object({
-        x: Type.Optional(Type.Tuple([Type.Number(), Type.Number()])),
-        y: Type.Optional(Type.Tuple([Type.Number(), Type.Number()])),
-        nx: Type.Optional(Type.Integer({ minimum: 2 })),
-        ny: Type.Optional(Type.Integer({ minimum: 2 })),
-      }),
-      material: Type.Object({ E: Type.Number(), nu: Type.Number() }),
-      objective: Type.Object({ type: Type.Literal("compliance"), sense: Type.Literal("minimize") }),
-      constraints: Type.Array(
-        Type.Object({ type: Type.Literal("volume_fraction"), max: Type.Number({ exclusiveMinimum: 0, maximum: 1 }) }),
-        { minItems: 1, maxItems: 1 },
-      ),
-      optimizer: Type.Object({
-        type: Type.Literal("mma"),
-        maxIterations: Type.Integer({ minimum: 1 }),
-        penalty: Type.Optional(Type.Number({ exclusiveMinimum: 1 })),
-        Emin: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
-      }),
-    }),
+    parameters: Type.Object(
+      {
+        mode: Type.Optional(Type.Literal("topology_2d_rect_v0")),
+        designDomain: Type.Object(
+          {
+            x: Type.Optional(Type.Tuple([Type.Number(), Type.Number()])),
+            y: Type.Optional(Type.Tuple([Type.Number(), Type.Number()])),
+            nx: Type.Optional(Type.Integer({ minimum: 2 })),
+            ny: Type.Optional(Type.Integer({ minimum: 2 })),
+          },
+          { additionalProperties: false },
+        ),
+        material: Type.Object({ E: Type.Number(), nu: Type.Number() }, { additionalProperties: false }),
+        objective: Type.Object(
+          { type: Type.Literal("compliance"), sense: Type.Literal("minimize") },
+          { additionalProperties: false },
+        ),
+        constraints: Type.Array(
+          Type.Object(
+            { type: Type.Literal("volume_fraction"), max: Type.Number({ exclusiveMinimum: 0, maximum: 1 }) },
+            { additionalProperties: false },
+          ),
+          { minItems: 1, maxItems: 1 },
+        ),
+        optimizer: Type.Object(
+          {
+            type: Type.Literal("mma"),
+            maxIterations: Type.Integer({ minimum: 1 }),
+            penalty: Type.Optional(Type.Number({ exclusiveMinimum: 1 })),
+            Emin: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+          },
+          { additionalProperties: false },
+        ),
+      },
+      { additionalProperties: false },
+    ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const spec = { ...params, mode: params.mode ?? "topology_2d_rect_v0" };
       const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "optimization", spec);

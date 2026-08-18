@@ -156,6 +156,11 @@ class TorchFemBackend(SimulationBackend):
         if artifact and artifact_hash is None:
             raise SimulationBackendError(f"artifact does not exist: {artifact}")
         if artifact and Path(artifact).suffix.lower() in (".step", ".stp"):
+            if mesh_spec.get("box"):
+                raise SimulationBackendError(
+                    "artifact and mesh.box are mutually exclusive in V1; the ignored one would "
+                    "silently change the mesh source"
+                )
             mesh = mesh_step_tetra(artifact, mesh_size)
         elif artifact is None and mesh_spec.get("box"):
             box = [float(v) for v in mesh_spec["box"]]

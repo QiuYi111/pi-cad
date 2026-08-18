@@ -35,8 +35,6 @@ function mockPi(): MockPi {
   return pi;
 }
 
-const pythonPath = `${process.cwd()}/.python/site-packages:${process.cwd()}/python`;
-
 test("cad_generate_drawing takes structured arguments and canonicalizes the spec", async () => {
   const pi = mockPi();
   const drawing = (await import("../src/extensions/drawing/index.ts")).default;
@@ -54,10 +52,13 @@ test("cad_generate_drawing takes structured arguments and canonicalizes the spec
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-drawing-tool-"));
   try {
     // Produce a real STEP artifact so the drawing backend can import it.
+    // Spawn through the harness's own Python resolution (venv when present)
+    // so the test passes on fresh installs and CI.
+    const { cadctlEnv, pythonBinary } = await import("../src/shared/capability.ts");
     execFileSync(
-      process.platform === "win32" ? "python" : "python3",
+      pythonBinary(),
       ["-m", "cadctl", "build", "--source", join(process.cwd(), "tests/fixtures/plate.py"), "--output", join(cwd, "plate.step")],
-      { cwd, env: { ...process.env, PYTHONPATH: pythonPath }, encoding: "utf-8" },
+      { cwd, env: cadctlEnv(), encoding: "utf-8" },
     );
 
     const result = await tool.execute(
