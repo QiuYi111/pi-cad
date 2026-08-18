@@ -244,3 +244,44 @@ test("simulation tool availability follows the 0.6 matrix", async () => {
   assert.ok(!phase("final_review").includes("cad_optimize"));
   assert.ok(!phase("build").includes("cad_simulate"));
 });
+
+test("analyze required simulation evidence is bound to the baseline artifact", () => {
+  const c = routeTo("analyze");
+  assert.equal(c.ok, true); if (!c.ok) return;
+  let state: CadRunState = {
+    ...c.state,
+    evidenceObligations: {
+      simulation: { disposition: "required", rationale: "quantitative load path determines diagnosis" },
+    },
+    baselineArtifactPath: "old.step",
+    baselineArtifactHash: "baseline-hash",
+  };
+  state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
+  let t = transition(state, "baseline_understood", "understood baseline");
+  assert.equal(t.ok, true); if (!t.ok) return;
+  t = transition(t.state, "cause_understood", "cause understood");
+  assert.equal(t.ok, true); if (!t.ok) return;
+  const blocked = transition(t.state, "findings_delivered", "cannot deliver without simulation");
+  assert.equal(blocked.ok, false);
+  const blockedFinishState: CadRunState = { ...t.state, phase: "ready", status: "ready" };
+  const blockedFinish = finish(blockedFinishState);
+  assert.equal(blockedFinish.ok, false);
+
+  const withSimulation: CadRunState = {
+    ...t.state,
+    evidence: [
+      ...t.state.evidence,
+      {
+        id: "simulation-baseline",
+        kind: "simulation" as const,
+        tool: "cad_simulate",
+        artifactHash: "baseline-hash",
+        paths: ["evidence/simulation-result.json"],
+        artifacts: [{ path: "evidence/simulation-result.json", sha256: "simulation-hash" }],
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  };
+  const delivered = transition(withSimulation, "findings_delivered", "simulation current");
+  assert.equal(delivered.ok, true);
+});

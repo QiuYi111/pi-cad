@@ -25,12 +25,12 @@ export const EVIDENCE_KINDS: EvidenceRef["kind"][] = [
   "optimization",
 ];
 
-export function verifyEvidenceFilesForHash(
+export async function verifyEvidenceFilesForHash(
   cwd: string,
   state: CadRunState,
   hash: string,
   kinds: EvidenceRef["kind"][],
-): string | null {
+): Promise<string | null> {
   for (const kind of kinds) {
     const refs = state.evidence.filter(
       (ref) => ref.kind === kind && ref.artifactHash === hash,
@@ -38,6 +38,19 @@ export function verifyEvidenceFilesForHash(
     if (refs.length === 0) return `${kind} evidence is missing`;
     if (refs.some((ref) => ref.paths.some((path) => !existsSync(resolve(cwd, path))))) {
       return `${kind} evidence files are missing`;
+    }
+    for (const ref of refs) {
+      if (!ref.artifacts || ref.artifacts.length === 0) {
+        return `${kind} evidence has no hashed artifact provenance`;
+      }
+      for (const artifact of ref.artifacts) {
+        if (!existsSync(resolve(cwd, artifact.path))) {
+          return `${kind} evidence artifact is missing: ${artifact.path}`;
+        }
+        if ((await sha256File(resolve(cwd, artifact.path))) !== artifact.sha256) {
+          return `${kind} evidence artifact hash changed: ${artifact.path}`;
+        }
+      }
     }
   }
   return null;

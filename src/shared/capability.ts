@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -31,9 +31,12 @@ function sitePackages(): string | null {
 function pythonBinary(): string {
   const override = process.env.PI_CAD_PYTHON;
   if (override) return override;
-  const venv = join(packageRoot(), ".venv", "bin", "python");
+  const venvRoot = process.env.PI_CAD_VENV ?? join(packageRoot(), ".venv");
+  const venv = process.platform === "win32"
+    ? join(venvRoot, "Scripts", "python.exe")
+    : join(venvRoot, "bin", "python");
   if (existsSync(venv)) return venv;
-  return "python3";
+  return process.platform === "win32" ? "python" : "python3";
 }
 
 function cadctlEnv(): NodeJS.ProcessEnv {
@@ -41,7 +44,7 @@ function cadctlEnv(): NodeJS.ProcessEnv {
     (entry): entry is string => Boolean(entry),
   );
   const previous = process.env.PYTHONPATH;
-  const pythonPath = previous ? [...entries, previous].join(":") : entries.join(":");
+  const pythonPath = previous ? [...entries, previous].join(delimiter) : entries.join(delimiter);
   return { ...process.env, PYTHONPATH: pythonPath };
 }
 

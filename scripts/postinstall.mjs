@@ -50,6 +50,43 @@ function makeVenv() {
   }
 }
 
+// CuPy provides the CUDA sparse solver torch-fem needs on-device. Install the
+// wheel matching torch's bundled CUDA when torch reports CUDA support; skip
+// silently on CPU-only hosts and fail soft (device resolver falls back to CPU
+// and doctor records cupyAvailable=false).
+function torchCudaVersion(python, env) {
+  try {
+    const out = execFileSync(
+      python,
+      ["-c", "import torch; print(torch.version.cuda or '') if torch.cuda.is_available() else print('')"],
+      { cwd: root, env, encoding: "utf-8" },
+    );
+    const version = out.trim();
+    return version === "" ? null : version;
+  } catch {
+    return null;
+  }
+}
+
+function installCupy(python, pipArgs, env, cudaVersion) {
+  if (process.env.PI_CAD_SKIP_CUPY) {
+    console.log("[pi-cad] PI_CAD_SKIP_CUPY set; skipping CuPy install (CUDA simulation stays optional)");
+    return;
+  }
+  const major = cudaVersion.split(".")[0];
+  const wheel = major === "12" ? "cupy-cuda12x" : major === "11" ? "cupy-cuda11x" : null;
+  if (!wheel) {
+    console.warn(`[pi-cad] torch CUDA ${cudaVersion} has no matching CuPy wheel; simulation falls back to CPU`);
+    return;
+  }
+  try {
+    run(python, [...pipArgs, wheel], { env });
+    console.log(`[pi-cad] installed ${wheel} for torch CUDA ${cudaVersion}`);
+  } catch {
+    console.warn(`[pi-cad] ${wheel} install failed; CUDA simulation falls back to CPU until CuPy is available`);
+  }
+}
+
 let python = venvPython;
 let mode = "venv";
 if (!existsSync(python) && !makeVenv()) {
@@ -86,6 +123,8 @@ if (mode === "target") {
   } catch {
     run(python, [...pipTarget, "--no-deps", "torch-fem"], { env });
   }
+  const targetCuda = torchCudaVersion(python, env);
+  if (targetCuda) installCupy(python, pipTarget, env, targetCuda);
 } else {
   await ensurePip(python);
   run(python, ["-m", "pip", "install", "--upgrade", "pip"]);
@@ -101,6 +140,8 @@ if (mode === "target") {
   } catch {
     run(python, ["-m", "pip", "install", "--no-deps", "torch-fem"]);
   }
+  const venvCuda = torchCudaVersion(python, process.env);
+  if (venvCuda) installCupy(python, ["-m", "pip", "install"], process.env, venvCuda);
 }
 
 const pythonPath = [join(root, "python")]

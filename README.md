@@ -97,8 +97,17 @@ updates Project Head directly.
 ```
 
 When `simulation.disposition = required`, `cad_transition(accepted)` and
-`cad_finish` require current-artifact simulation evidence. Candidate changes
-stale the old simulation automatically.
+`cad_finish` require current-artifact simulation evidence. In the analyze
+workflow the obligation binds to the baseline artifact instead of a new
+candidate. Candidate changes stale the old simulation automatically.
+
+`cad_simulate`, `cad_optimize`, `cad_generate_drawing`, and `cad_render_scene`
+take structured arguments (material, loads, constraints, mesh, views,
+directions); the harness canonicalizes them into a run-scoped
+`evidence/<kind>/<id>/spec.json` and rejects unknown physics, load types,
+constraint types, regions, and multi-material specs instead of guessing. No
+tool exposes a spec path or output directory to the agent, so read-only phases
+can produce evidence without project-tree mutation.
 
 Unavailable optional backends are returned explicitly (`simulation.run`,
 Blender/FFmpeg presentation, PDF drawing, standards-compliant GD&T). The
@@ -112,6 +121,10 @@ automatically (`scripts/postinstall.mjs`):
 - prefers `uv` / `python -m venv`;
 - falls back to `.python/site-packages` when system ensurepip is unavailable;
 - installs core CAD and simulation dependencies;
+- installs the CuPy wheel matching torch's bundled CUDA when torch reports
+  CUDA support (best-effort; CPU-only hosts skip it, and a failed install
+  downgrades CUDA simulation to the honest CPU fallback rather than breaking
+  the install — set `PI_CAD_SKIP_CUPY=1` to opt out);
 - writes `.pi-cad-runtime.json` from `cadctl doctor --json`.
 
 For a repository checkout without running package install:
@@ -120,7 +133,8 @@ For a repository checkout without running package install:
 scripts/bootstrap-python.sh
 ```
 
-Set `PI_CAD_PYTHON` to override the Python binary used by the harness.
+Set `PI_CAD_PYTHON` to override the Python binary used by the harness, or
+`PI_CAD_VENV` to point both installer and runtime at an existing virtualenv.
 
 ## Test
 

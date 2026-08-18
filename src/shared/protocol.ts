@@ -91,6 +91,7 @@ export interface EvidenceRef {
   artifactHash: string;
   sourceHash?: string;
   paths: string[];
+  artifacts: Array<{ path: string; sha256: string }>;
   createdAt: string;
 }
 

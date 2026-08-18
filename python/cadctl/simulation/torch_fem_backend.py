@@ -50,13 +50,21 @@ def resolve_device(requested: str = "auto") -> DeviceInfo:
 
 
 def _select_nodes(nodes: np.ndarray, region: dict[str, Any], tolerance: float) -> np.ndarray:
-    if "indices" in region:
-        return np.asarray(region["indices"], dtype=int)
-    axis = region.get("axis", "x")
-    side = region.get("side", "min")
-    coord = {"x": 0, "y": 1, "z": 2}[axis]
+    keys = set(region or {})
+    if keys == {"indices"}:
+        selected = np.asarray(region["indices"], dtype=int)
+        if selected.size == 0 or selected.min() < 0 or selected.max() >= len(nodes):
+            raise SimulationBackendError("region.indices are empty or outside the mesh")
+        return selected
+    if keys != {"axis", "side"}:
+        raise SimulationBackendError("region must contain either indices or exactly axis+side")
+    if region["axis"] not in ("x", "y", "z"):
+        raise SimulationBackendError("region.axis must be x, y, or z")
+    if region["side"] not in ("min", "max"):
+        raise SimulationBackendError("region.side must be min or max")
+    coord = {"x": 0, "y": 1, "z": 2}[region["axis"]]
     values = nodes[:, coord]
-    if side == "min":
+    if region["side"] == "min":
         return np.flatnonzero(values <= values.min() + tolerance)
     return np.flatnonzero(values >= values.max() - tolerance)
 
@@ -65,6 +73,8 @@ def _parse_material(spec: dict[str, Any]) -> tuple[float, float]:
     materials = spec.get("materials") or []
     if not materials:
         raise SimulationBackendError("simulation spec requires at least one material")
+    if len(materials) != 1:
+        raise SimulationBackendError("V1 supports exactly one homogeneous material")
     material = materials[0]
     E = float(material.get("E", material.get("youngs_modulus", 0)))
     nu = float(material.get("nu", material.get("poisson_ratio", 0)))
@@ -94,7 +104,6 @@ def _apply_regions(model: Any, nodes: np.ndarray, spec: dict[str, Any], mesh_siz
         dofs = constraint.get("dofs", [0, 1, 2])
         if not isinstance(dofs, (list, tuple)) or any(int(d) not in (0, 1, 2) for d in dofs):
             raise SimulationBackendError("fixed constraint dofs must be a subset of [0,1,2]")
-        model.constraints[selected, :] = False
         for dof in dofs:
             model.constraints[selected, int(dof)] = True
 
@@ -116,7 +125,7 @@ def _apply_regions(model: Any, nodes: np.ndarray, spec: dict[str, Any], mesh_siz
             raise SimulationBackendError("load.vector must be a 3-vector")
         if load.get("distribute", "total") == "total":
             vector = vector / len(selected)
-        model.forces[selected, :] = torch.as_tensor(vector, dtype=model.nodes.dtype, device=model.nodes.device)
+        model.forces[selected, :] += torch.as_tensor(vector, dtype=model.nodes.dtype, device=model.nodes.device)
 
 
 class TorchFemBackend(SimulationBackend):
@@ -157,13 +166,26 @@ class TorchFemBackend(SimulationBackend):
         model = Solid(nodes, elements, material)
         _apply_regions(model, nodes_np, spec, mesh_size)
 
-        u, f, sigma, epsilon, _state = model.solve(
+        u, internal_force, sigma, deformation_gradient, _state = model.solve(
             increments=torch.tensor([0.0, 1.0], dtype=nodes.dtype),
             device=device_info.actual,
             verbose=False,
         )
 
         displacement_mag = torch.linalg.norm(u, dim=1)
+        F_cpu = deformation_gradient.detach().cpu().to(torch.float64)
+        identity = torch.eye(3, dtype=torch.float64)
+        H = F_cpu - identity
+        strain = 0.5 * (H + H.transpose(-1, -2))
+        strain_magnitude = torch.sqrt(torch.einsum("eij,eij->e", strain, strain))
+        internal_force_cpu = internal_force.detach().cpu().to(torch.float64)
+        reaction_field = torch.where(
+            model.constraints,
+            internal_force_cpu,
+            torch.zeros_like(internal_force_cpu),
+        )
+        reaction_vector = reaction_field.sum(dim=0)
+        reaction_magnitude = float(torch.linalg.norm(reaction_vector).item())
         # Flux tensor is [n_elem, 3, 3]; compute per-element von Mises and
         # expose both element and node-averaged scalar maxima.
         sigma_cpu = sigma.detach().cpu().to(torch.float64)
@@ -202,7 +224,6 @@ class TorchFemBackend(SimulationBackend):
         max_disp = float(displacement_mag.detach().cpu().max().item())
         max_vm_elem = float(von_mises_elem.max().item())
         max_vm_node = float(node_vm.max().item())
-        reaction = float(f[model.constraints].sum().item())
 
         result = {
             "units": "mm_N_MPa",
@@ -235,9 +256,15 @@ class TorchFemBackend(SimulationBackend):
                 "maxVonMisesNode": max_vm_node,
             },
             "strain": {
-                "maxMagnitude": float(torch.linalg.norm(epsilon.detach().cpu().to(torch.float64).reshape(-1, 3, 3), dim=(1, 2)).max().item()),
+                "maxMagnitudeElement": float(strain_magnitude.max().item()),
             },
-            "reaction": {"sum": reaction},
+            "deformationGradient": {
+                "maxDeviationFromIdentity": float(torch.linalg.norm(H, dim=(1, 2)).max().item()),
+            },
+            "reaction": {
+                "vector": reaction_vector.tolist(),
+                "magnitude": reaction_magnitude,
+            },
             "solver": {
                 "linear": "differentiable_sparse_solve",
                 "device": device_info.actual,
@@ -251,8 +278,10 @@ class TorchFemBackend(SimulationBackend):
             fields_path,
             displacement=u.detach().cpu().numpy(),
             stress=sigma_cpu.numpy(),
-            strain=epsilon.detach().cpu().to(torch.float64).numpy(),
-            reaction=f.detach().cpu().numpy(),
+            deformationGradient=F_cpu.numpy(),
+            strain=strain.numpy(),
+            internalForce=internal_force_cpu.numpy(),
+            reaction=reaction_field.numpy(),
         )
         out_path = Path(workdir) / "simulation-result.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)

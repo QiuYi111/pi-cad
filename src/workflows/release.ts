@@ -49,11 +49,15 @@ export const releaseWorkflow: WorkflowSpec = {
   },
   acceptedPhases: ["final_review"],
   acceptedEvidence: (state) =>
-    state.baselineArtifactHash
+    state.baselineArtifactHash &&
+    state.currentArtifactHash &&
+    state.baselineArtifactHash !== state.currentArtifactHash
       ? ["visual", "geometry", "compare"]
       : ["visual", "geometry"],
   finishEvidence: (state) =>
-    state.baselineArtifactHash
+    state.baselineArtifactHash &&
+    state.currentArtifactHash &&
+    state.baselineArtifactHash !== state.currentArtifactHash
       ? ["visual", "geometry", "compare"]
       : ["visual", "geometry"],
   requiresBaselineInput: false,

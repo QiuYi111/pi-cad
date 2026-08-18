@@ -390,7 +390,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         if (!state.currentArtifactHash) {
           return errTool("cannot accept: current artifact hash is not bound");
         }
-        const evidenceVerification = verifyEvidenceFilesForHash(
+        const evidenceVerification = await verifyEvidenceFilesForHash(
           ctx.cwd,
           state,
           state.currentArtifactHash,
@@ -398,7 +398,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         );
         if (evidenceVerification) return errTool(`cannot accept: ${evidenceVerification}`);
         if (state.evidenceObligations?.simulation?.disposition === "required") {
-          const simVerification = verifyEvidenceFilesForHash(
+          const simVerification = await verifyEvidenceFilesForHash(
             ctx.cwd,
             state,
             state.currentArtifactHash,
@@ -414,7 +414,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         (state.phase === "baseline" || state.phase === "source_baseline") &&
         state.baselineArtifactHash
       ) {
-        const verification = verifyEvidenceFilesForHash(
+        const verification = await verifyEvidenceFilesForHash(
           ctx.cwd,
           state,
           state.baselineArtifactHash,
@@ -486,15 +486,19 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       if (verification) return errTool(`cad_finish blocked: ${verification}`);
       const spec = workflowSpec(state);
       if (state.workflow === "analyze" && state.baselineArtifactHash) {
-        const evidenceVerification = verifyEvidenceFilesForHash(
+        const analyzeKinds: EvidenceRef["kind"][] =
+          state.evidenceObligations?.simulation?.disposition === "required"
+            ? ["visual", "geometry", "simulation"]
+            : ["visual", "geometry"];
+        const evidenceVerification = await verifyEvidenceFilesForHash(
           ctx.cwd,
           state,
           state.baselineArtifactHash,
-          ["visual", "geometry"],
+          analyzeKinds,
         );
         if (evidenceVerification) return errTool(`cad_finish blocked: ${evidenceVerification}`);
       } else if (state.currentArtifactHash) {
-        const evidenceVerification = verifyEvidenceFilesForHash(
+        const evidenceVerification = await verifyEvidenceFilesForHash(
           ctx.cwd,
           state,
           state.currentArtifactHash,
@@ -502,7 +506,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         );
         if (evidenceVerification) return errTool(`cad_finish blocked: ${evidenceVerification}`);
         if (state.evidenceObligations?.simulation?.disposition === "required") {
-          const simVerification = verifyEvidenceFilesForHash(
+          const simVerification = await verifyEvidenceFilesForHash(
             ctx.cwd,
             state,
             state.currentArtifactHash,

@@ -68,7 +68,7 @@ class SimulationTests(unittest.TestCase):
             self.assertEqual(payload["backend"], "torch-fem")
             self.assertGreater(payload["displacement"]["maxMagnitude"], 0.0)
             self.assertGreater(payload["mesh"]["elementCount"], 0)
-            self.assertLess(abs(abs(payload["reaction"]["sum"]) - 100.0) / 100.0, 0.02)
+            self.assertLess(abs(payload["reaction"]["magnitude"] - 100.0) / 100.0, 0.02)
             self.assertTrue((root / "out" / "simulation-result.json").exists())
             self.assertTrue((root / "out" / "simulation-fields.npz").exists())
             self.assertEqual(payload["visualization"]["status"], "ready")
@@ -120,7 +120,6 @@ class SimulationTests(unittest.TestCase):
         from torchfem.materials import IsotropicElasticityPlaneStress
         from torchfem.mesh import rect_tri
         from torchfem.planar import Planar
-
         torch.set_default_dtype(torch.float64)
         nodes, elements = rect_tri(6, 2, 10, 4, variant="zigzag")
         nodes = nodes.double()
@@ -160,6 +159,169 @@ class SimulationTests(unittest.TestCase):
         rm[0] -= eps
         finite = (compliance(rp).item() - compliance(rm).item()) / (2 * eps)
         self.assertLess(abs(analytical - finite) / max(abs(analytical), abs(finite)), 1e-5)
+
+
+def run_backend(spec: dict, tmp: Path) -> dict:
+    from cadctl.simulation.api import run_simulation
+
+    spec_path = tmp / "spec.json"
+    spec_path.write_text(json.dumps(spec), encoding="utf-8")
+    payload = run_simulation(str(spec_path), str(tmp), stage="run")
+    assert payload.get("status") == "solved", payload
+    return payload
+
+
+def beam_spec(size: float, *, loads: list[dict], constraints: list[dict]) -> dict:
+    return {
+        "backend": "torch-fem",
+        "device": "auto",
+        "physics": {"type": "linear_elasticity"},
+        "mesh": {"element": "tet", "box": [100, 10, 10], "size": size},
+        "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
+        "constraints": constraints,
+        "loads": loads,
+    }
+
+
+FACE_MIN = {"axis": "x", "side": "min"}
+FACE_MAX = {"axis": "x", "side": "max"}
+
+
+class SimulationSemanticsTests(unittest.TestCase):
+    def test_validate_spec_fails_closed_on_unknown_semantics(self) -> None:
+        from cadctl.simulation.api import validate_spec
+
+        def expect_error(spec: dict, fragment: str) -> None:
+            ok, errors = validate_spec(spec)
+            self.assertFalse(ok, errors)
+            self.assertTrue(any(fragment in e for e in errors), (fragment, errors))
+
+        base = {
+            "physics": {"type": "linear_elasticity"},
+            "mesh": {"element": "tet", "box": [100, 10, 10], "size": 5.0},
+            "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
+            "constraints": [{"type": "fixed", "region": FACE_MIN}],
+            "loads": [{"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -100.0]}],
+        }
+        ok, _ = validate_spec(base)
+        self.assertTrue(ok)
+
+        import copy
+
+        def mutate(**kwargs):
+            spec = copy.deepcopy(base)
+            spec.update(kwargs)
+            return spec
+
+        expect_error(mutate(backend="calculix"), "backend must be torch-fem")
+        expect_error(mutate(device="gpu"), "device must be one of")
+        expect_error(mutate(materials=[{"E": 210000.0, "nu": 0.3}, {"E": 70000.0, "nu": 0.33}]), "exactly one homogeneous material")
+        expect_error(mutate(materials=[{"E": -1.0, "nu": 0.3}]), "E > 0")
+        expect_error(mutate(materials=[{"E": 210000.0, "nu": 0.5}]), "nu < 0.5")
+        expect_error(mutate(mesh={"element": "tet", "box": [100, 10, 10], "size": 0.0}), "mesh.size must be > 0")
+        expect_error(mutate(mesh={"element": "hex", "box": [100, 10, 10], "size": 5.0}), "mesh.element must be tet")
+
+        spec = copy.deepcopy(base)
+        spec["loads"][0]["type"] = "pressure"
+        expect_error(spec, "nodal_force")
+
+        spec = copy.deepcopy(base)
+        del spec["loads"][0]["region"]
+        expect_error(spec, "region is required")
+
+        spec = copy.deepcopy(base)
+        spec["loads"][0]["region"] = {"axis": "x", "side": "minimum"}
+        expect_error(spec, "side must be min or max")
+
+        spec = copy.deepcopy(base)
+        spec["loads"][0]["region"] = {"axis": "x", "side": "min", "indices": [0, 1]}
+        expect_error(spec, "either indices or exactly axis+side")
+
+        spec = copy.deepcopy(base)
+        spec["loads"][0]["region"] = {}
+        expect_error(spec, "either indices or exactly axis+side")
+
+        spec = copy.deepcopy(base)
+        spec["constraints"][0]["dofs"] = [3]
+        expect_error(spec, "dofs must be a non-empty subset")
+
+        spec = copy.deepcopy(base)
+        spec["constraints"][0]["type"] = "roller"
+        expect_error(spec, "type must be fixed")
+
+        spec = copy.deepcopy(base)
+        spec["artifact"] = "does-not-exist.step"
+        expect_error(spec, "artifact does not exist")
+
+    def test_overlapping_loads_add(self) -> None:
+        single = beam_spec(
+            6.0,
+            loads=[{"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -100.0]}],
+            constraints=[{"type": "fixed", "region": FACE_MIN}],
+        )
+        split = beam_spec(
+            6.0,
+            loads=[
+                {"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -60.0]},
+                {"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -40.0]},
+            ],
+            constraints=[{"type": "fixed", "region": FACE_MIN}],
+        )
+        with tempfile.TemporaryDirectory() as tmp_a, tempfile.TemporaryDirectory() as tmp_b:
+            a = run_backend(single, Path(tmp_a))
+            b = run_backend(split, Path(tmp_b))
+        self.assertAlmostEqual(
+            a["displacement"]["maxMagnitude"],
+            b["displacement"]["maxMagnitude"],
+            delta=1e-9 * max(1.0, a["displacement"]["maxMagnitude"]),
+        )
+
+    def test_overlapping_constraints_union(self) -> None:
+        full = beam_spec(
+            6.0,
+            loads=[{"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -100.0]}],
+            constraints=[{"type": "fixed", "region": FACE_MIN, "dofs": [0, 1, 2]}],
+        )
+        overlapped = beam_spec(
+            6.0,
+            loads=[{"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -100.0]}],
+            constraints=[
+                {"type": "fixed", "region": FACE_MIN, "dofs": [0, 1, 2]},
+                {"type": "fixed", "region": FACE_MIN, "dofs": [0]},
+            ],
+        )
+        with tempfile.TemporaryDirectory() as tmp_a, tempfile.TemporaryDirectory() as tmp_b:
+            a = run_backend(full, Path(tmp_a))
+            b = run_backend(overlapped, Path(tmp_b))
+        self.assertAlmostEqual(
+            a["displacement"]["maxMagnitude"],
+            b["displacement"]["maxMagnitude"],
+            delta=1e-9 * max(1.0, a["displacement"]["maxMagnitude"]),
+        )
+
+    def test_cantilever_converges_toward_beam_theory(self) -> None:
+        # delta = F L^3 / (3 E I), I = b h^3 / 12 with b = h = 10 mm.
+        analytic = 100.0 * 100.0**3 / (3.0 * 210000.0 * (10.0 * 10.0**3 / 12.0))
+        results = {}
+        for size in (6.0, 4.0, 3.0):
+            spec = beam_spec(
+                size,
+                loads=[{"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -100.0]}],
+                constraints=[{"type": "fixed", "region": FACE_MIN}],
+            )
+            with tempfile.TemporaryDirectory() as tmp:
+                results[size] = run_backend(spec, Path(tmp))
+        coarse = results[6.0]["displacement"]["maxMagnitude"]
+        medium = results[4.0]["displacement"]["maxMagnitude"]
+        fine = results[3.0]["displacement"]["maxMagnitude"]
+        # Linear tets are overly stiff: displacement grows monotonically toward
+        # the analytic value under refinement, and reaction equilibrium holds.
+        self.assertLess(coarse, medium)
+        self.assertLess(medium, fine)
+        self.assertLess(abs(medium - analytic), abs(coarse - analytic))
+        self.assertLess(abs(fine - analytic) / analytic, 0.20)
+        self.assertLess(results[3.0]["reaction"]["magnitude"] / 100.0 - 1.0, 0.02)
+        self.assertGreater(results[3.0]["strain"]["maxMagnitudeElement"], 0.0)
 
 
 if __name__ == "__main__":

@@ -243,6 +243,7 @@ export function evidenceFromBuild(
     artifactHash,
     sourceHash,
     paths: envelope.artifacts.map((artifact) => artifact.path),
+    artifacts: envelope.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
     createdAt: nowIso(),
   };
 }
@@ -261,6 +262,7 @@ export function evidenceFromEnvelope(
     artifactHash,
     sourceHash,
     paths: envelope.artifacts.map((artifact) => artifact.path),
+    artifacts: envelope.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
     createdAt: nowIso(),
   };
 }
@@ -328,6 +330,15 @@ export function transition(
     }
   }
 
+  if (
+    event === "findings_delivered" &&
+    state.workflow === "analyze" &&
+    state.evidenceObligations?.simulation?.disposition === "required" &&
+    state.baselineArtifactHash &&
+    !hasEvidenceForArtifact(state, state.baselineArtifactHash, "simulation")
+  ) {
+    return { ok: false, reason: "cannot complete analyze: required simulation evidence is missing for the baseline artifact" };
+  }
   const target = transitionTarget(state, event);
   if (!target) {
     return { ok: false, reason: `transition ${event} is not valid in phase ${state.phase} for workflow ${state.workflow ?? "unset"}` };
@@ -367,6 +378,12 @@ export function finish(state: CadRunState): ActionResult {
   if (state.workflow === "analyze") {
     if (!state.baselineArtifactHash) {
       return { ok: false, reason: "cad_finish requires a bound baseline artifact for analyze workflow" };
+    }
+    if (
+      state.evidenceObligations?.simulation?.disposition === "required" &&
+      !hasEvidenceForArtifact(state, state.baselineArtifactHash, "simulation")
+    ) {
+      return { ok: false, reason: "cad_finish requires required simulation evidence for the baseline artifact" };
     }
   } else {
     if (!state.currentSourceHash || !state.currentArtifactHash) {

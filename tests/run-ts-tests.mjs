@@ -8,5 +8,7 @@ await jiti.import("./restore.test.ts", { default: true });
 await jiti.import("./policy.test.ts", { default: true });
 await jiti.import("./workflows-full.test.ts", { default: true });
 await jiti.import("./harness-convert.test.ts", { default: true });
+await jiti.import("./simulation-tool.test.ts", { default: true });
+await jiti.import("./drawing-presentation-tool.test.ts", { default: true });
 await jiti.import("./task-lifecycle.test.ts", { default: true });
 await jiti.import("./commands-lifecycle.test.ts", { default: true });

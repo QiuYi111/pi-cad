@@ -336,6 +336,8 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
         payload = run_simulation(args.spec, args.output_dir, stage=args.stage)
         input_hashes = {"spec": sha256_file(args.spec)}
         artifacts: list[dict[str, str]] = []
+        if Path(args.spec).exists():
+            artifacts.append({"path": args.spec, "kind": "simulation_spec", "sha256": sha256_file(args.spec)})
         if args.stage == "run":
             spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
             artifact = spec.get("artifact")
@@ -420,6 +422,8 @@ def _cmd_optimize(args: argparse.Namespace) -> int:
         spec = _json.loads(Path(args.spec).read_text(encoding="utf-8"))
         payload = run_topology(spec, args.output_dir)
         artifacts = []
+        if Path(args.spec).exists():
+            artifacts.append({"path": args.spec, "kind": "optimization_spec", "sha256": sha256_file(args.spec)})
         if payload.get("artifact") and Path(payload["artifact"]).exists():
             artifacts.append({"path": payload["artifact"], "kind": "optimization", "sha256": sha256_file(payload["artifact"])})
         emit("cad_optimize", payload, input_hashes={"spec": sha256_file(args.spec)}, artifacts=artifacts, duration_ms=int((time.monotonic() - started) * 1000))
