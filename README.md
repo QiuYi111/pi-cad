@@ -1,169 +1,54 @@
 # Pi-CAD
 
-Harness-native agentic mechanical CAD on Pi, implemented from
-`pi-cad-whitepaper.md`.
+**Agentic mechanical CAD that shows its work.**
 
-> Tools expose reality. Agent interprets reality. Workflow defines process.
-> Harness enforces workflow. Skills improve reasoning.
+[English](README.md) · [简体中文](README.zh-CN.md)
 
-## Implemented architecture
+[![CI](https://github.com/QiuYi111/pi-cad/actions/workflows/ci.yml/badge.svg)](https://github.com/QiuYi111/pi-cad/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-| Layer | Path |
-| --- | --- |
-| Pi-CAD core harness | `src/core/` + `src/extensions/core/index.ts` |
-| Geometry tools | `src/extensions/geometry/index.ts` |
-| Visual/section tools | `src/extensions/visual/index.ts` |
-| Read-only UI/status | `src/extensions/ui/index.ts` |
-| Optional drawing plugin | `src/extensions/drawing/index.ts` |
-| Optional simulation plugin | `src/extensions/simulation/index.ts` |
-| Optional presentation plugin | `src/extensions/presentation/index.ts` |
-| Optional aggregate entry | `src/extensions/optional/index.ts` |
-| Project store / task store | `src/shared/store.ts` (`CadProjectStore`, `CadTaskStore`) |
-| Shared protocol/state/capability | `src/shared/` |
-| Workflow data modules | `src/workflows/{quick,analyze,modify,greenfield,hybrid,convert,release}.ts` |
-| Layered state prompts | `src/prompts/` |
-| Deterministic Python backend | `python/cadctl/` |
-| Spec templates | `assets/templates/` |
+Pi-CAD is a mechanical CAD harness for the
+[Pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent).
+An AI agent designs the part, runs the numbers, and walks your engineering
+review — but every claim it makes is backed by files you can open, images you
+can look at, and hashes that fail loudly if anything changes.
 
-`cad-core` is deliberately not a God Object:
+It is built on one simple split of responsibility:
 
-```text
-src/core/
-├── runtime.ts          # Pi lifecycle glue
-├── controller.ts       # cad_* control-action tools
-├── state-machine.ts    # data-driven workflow engine
-├── policies.ts         # mutation / active-tool policy
-├── auto-actions.ts     # baseline/candidate observation loop
-├── continuation.ts     # agent_settled auto-resume
-├── context.ts          # layered prompt composition
-└── evidence.ts         # hash binding, stale tracking, file guards
-```
+- **Deterministic tools do the geometry and the physics.** build123d/OCP for
+  CAD, gmsh for meshing, torch-fem for linear elasticity, NLopt for
+  topology optimization. No LLM ever decides a dimension or blesses a stress
+  plot.
+- **The agent interprets reality** — it reads the fields, the views, and the
+  geometry facts, then argues for a design decision in plain language.
+- **A state machine enforces the process.** Review cannot be skipped,
+  read-only phases cannot mutate the project, and acceptance without
+  evidence is structurally impossible.
+- **Evidence is hash-bound.** Specs, results, fields, and rendered views are
+  stored per run, hashed, and re-verified at every acceptance. Tampered or
+  stale evidence is rejected, never silently reused.
 
-## Workflows
+> The original design rationale lives in [`pi-cad-whitepaper.md`](pi-cad-whitepaper.md).
 
-- `quick` — fully specified direct geometry
-- `analyze` — read-only STEP/CAD diagnosis
-- `modify` — baseline, plan, controlled redesign, before/after compare
-- `greenfield` — concept, optional domain analysis, intent, build
-- `hybrid` — legacy baseline plus greenfield concept merge
-- `convert` — source baseline, transform plan, conversion, compare
-- `release` — audit → writable gap closure (engineering changes + candidate loop) → audit → package → final review, with nine workstream statuses
+---
 
-## Control protocol
-
-```text
-cad_route
-cad_commit_requirements
-cad_commit_plan
-cad_commit_candidate
-cad_transition
-cad_wait_for_user
-cad_finish
-```
-
-`cad_commit_candidate` owns the automatic loop:
-build → visual views → geometry facts → (modify/convert) deterministic compare
-→ evidence bound to source/artifact hashes → review.
-
-## Deterministic capability tools
-
-```text
-cad_build_step              cad_inspect_visual
-cad_inspect_geometry        cad_inspect_section
-cad_measure                 cad_compare_geometry
-cad_assembly_tree           cad_export
-cad_generate_drawing        cad_simulate
-cad_optimize                cad_render_scene
-```
-
-`cad_simulate` uses the torch-fem linear elasticity backend with gmsh STEP
-meshing. `cad_optimize` runs a differentiable SIMP topology optimization with
-an NLopt MMA inner loop; its output is density/surface evidence and never
-updates Project Head directly.
-
-### Evidence obligations
-
-`cad_commit_requirements` / `cad_commit_plan` accept:
-
-```json
-{
-  "evidenceObligations": {
-    "simulation": {
-      "disposition": "required",
-      "rationale": "strength controls acceptance"
-    }
-  }
-}
-```
-
-When `simulation.disposition = required`, `cad_transition(accepted)` and
-`cad_finish` require current-artifact simulation evidence. In the analyze
-workflow the obligation binds to the baseline artifact instead of a new
-candidate. Candidate changes stale the old simulation automatically.
-
-`cad_simulate`, `cad_optimize`, `cad_generate_drawing`, and `cad_render_scene`
-take structured arguments (material, loads, constraints, mesh, views,
-directions); the harness canonicalizes them into a run-scoped
-`evidence/<kind>/<id>/spec.json` and rejects unknown physics, load types,
-constraint types, regions, and multi-material specs instead of guessing. No
-tool exposes a spec path or output directory to the agent, so read-only phases
-can produce evidence without project-tree mutation.
-
-V1 simulation boundary conditions are deliberately simple: an `axis+side`
-region selects the axis-extreme node slab (all nodes within 0.75× mesh size of
-the bounding-box extreme), and `indices` selects explicit mesh nodes. This is
-not arbitrary STEP face selection; a deterministic mesh-boundary inspector for
-surface-level BCs is planned as the next capability. Simulation evidence for
-the same artifact is identified by spec hash, so multiple load cases (normal,
-peak, shock) coexist instead of overwriting each other.
-
-Unavailable optional backends are returned explicitly (`simulation.run`,
-Blender/FFmpeg presentation, PDF drawing, standards-compliant GD&T). The
-harness never substitutes a fake verifier or upgrades unavailable evidence.
-
-## Python backend setup
-
-The Pi package postinstall installs a package-local Python runtime
-automatically (`scripts/postinstall.mjs`):
-
-- prefers `uv` / `python -m venv`;
-- falls back to `.python/site-packages` when system ensurepip is unavailable;
-- installs core CAD and simulation dependencies;
-- installs the CuPy wheel matching torch's bundled CUDA when torch reports
-  CUDA support (best-effort; CPU-only hosts skip it, and a failed install
-  downgrades CUDA simulation to the honest CPU fallback rather than breaking
-  the install — set `PI_CAD_SKIP_CUPY=1` to opt out);
-- writes `.pi-cad-runtime.json` from `cadctl doctor --json`.
-
-Headless Linux hosts also need `libglu1-mesa` (the gmsh wheel's bundled
-library dlopens `libGLU.so.1`): `sudo apt-get install -y libglu1-mesa`.
-
-For a repository checkout without running package install:
+## Quick start
 
 ```bash
-scripts/bootstrap-python.sh
-```
-
-Set `PI_CAD_PYTHON` to override the Python binary used by the harness, or
-`PI_CAD_VENV` to point both installer and runtime at an existing virtualenv.
-
-## Test
-
-```bash
+git clone https://github.com/QiuYi111/pi-cad.git
+cd pi-cad
 npm install
-npm run test
-# or
-bash scripts/test.sh
 ```
 
-Coverage:
+`npm install` also builds the Python CAD runtime (a package-local venv with
+build123d, gmsh, torch-fem, and friends). On headless Linux you will
+additionally want the GLU runtime that gmsh links:
 
-- pure workflow state machine: all seven workflows
-- harness integration: quick candidate loop, convert candidate loop
-- mutation policy, evidence guards, restart recovery
-- Python backend: STEP build/inspect/render/section/compare/assembly/export/drawing/capability
+```bash
+sudo apt-get install -y libglu1-mesa
+```
 
-## Run in Pi
+Then launch Pi with the seven extensions:
 
 ```bash
 pi -e src/extensions/core/index.ts \
@@ -175,49 +60,178 @@ pi -e src/extensions/core/index.ts \
    -e src/extensions/ui/index.ts
 ```
 
-When installed as a Pi package, the `pi` key in `package.json` loads all
-seven extensions automatically.
+(When Pi-CAD is installed as a Pi package, the `pi` key in `package.json`
+loads all seven automatically — no flags needed.)
 
-Use `/cad` to show the workspace, `/cad-status` for canonical state, and
-`/cad-abort` to abort only the active workflow run. `cad_route` creates a run
-implicitly when the project is IDLE; users do not manage task IDs.
+## Your first part
 
-## Canonical project state
+Try this in a fresh directory:
 
-A working directory is a long-lived **design project**. Workflow activity is
-stored as short-lived **runs**.
+```text
+/cad
+"Route a quick workflow: a 100 x 80 x 5 mm plate with four 6 mm through
+holes, centers 10 mm from the edges."
+```
+
+The agent will route the run, commit requirements, build the STEP file, and
+then — before it can say anything — the harness automatically renders seven
+visual views and extracts geometry facts as evidence, bound to the exact
+source and artifact hashes. The images come back to you in the conversation.
+Review them, ask for changes, and accept:
+
+```text
+"Looks good — accept and finish."
+```
+
+Useful slash commands:
+
+| Command | What it does |
+| --- | --- |
+| `/cad` | Show the workspace: project, design head, active run |
+| `/cad-status` | Canonical run state, phase, and evidence |
+| `/cad-abort` | Abort the active run only; the project head is untouched |
+
+## Seven workflows
+
+Route with plain language ("analyze this STEP", "release the current head")
+and Pi-CAD picks the workflow; you never manage run IDs.
+
+| Workflow | Use it when |
+| --- | --- |
+| `quick` | The part is fully specified — just build it |
+| `analyze` | You have a STEP and want a read-only diagnosis |
+| `modify` | Controlled redesign of an existing part, with before/after compare |
+| `greenfield` | New concept → intent → build, with optional domain analysis |
+| `hybrid` | Merge a legacy baseline with a new concept |
+| `convert` | Convert a source baseline to another format (e.g. STEP → STL) |
+| `release` | Audit, close gaps, package, and hand off — with drawing/BOM workstreams |
+
+## What the agent can actually do
+
+**Control** — `cad_route`, `cad_commit_requirements`, `cad_commit_plan`,
+`cad_commit_candidate`, `cad_transition`, `cad_wait_for_user`, `cad_finish`.
+`cad_commit_candidate` runs the automatic observation loop: build → seven
+visual views → geometry facts → deterministic compare (modify/convert) →
+evidence bound to hashes → review.
+
+**Geometry** — `cad_build_step`, `cad_inspect_visual`, `cad_inspect_geometry`,
+`cad_inspect_section`, `cad_measure`, `cad_compare_geometry`,
+`cad_assembly_tree`, `cad_export`.
+
+**Engineering analysis** — `cad_simulate`, `cad_optimize`,
+`cad_generate_drawing`, `cad_render_scene`.
+
+All four engineering tools take structured arguments (material, loads,
+constraints, mesh, views, directions). You never point them at a spec file or
+an output directory — the harness canonicalizes the spec into run-scoped
+evidence storage itself, which is why even read-only review phases can run a
+simulation without touching your project tree. Unknown physics, load types,
+constraint types, regions, or a second material are rejected with an error,
+not guessed.
+
+## Simulation, honestly scoped
+
+What V1 does well:
+
+- **Linear elastic FEA** with torch-fem, gmsh tet meshing of STEP, or a
+  parametric box mesh. Units are pinned: mm / N / MPa.
+- **Boundary conditions you can reason about**: nodal force loads that
+  *add* when they overlap, fixed constraints that *union* when they overlap.
+  Regions select the axis-extreme node slab or explicit node indices.
+- **Readable results**: seven rendered views (displacement, von Mises,
+  deformed shape…), full fields in NPZ, and a result JSON with reaction
+  equilibrium, mesh provenance, and device fallback reasons.
+- **Multiple load cases coexist**: normal, peak, and shock load cases on the
+  same part are kept side by side, keyed by spec hash.
+- **Devices, honestly**: CPU is first-class; CUDA is used when a matching
+  CuPy is present; Metal reports an explicit CPU fallback. Nothing pretends.
+
+What V1 deliberately does not do: nonlinear materials, pressure/traction
+loads, arbitrary CAD-face boundary conditions (a deterministic mesh-boundary
+inspector is the planned next step), and multi-material parts. The tool
+returns raw deterministic fields — it never says "safe" or "passes"; that
+judgment belongs to the agent and to you.
+
+`cad_optimize` is a clearly-labeled walking skeleton: differentiable SIMP
+topology optimization (2D rectangular domain, MMA inner loop) whose output is
+density/surface evidence, never a CAD candidate.
+
+## Why you can trust the output
+
+- **Acceptance requires evidence.** An artifact cannot be accepted without
+  current visual and geometry evidence — plus simulation evidence when the
+  requirements say it is required.
+- **Evidence is tamper-evident.** Every evidence artifact is sha256-hashed,
+  and the hashes are re-verified at `cad_transition(accepted)` and
+  `cad_finish`. A rewritten result file fails verification.
+- **Simulation binds to the pre-solve artifact hash.** If the STEP file
+  changes while the solver is running, the result is discarded rather than
+  bound to the wrong version.
+- **Candidate changes stale old evidence automatically.** You cannot accept
+  a new geometry against last revision's simulation.
+- **Unavailable backends say so.** Missing Blender, PDF drawing, or GD&T
+  support is reported as unavailable — the harness never substitutes a fake
+  verifier.
+
+## Configuration
+
+| Variable | Effect |
+| --- | --- |
+| `PI_CAD_PYTHON` | Use this Python binary for all cadctl calls |
+| `PI_CAD_VENV` | Point installer and runtime at an existing virtualenv |
+| `PI_CAD_SKIP_CUPY` | Skip the best-effort CuPy install (`1` to opt out) |
+
+Runtime capability checks (the "doctor" report) are a **live probe** of the
+Python that would actually be used, honored once per session — not a stale
+install-time snapshot.
+
+## Tests & CI
+
+```bash
+npm test          # or: bash scripts/test.sh
+```
+
+31 TypeScript harness tests + 19 Python backend tests, including a
+cantilever mesh-convergence check against beam theory, load/constraint
+overlap semantics, negative validation matrices, evidence tampering, and
+artifact-mutation races. CI runs the full suite on a fresh install (Linux
+CPU) on every push.
+
+## What lives on disk
+
+A working directory is a long-lived **design project**; each workflow
+activity is a short-lived **run**:
 
 ```text
 .pi-cad/
-├── project.json            # projectId + current design head + currentRunId
-├── runs/
-│   ├── run-20260817-001/
-│   │   ├── state.json
-│   │   ├── events.jsonl
-│   │   ├── records/
-│   │   ├── evidence/
-│   │   └── artifacts/manifest.json
-│   └── run-20260817-002/
-│       └── ...
-└── artifacts/              # optional future project-level package area
+├── project.json      # design head: current source/STEP/hashes + accepted evidence
+└── runs/
+    └── run-.../      # state, events, records,
+                      └── evidence/<kind>/<id>/   # spec.json + results + views
 ```
 
-- `project.json.head` is the current design: source/STEP/hash + accepted evidence.
-- `project.json.currentRunId` is `null` in the normal IDLE state.
-- `cad_route` creates a run when the project is IDLE.
-- `cad_transition(accepted)` updates the design head for design-producing workflows.
-- `cad_finish` and `/cad-abort` clear `currentRunId`; the head remains intact.
-- Legacy task/single-state layouts are migrated into runs automatically.
+`cad_route` creates a run when the project is idle; `cad_finish` and
+`/cad-abort` clear it. The design head survives aborts. Legacy single-state
+layouts are migrated automatically.
 
-## Real-model validation performed
+## Repository map
 
-With `openai-codex/gpt-5.6-luna` (`thinking=medium`):
+| Area | Path |
+| --- | --- |
+| Harness core (state machine, policies, evidence) | `src/core/` |
+| Tool extensions (geometry, visual, drawing, simulation, presentation, UI) | `src/extensions/` |
+| Workflow definitions (all seven) | `src/workflows/` |
+| Layered prompts | `src/prompts/` |
+| Deterministic Python backend | `python/cadctl/` |
+| Spec templates | `assets/templates/` |
 
-- `quick` plate: 100×80×5, four Ø6 holes, delivered STEP + source, state done.
-- `analyze` plate inspection: read-only, verified all dimensions, state done.
-- `modify` old plate: 5 mm → 4 mm height, holes preserved, compare evidence, state done.
-- `greenfield` pen stand: concept → intent → build → review, STEP + source, state done.
-- `release` plate supplier handoff: workstreams closed/blocked honestly, state done.
+## Validation performed
 
-`convert` is covered by harness integration tests (STEP → STL sidecar), and
-all seven workflows are covered by pure state-machine tests.
+Real end-to-end runs (with `openai-codex/gpt-5.6-luna`, thinking=medium):
+quick plate build, read-only plate analysis, 5→4 mm plate modification with
+compare evidence, greenfield pen stand, and a release handoff with honest
+closed/blocked workstreams — all reaching `done` with evidence intact.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
