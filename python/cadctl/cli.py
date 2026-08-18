@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -333,10 +334,16 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
         payload = run_simulation(args.spec, args.output_dir, stage=args.stage)
+        input_hashes = {"spec": sha256_file(args.spec)}
+        if args.stage == "run":
+            spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
+            artifact = spec.get("artifact")
+            if artifact and Path(artifact).exists():
+                input_hashes["artifact"] = sha256_file(artifact)
         emit(
-            "cad_run_simulation",
+            "cad_simulate",
             payload,
-            input_hashes={"spec": sha256_file(args.spec)},
+            input_hashes=input_hashes,
             warnings=["simulation capability is optional and may be unavailable"] if payload.get("status") == "unavailable" else [],
             duration_ms=int((time.monotonic() - started) * 1000),
         )

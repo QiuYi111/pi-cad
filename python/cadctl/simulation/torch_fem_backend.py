@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -143,6 +144,12 @@ class TorchFemBackend(SimulationBackend):
                 node_vm[elements[e]] += von_mises_elem[e]
             node_vm = node_vm / counts.clamp_min(1)
 
+        mesh_identity = json.dumps({"nodes": mesh["nodes"], "elements": mesh["elements"]}, sort_keys=True).encode("utf-8")
+        mesh_hash = hashlib.sha256(mesh_identity).hexdigest()
+        artifact_hash = None
+        if artifact and Path(artifact).exists():
+            artifact_hash = hashlib.sha256(Path(artifact).read_bytes()).hexdigest()
+
         max_disp = float(displacement_mag.detach().cpu().max().item())
         max_vm_elem = float(von_mises_elem.max().item())
         max_vm_node = float(node_vm.max().item())
@@ -150,6 +157,7 @@ class TorchFemBackend(SimulationBackend):
 
         result = {
             "backend": self.name,
+            "artifactHash": artifact_hash,
             "requestedDevice": device_info.requested,
             "actualDevice": device_info.actual,
             "dtype": device_info.dtype,
@@ -159,6 +167,7 @@ class TorchFemBackend(SimulationBackend):
             "torchVersion": torch.__version__,
             "torchFemVersion": __import__("importlib.metadata", fromlist=["version"]).version("torch-fem"),
             "mesh": {
+                "hash": mesh_hash,
                 "elementType": mesh.get("elementType"),
                 "meshSize": mesh.get("meshSize"),
                 "generator": mesh.get("generator"),
