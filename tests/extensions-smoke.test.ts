@@ -36,6 +36,12 @@ function mockPi(): MockPi {
     setActiveTools(names) {
       pi.activeTools = [...names];
     },
+    getActiveTools(): string[] {
+      return [...pi.activeTools];
+    },
+    getAllTools() {
+      return [];
+    },
     appendEntry() {},
     sendUserMessage() {},
     setSessionName() {},

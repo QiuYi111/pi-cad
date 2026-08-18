@@ -25,6 +25,8 @@ function mockPi(): MockPi {
     on() {},
     registerCommand() {},
     setActiveTools(names) { pi.activeTools = [...names]; },
+    getActiveTools(): string[] { return [...pi.activeTools]; },
+    getAllTools() { return []; },
     appendEntry() {},
     sendUserMessage() {},
   };

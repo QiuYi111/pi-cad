@@ -172,6 +172,10 @@ density/surface evidence, never a CAD candidate.
 - **Unavailable backends say so.** Missing Blender, PDF drawing, or GD&T
   support is reported as unavailable — the harness never substitutes a fake
   verifier.
+- **Plays well with other plugins.** Pi-CAD manages only its own `cad_*`
+  tools, as a phase overlay on the session's active tool set — it never
+  uninstalls or re-activates another extension's tools, and phase policy is
+  enforced at call time, not merely by hiding tools.
 
 ## Configuration
 

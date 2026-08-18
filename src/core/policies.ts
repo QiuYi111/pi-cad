@@ -1,9 +1,73 @@
 import { extname, isAbsolute, relative, resolve } from "node:path";
 
-import { CAPABILITY_TOOLS, type CadPhase } from "../shared/protocol.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+import {
+  CAPABILITY_TOOLS,
+  CONTROL_TOOLS,
+  type CadPhase,
+  type CadRunState,
+} from "../shared/protocol.ts";
 
 export const BUILTIN_READONLY = ["read", "grep", "find", "ls"];
 export const BUILTIN_SOURCE = [...BUILTIN_READONLY, "bash", "edit", "write"];
+
+/**
+ * Tools Pi-CAD is allowed to manage. Everything else in the host session —
+ * other extensions' tools (Goal, Ralph, ...), builtin tools the user enabled
+ * or disabled — is explicitly NOT ours: `setActiveTools` replaces the whole
+ * global set, so touching anything outside this namespace would silently
+ * uninstall other plugins' tools.
+ */
+export const PI_CAD_OWNED_TOOLS: ReadonlySet<string> = new Set<string>([
+  ...CONTROL_TOOLS,
+  ...CAPABILITY_TOOLS,
+]);
+
+function effectivePhase(state: CadRunState | null): CadPhase {
+  if (!state || state.status === "done" || state.status === "aborted") {
+    return "intake";
+  }
+  return state.phase;
+}
+
+/**
+ * Apply the Pi-CAD phase tool policy as an OVERLAY on the global active tool
+ * set, never as the global set itself:
+ *
+ * 1. read the actual current active set (preserving other plugins and user
+ *    tool choices, including deliberately disabled ones);
+ * 2. remove only the Pi-CAD-owned tools;
+ * 3. re-add the Pi-CAD-owned tools valid for the current phase.
+ *
+ * This is visibility/prompt hygiene only — actual enforcement lives in the
+ * `tool_call` guard, so a manually re-activated tool still cannot bypass the
+ * phase policy.
+ */
+export function applyCadToolOverlay(pi: ExtensionAPI, state: CadRunState | null): void {
+  const phase = effectivePhase(state);
+  const phaseAllowed = new Set(toolsForPhase(phase));
+
+  // Current global active set. The host API guarantees getActiveTools(); the
+  // optional chaining keeps minimal test doubles working (they track state
+  // through setActiveTools only).
+  const current = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+  const next = new Set<string>(current);
+
+  for (const name of PI_CAD_OWNED_TOOLS) {
+    next.delete(name);
+  }
+
+  const all = typeof pi.getAllTools === "function" ? pi.getAllTools() : [];
+  const registered = all.length > 0 ? new Set(all.map((tool) => tool.name)) : null;
+  for (const name of PI_CAD_OWNED_TOOLS) {
+    if (phaseAllowed.has(name) && (registered === null || registered.has(name))) {
+      next.add(name);
+    }
+  }
+
+  pi.setActiveTools([...next]);
+}
 
 const REVIEW_TOOLS = [
   ...BUILTIN_READONLY,

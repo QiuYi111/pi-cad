@@ -27,6 +27,12 @@ test("before_agent_start restores canonical state and active tool policy after r
     setActiveTools(names: string[]) {
       pi.activeTools = [...names];
     },
+    getActiveTools(): string[] {
+      return [...pi.activeTools];
+    },
+    getAllTools() {
+      return [];
+    },
     appendEntry() {},
     sendUserMessage() {},
     events: { emit() {}, on() {} },

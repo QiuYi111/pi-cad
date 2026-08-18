@@ -14,7 +14,7 @@ import { composeSystemPrompt } from "./context.ts";
 import { maybeAutoContinue } from "./continuation.ts";
 import { registerControlTools, type ControllerDeps } from "./controller.ts";
 import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
-import { isMutatingBash, toolsForPhase, writePathAllowed } from "./policies.ts";
+import { applyCadToolOverlay, isMutatingBash, PI_CAD_OWNED_TOOLS, toolsForPhase, writePathAllowed } from "./policies.ts";
 import { resumeFromUser } from "./state-machine.ts";
 
 const OPTIONAL_TOOL_NAMES = [
@@ -34,7 +34,9 @@ async function persist(
   for (const event of events) {
     await store.appendEvent(event.type, event.data);
   }
-  pi.setActiveTools(toolsForPhase(state.phase));
+  // Overlay, not replace: Pi-CAD only owns its own cad_* tools and must not
+  // uninstall other plugins' active tools (Goal, Ralph, ...).
+  applyCadToolOverlay(pi, state);
   pi.events.emit("pi-cad:state-changed", state);
   try {
     pi.appendEntry<CadRunState>("pi-cad-run-state", state);
@@ -215,7 +217,10 @@ export default function cadCore(pi: ExtensionAPI) {
       ]);
     }
     const active = state && state.status !== "done" && state.status !== "aborted";
-    if (active && state) pi.setActiveTools(toolsForPhase(state.phase));
+    // Always apply — also when idle/done/aborted — so a finished run drops
+    // back to the intake overlay (cad_route) without disturbing any other
+    // plugin's active tools.
+    applyCadToolOverlay(pi, active ? state : null);
     const missing = await unavailableCapabilities(pi, ctx.cwd);
     return {
       systemPrompt: `${event.systemPrompt}\n\n${await composeSystemPrompt("", active ? state : null, missing, project)}`,
@@ -226,6 +231,17 @@ export default function cadCore(pi: ExtensionAPI) {
     const store = new CadProjectStore(ctx.cwd);
     const state = await guardState(store);
     if (!state) return;
+
+    // Phase enforcement for Pi-CAD-owned tools. setActiveTools is only
+    // visibility hygiene; a tool force-reactivated by the user or another
+    // extension must still be blocked here.
+    const phaseAllowed = new Set(toolsForPhase(state.phase));
+    if (PI_CAD_OWNED_TOOLS.has(event.toolName) && !phaseAllowed.has(event.toolName)) {
+      return {
+        block: true,
+        reason: `Pi-CAD: ${event.toolName} is not available in phase ${state.phase}`,
+      };
+    }
 
     if (event.toolName === "write" || event.toolName === "edit") {
       const input = event.input as { path?: string };

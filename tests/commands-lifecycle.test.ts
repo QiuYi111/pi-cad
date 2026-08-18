@@ -17,6 +17,7 @@ function mockPi() {
     registerCommand(name: string, options: any) { pi.commands.set(name, options); },
     on(event: string, handler: any) { pi.handlers.set(event, handler); },
     setActiveTools(names: string[]) { pi.activeTools = [...names]; },
+    getActiveTools(): string[] { return [...pi.activeTools]; },
     appendEntry() {},
     sendUserMessage(text: string) { pi.sent.push(text); },
     events: { emit() {}, on() {} },
