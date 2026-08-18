@@ -20,6 +20,11 @@ jobs:
       - name: Set up headless display
         uses: pyvista/setup-headless-display-action@v3
 
+      # The gmsh wheel's bundled libgmsh dlopens libGLU.so.1, which is not on
+      # GitHub runners (or minimal headless servers) by default.
+      - name: Install system libraries for gmsh
+        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22

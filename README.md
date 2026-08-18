@@ -135,6 +135,9 @@ automatically (`scripts/postinstall.mjs`):
   the install — set `PI_CAD_SKIP_CUPY=1` to opt out);
 - writes `.pi-cad-runtime.json` from `cadctl doctor --json`.
 
+Headless Linux hosts also need `libglu1-mesa` (the gmsh wheel's bundled
+library dlopens `libGLU.so.1`): `sudo apt-get install -y libglu1-mesa`.
+
 For a repository checkout without running package install:
 
 ```bash
