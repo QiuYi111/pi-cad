@@ -9,14 +9,16 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SITE = ROOT / ".python" / "site-packages"
-
 
 def cadctl_env() -> dict:
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        [str(ROOT / "python"), str(SITE), env.get("PYTHONPATH", "")]
-    )
+    site = ROOT / ".python" / "site-packages"
+    entries = [str(ROOT / "python")]
+    if site.exists():
+        entries.append(str(site))
+    if env.get("PYTHONPATH"):
+        entries.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(entries)
     return env
 
 
@@ -34,7 +36,6 @@ def run_cadctl(*args: str, cwd: Path) -> dict:
     return json.loads(proc.stdout)
 
 
-@unittest.skipUnless(SITE.exists(), "local simulation runtime not installed")
 class SimulationTests(unittest.TestCase):
     def test_doctor_reports_torch_fem_and_optimization(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,7 +57,7 @@ class SimulationTests(unittest.TestCase):
                         "mesh": {"element": "tet", "box": [100, 10, 10], "size": 5.0},
                         "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
                         "constraints": [{"type": "fixed", "region": {"axis": "x", "side": "min"}}],
-                        "loads": [{"type": "force", "region": {"axis": "x", "side": "max"}, "vector": [0, 0, -100.0]}],
+                        "loads": [{"type": "nodal_force", "region": {"axis": "x", "side": "max"}, "vector": [0, 0, -100.0]}],
                     }
                 ),
                 encoding="utf-8",
@@ -67,7 +68,11 @@ class SimulationTests(unittest.TestCase):
             self.assertEqual(payload["backend"], "torch-fem")
             self.assertGreater(payload["displacement"]["maxMagnitude"], 0.0)
             self.assertGreater(payload["mesh"]["elementCount"], 0)
+            self.assertLess(abs(abs(payload["reaction"]["sum"]) - 100.0) / 100.0, 0.02)
             self.assertTrue((root / "out" / "simulation-result.json").exists())
+            self.assertTrue((root / "out" / "simulation-fields.npz").exists())
+            self.assertEqual(payload["visualization"]["status"], "ready")
+            self.assertEqual(len(payload["visualization"]["views"]), 7)
 
     def test_topology_optimization_walking_skeleton(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

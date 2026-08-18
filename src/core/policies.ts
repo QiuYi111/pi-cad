@@ -103,7 +103,7 @@ export function isMutatingBash(command: string): boolean {
   if (/\b(rm|mv|cp|touch|tee|install|chmod|chown|ln|mkfs|dd)\b/.test(c)) return true;
   if (/(^|[|&;]\s*)(cat|echo|printf|python3?|uv)\b[^\n|&;]*\s(>>?)\s/.test(c)) return true;
   if (/>\s*\S/.test(c) && !/(2>)/.test(c)) return true;
-  if (/\bcadctl\s+(build|render|export|drawing|simulate|present)\b/.test(c)) return true;
+  if (/\bcadctl\s+(build|render|export|drawing|simulate|optimize|present)\b/.test(c)) return true;
   return false;
 }
 

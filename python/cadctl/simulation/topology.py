@@ -32,12 +32,18 @@ def run_topology(spec: dict[str, Any], workdir: str | Path) -> dict[str, Any]:
     from torchfem.planar import Planar
 
     domain = spec.get("designDomain") or {}
-    lx = float(domain.get("x", [0, 60])[1] if isinstance(domain.get("x", [0, 60]), (list, tuple)) else domain.get("x", 60))
-    ly = float(domain.get("y", [0, 20])[1] if isinstance(domain.get("y", [0, 20]), (list, tuple)) else domain.get("y", 20))
+    x_domain = domain.get("x", [0, 60])
+    y_domain = domain.get("y", [0, 20])
+    x_domain = [float(x_domain[0]), float(x_domain[1])] if isinstance(x_domain, (list, tuple)) else [0.0, float(x_domain)]
+    y_domain = [float(y_domain[0]), float(y_domain[1])] if isinstance(y_domain, (list, tuple)) else [0.0, float(y_domain)]
+    lx = x_domain[1] - x_domain[0]
+    ly = y_domain[1] - y_domain[0]
     nx = int(domain.get("nx", 48))
     ny = int(domain.get("ny", 16))
     nodes, elements = rect_tri(nx, ny, lx, ly, variant="zigzag")
     nodes = nodes.to(torch.float64)
+    nodes[:, 0] += x_domain[0]
+    nodes[:, 1] += y_domain[0]
     elements = elements.to(torch.int64)
     n_elem = elements.shape[0]
 
@@ -95,7 +101,7 @@ def run_topology(spec: dict[str, Any], workdir: str | Path) -> dict[str, Any]:
 
     def constraint(x_np: np.ndarray, grad: np.ndarray) -> float:
         if grad.size > 0:
-            grad[:] = 1.0 / x_np.size
+            grad[:] = 1.0 / (x_np.size * volfrac)
         value = float(np.mean(x_np) / volfrac - 1.0)
         constraint_history.append(value)
         return value
@@ -116,7 +122,7 @@ def run_topology(spec: dict[str, Any], workdir: str | Path) -> dict[str, Any]:
         "density": density,
     }
     result = {
-        "mode": "topology",
+        "mode": "topology_2d_rect_v0",
         "backend": "torch-fem + nlopt MMA",
         "optimizer": {"type": "mma", "maxIterations": max_iter},
         "objective": spec.get("objective", {"type": "compliance", "sense": "minimize"}),
@@ -124,7 +130,7 @@ def run_topology(spec: dict[str, Any], workdir: str | Path) -> dict[str, Any]:
         "iterations": len(objective_history),
         "objectiveHistory": objective_history,
         "constraintHistory": constraint_history,
-        "bestObjective": objective_history[-1] if objective_history else None,
+        "bestObjective": min(objective_history) if objective_history else None,
         "finalVolumeFraction": float(np.mean(x_opt)),
         "densityField": density,
         "surfaceMesh": surface_mesh,

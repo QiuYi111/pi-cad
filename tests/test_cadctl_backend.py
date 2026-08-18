@@ -247,7 +247,7 @@ class CadctlBackendTests(unittest.TestCase):
                     "mesh": {"element": "tet", "box": [20, 10, 2], "size": 2.0},
                     "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
                     "constraints": [{"type": "fixed", "region": {"axis": "x", "side": "min"}}],
-                    "loads": [{"type": "force", "region": {"axis": "x", "side": "max"}, "vector": [0, 0, -10.0]}],
+                    "loads": [{"type": "nodal_force", "region": {"axis": "x", "side": "max"}, "vector": [0, 0, -10.0]}],
                 }
             ),
             encoding="utf-8",

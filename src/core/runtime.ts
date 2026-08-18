@@ -5,8 +5,11 @@ import {
   type CadRunState,
   type EvidenceRef,
 } from "../shared/protocol.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { CadProjectStore, nowIso } from "../shared/store.ts";
 import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
+import { packageRoot } from "../shared/capability.ts";
 import { composeSystemPrompt } from "./context.ts";
 import { maybeAutoContinue } from "./continuation.ts";
 import { registerControlTools, type ControllerDeps } from "./controller.ts";
@@ -46,11 +49,19 @@ async function guardState(store: CadProjectStore): Promise<CadRunState | null> {
   return state;
 }
 
+function envelopeOk(
+  envelope: Parameters<typeof recordToolEvidence>[1] | undefined,
+): boolean {
+  return Boolean(envelope && envelope.ok);
+}
+
 function customToolDetails(event: ToolResultEvent) {
   if (!("details" in event)) return undefined;
   return event.details as
     | {
         envelope?: {
+          ok?: boolean;
+          payload?: { status?: string };
           inputHashes?: Record<string, string>;
           artifacts?: Array<{ path: string }>;
           tool?: string;
@@ -72,6 +83,14 @@ async function handleToolResult(
   if (!info?.envelope || !info.kind) return;
   const kind = info.kind as EvidenceRef["kind"];
   if (!EVIDENCE_KINDS.includes(kind)) return;
+  if (!envelopeOk(info.envelope)) return;
+  if (kind === "simulation") {
+    const payload = info.envelope.payload as { status?: string } | undefined;
+    if (payload?.status !== "solved" || (info.envelope.artifacts?.length ?? 0) === 0) {
+      return;
+    }
+  }
+  if (kind === "optimization" && (info.envelope.artifacts?.length ?? 0) === 0) return;
   const artifactHash =
     info.artifactHash ??
     info.envelope.inputHashes?.artifact ??
@@ -91,12 +110,33 @@ async function handleToolResult(
   ]);
 }
 
-function unavailableCapabilities(pi: ExtensionAPI): string[] {
+async function unavailableCapabilities(pi: ExtensionAPI): Promise<string[]> {
   const available = new Set((pi.getAllTools?.() ?? []).map((tool) => tool.name));
   const missing = [...CAPABILITY_TOOLS].filter((name) => !available.has(name));
-  return missing.filter((name) =>
+  const result = missing.filter((name) =>
     (OPTIONAL_TOOL_NAMES as readonly string[]).includes(name),
   );
+  try {
+    const raw = await readFile(join(packageRoot(), ".pi-cad-runtime.json"), "utf-8");
+    const doctor = JSON.parse(raw) as {
+      capabilities?: {
+        simulation?: { status?: string };
+        differentiableOptimization?: { status?: string };
+      };
+    };
+    if (available.has("cad_simulate") && doctor.capabilities?.simulation?.status !== "ready") {
+      result.push("cad_simulate: doctor simulation backend not ready");
+    }
+    if (
+      available.has("cad_optimize") &&
+      doctor.capabilities?.differentiableOptimization?.status !== "ready"
+    ) {
+      result.push("cad_optimize: doctor differentiableOptimization not ready");
+    }
+  } catch {
+    // No doctor report installed yet; fall back to tool-registration check.
+  }
+  return result;
 }
 
 export default function cadCore(pi: ExtensionAPI) {
@@ -166,7 +206,7 @@ export default function cadCore(pi: ExtensionAPI) {
     }
     const active = state && state.status !== "done" && state.status !== "aborted";
     if (active && state) pi.setActiveTools(toolsForPhase(state.phase));
-    const missing = unavailableCapabilities(pi);
+    const missing = await unavailableCapabilities(pi);
     return {
       systemPrompt: `${event.systemPrompt}\n\n${await composeSystemPrompt("", active ? state : null, missing, project)}`,
     };

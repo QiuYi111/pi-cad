@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -70,23 +70,44 @@ if (mode === "target") {
   const env = { ...process.env, PYTHONPATH: join(root, ".python", "pip-target") };
   run(python, ["-m", "pip", "install", "--target", join(root, ".python", "site-packages"), "-r", "python/requirements-core.txt"], { env });
   const pipTarget = ["-m", "pip", "install", "--target", join(root, ".python", "site-packages")];
+  // Install torch on every platform. Linux CPU uses the CPU wheel index;
+  // NVIDIA/macOS/Windows use the default PyTorch wheel for that platform.
   if (process.platform === "linux" && !has("nvidia-smi")) {
     run(python, [...pipTarget, "torch", "--index-url", "https://download.pytorch.org/whl/cpu"], { env });
+  } else {
+    run(python, [...pipTarget, "torch"], { env });
   }
   run(python, [...pipTarget, "-r", "python/requirements-simulation-runtime.txt"], { env });
-  run(python, [...pipTarget, "--no-deps", "torch-fem"], { env });
+  // Full torch-fem install first. If the optional pyamg build is unavailable
+  // on this host, install the package without it; Pi-CAD records that pyamg
+  // is unavailable and uses direct spsolve for the V1 small systems.
+  try {
+    run(python, [...pipTarget, "torch-fem"], { env });
+  } catch {
+    run(python, [...pipTarget, "--no-deps", "torch-fem"], { env });
+  }
 } else {
   await ensurePip(python);
   run(python, ["-m", "pip", "install", "--upgrade", "pip"]);
   run(python, ["-m", "pip", "install", "-r", "python/requirements-core.txt"]);
   if (process.platform === "linux" && !has("nvidia-smi")) {
     run(python, ["-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cpu"]);
+  } else {
+    run(python, ["-m", "pip", "install", "torch"]);
   }
   run(python, ["-m", "pip", "install", "-r", "python/requirements-simulation-runtime.txt"]);
-  run(python, ["-m", "pip", "install", "--no-deps", "torch-fem"]);
+  try {
+    run(python, ["-m", "pip", "install", "torch-fem"]);
+  } catch {
+    run(python, ["-m", "pip", "install", "--no-deps", "torch-fem"]);
+  }
 }
 
-const env = { ...process.env, PYTHONPATH: join(root, "python") };
+const pythonPath = [join(root, "python")]
+  .concat(mode === "target" ? [join(root, ".python", "site-packages"), join(root, ".python", "pip-target")] : [])
+  .concat(process.env.PYTHONPATH ? [process.env.PYTHONPATH] : [])
+  .join(delimiter);
+const env = { ...process.env, PYTHONPATH: pythonPath };
 const doctor = JSON.parse(
   execFileSync(python, ["-m", "cadctl", "doctor", "--json"], {
     cwd: root,

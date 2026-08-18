@@ -5,6 +5,7 @@ import { Type } from "typebox";
 
 import {
   optimizationCommand,
+  readImageContents,
   simulationCommand,
 } from "../../shared/capability.ts";
 import { sha256File } from "../../shared/store.ts";
@@ -22,6 +23,7 @@ function shortSimulationText(envelope: any): string {
     `maxDisplacement=${p.displacement?.maxMagnitude}`,
     `maxVonMises(element)=${p.stress?.maxVonMisesElement}`,
     `resultArtifact=${p.artifact ?? ""}`,
+    `views=${(p.visualization?.views ?? []).length}`,
   ].join("\n");
 }
 
@@ -51,8 +53,16 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       } catch {
         // Keep spec hash as provenance fallback.
       }
+      const images =
+        envelope.ok && (envelope.payload as any)?.status === "solved"
+          ? await readImageContents(
+              ((envelope.payload as any)?.visualization?.views ?? []).map(
+                (view: { path: string }) => view.path,
+              ),
+            )
+          : [];
       return {
-        content: [{ type: "text", text: shortSimulationText(envelope) }],
+        content: [{ type: "text", text: shortSimulationText(envelope) }, ...images],
         details: { envelope, artifactHash, kind: "simulation" as const },
       };
     },
@@ -62,7 +72,7 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
     name: "cad_optimize",
     label: "CAD Optimize",
     description:
-      "Run a differentiable topology optimization over a fixed FE-native density field using the NLopt MMA inner loop. The optimizer never calls the LLM and the result is density/surface data only; it does not update Project Head.",
+      "Run the V0 differentiable 2D rectangular topology optimization walking skeleton: SIMP density + torch-fem autograd + NLopt MMA. The optimizer never calls the LLM and the result is density/surface data only; it does not update Project Head.",
     promptSnippet: "Run deterministic differentiable topology optimization (SIMP + MMA)",
     promptGuidelines: [
       "Only use when a continuous, mesh-native design variable is appropriate.",

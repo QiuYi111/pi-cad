@@ -335,21 +335,47 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
     try:
         payload = run_simulation(args.spec, args.output_dir, stage=args.stage)
         input_hashes = {"spec": sha256_file(args.spec)}
+        artifacts: list[dict[str, str]] = []
         if args.stage == "run":
             spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
             artifact = spec.get("artifact")
             if artifact and Path(artifact).exists():
                 input_hashes["artifact"] = sha256_file(artifact)
+            result_artifact = payload.get("artifact")
+            if payload.get("status") == "solved" and result_artifact and Path(result_artifact).exists():
+                artifacts.append(
+                    {"path": result_artifact, "kind": "simulation", "sha256": sha256_file(result_artifact)}
+                )
+            for field_artifact in payload.get("fieldArtifacts") or []:
+                if Path(field_artifact).exists():
+                    artifacts.append(
+                        {"path": field_artifact, "kind": "simulation_fields", "sha256": sha256_file(field_artifact)}
+                    )
+            for view in (payload.get("visualization") or {}).get("views") or []:
+                view_path = view.get("path")
+                if view_path and Path(view_path).exists():
+                    artifacts.append(
+                        {"path": view_path, "kind": "simulation_visual", "sha256": sha256_file(view_path)}
+                    )
+        if args.stage == "run" and payload.get("status") == "unavailable":
+            emit_error(
+                "cad_simulate",
+                str(payload.get("reason", "simulation backend unavailable")),
+                input_hashes=input_hashes,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return 0
         emit(
             "cad_simulate",
             payload,
             input_hashes=input_hashes,
-            warnings=["simulation capability is optional and may be unavailable"] if payload.get("status") == "unavailable" else [],
+            artifacts=artifacts,
+            warnings=[] if payload.get("status") == "solved" else ["simulation did not produce satisfying evidence"],
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0
     except Exception as exc:
-        emit_error("cad_run_simulation", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
+        emit_error("cad_simulate", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
         return 0
 
 

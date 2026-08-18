@@ -32,7 +32,9 @@ def _torch_fem_status() -> dict[str, Any]:
             "devices": {
                 "cpu": True,
                 "cuda": info.cudaAvailable,
-                "mps": info.mpsAvailable,
+                "cupy": info.cupyAvailable,
+                "mps": False,
+                "mpsHardware": info.mpsAvailable,
             },
             "requestedDevice": info.requested,
             "actualDevice": info.actual,

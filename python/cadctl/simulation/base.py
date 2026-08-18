@@ -11,6 +11,7 @@ class DeviceInfo:
     dtype: str
     fallbackReason: str | None = None
     cudaAvailable: bool = False
+    cupyAvailable: bool = False
     mpsAvailable: bool = False
 
 

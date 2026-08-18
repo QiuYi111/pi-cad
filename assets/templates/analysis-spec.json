@@ -1,13 +1,36 @@
 {
   "artifact": "build/part.step",
-  "solver": "calculix",
-  "analysis": "static",
-  "materials": "spec/materials.json",
-  "loads": "spec/loads.json",
-  "constraints": "spec/bc.json",
-  "mesh": "spec/mesh.json",
-  "acceptance": {
-    "equilibrium_relative_error_max": 0.02,
-    "screening_only": true
-  }
+  "backend": "torch-fem",
+  "device": "auto",
+  "units": "mm_N_MPa",
+  "physics": {
+    "type": "linear_elasticity"
+  },
+  "mesh": {
+    "element": "tet",
+    "size": 2.0
+  },
+  "materials": [
+    {
+      "name": "steel",
+      "E": 210000,
+      "nu": 0.3,
+      "density": 7.85e-9
+    }
+  ],
+  "constraints": [
+    {
+      "type": "fixed",
+      "region": { "axis": "x", "side": "min" },
+      "dofs": [0, 1, 2]
+    }
+  ],
+  "loads": [
+    {
+      "type": "nodal_force",
+      "region": { "axis": "x", "side": "max" },
+      "vector": [0, 0, -100],
+      "distribute": "total"
+    }
+  ]
 }

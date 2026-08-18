@@ -14,19 +14,39 @@ from .mesh import mesh_step_tetra, structured_tetra_box
 def resolve_device(requested: str = "auto") -> DeviceInfo:
     import torch
 
-    cuda = bool(torch.cuda.is_available())
-    mps = bool(getattr(getattr(torch.backends, "mps", None), "is_available", lambda: False)())
-    candidates = {"cpu": True, "cuda": cuda, "mps": mps}
-    actual = requested if requested in candidates and candidates[requested] else "auto"
+    torch_cuda = bool(torch.cuda.is_available())
+    mps_hardware = bool(
+        getattr(getattr(torch.backends, "mps", None), "is_available", lambda: False)()
+    )
+    cupy = False
+    try:
+        import cupy  # noqa: F401
+
+        cupy = True
+    except Exception:
+        cupy = False
+    # torch-fem's GPU sparse solver requires CuPy. Do not advertise CUDA as
+    # usable without it. MPS has no torch-fem sparse backend in 0.6: always
+    # fall back to CPU explicitly.
+    cuda_usable = torch_cuda and cupy
+    actual = "cpu"
     fallback = None
-    if actual == "auto":
-        actual = "cuda" if cuda else "mps" if mps else "cpu"
-    elif requested == "cuda" and not cuda:
-        actual, fallback = ("mps" if mps else "cpu"), "cuda unavailable"
-    elif requested == "mps" and not mps:
-        actual, fallback = ("cuda" if cuda else "cpu"), "mps unavailable"
-    dtype = "float32" if actual in ("cuda", "mps") else "float64"
-    return DeviceInfo(requested, actual, dtype, fallback, cuda, mps)
+    if requested == "auto":
+        if cuda_usable:
+            actual = "cuda"
+        elif mps_hardware or torch_cuda:
+            fallback = "cuda/cupy missing" if torch_cuda else "mps sparse backend unavailable"
+        else:
+            fallback = None
+    elif requested == "cuda":
+        if cuda_usable:
+            actual = "cuda"
+        else:
+            fallback = "cuda requires cupy; cupy not installed" if torch_cuda else "cuda unavailable"
+    elif requested == "mps":
+        fallback = "torch-fem has no MPS sparse solver; explicit CPU fallback"
+    # Float64 is the torch-fem recommended default for all Pi-CAD devices.
+    return DeviceInfo(requested, actual, "float64", fallback, cuda_usable, cupy, mps_hardware)
 
 
 def _select_nodes(nodes: np.ndarray, region: dict[str, Any], tolerance: float) -> np.ndarray:
@@ -61,6 +81,10 @@ def _apply_regions(model: Any, nodes: np.ndarray, spec: dict[str, Any], mesh_siz
     model.forces[:] = 0.0
 
     for constraint in spec.get("constraints") or []:
+        if constraint.get("type") != "fixed":
+            raise SimulationBackendError(
+                f"constraint type {constraint.get('type')!r} is unsupported; V1 supports only fixed"
+            )
         region = constraint.get("region") or constraint.get("nodes") or {}
         selected = _select_nodes(nodes, region, tol)
         if "indices" in region:
@@ -68,18 +92,26 @@ def _apply_regions(model: Any, nodes: np.ndarray, spec: dict[str, Any], mesh_siz
         if len(selected) == 0:
             raise SimulationBackendError("constraint region selected no nodes")
         dofs = constraint.get("dofs", [0, 1, 2])
+        if not isinstance(dofs, (list, tuple)) or any(int(d) not in (0, 1, 2) for d in dofs):
+            raise SimulationBackendError("fixed constraint dofs must be a subset of [0,1,2]")
         model.constraints[selected, :] = False
         for dof in dofs:
             model.constraints[selected, int(dof)] = True
 
     for load in spec.get("loads") or []:
+        if load.get("type") != "nodal_force":
+            raise SimulationBackendError(
+                f"load type {load.get('type')!r} is unsupported; V1 supports only nodal_force"
+            )
         region = load.get("region") or load.get("nodes") or {}
         selected = _select_nodes(nodes, region, tol)
         if "indices" in region:
             selected = np.asarray(region["indices"], dtype=int)
         if len(selected) == 0:
             raise SimulationBackendError("load region selected no nodes")
-        vector = np.asarray(load.get("vector", [0, 0, 0]), dtype=np.float64)
+        if load.get("vector") is None:
+            raise SimulationBackendError("nodal_force requires vector")
+        vector = np.asarray(load["vector"], dtype=np.float64)
         if vector.shape != (3,):
             raise SimulationBackendError("load.vector must be a 3-vector")
         if load.get("distribute", "total") == "total":
@@ -100,7 +132,7 @@ class TorchFemBackend(SimulationBackend):
         from torchfem.solid import Solid
 
         device_info = resolve_device(spec.get("device", "auto"))
-        torch.set_default_dtype(torch.float32 if device_info.dtype == "float32" else torch.float64)
+        torch.set_default_dtype(torch.float64)
 
         artifact = spec.get("artifact")
         mesh_spec = spec.get("mesh") or {}
@@ -150,19 +182,39 @@ class TorchFemBackend(SimulationBackend):
         if artifact and Path(artifact).exists():
             artifact_hash = hashlib.sha256(Path(artifact).read_bytes()).hexdigest()
 
+        visualization: dict[str, Any] = {"status": "unavailable", "views": []}
+        try:
+            from .visualization import render_simulation_views
+
+            visual_dir = Path(workdir) / "visualization"
+            visualization = render_simulation_views(
+                nodes_np,
+                elements_np,
+                u.detach().cpu().numpy(),
+                von_mises_elem.numpy(),
+                visual_dir,
+                field_name="vonMises",
+            )
+            visualization["status"] = "ready"
+        except Exception as exc:
+            visualization["reason"] = str(exc)
+
         max_disp = float(displacement_mag.detach().cpu().max().item())
         max_vm_elem = float(von_mises_elem.max().item())
         max_vm_node = float(node_vm.max().item())
         reaction = float(f[model.constraints].sum().item())
 
         result = {
+            "units": "mm_N_MPa",
             "backend": self.name,
+            "visualization": visualization,
             "artifactHash": artifact_hash,
             "requestedDevice": device_info.requested,
             "actualDevice": device_info.actual,
             "dtype": device_info.dtype,
             "fallbackReason": device_info.fallbackReason,
             "cudaAvailable": device_info.cudaAvailable,
+            "cupyAvailable": device_info.cupyAvailable,
             "mpsAvailable": device_info.mpsAvailable,
             "torchVersion": torch.__version__,
             "torchFemVersion": __import__("importlib.metadata", fromlist=["version"]).version("torch-fem"),
@@ -177,17 +229,15 @@ class TorchFemBackend(SimulationBackend):
             "displacement": {
                 "maxMagnitude": max_disp,
                 "maxAbsComponent": float(u.detach().cpu().abs().max().item()),
-                "field": u.detach().cpu().numpy().tolist(),
             },
             "stress": {
                 "maxVonMisesElement": max_vm_elem,
                 "maxVonMisesNode": max_vm_node,
-                "elementField": sigma_cpu.numpy().tolist(),
             },
             "strain": {
                 "maxMagnitude": float(torch.linalg.norm(epsilon.detach().cpu().to(torch.float64).reshape(-1, 3, 3), dim=(1, 2)).max().item()),
             },
-            "reaction": {"sum": reaction, "field": f.detach().cpu().numpy().tolist()},
+            "reaction": {"sum": reaction},
             "solver": {
                 "linear": "differentiable_sparse_solve",
                 "device": device_info.actual,
@@ -195,8 +245,18 @@ class TorchFemBackend(SimulationBackend):
             },
             "interpretationPolicy": "raw deterministic fields only; safety and acceptance are Agent decisions",
         }
+        fields_path = Path(workdir) / "simulation-fields.npz"
+        fields_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            fields_path,
+            displacement=u.detach().cpu().numpy(),
+            stress=sigma_cpu.numpy(),
+            strain=epsilon.detach().cpu().to(torch.float64).numpy(),
+            reaction=f.detach().cpu().numpy(),
+        )
         out_path = Path(workdir) / "simulation-result.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        result["fieldArtifacts"] = [str(fields_path)]
         out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
         result["artifact"] = str(out_path)
         return result

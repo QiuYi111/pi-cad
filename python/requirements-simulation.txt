@@ -4,3 +4,5 @@ gmsh>=4.13
 meshio>=5.3
 pyvista>=0.44
 nlopt>=2.7
+scipy>=1.14
+matplotlib>=3.8
