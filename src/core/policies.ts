@@ -14,8 +14,14 @@ const REVIEW_TOOLS = [
   "cad_measure",
   "cad_compare_geometry",
   "cad_assembly_tree",
+  "cad_simulate",
+  "cad_optimize",
   "cad_transition",
 ];
+
+const SOURCE_CAPABILITY_TOOLS = CAPABILITY_TOOLS.filter(
+  (name) => name !== "cad_simulate" && name !== "cad_optimize",
+);
 
 const COGNITIVE_TOOLS = [
   ...BUILTIN_READONLY,
@@ -40,7 +46,7 @@ export function toolsForPhase(phase: CadPhase): string[] {
     case "convert":
       return [
         ...BUILTIN_SOURCE,
-        ...CAPABILITY_TOOLS,
+        ...SOURCE_CAPABILITY_TOOLS,
         "cad_commit_candidate",
         "cad_transition",
         "cad_wait_for_user",
@@ -58,9 +64,14 @@ export function toolsForPhase(phase: CadPhase): string[] {
     case "explain":
     case "concept":
     case "domain_analysis":
-      return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
+      return [...COGNITIVE_TOOLS, "cad_simulate", "cad_wait_for_user"];
     case "audit":
-      return [...COGNITIVE_TOOLS, ...CAPABILITY_TOOLS, "cad_commit_plan", "cad_wait_for_user"];
+      return [
+        ...COGNITIVE_TOOLS,
+        ...CAPABILITY_TOOLS.filter((name) => name !== "cad_optimize"),
+        "cad_commit_plan",
+        "cad_wait_for_user",
+      ];
     case "gap_closure":
       return [
         ...BUILTIN_SOURCE,
@@ -73,9 +84,15 @@ export function toolsForPhase(phase: CadPhase): string[] {
     case "package":
       return [...BUILTIN_READONLY, "bash", "edit", "write", ...CAPABILITY_TOOLS, "cad_commit_plan", "cad_transition", "cad_wait_for_user"];
     case "final_review":
-      return [...COGNITIVE_TOOLS, "cad_wait_for_user"];
+      return [...COGNITIVE_TOOLS, "cad_simulate", "cad_wait_for_user"];
     case "ready":
-      return [...BUILTIN_READONLY, "bash", ...CAPABILITY_TOOLS, "cad_finish"];
+      return [
+        ...BUILTIN_READONLY,
+        "bash",
+        ...SOURCE_CAPABILITY_TOOLS,
+        "cad_simulate",
+        "cad_finish",
+      ];
     case "done":
       return BUILTIN_READONLY;
   }

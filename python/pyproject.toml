@@ -1,12 +1,23 @@
 [project]
 name = "pi-cad-cadctl"
-version = "0.1.0"
+version = "0.6.0"
 description = "Deterministic build123d/STEP backend for the Pi-CAD V0 walking skeleton."
 requires-python = ">=3.10"
 dependencies = [
   "build123d>=0.11.1",
   "numpy>=2.0",
   "pillow>=11",
+  "ezdxf>=1.4",
+]
+
+[project.optional-dependencies]
+simulation = [
+  "torch>=2.5",
+  "torch-fem>=0.7",
+  "gmsh>=4.13",
+  "meshio>=5.3",
+  "pyvista>=0.44",
+  "nlopt>=2.7",
 ]
 
 [project.scripts]

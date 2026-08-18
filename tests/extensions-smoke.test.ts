@@ -78,7 +78,8 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_assembly_tree",
     "cad_export",
     "cad_generate_drawing",
-    "cad_run_simulation",
+    "cad_simulate",
+    "cad_optimize",
     "cad_render_scene",
   ];
   assert.deepEqual(pi.tools.sort(), [...expectedTools].sort());

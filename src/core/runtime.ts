@@ -16,7 +16,8 @@ import { resumeFromUser } from "./state-machine.ts";
 
 const OPTIONAL_TOOL_NAMES = [
   "cad_generate_drawing",
-  "cad_run_simulation",
+  "cad_simulate",
+  "cad_optimize",
   "cad_render_scene",
 ] as const;
 

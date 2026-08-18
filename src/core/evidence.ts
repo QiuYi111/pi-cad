@@ -22,6 +22,7 @@ export const EVIDENCE_KINDS: EvidenceRef["kind"][] = [
   "presentation",
   "convert",
   "assembly",
+  "optimization",
 ];
 
 export function verifyEvidenceFilesForHash(

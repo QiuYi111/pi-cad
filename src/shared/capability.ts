@@ -319,6 +319,18 @@ export async function presentationCommand(
   );
 }
 
+export async function optimizationCommand(
+  cwd: string,
+  spec: string,
+  outputDir: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    ["optimize", "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
+    { cwd, timeoutMs },
+  );
+}
+
 export async function imageContent(
   path: string,
 ): Promise<{ type: "image"; data: string; mimeType: string }> {

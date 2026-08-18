@@ -1,0 +1,2 @@
+jiti>=2.7
+typebox>=1.3

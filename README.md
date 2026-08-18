@@ -72,9 +72,33 @@ cad_build_step              cad_inspect_visual
 cad_inspect_geometry        cad_inspect_section
 cad_measure                 cad_compare_geometry
 cad_assembly_tree           cad_export
-cad_generate_drawing        cad_run_simulation
-cad_render_scene
+cad_generate_drawing        cad_simulate
+cad_optimize                cad_render_scene
 ```
+
+`cad_simulate` uses the torch-fem linear elasticity backend with gmsh STEP
+meshing. `cad_optimize` runs a differentiable SIMP topology optimization with
+an NLopt MMA inner loop; its output is density/surface evidence and never
+updates Project Head directly.
+
+### Evidence obligations
+
+`cad_commit_requirements` / `cad_commit_plan` accept:
+
+```json
+{
+  "evidenceObligations": {
+    "simulation": {
+      "disposition": "required",
+      "rationale": "strength controls acceptance"
+    }
+  }
+}
+```
+
+When `simulation.disposition = required`, `cad_transition(accepted)` and
+`cad_finish` require current-artifact simulation evidence. Candidate changes
+stale the old simulation automatically.
 
 Unavailable optional backends are returned explicitly (`simulation.run`,
 Blender/FFmpeg presentation, PDF drawing, standards-compliant GD&T). The
@@ -82,13 +106,21 @@ harness never substitutes a fake verifier or upgrades unavailable evidence.
 
 ## Python backend setup
 
+The Pi package postinstall installs a package-local Python runtime
+automatically (`scripts/postinstall.mjs`):
+
+- prefers `uv` / `python -m venv`;
+- falls back to `.python/site-packages` when system ensurepip is unavailable;
+- installs core CAD and simulation dependencies;
+- writes `.pi-cad-runtime.json` from `cadctl doctor --json`.
+
+For a repository checkout without running package install:
+
 ```bash
 scripts/bootstrap-python.sh
 ```
 
-The bootstrap prefers `.venv`; on systems without ensurepip it installs into
-repository-local `.python/site-packages`. Set `PI_CAD_PYTHON` to override the
-Python binary used by the harness.
+Set `PI_CAD_PYTHON` to override the Python binary used by the harness.
 
 ## Test
 

@@ -186,6 +186,21 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         release: "release",
       }),
       inputs: Type.Optional(Type.Array(Type.String())),
+      evidenceObligations: Type.Optional(
+        Type.Object({
+          simulation: Type.Optional(
+            Type.Object({
+              disposition: Type.Enum({
+                required: "required",
+                optional: "optional",
+                not_applicable: "not_applicable",
+                blocked_external: "blocked_external",
+              }),
+              rationale: Type.Optional(Type.String()),
+            }),
+          ),
+        }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
@@ -245,6 +260,21 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       reviewPlan: Type.Array(Type.String(), { default: [] }),
       architecture: Type.Optional(Type.Array(Type.String())),
       selectionRationale: Type.Optional(Type.String()),
+      evidenceObligations: Type.Optional(
+        Type.Object({
+          simulation: Type.Optional(
+            Type.Object({
+              disposition: Type.Enum({
+                required: "required",
+                optional: "optional",
+                not_applicable: "not_applicable",
+                blocked_external: "blocked_external",
+              }),
+              rationale: Type.Optional(Type.String()),
+            }),
+          ),
+        }),
+      ),
       workstreams: Type.Optional(
         Type.Array(
           Type.Object({
@@ -367,6 +397,15 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           acceptedEvidenceKinds(state),
         );
         if (evidenceVerification) return errTool(`cannot accept: ${evidenceVerification}`);
+        if (state.evidenceObligations?.simulation?.disposition === "required") {
+          const simVerification = verifyEvidenceFilesForHash(
+            ctx.cwd,
+            state,
+            state.currentArtifactHash,
+            ["simulation"],
+          );
+          if (simVerification) return errTool(`cannot accept: ${simVerification}`);
+        }
         const guard = spec.completionGuard?.(state);
         if (guard) return errTool(`cannot accept: ${guard}`);
       }
@@ -462,6 +501,15 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           spec?.finishEvidence(state) ?? ["visual", "geometry"],
         );
         if (evidenceVerification) return errTool(`cad_finish blocked: ${evidenceVerification}`);
+        if (state.evidenceObligations?.simulation?.disposition === "required") {
+          const simVerification = verifyEvidenceFilesForHash(
+            ctx.cwd,
+            state,
+            state.currentArtifactHash,
+            ["simulation"],
+          );
+          if (simVerification) return errTool(`cad_finish blocked: ${simVerification}`);
+        }
       }
       const result = finish(state);
       if (!result.ok) return errTool(result.reason);

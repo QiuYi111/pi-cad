@@ -1,6 +1,6 @@
 {
   "name": "pi-cad",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Harness-native agentic mechanical CAD for Pi: seven workflows, deterministic build123d/STEP tools, evidence-bound harness, and optional drawing/simulation/presentation plugins.",
   "type": "module",
   "keywords": [
@@ -26,7 +26,8 @@
     "test:py": "bash scripts/test.sh",
     "test:ts": "node tests/run-ts-tests.mjs",
     "setup:python": "bash scripts/bootstrap-python.sh",
-    "pack": "npm pack --cache .npm-cache"
+    "pack": "npm pack --cache .npm-cache",
+    "postinstall": "node scripts/postinstall.mjs"
   },
   "engines": {
     "node": ">=20.19.0"

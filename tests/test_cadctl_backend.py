@@ -241,13 +241,13 @@ class CadctlBackendTests(unittest.TestCase):
         analysis.write_text(
             json.dumps(
                 {
-                    "artifact": str(step),
-                    "solver": "calculix",
-                    "analysis": "static",
-                    "materials": "materials.json",
-                    "loads": "loads.json",
-                    "constraints": "bc.json",
-                    "mesh": "mesh.json",
+                    "backend": "torch-fem",
+                    "device": "auto",
+                    "physics": {"type": "linear_elasticity"},
+                    "mesh": {"element": "tet", "box": [20, 10, 2], "size": 2.0},
+                    "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
+                    "constraints": [{"type": "fixed", "region": {"axis": "x", "side": "min"}}],
+                    "loads": [{"type": "force", "region": {"axis": "x", "side": "max"}, "vector": [0, 0, -10.0]}],
                 }
             ),
             encoding="utf-8",
@@ -262,7 +262,7 @@ class CadctlBackendTests(unittest.TestCase):
             cwd=self.cwd,
         )
         self.assertTrue(sim["ok"])
-        self.assertEqual(sim["payload"]["status"], "unavailable")
+        self.assertEqual(sim["payload"]["backend"], "torch-fem")
 
     def test_failed_model_returns_envelope_not_traceback(self) -> None:
         bad = self.cwd / "bad.py"

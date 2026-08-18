@@ -1,0 +1,6 @@
+torch>=2.5
+torch-fem>=0.7
+gmsh>=4.13
+meshio>=5.3
+pyvista>=0.44
+nlopt>=2.7

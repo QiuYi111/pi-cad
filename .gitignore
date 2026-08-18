@@ -17,3 +17,7 @@ ref/
 *.tgz
 benchmarks/results/*
 !benchmarks/results/.gitkeep
+.pi-cad-runtime.json
+.postinstall-test.log
+.postinstall-test.pid
+.uv-cache/

@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SITE = ROOT / ".python" / "site-packages"
+
+
+def cadctl_env() -> dict:
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(ROOT / "python"), str(SITE), env.get("PYTHONPATH", "")]
+    )
+    return env
+
+
+def run_cadctl(*args: str, cwd: Path) -> dict:
+    proc = subprocess.run(
+        [sys.executable, "-m", "cadctl", *args],
+        cwd=cwd,
+        env=cadctl_env(),
+        capture_output=True,
+        text=True,
+        timeout=240,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr)
+    return json.loads(proc.stdout)
+
+
+@unittest.skipUnless(SITE.exists(), "local simulation runtime not installed")
+class SimulationTests(unittest.TestCase):
+    def test_doctor_reports_torch_fem_and_optimization(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            envelope = run_cadctl("doctor", "--json", cwd=Path(tmp))
+            self.assertIn("simulation", envelope["capabilities"])
+            self.assertEqual(envelope["capabilities"]["simulation"]["backend"], "torch-fem")
+            self.assertEqual(envelope["capabilities"]["differentiableOptimization"]["status"], "ready")
+
+    def test_beam_simulation_walking_skeleton(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "beam.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "backend": "torch-fem",
+                        "device": "auto",
+                        "physics": {"type": "linear_elasticity"},
+                        "mesh": {"element": "tet", "box": [100, 10, 10], "size": 5.0},
+                        "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
+                        "constraints": [{"type": "fixed", "region": {"axis": "x", "side": "min"}}],
+                        "loads": [{"type": "force", "region": {"axis": "x", "side": "max"}, "vector": [0, 0, -100.0]}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            envelope = run_cadctl("simulate", "run", "--spec", str(spec), "--output-dir", str(root / "out"), cwd=root)
+            self.assertTrue(envelope["ok"], envelope)
+            payload = envelope["payload"]
+            self.assertEqual(payload["backend"], "torch-fem")
+            self.assertGreater(payload["displacement"]["maxMagnitude"], 0.0)
+            self.assertGreater(payload["mesh"]["elementCount"], 0)
+            self.assertTrue((root / "out" / "simulation-result.json").exists())
+
+    def test_topology_optimization_walking_skeleton(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "mbb.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "mode": "topology",
+                        "designDomain": {"x": [0, 60], "y": [0, 20], "nx": 12, "ny": 4},
+                        "material": {"E": 1.0, "nu": 0.3},
+                        "objective": {"type": "compliance", "sense": "minimize"},
+                        "constraints": [{"type": "volume_fraction", "max": 0.5}],
+                        "optimizer": {"type": "mma", "maxIterations": 10, "penalty": 3.0, "Emin": 1e-3},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            envelope = run_cadctl("optimize", "--spec", str(spec), "--output-dir", str(root / "out"), cwd=root)
+            self.assertTrue(envelope["ok"], envelope)
+            payload = envelope["payload"]
+            self.assertGreater(payload["iterations"], 0)
+            self.assertLess(abs(payload["finalVolumeFraction"] - 0.5), 0.03)
+            self.assertTrue((root / "out" / "optimization-result.json").exists())
+
+
+    def test_gmsh_meshes_step_artifact(self) -> None:
+        from cadctl.model import run_source
+        from cadctl.simulation.mesh import mesh_step_tetra
+
+        with tempfile.TemporaryDirectory() as tmp:
+            step = Path(tmp) / "plate.step"
+            result = run_source(str(ROOT / "tests" / "fixtures" / "plate.py"), step)
+            self.assertEqual(result.get("exitCode"), 0)
+            mesh = mesh_step_tetra(step, 10.0)
+            self.assertGreater(len(mesh["nodes"]), 0)
+            self.assertGreater(len(mesh["elements"]), 0)
+            self.assertEqual(mesh["elementType"], "tet")
+
+    def test_topology_gradient_finite_difference_spot_check(self) -> None:
+        from cadctl.simulation._torchfem_import import import_torchfem
+
+        import_torchfem()
+        import torch
+        from torchfem.materials import IsotropicElasticityPlaneStress
+        from torchfem.mesh import rect_tri
+        from torchfem.planar import Planar
+
+        torch.set_default_dtype(torch.float64)
+        nodes, elements = rect_tri(6, 2, 10, 4, variant="zigzag")
+        nodes = nodes.double()
+        elements = elements.long()
+
+        def compliance(rho: torch.Tensor) -> torch.Tensor:
+            model = Planar(
+                nodes,
+                elements,
+                IsotropicElasticityPlaneStress(1e-3 + rho**3, 0.3),
+                1.0,
+            )
+            model.constraints[:] = False
+            model.forces[:] = 0.0
+            model.constraints[nodes[:, 0] <= nodes[:, 0].min() + 0.1, 0] = True
+            model.constraints[
+                (nodes[:, 0] >= nodes[:, 0].max() - 0.1)
+                & (nodes[:, 1] <= nodes[:, 1].min() + 0.1),
+                1,
+            ] = True
+            top = nodes[:, 0] <= nodes[:, 0].min() + 0.1
+            model.forces[top, 1] = -1.0 / top.sum()
+            u, *_ = model.solve(
+                increments=torch.tensor([0.0, 1.0], dtype=torch.float64),
+                differentiable_parameters=[rho],
+            )
+            return (u * model.forces).sum()
+
+        rho = torch.full((elements.shape[0],), 0.5, dtype=torch.float64, requires_grad=True)
+        value = compliance(rho)
+        value.backward()
+        analytical = rho.grad[0].item()
+        eps = 1e-5
+        rp = rho.detach().clone()
+        rp[0] += eps
+        rm = rho.detach().clone()
+        rm[0] -= eps
+        finite = (compliance(rp).item() - compliance(rm).item()) / (2 * eps)
+        self.assertLess(abs(analytical - finite) / max(abs(analytical), abs(finite)), 1e-5)
+
+
+if __name__ == "__main__":
+    unittest.main()

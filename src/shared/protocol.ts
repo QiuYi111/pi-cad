@@ -33,7 +33,8 @@ export const CAPABILITY_TOOLS = [
   "cad_compare_geometry",
   "cad_assembly_tree",
   "cad_export",
-  "cad_run_simulation",
+  "cad_simulate",
+  "cad_optimize",
   "cad_generate_drawing",
   "cad_render_scene",
 ] as const;
@@ -84,7 +85,8 @@ export interface EvidenceRef {
     | "simulation"
     | "presentation"
     | "convert"
-    | "assembly";
+    | "assembly"
+    | "optimization";
   tool: string;
   artifactHash: string;
   sourceHash?: string;
@@ -94,6 +96,7 @@ export interface EvidenceRef {
 
 export interface CadRequirements {
   goal: string;
+  evidenceObligations?: EvidenceObligations;
   deliverables: string[];
   must: string[];
   preferences: string[];
@@ -104,6 +107,19 @@ export interface CadRequirements {
   inputs?: string[];
 }
 
+export type EvidenceDisposition =
+  | "required"
+  | "optional"
+  | "not_applicable"
+  | "blocked_external";
+
+export interface EvidenceObligations {
+  simulation?: {
+    disposition: EvidenceDisposition;
+    rationale?: string;
+  };
+}
+
 export interface CadPlan {
   summary: string;
   protected: string[];
@@ -111,6 +127,7 @@ export interface CadPlan {
   interfaces: Array<Record<string, unknown>>;
   datums: string[];
   reviewPlan: string[];
+  evidenceObligations?: EvidenceObligations;
   architecture?: string[];
   selectionRationale?: string;
   workstreams?: Array<{ name: string; status: "open" | "complete" | "not_applicable" | "blocked_external" }>;
@@ -142,6 +159,7 @@ export interface CadRunState {
   evidence: EvidenceRef[];
   staleEvidence: EvidenceRef[];
   activeWorkstreams: string[];
+  evidenceObligations?: EvidenceObligations;
   workstreamStatuses?: Record<
     string,
     "open" | "complete" | "not_applicable" | "blocked_external"

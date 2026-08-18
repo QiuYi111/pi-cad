@@ -112,6 +112,7 @@ export function commitRequirements(
     mutationPolicy: mutationPolicyForPhase(nextPhase, state.workflow ?? undefined),
     requirementsVersion: hashRecord(record),
     maturity: record.maturity,
+    evidenceObligations: record.evidenceObligations ?? state.evidenceObligations,
     updatedAt: nowIso(),
   };
   return {
@@ -136,6 +137,7 @@ export function commitPlan(state: CadRunState, record: CadPlan): ActionResult {
     phase: nextPhase,
     mutationPolicy: mutationPolicyForPhase(nextPhase, state.workflow ?? undefined),
     planVersion: hashRecord(record),
+    evidenceObligations: record.evidenceObligations ?? state.evidenceObligations,
     workstreamStatuses: record.workstreams?.length
       ? Object.fromEntries(record.workstreams.map((w) => [w.name, w.status]))
       : state.workstreamStatuses,
@@ -295,6 +297,11 @@ export function transition(
         return { ok: false, reason: `cannot accept: current ${kind} evidence is missing` };
       }
     }
+    if (state.evidenceObligations?.simulation?.disposition === "required") {
+      if (!hasCurrentEvidence(state, "simulation")) {
+        return { ok: false, reason: "cannot accept: required simulation evidence is missing for the current artifact" };
+      }
+    }
     const guard = spec.completionGuard?.(state);
     if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
     const next: CadRunState = {
@@ -368,6 +375,11 @@ export function finish(state: CadRunState): ActionResult {
     for (const kind of spec.finishEvidence(state)) {
       if (!hasCurrentEvidence(state, kind)) {
         return { ok: false, reason: `cad_finish requires current ${kind} evidence` };
+      }
+    }
+    if (state.evidenceObligations?.simulation?.disposition === "required") {
+      if (!hasCurrentEvidence(state, "simulation")) {
+        return { ok: false, reason: "cad_finish requires required simulation evidence for the current artifact" };
       }
     }
   }

@@ -13,4 +13,10 @@ Reach a shared, actionable understanding for the requested maturity before execu
 - If the task is already fully specified (the V0 plate is an example), do not ask ceremonial questions: call cad_commit_requirements directly.
 - For workflows that start from supplied STEP/CAD (analyze, modify, hybrid, convert), put every supplied artifact path in inputs[].
 
-When the task is sufficiently defined, call cad_commit_requirements instead of starting CAD work directly.
+## Engineering simulation obligation
+
+- Identify whether the requested maturity and explicit physics constraints require engineering simulation evidence.
+- Do not require simulation ceremonially.
+- If strength, stiffness, thermal, flow, dynamics, or another quantitative physical behavior materially determines acceptance, record evidenceObligations.simulation.disposition = required.
+- If the decision can be made without simulation at the current maturity, use optional or not_applicable.
+- Missing external loads/materials/BCs should become blocked_external rather than invented.

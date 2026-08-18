@@ -201,3 +201,46 @@ test("wait_for_user pauses and resumeFromUser restores same phase", () => {
   assert.equal(resumed.status, "active");
   assert.equal(resumed.phase, "build");
 });
+
+test("required simulation evidence obligation blocks acceptance and finish until current simulation exists", () => {
+  const c = routeTo("quick");
+  assert.equal(c.ok, true); if (!c.ok) return;
+  let state = { ...c.state, evidenceObligations: { simulation: { disposition: "required" as const, rationale: "strength controls acceptance" } } };
+  state = candidate(state);
+  state = withEvidence(state, ["visual", "geometry"]);
+  const blocked = transition(state, "accepted", "no simulation");
+  assert.equal(blocked.ok, false);
+
+  state = {
+    ...state,
+    evidence: [
+      ...state.evidence,
+      {
+        id: "sim-1",
+        kind: "simulation" as const,
+        tool: "cad_simulate",
+        artifactHash: "artifact-hash",
+        paths: ["evidence/simulation-result.json"],
+        createdAt: new Date().toISOString(),
+      },
+    ],
+  };
+  const accepted = transition(state, "accepted", "simulation current");
+  assert.equal(accepted.ok, true);
+});
+
+test("simulation tool availability follows the 0.6 matrix", async () => {
+  const { toolsForPhase } = await import("../src/core/policies.ts");
+  const phase = (p: string) => toolsForPhase(p as any);
+  assert.ok(phase("review").includes("cad_simulate"));
+  assert.ok(phase("review").includes("cad_optimize"));
+  assert.ok(phase("investigate").includes("cad_simulate"));
+  assert.ok(!phase("investigate").includes("cad_optimize"));
+  assert.ok(phase("audit").includes("cad_simulate"));
+  assert.ok(!phase("audit").includes("cad_optimize"));
+  assert.ok(phase("gap_closure").includes("cad_simulate"));
+  assert.ok(phase("gap_closure").includes("cad_optimize"));
+  assert.ok(phase("final_review").includes("cad_simulate"));
+  assert.ok(!phase("final_review").includes("cad_optimize"));
+  assert.ok(!phase("build").includes("cad_simulate"));
+});

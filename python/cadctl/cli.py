@@ -10,6 +10,7 @@ from . import __version__
 from .assembly import assembly_tree
 from .capability import capabilities
 from .common import emit, emit_error, sha256_file, write_json
+from .doctor import doctor
 from .compare import compare_geometry
 from .drawing import generate_drawing, validate_drawing_spec
 from .export import export_artifact
@@ -18,7 +19,8 @@ from .model import run_source
 from .presentation import run_presentation
 from .render import VIEW_NAMES, render_views
 from .section import render_section
-from .simulation import run_simulation
+from .simulation.api import run_simulation
+from .simulation.topology import run_topology
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -366,6 +368,33 @@ def _cmd_present(args: argparse.Namespace) -> int:
         emit_error("cad_render_scene", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
         return 0
 
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    payload = doctor()
+    if args.json:
+        print(__import__("json").dumps(payload, indent=2, sort_keys=True))
+        return 0
+    emit("cadctl_doctor", payload, duration_ms=int((time.monotonic() - started) * 1000))
+    return 0
+
+
+def _cmd_optimize(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    try:
+        import json as _json
+
+        spec = _json.loads(Path(args.spec).read_text(encoding="utf-8"))
+        payload = run_topology(spec, args.output_dir)
+        artifacts = []
+        if payload.get("artifact") and Path(payload["artifact"]).exists():
+            artifacts.append({"path": payload["artifact"], "kind": "optimization", "sha256": sha256_file(payload["artifact"])})
+        emit("cad_optimize", payload, input_hashes={"spec": sha256_file(args.spec)}, artifacts=artifacts, duration_ms=int((time.monotonic() - started) * 1000))
+        return 0
+    except Exception as exc:
+        emit_error("cad_optimize", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
+        return 0
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cadctl", description="Pi-CAD deterministic CAD backend (V0)")
     parser.add_argument("--version", action="version", version=f"cadctl {__version__}")
@@ -432,6 +461,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("capability", help="Report installed deterministic backend capabilities")
     p.set_defaults(func=_cmd_capability)
+
+    p = sub.add_parser("doctor", help="Report the actual Pi-CAD execution environment")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=_cmd_doctor)
+
+    p = sub.add_parser("optimize", help="Run deterministic differentiable topology optimization")
+    p.add_argument("--spec", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.set_defaults(func=_cmd_optimize)
 
     p = sub.add_parser("drawing", help="Validate or generate a spec-driven drawing")
     p.add_argument("stage", choices=("validate", "generate"))
