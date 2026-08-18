@@ -90,6 +90,8 @@ export interface EvidenceRef {
   tool: string;
   artifactHash: string;
   sourceHash?: string;
+  /** Spec identity for spec-driven evidence (simulation load cases, optimization runs). */
+  specHash?: string;
   paths: string[];
   artifacts: Array<{ path: string; sha256: string }>;
   createdAt: string;

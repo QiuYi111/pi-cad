@@ -1,0 +1,43 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-linux-cpu:
+    name: "Linux CPU: fresh install + full test suite"
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Simulation evidence renders seven pyvista views; give VTK a headless
+      # software-rendering display so the suite exercises the real path.
+      - name: Set up headless display
+        uses: pyvista/setup-headless-display-action@v3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Python runtime (venv + build123d/OCP + torch CPU + torch-fem + gmsh)
+      # is built by the package postinstall; cache it keyed on the requirement
+      # files so routine CI runs do not re-download the heavy wheels.
+      - name: Cache Python runtime
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('python/requirements-core.txt', 'python/requirements-simulation-runtime.txt') }}
+
+      - name: Fresh install (postinstall builds the Python runtime)
+        run: npm install
+
+      - name: Full test suite (TypeScript harness + Python backend)
+        run: npm test
+        env:
+          MPLCONFIGDIR: /tmp/matplotlib-cache

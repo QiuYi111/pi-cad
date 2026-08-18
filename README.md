@@ -109,6 +109,14 @@ constraint types, regions, and multi-material specs instead of guessing. No
 tool exposes a spec path or output directory to the agent, so read-only phases
 can produce evidence without project-tree mutation.
 
+V1 simulation boundary conditions are deliberately simple: an `axis+side`
+region selects the axis-extreme node slab (all nodes within 0.75× mesh size of
+the bounding-box extreme), and `indices` selects explicit mesh nodes. This is
+not arbitrary STEP face selection; a deterministic mesh-boundary inspector for
+surface-level BCs is planned as the next capability. Simulation evidence for
+the same artifact is identified by spec hash, so multiple load cases (normal,
+peak, shock) coexist instead of overwriting each other.
+
 Unavailable optional backends are returned explicitly (`simulation.run`,
 Blender/FFmpeg presentation, PDF drawing, standards-compliant GD&T). The
 harness never substitutes a fake verifier or upgrades unavailable evidence.

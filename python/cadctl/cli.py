@@ -333,16 +333,36 @@ def _cmd_drawing(args: argparse.Namespace) -> int:
 def _cmd_simulate(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
-        payload = run_simulation(args.spec, args.output_dir, stage=args.stage)
         input_hashes = {"spec": sha256_file(args.spec)}
+        # Bind the artifact version BEFORE the solve; evidence provenance must
+        # never come from a post-solve hash of a file that may have changed.
+        artifact_before: str | None = None
+        spec_artifact = None
+        if args.stage == "run":
+            spec_artifact = json.loads(Path(args.spec).read_text(encoding="utf-8")).get("artifact")
+            if spec_artifact and Path(spec_artifact).exists():
+                artifact_before = sha256_file(spec_artifact)
+            if artifact_before:
+                input_hashes["artifact"] = artifact_before
+        payload = run_simulation(args.spec, args.output_dir, stage=args.stage)
         artifacts: list[dict[str, str]] = []
         if Path(args.spec).exists():
             artifacts.append({"path": args.spec, "kind": "simulation_spec", "sha256": sha256_file(args.spec)})
         if args.stage == "run":
-            spec = json.loads(Path(args.spec).read_text(encoding="utf-8"))
-            artifact = spec.get("artifact")
-            if artifact and Path(artifact).exists():
-                input_hashes["artifact"] = sha256_file(artifact)
+            if (
+                artifact_before
+                and spec_artifact
+                and Path(spec_artifact).exists()
+                and sha256_file(spec_artifact) != artifact_before
+            ):
+                emit_error(
+                    "cad_simulate",
+                    "artifact changed during simulation; result discarded because the mesh and "
+                    "the bound artifact version no longer match",
+                    input_hashes=input_hashes,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                )
+                return 0
             result_artifact = payload.get("artifact")
             if payload.get("status") == "solved" and result_artifact and Path(result_artifact).exists():
                 artifacts.append(

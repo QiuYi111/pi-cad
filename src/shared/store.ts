@@ -54,8 +54,13 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
-export function makeEvidenceId(kind: EvidenceRef["kind"], artifactHash: string): string {
-  return `${kind}-${artifactHash.slice(0, 12)}-${randomUUID().slice(0, 8)}`;
+export function makeEvidenceId(
+  kind: EvidenceRef["kind"],
+  artifactHash: string,
+  specHash?: string,
+): string {
+  const identity = specHash ? `${artifactHash.slice(0, 12)}-${specHash.slice(0, 12)}` : artifactHash.slice(0, 12);
+  return `${kind}-${identity}-${randomUUID().slice(0, 8)}`;
 }
 
 function atomicWrite(path: string, content: string): Promise<void> {

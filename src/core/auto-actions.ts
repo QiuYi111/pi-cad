@@ -171,6 +171,7 @@ export async function runCandidateAuto(
     warnings.push(`geometry auto-action failed: ${geometryPayload(geometryEnvelope).error ?? "unknown error"}`);
   }
 
+  let compareRecorded = false;
   if (
     ["modify", "convert", "release"].includes(state.workflow ?? "") &&
     state.baselineArtifactPath &&
@@ -183,6 +184,7 @@ export async function runCandidateAuto(
         next,
         evidenceFromEnvelope("compare", "cad_compare_geometry", compareEnvelope, artifactHash, sourceHash),
       );
+      compareRecorded = true;
       events.push({ type: "EvidenceCreated", data: { kind: "compare", artifactHash } });
     } else {
       warnings.push(`compare auto-action failed: ${compareEnvelope.payload.error ?? "unknown error"}`);
@@ -214,6 +216,7 @@ export async function runCandidateAuto(
     evidence: next.evidence.map((ref) => ({
       kind: ref.kind,
       artifactHash: ref.artifactHash,
+      ...(ref.specHash ? { specHash: ref.specHash } : {}),
       paths: ref.paths,
     })),
     warnings,
@@ -225,11 +228,7 @@ export async function runCandidateAuto(
     ? await readImageContents((visualPayload(visualEnvelope).views ?? []).map((view) => view.path))
     : [];
   const summary = [
-    `Candidate ${label} committed. Harness executed build, visual, geometry${
-      (state.workflow === "modify" || state.workflow === "convert") && state.baselineArtifactPath
-        ? ", compare"
-        : ""
-    }.`,
+    `Candidate ${label} committed. Harness executed build, visual, geometry${compareRecorded ? ", compare" : ""}.`,
     `- ${buildEnvelope.ok ? "build: ok" : "build: failed"}`,
     `- ${visualEnvelope.ok ? "visual: ok" : "visual: failed"}`,
     `- ${geometryEnvelope.ok ? "geometry: ok" : "geometry: failed"}`,

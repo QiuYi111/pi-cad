@@ -9,7 +9,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CadProjectStore, nowIso } from "../shared/store.ts";
 import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
-import { packageRoot } from "../shared/capability.ts";
+import { currentDoctorReport, type DoctorReport, packageRoot } from "../shared/capability.ts";
 import { composeSystemPrompt } from "./context.ts";
 import { maybeAutoContinue } from "./continuation.ts";
 import { registerControlTools, type ControllerDeps } from "./controller.ts";
@@ -68,6 +68,7 @@ function customToolDetails(event: ToolResultEvent) {
         };
         kind?: string;
         artifactHash?: string;
+        specHash?: string;
       }
     | undefined;
 }
@@ -96,45 +97,54 @@ async function handleToolResult(
     info.envelope.inputHashes?.artifact ??
     info.envelope.inputHashes?.after;
   if (!artifactHash) return;
+  const specHash =
+    info.specHash ??
+    (kind === "simulation" || kind === "optimization" ? info.envelope.inputHashes?.spec : undefined);
   const envelope = info.envelope as Parameters<typeof recordToolEvidence>[1];
-  const next = recordToolEvidence(state, envelope, kind, artifactHash);
+  const next = recordToolEvidence(state, envelope, kind, artifactHash, specHash);
   await persist(pi, store, next, [
     {
       type: "EvidenceCreated",
       data: {
         kind,
         artifactHash,
+        ...(specHash ? { specHash } : {}),
         paths: envelope.artifacts?.map((artifact) => artifact.path) ?? [],
       },
     },
   ]);
 }
 
-async function unavailableCapabilities(pi: ExtensionAPI): Promise<string[]> {
+async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<string[]> {
   const available = new Set((pi.getAllTools?.() ?? []).map((tool) => tool.name));
   const missing = [...CAPABILITY_TOOLS].filter((name) => !available.has(name));
   const result = missing.filter((name) =>
     (OPTIONAL_TOOL_NAMES as readonly string[]).includes(name),
   );
-  try {
-    const raw = await readFile(join(packageRoot(), ".pi-cad-runtime.json"), "utf-8");
-    const doctor = JSON.parse(raw) as {
-      capabilities?: {
-        simulation?: { status?: string };
-        differentiableOptimization?: { status?: string };
-      };
-    };
-    if (available.has("cad_simulate") && doctor.capabilities?.simulation?.status !== "ready") {
+  // Runtime source of truth is a live `cadctl doctor` against the Python the
+  // harness would actually use (PI_CAD_PYTHON / PI_CAD_VENV honored), cached
+  // per session. The install-time .pi-cad-runtime.json is only a fallback
+  // diagnostic when the live probe itself cannot run.
+  let doctor: DoctorReport | null = await currentDoctorReport(cwd);
+  if (!doctor) {
+    try {
+      const raw = await readFile(join(packageRoot(), ".pi-cad-runtime.json"), "utf-8");
+      doctor = JSON.parse(raw) as DoctorReport;
+    } catch {
+      // No doctor report installed and probe failed; fall back to the
+      // tool-registration check only.
+    }
+  }
+  if (doctor?.capabilities) {
+    if (available.has("cad_simulate") && doctor.capabilities.simulation?.status !== "ready") {
       result.push("cad_simulate: doctor simulation backend not ready");
     }
     if (
       available.has("cad_optimize") &&
-      doctor.capabilities?.differentiableOptimization?.status !== "ready"
+      doctor.capabilities.differentiableOptimization?.status !== "ready"
     ) {
       result.push("cad_optimize: doctor differentiableOptimization not ready");
     }
-  } catch {
-    // No doctor report installed yet; fall back to tool-registration check.
   }
   return result;
 }
@@ -206,7 +216,7 @@ export default function cadCore(pi: ExtensionAPI) {
     }
     const active = state && state.status !== "done" && state.status !== "aborted";
     if (active && state) pi.setActiveTools(toolsForPhase(state.phase));
-    const missing = await unavailableCapabilities(pi);
+    const missing = await unavailableCapabilities(pi, ctx.cwd);
     return {
       systemPrompt: `${event.systemPrompt}\n\n${await composeSystemPrompt("", active ? state : null, missing, project)}`,
     };

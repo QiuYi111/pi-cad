@@ -146,6 +146,15 @@ class TorchFemBackend(SimulationBackend):
         artifact = spec.get("artifact")
         mesh_spec = spec.get("mesh") or {}
         mesh_size = float(mesh_spec.get("size", 2.0))
+        # Bind the artifact version BEFORE meshing; the result is only valid if
+        # the artifact is byte-identical after the solve (external mutation
+        # would otherwise let the mesh come from version A while evidence binds
+        # to version B).
+        artifact_hash = None
+        if artifact and Path(artifact).exists():
+            artifact_hash = hashlib.sha256(Path(artifact).read_bytes()).hexdigest()
+        if artifact and artifact_hash is None:
+            raise SimulationBackendError(f"artifact does not exist: {artifact}")
         if artifact and Path(artifact).suffix.lower() in (".step", ".stp"):
             mesh = mesh_step_tetra(artifact, mesh_size)
         elif artifact is None and mesh_spec.get("box"):
@@ -200,9 +209,13 @@ class TorchFemBackend(SimulationBackend):
 
         mesh_identity = json.dumps({"nodes": mesh["nodes"], "elements": mesh["elements"]}, sort_keys=True).encode("utf-8")
         mesh_hash = hashlib.sha256(mesh_identity).hexdigest()
-        artifact_hash = None
-        if artifact and Path(artifact).exists():
-            artifact_hash = hashlib.sha256(Path(artifact).read_bytes()).hexdigest()
+        if artifact and artifact_hash is not None:
+            after_hash = hashlib.sha256(Path(artifact).read_bytes()).hexdigest()
+            if after_hash != artifact_hash:
+                raise SimulationBackendError(
+                    "artifact changed during simulation; discarding the result because the mesh "
+                    "and the bound artifact version no longer match"
+                )
 
         visualization: dict[str, Any] = {"status": "unavailable", "views": []}
         try:

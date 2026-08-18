@@ -19,7 +19,12 @@ const RegionSchema = Type.Union([
   Type.Object({
     indices: Type.Array(Type.Integer({ minimum: 0 }), { minItems: 1 }),
   }),
-], { description: "Either axis+side (extreme face along an axis) or explicit node indices" });
+], {
+  description:
+    "axis+side selects the axis-extreme node slab (all nodes within 0.75x mesh size of the "
+    + "bounding-box extreme along that axis) — a simple V1 boundary selector, NOT arbitrary "
+    + "CAD face selection; indices selects explicit mesh node indices",
+});
 
 function shortSimulationText(envelope: any): string {
   const p = envelope.payload ?? {};
@@ -43,7 +48,7 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
     name: "cad_simulate",
     label: "CAD Simulate",
     description:
-      "Run a linear elastic finite element simulation with torch-fem. Pass the simulation directly: artifact or mesh.box, one homogeneous material, loads, constraints, mesh size. The tool canonicalizes the spec into run-scoped evidence storage itself; it returns deterministic fields and provenance only; it never says safe, good, or passes.",
+      "Run a linear elastic finite element simulation with torch-fem. Pass the simulation directly: artifact or mesh.box, one homogeneous material, loads, constraints, mesh size. Boundary regions are V1 simple axis-extreme node slabs or explicit node indices, not arbitrary CAD face selection. The tool canonicalizes the spec into run-scoped evidence storage itself; it returns deterministic fields and provenance only; it never says safe, good, or passes.",
     promptSnippet: "Run deterministic torch-fem linear elasticity on a STEP artifact",
     promptGuidelines: [
       "Supply material constants, loads, constraints, and mesh explicitly; unknown physics is rejected.",
@@ -103,12 +108,19 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       };
       const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "simulation", spec);
       const envelope = await simulationCommand(ctx.cwd, "run", specPath, outputDir);
+      // inputHashes.artifact is hashed by cadctl BEFORE the solve; binding
+      // evidence to it makes the provenance immune to concurrent artifact
+      // mutation. Re-hashing here would only be a weaker post-solve check.
       let artifactHash = envelope.inputHashes.spec;
       if (params.artifact) {
-        try {
-          artifactHash = await sha256File(resolve(ctx.cwd, params.artifact));
-        } catch {
-          // Keep spec hash as provenance fallback.
+        if (envelope.inputHashes.artifact) {
+          artifactHash = envelope.inputHashes.artifact;
+        } else {
+          try {
+            artifactHash = await sha256File(resolve(ctx.cwd, params.artifact));
+          } catch {
+            // Keep spec hash as provenance fallback.
+          }
         }
       }
       const images =
@@ -183,6 +195,7 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
         details: {
           envelope,
           artifactHash: envelope.inputHashes.spec,
+          specHash: envelope.inputHashes.spec,
           kind: "optimization" as const,
         },
       };

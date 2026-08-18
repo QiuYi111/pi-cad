@@ -90,13 +90,23 @@ export function recordToolEvidence(
   envelope: CadEventEnvelope,
   kind: EvidenceRef["kind"],
   artifactHash: string,
+  specHash?: string,
 ): CadRunState {
   let next = { ...state };
+  // Spec-driven evidence (simulation load cases, optimization runs) is
+  // identified by kind + artifactHash + specHash, so distinct load cases on
+  // the same artifact coexist and re-running one case replaces only itself.
+  // Evidence without a spec identity stays latest-wins per kind+artifact.
   next.evidence = next.evidence.filter(
-    (ref) => !(ref.kind === kind && ref.artifactHash === artifactHash),
+    (ref) =>
+      !(
+        ref.kind === kind &&
+        ref.artifactHash === artifactHash &&
+        (specHash === undefined || ref.specHash === specHash)
+      ),
   );
   return addEvidence(
     next,
-    evidenceFromEnvelope(kind, envelope.tool, envelope, artifactHash, state.currentSourceHash),
+    evidenceFromEnvelope(kind, envelope.tool, envelope, artifactHash, state.currentSourceHash, specHash),
   );
 }

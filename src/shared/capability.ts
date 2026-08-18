@@ -283,6 +283,45 @@ export async function cadctlCapabilities(cwd: string, timeoutMs?: number): Promi
   return runCadctl(["capability"], { cwd, timeoutMs });
 }
 
+/**
+ * Live doctor report for the Python runtime the harness would actually use
+ * right now (honoring PI_CAD_PYTHON / PI_CAD_VENV). Cached per process: the
+ * probe runs once per Pi session, so the startup cost is paid once and later
+ * capability gating reads the same snapshot. `.pi-cad-runtime.json` remains
+ * an install-time diagnostic, not the runtime source of truth.
+ */
+export interface DoctorReport {
+  python?: string;
+  mode?: string;
+  capabilities?: {
+    simulation?: { status?: string; backend?: string };
+    differentiableOptimization?: { status?: string };
+    [name: string]: unknown;
+  };
+}
+
+let doctorProbeCache: DoctorReport | null | undefined;
+
+export async function currentDoctorReport(
+  cwd?: string,
+  timeoutMs = 30_000,
+): Promise<DoctorReport | null> {
+  if (doctorProbeCache !== undefined) return doctorProbeCache;
+  try {
+    const { stdout } = await execFileAsync(pythonBinary(), ["-m", "cadctl", "doctor", "--json"], {
+      cwd,
+      env: cadctlEnv(),
+      timeout: timeoutMs,
+      maxBuffer: 16 * 1024 * 1024,
+      killSignal: "SIGKILL",
+    });
+    doctorProbeCache = JSON.parse(stdout.trim()) as DoctorReport;
+  } catch {
+    doctorProbeCache = null;
+  }
+  return doctorProbeCache;
+}
+
 
 export async function drawingCommand(
   cwd: string,

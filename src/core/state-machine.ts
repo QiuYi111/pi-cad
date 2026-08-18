@@ -254,13 +254,15 @@ export function evidenceFromEnvelope(
   envelope: { artifacts: Array<{ path: string; kind: string; sha256: string }> },
   artifactHash: string,
   sourceHash?: string,
+  specHash?: string,
 ): EvidenceRef {
   return {
-    id: makeEvidenceId(kind, artifactHash),
+    id: makeEvidenceId(kind, artifactHash, specHash),
     kind,
     tool,
     artifactHash,
     sourceHash,
+    specHash,
     paths: envelope.artifacts.map((artifact) => artifact.path),
     artifacts: envelope.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
     createdAt: nowIso(),

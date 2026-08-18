@@ -13,6 +13,7 @@ import {
   route as routeQuick,
   transition as transitionQuick,
 } from "../src/core/state-machine.ts";
+import { recordToolEvidence } from "../src/core/evidence.ts";
 import { ProjectStateStore } from "../src/shared/store.ts";
 import { CAD_STATE_SCHEMA_VERSION, type CadRequirements } from "../src/shared/protocol.ts";
 
@@ -195,4 +196,49 @@ test("routeQuick only from null or intake", () => {
   const routed = stateInPhase("requirements");
   const again = routeQuick(routed, "quick", "re-route");
   assert.equal(again.ok, false);
+});
+
+test("simulation load cases coexist by specHash instead of overwriting", () => {
+  const envelopeA = {
+    tool: "cad_simulate",
+    artifacts: [{ path: "evidence/simulation/a/result.json", kind: "simulation", sha256: "a" }],
+  };
+  const envelopeB = {
+    tool: "cad_simulate",
+    artifacts: [{ path: "evidence/simulation/b/result.json", kind: "simulation", sha256: "b" }],
+  };
+  const artifactHash = "artifact-hash";
+  let state = createIntakeState({ runId: "load-cases" });
+  state = recordToolEvidence(state, envelopeA as any, "simulation", artifactHash, "spec-hash-a");
+  state = recordToolEvidence(state, envelopeB as any, "simulation", artifactHash, "spec-hash-b");
+  // Both load cases live side by side for the same artifact.
+  assert.equal(state.evidence.filter((ref) => ref.kind === "simulation").length, 2);
+  assert.deepEqual(
+    state.evidence.filter((ref) => ref.kind === "simulation").map((ref) => ref.specHash).sort(),
+    ["spec-hash-a", "spec-hash-b"],
+  );
+  // Re-running load case A replaces only A; B survives untouched.
+  const rerunA = {
+    tool: "cad_simulate",
+    artifacts: [{ path: "evidence/simulation/a2/result.json", kind: "simulation", sha256: "a2" }],
+  };
+  state = recordToolEvidence(state, rerunA as any, "simulation", artifactHash, "spec-hash-a");
+  const sims = state.evidence.filter((ref) => ref.kind === "simulation");
+  assert.equal(sims.length, 2);
+  assert.ok(sims.some((ref) => ref.specHash === "spec-hash-a" && ref.paths[0].includes("a2")));
+  assert.ok(sims.some((ref) => ref.specHash === "spec-hash-b" && ref.paths[0].includes("/b/")));
+
+  // Evidence without a spec identity stays latest-wins per kind + artifact.
+  const visual1 = { tool: "cad_inspect_visual", artifacts: [{ path: "v1.png", kind: "visual", sha256: "v1" }] };
+  const visual2 = { tool: "cad_inspect_visual", artifacts: [{ path: "v2.png", kind: "visual", sha256: "v2" }] };
+  state = recordToolEvidence(state, visual1 as any, "visual", artifactHash);
+  state = recordToolEvidence(state, visual2 as any, "visual", artifactHash);
+  const visuals = state.evidence.filter((ref) => ref.kind === "visual");
+  assert.equal(visuals.length, 1);
+  assert.equal(visuals[0].paths[0], "v2.png");
+
+  // A stale candidate still invalidates every load case at once.
+  const staled = markEvidenceStale(state);
+  assert.equal(staled.evidence.length, 0);
+  assert.equal(staled.staleEvidence.length, 3);
 });
