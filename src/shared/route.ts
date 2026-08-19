@@ -168,9 +168,17 @@ export function obligationsOf(route: Route): Set<ObligationKey> {
   }
   if (route.maturity === "release") {
     for (const name of RELEASE_WORKSTREAMS) keys.add(`workstream:${name}`);
-    keys.add("presentation:exploded");
-    keys.add("presentation:assembly_animation");
+    // Presentation deliverables follow the structure: a part release owes
+    // the hero render and turntable; an assembly release additionally owes
+    // the exploded view (module separation is the point) and the assembly
+    // animation (install order is the point). The closure verifier derives
+    // its required list from THESE keys — one source of truth.
+    keys.add("presentation:hero");
     keys.add("presentation:turntable");
+    if (route.structure === "assembly") {
+      keys.add("presentation:exploded");
+      keys.add("presentation:assembly_animation");
+    }
   }
   return keys;
 }

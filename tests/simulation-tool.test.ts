@@ -162,3 +162,113 @@ test("cad_simulate takes structured arguments and canonicalizes the spec without
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("structural FEA accepts a fused analysis model via derivationRef and binds evidence to the canonical design", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { existsSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const venvPython = join(fileURLToPath(new URL("..", import.meta.url)), ".venv", "bin", "python");
+  if (!existsSync(venvPython)) return; // honest skip: backend not set up
+  const root = fileURLToPath(new URL("..", import.meta.url));
+
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-structural-derivation-"));
+  try {
+    // A two-part assembly whose solids touch — the canonical design.
+    await writeFile(
+      join(cwd, "assembly.py"),
+      [
+        "import build123d as bd",
+        "with bd.BuildPart() as p:",
+        "    bd.Box(60, 20, 10, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))",
+        "    a = p.part",
+        "with bd.BuildPart() as p:",
+        "    bd.Box(20, 20, 30, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))",
+        "    b = p.part",
+        "result = bd.Compound([a, b])",
+        "",
+      ].join("\n"),
+    );
+    const env = { ...process.env, PYTHONPATH: join(root, "python") };
+    execFileSync(venvPython, ["-m", "cadctl", "build", "--source", "assembly.py", "--output", "assembly.step", "--force"], {
+      cwd, encoding: "utf-8", env, timeout: 300_000,
+    });
+
+    // Make the canonical design the project head so the guard protects it.
+    const { CadProjectStore } = await import("../src/shared/store.ts");
+    const { createHash } = await import("node:crypto");
+    const { readFile: rf } = await import("node:fs/promises");
+    const store = new CadProjectStore(cwd);
+    const project = await store.ensureProject();
+    await store.updateHead({
+      artifactPath: "assembly.step",
+      artifactHash: createHash("sha256").update(await rf(join(cwd, "assembly.step"))).digest("hex"),
+      evidence: project.head.evidence,
+    });
+
+    const pi = mockPi();
+    const simulation = (await import("../src/extensions/simulation/index.ts")).default;
+    simulation(pi as any);
+    const deriveTool = pi.tools.get("cad_derive_analysis_model");
+    const simulateTool = pi.tools.get("cad_simulate");
+
+    // 1. Harness-executed derivation: fuse the assembly for solid FEA.
+    const derived = await deriveTool.execute(
+      "d1",
+      { source: "assembly.step", operations: ["fused"] },
+      undefined, undefined, { cwd },
+    );
+    const derivedText = derived.content[0].type === "text" ? derived.content[0].text : "";
+    assert.match(derivedText, /harness-executed/);
+    const payload = derived.details.envelope.payload as {
+      recordPath: string;
+      output: string;
+    };
+    assert.ok(existsSync(payload.output));
+    assert.ok(existsSync(payload.recordPath));
+    const record = JSON.parse(await rf(payload.recordPath, "utf-8"));
+    assert.equal(record.executed, true);
+
+    // 2. FEA on the fused model WITHOUT the declaration: fail closed.
+    const rejected = await simulateTool.execute(
+      "s0",
+      {
+        artifact: payload.output,
+        physics: { type: "linear_elasticity" },
+        mesh: { element: "tet", size: 6.0 },
+        materials: [{ name: "steel", E: 210000.0, nu: 0.3 }],
+        constraints: [{ type: "fixed", region: { axis: "x", side: "min" } }],
+        loads: [{ type: "nodal_force", region: { axis: "x", side: "max" }, vector: [0, 0, -100.0] }],
+      } as never,
+      undefined, undefined, { cwd },
+    ).catch((error: Error) => error);
+    const rejectedText =
+      rejected instanceof Error ? rejected.message : rejected.content[0].text;
+    assert.match(rejectedText, /analysisModel/);
+
+    // 3. WITH the derivationRef: the run executes, and the evidence binds
+    // to the CANONICAL assembly hash — the original fuse-for-FEA use case.
+    const solved = await simulateTool.execute(
+      "s1",
+      {
+        artifact: payload.output,
+        analysisModel: { derivationRef: payload.recordPath },
+        physics: { type: "linear_elasticity" },
+        mesh: { element: "tet", size: 6.0 },
+        materials: [{ name: "steel", E: 210000.0, nu: 0.3 }],
+        constraints: [{ type: "fixed", region: { axis: "x", side: "min" } }],
+        loads: [{ type: "nodal_force", region: { axis: "x", side: "max" }, vector: [0, 0, -100.0] }],
+      } as never,
+      undefined, undefined, { cwd },
+    );
+    const solvedText = solved.content[0].type === "text" ? solved.content[0].text : "";
+    assert.match(solvedText, /cad_simulate solved/);
+    const canonicalHash = record.sourceHash;
+    assert.equal(solved.details.artifactHash, canonicalHash);
+    // The envelope carries the frozen derivation chain as inputArtifacts.
+    const roles = (solved.details.envelope.inputArtifacts ?? []).map((entry: { role: string }) => entry.role);
+    assert.ok(roles.includes("derivationRecord"), `roles: ${roles.join(",")}`);
+    assert.ok(roles.includes("analysisSource"), `roles: ${roles.join(",")}`);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});

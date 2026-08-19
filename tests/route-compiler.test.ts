@@ -184,7 +184,15 @@ test("obligations: maturity chain is cumulative per structure", () => {
   assert.ok(assembly("prototype").includes("record:interface_contracts"));
   assert.ok(part("manufacturing").includes("evidence:drawing"));
   assert.ok(part("release").includes("workstream:bom"));
-  assert.ok(part("release").includes("presentation:exploded"));
+  // Part release owes hero + turntable; the exploded view and assembly
+  // animation are assembly-structure deliverables.
+  assert.ok(part("release").includes("presentation:hero"));
+  assert.ok(part("release").includes("presentation:turntable"));
+  assert.ok(!part("release").includes("presentation:exploded"));
+  assert.ok(!part("release").includes("presentation:assembly_animation"));
+  assert.ok(assembly("release").includes("presentation:exploded"));
+  assert.ok(assembly("release").includes("presentation:assembly_animation"));
+  assert.ok(assembly("release").includes("presentation:hero"));
   // A prototype is not a concept: obligations never drop to zero for
   // assemblies.
   assert.ok(assembly("prototype").length > 0);

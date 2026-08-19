@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import type { CadEventEnvelope, CadRunState, EvidenceRef } from "../shared/protocol.ts";
+import { obligationsOf, type CadEventEnvelope, type CadRunState, type EvidenceRef } from "../shared/protocol.ts";
 import { sha256File } from "../shared/store.ts";
 import {
   addEvidence,
@@ -150,9 +150,20 @@ export async function verifyPresentationDeliverables(
 ): Promise<string | null> {
   const route = state.route;
   if (route?.objective !== "design" || route.maturity !== "release") return null;
-  const required = route.structure === "assembly"
-    ? ["exploded.png", "assembly.mp4", "turntable.mp4"]
-    : ["exploded.png", "turntable.mp4"];
+  // Single source of truth: the required deliverables DERIVE from
+  // obligationsOf(route)'s presentation:* keys (part: hero + turntable;
+  // assembly adds exploded + assembly_animation).
+  const DELIVERABLE_FOR: Record<string, string> = {
+    "presentation:hero": "hero.png",
+    "presentation:exploded": "exploded.png",
+    "presentation:turntable": "turntable.mp4",
+    "presentation:assembly_animation": "assembly.mp4",
+  };
+  const required = [...obligationsOf(route)]
+    .filter((key) => key.startsWith("presentation:"))
+    .map((key) => DELIVERABLE_FOR[key])
+    .filter((name): name is string => Boolean(name));
+  if (required.length === 0) return null;
   const refs = state.evidence.filter(
     (ref) =>
       ref.kind === "presentation" &&

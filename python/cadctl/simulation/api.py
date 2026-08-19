@@ -11,7 +11,19 @@ from .torch_fem_backend import TorchFemBackend
 # (additionalProperties: false), but a spec handed straight to
 # `cadctl simulate --spec` must fail closed the same way. A typo like
 # "distribut" or "dof" must never silently fall back to a default.
-_SPEC_KEYS = {"units", "backend", "device", "artifact", "physics", "mesh", "materials", "constraints", "loads"}
+_SPEC_KEYS = {
+    "units",
+    "backend",
+    "device",
+    "artifact",
+    "analysisModel",
+    "physics",
+    "mesh",
+    "materials",
+    "constraints",
+    "loads",
+}
+_ANALYSIS_MODEL_KEYS = {"derivationRef"}
 _PHYSICS_KEYS = {"type"}
 _MATERIAL_KEYS = {"name", "E", "nu", "density", "youngs_modulus", "poisson_ratio"}
 _MESH_KEYS = {"element", "size", "box"}
@@ -50,6 +62,21 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
             errors.append(f"artifact does not exist: {artifact}")
         elif artifact_path.suffix.lower() not in (".step", ".stp"):
             errors.append("artifact must be .step or .stp in V1")
+
+    # Analysis-model derivation (0.8 review P0-3): a fused/bonded assembly
+    # handed to solid FEA must carry a harness-owned derivation record, not
+    # a free-form claim. Same contract as flow/thermal.
+    model = spec.get("analysisModel")
+    if model is not None:
+        if not isinstance(model, dict):
+            errors.append("analysisModel must be an object {derivationRef}")
+        else:
+            _reject_unknown_keys(model, _ANALYSIS_MODEL_KEYS, "analysisModel", errors)
+            ref = model.get("derivationRef")
+            if not isinstance(ref, str) or not ref.strip():
+                errors.append("analysisModel.derivationRef is required (a cad_derive_analysis_model record path)")
+            elif not Path(ref).is_file():
+                errors.append(f"analysisModel.derivationRef does not exist: {ref}")
 
     physics = spec.get("physics")
     _reject_unknown_keys(physics, _PHYSICS_KEYS, "physics", errors)

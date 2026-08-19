@@ -337,9 +337,25 @@ def run_presentation(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    spec_hash = sha256_file(spec_path)
+
+    # FREEZE FIRST (0.8 review P0-4): provenance is defined before the
+    # interpreter consumes ANY input — including the tessellation below,
+    # which is the first heavy read of the artifact. The manifest's
+    # spec/subject hashes come FROM the frozen set, so they can never
+    # describe inputs that changed after the render started.
+    from .provenance import FrozenInputs
+
     artifact_path = Path(spec["artifact"]).resolve()
-    subject_hash = sha256_file(artifact_path)
+    frozen = FrozenInputs.freeze(
+        [("spec", str(spec_path.resolve()))]
+        + [("artifact", str(artifact_path))]
+        + [
+            (f"reference:{index}", str(Path(direction["reference"]).resolve()))
+            for index, direction in enumerate(spec.get("directions", []))
+        ]
+    )
+    spec_hash = frozen.hashes()["spec"]
+    subject_hash = frozen.hashes()["artifact"]
 
     if stage == "validate":
         return {"status": "validated", "spec": str(spec_path), "errors": []}
@@ -436,20 +452,8 @@ def run_presentation(
     args_path = output_dir / "driver-args.json"
     args_path.write_text(json.dumps(driver_args, indent=2), encoding="utf-8")
 
-    # Frozen provenance (same contract as the solvers): everything the
-    # render consumes is hashed BEFORE Blender runs and re-verified after —
-    # the manifest's subject/spec hashes can never describe inputs that
-    # changed mid-render.
-    from .provenance import FrozenInputs, spec_input_paths
-
-    frozen = FrozenInputs.freeze(
-        [("spec", str(spec_path.resolve()))]
-        + [("artifact", str(artifact_path))]
-        + [
-            (f"reference:{i}", str(Path(d['reference']).resolve()))
-            for i, d in enumerate(spec.get("directions", []))
-        ]
-    )
+    # The frozen set spans the WHOLE invocation (tessellation + render +
+    # encode); verify it before handing anything to Blender.
     changed = frozen.changed_role()
     if changed is not None:
         return {
@@ -585,4 +589,7 @@ def run_presentation(
         "previewImages": preview_images,
         "blenderVersion": manifest["blenderVersion"],
         "objectCount": report.get("objectCount"),
+        # The frozen invocation set: the CLI forwards these into the
+        # envelope verbatim instead of re-hashing after the render.
+        "inputArtifacts": frozen.artifacts(),
     }

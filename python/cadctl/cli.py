@@ -426,32 +426,22 @@ def _cmd_drawing(args: argparse.Namespace) -> int:
 def _cmd_simulate(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
-        input_hashes = {"spec": sha256_file(args.spec)}
-        # Bind the artifact version BEFORE the solve; evidence provenance must
-        # never come from a post-solve hash of a file that may have changed.
-        artifact_before: str | None = None
-        spec_artifact = None
-        if args.stage == "run":
-            spec_artifact = json.loads(Path(args.spec).read_text(encoding="utf-8")).get("artifact")
-            if spec_artifact and Path(spec_artifact).exists():
-                artifact_before = sha256_file(spec_artifact)
-            if artifact_before:
-                input_hashes["artifact"] = artifact_before
+        # Freeze the invocation's inputs ONCE (spec, artifact, and any
+        # derivation record + authoritative source the spec declares), the
+        # same contract as flow/thermal. Provenance is defined here and
+        # only verified afterwards — never re-derived post-solve.
+        frozen = _frozen_invocation_inputs(args.spec, args.stage)
+        input_hashes = frozen.hashes()
         payload = run_simulation(args.spec, args.output_dir, stage=args.stage)
         artifacts: list[dict[str, str]] = []
         if Path(args.spec).exists():
             artifacts.append({"path": args.spec, "kind": "simulation_spec", "sha256": sha256_file(args.spec)})
         if args.stage == "run":
-            if (
-                artifact_before
-                and spec_artifact
-                and Path(spec_artifact).exists()
-                and sha256_file(spec_artifact) != artifact_before
-            ):
+            reason = frozen.discard_reason()
+            if reason is not None:
                 emit_error(
                     "cad_simulate",
-                    "artifact changed during simulation; result discarded because the mesh and "
-                    "the bound artifact version no longer match",
+                    reason,
                     input_hashes=input_hashes,
                     duration_ms=int((time.monotonic() - started) * 1000),
                 )
@@ -472,7 +462,7 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
                     artifacts.append(
                         {"path": view_path, "kind": "simulation_visual", "sha256": sha256_file(view_path)}
                     )
-        if args.stage == "run" and payload.get("status") == "unavailable":
+        if payload.get("status") == "unavailable":
             emit_error(
                 "cad_simulate",
                 str(payload.get("reason", "simulation backend unavailable")),
@@ -484,6 +474,7 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
             "cad_simulate",
             payload,
             input_hashes=input_hashes,
+            input_artifacts=frozen.artifacts() if args.stage == "run" else None,
             artifacts=artifacts,
             warnings=[] if payload.get("status") == "solved" else ["simulation did not produce satisfying evidence"],
             duration_ms=int((time.monotonic() - started) * 1000),
@@ -666,26 +657,32 @@ def _cmd_present(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
         payload = run_presentation(args.spec, args.output_dir, stage=args.stage)
+        if payload.get("status") == "discarded":
+            emit_error(
+                "cad_render_scene",
+                str(payload.get("reason", "presentation discarded")),
+                input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""},
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return 0
         artifacts = [
             {"path": p, "kind": "presentation", "sha256": sha256_file(p)}
             for p in payload.get("outputs", [])
             if Path(p).exists()
         ]
-        # Presentation evidence binds to the presented DESIGN (the artifact),
-        # with the canonical spec hash-bound alongside it.
-        input_hashes = {"spec": sha256_file(args.spec)}
-        input_artifacts = [{"path": str(Path(args.spec).resolve()), "sha256": sha256_file(args.spec), "role": "spec"}]
-        try:
-            spec_json = json.loads(Path(args.spec).read_text(encoding="utf-8"))
-            artifact = spec_json.get("artifact")
-            if isinstance(artifact, str) and Path(artifact).exists():
-                artifact_hash = sha256_file(artifact)
-                input_hashes["artifact"] = artifact_hash
-                input_artifacts.append(
-                    {"path": str(Path(artifact).resolve()), "sha256": artifact_hash, "role": "artifact"}
-                )
-        except Exception:
-            pass
+        # Provenance comes FROM the frozen invocation set (spec, artifact,
+        # and every reference image), never from a post-render re-hash:
+        # accept/finish re-verify these hashes, so a rewritten reference
+        # invalidates the evidence like any other input.
+        frozen_artifacts = payload.get("inputArtifacts") or []
+        if frozen_artifacts:
+            input_hashes = {entry["role"]: entry["sha256"] for entry in frozen_artifacts}
+            input_artifacts = frozen_artifacts
+        else:
+            input_hashes = {"spec": sha256_file(args.spec)}
+            input_artifacts = [
+                {"path": str(Path(args.spec).resolve()), "sha256": sha256_file(args.spec), "role": "spec"}
+            ]
         emit(
             "cad_render_scene",
             payload,

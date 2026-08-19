@@ -14,6 +14,7 @@ import {
 } from "../src/core/state-machine.ts";
 
 const frameContext = {
+  disposition: "confirmed" as const,
   axes: [
     { axis: "x", mapsTo: "machine X (rail direction)" },
     { axis: "y", mapsTo: "machine Y" },
@@ -505,6 +506,7 @@ test("release closure requires presentation deliverables in current evidence", a
     const manifest = {
       status: "rendered",
       outputs: {
+        "hero.png": { path: join(evidenceDir, "hero.png"), sha256: "h" },
         "exploded.png": { path: join(evidenceDir, "exploded.png"), sha256: "x" },
         "turntable.mp4": { path: join(evidenceDir, "turntable.mp4"), sha256: "y" },
         "assembly.mp4": { path: join(evidenceDir, "assembly.mp4"), sha256: "z" },
@@ -658,4 +660,147 @@ test("interface_or_detail_issue stales only the interface contracts", () => {
   assert.equal(regression.state.phase, "interface_design");
   // The assembly design record SURVIVES: only the contracts are stale.
   assert.deepEqual(regression.state.phaseRecords, ["assembly_design"]);
+});
+
+test("frame context dispositions: harness forces handling, not necessarily asking", () => {
+  const r = route(null, { objective: "design", lineage: "legacy", structure: "part", maturity: "engineering" }, "t");
+  assert.equal(r.ok, true); if (!r.ok) return;
+  const c = commitRequirements(r.state, req);
+  assert.equal(c.ok, true); if (!c.ok) return;
+  const state: CadRunState = {
+    ...c.state,
+    baselineArtifactPath: "old.step",
+    baselineArtifactHash: "baseline-hash",
+  };
+  // not_applicable (pure convert-style carry-through) still satisfies the gate.
+  const na = commitPhaseRecord(state, "frame_context", {
+    disposition: "not_applicable",
+    axes: [
+      { axis: "x", mapsTo: "file +X carried through verbatim" },
+      { axis: "y", mapsTo: "file +Y carried through verbatim" },
+      { axis: "z", mapsTo: "file +Z carried through verbatim" },
+    ],
+    howConfirmed: "coordinates pass through unchanged and no direction is referenced in the task",
+  });
+  assert.equal(na.ok, true);
+  // user_declined also satisfies the gate — the question was handled.
+  const declined = commitPhaseRecord(state, "frame_context", {
+    disposition: "user_declined",
+    axes: [
+      { axis: "x", mapsTo: "file +X (best-effort reading)" },
+      { axis: "y", mapsTo: "file +Y (best-effort reading)" },
+      { axis: "z", mapsTo: "file +Z (best-effort reading)" },
+    ],
+    howConfirmed: "asked via cad_wait_for_user; user declined to specify a machine frame",
+  });
+  assert.equal(declined.ok, true);
+  // Still no silent skip: without the record, baseline_understood stays blocked.
+  const blocked = transition(state, "baseline_understood", "no record");
+  assert.equal(blocked.ok, false);
+});
+
+test("release design-review accepted enters audit without closure deliverables or moving the head", async () => {
+  const { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync: wfs } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const pi: any = {
+    tools: new Map(),
+    handlers: new Map(),
+    activeTools: [],
+    events: { emit() {}, on() {} },
+    registerTool(tool: any) {
+      pi.tools.set(tool.name, tool);
+    },
+    on(event: string, handler: any) {
+      const list = pi.handlers.get(event) ?? [];
+      list.push(handler);
+      pi.handlers.set(event, list);
+    },
+    registerCommand() {},
+    setActiveTools() {},
+    getActiveTools: () => [],
+    getAllTools: () => [],
+    appendEntry() {},
+    sendUserMessage() {},
+  };
+  const core = (await import("../src/extensions/core/index.ts")).default;
+  core(pi);
+
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-release-closure-"));
+  try {
+    const ctx = { cwd };
+    const routeTool = pi.tools.get("cad_route");
+    const reqTool = pi.tools.get("cad_commit_requirements");
+    const planTool = pi.tools.get("cad_commit_plan");
+    const designTool = pi.tools.get("cad_commit_assembly_design");
+    const contractsTool = pi.tools.get("cad_commit_interface_contracts");
+    const candidateTool = pi.tools.get("cad_commit_candidate");
+    const transitionTool = pi.tools.get("cad_transition");
+
+    await routeTool.execute(
+      "c1",
+      { objective: "design", lineage: "greenfield", structure: "assembly", maturity: "release", reason: "release assembly" },
+      undefined, undefined, ctx,
+    );
+    await reqTool.execute(
+      "c2",
+      { goal: "g", deliverables: ["STEP"], must: [], preferences: [], assumptions: [], openUnknowns: [] },
+      undefined, undefined, ctx,
+    );
+    await transitionTool.execute("c3", { event: "direction_selected", note: "two boxes" }, undefined, undefined, ctx);
+    await designTool.execute(
+      "c4",
+      { summary: "s", modules: [{ name: "a", purpose: "x" }, { name: "b", purpose: "y" }], datums: [{ name: "A", kind: "primary", definedBy: "f" }], sequence: [{ step: 1, installs: ["a"] }] },
+      undefined, undefined, ctx,
+    );
+    await contractsTool.execute(
+      "c5",
+      { contracts: [{ id: "i", a: "a", b: "b", purpose: "x", locating: "x", dof: "x", fasteners: "x", fits: "x", assemblyDirection: "+Z", toolAccess: "x" }] },
+      undefined, undefined, ctx,
+    );
+    await planTool.execute("c6", { summary: "p", protected: [], plannedChanges: [], interfaces: [], datums: [], reviewPlan: [] }, undefined, undefined, ctx);
+
+    mkdirSync(join(cwd, "models"), { recursive: true });
+    wfs(
+      join(cwd, "models", "assembly.py"),
+      [
+        "import build123d as bd",
+        "with bd.BuildPart() as p:",
+        "    bd.Box(30, 30, 10)",
+        "    a = p.part",
+        "with bd.BuildPart() as p:",
+        "    bd.Box(12, 12, 25)",
+        "    b = p.part",
+        "result = bd.Compound([a, b.moved(bd.Location((0, 0, 17.5)))])",
+        "",
+      ].join("\n"),
+    );
+    const committed = await candidateTool.execute("c7", { sources: ["models/assembly.py"], label: "r1" }, undefined, undefined, ctx);
+    assert.match(committed.content[0].text as string, /INTEGRATION_REVIEW/);
+
+    // The design review accepted: only the design-core evidence is present
+    // (visual, geometry, assembly, interference) — no drawing, no
+    // presentation, no workstream statuses. The old controller would have
+    // blocked here demanding release deliverables; now it enters audit.
+    const accepted = await transitionTool.execute("c8", { event: "accepted", note: "design core accepted" }, undefined, undefined, ctx);
+    assert.match(accepted.content[0].text as string, /AUDIT/);
+
+    // The project head did NOT move: head commits only at closure (ready).
+    const project = JSON.parse(readFileSync(join(cwd, ".pi-cad", "project.json"), "utf-8"));
+    assert.ok(!project.head.artifactPath, "design-review accepted must not update the project head");
+
+    // ...and the closure still demands the deliverables: final_review
+    // accepted is blocked without presentation evidence with a manifest.
+    const state = JSON.parse(
+      readFileSync(join(cwd, ".pi-cad", "runs", project.currentRunId, "state.json"), "utf-8"),
+    );
+    const atFinal: typeof state = { ...state, phase: "final_review", status: "active" };
+    // Simulate being in final_review via the pure machine + controller gate:
+    const { verifyPresentationDeliverables } = await import("../src/core/evidence.ts");
+    const check = await verifyPresentationDeliverables(cwd, atFinal);
+    assert.ok(check);
+    assert.match(check, /hero\.png|turntable\.mp4/);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

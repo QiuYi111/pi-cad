@@ -536,16 +536,26 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     name: "cad_commit_frame_context",
     label: "Pi-CAD Commit Frame Context",
     description:
-      "Record the coordinate-frame mapping of a user-supplied artifact, confirmed WITH the user during the baseline phase. Mandatory for every baseline-bound route before baseline_understood: a part's local axes are often arbitrary, and every later interpretation inherits the assumed mapping.",
-    promptSnippet: "Record the user-confirmed coordinate frame mapping",
+      "Record the coordinate-frame mapping of a user-supplied artifact during the baseline phase. Mandatory for every baseline-bound route before baseline_understood: a part's local axes are often arbitrary, and every later interpretation inherits the assumed mapping. The harness forces the frame question to be HANDLED — the disposition records how (user-confirmed, already provided, genuinely not applicable, or user-declined).",
+    promptSnippet: "Record the coordinate frame mapping (with its disposition)",
     promptGuidelines: [
-      "Ask the user (one question, cad_wait_for_user) pointing at visible evidence: the attached views or unambiguous features.",
+      "Default to disposition=confirmed: ask the user (one question, cad_wait_for_user) pointing at visible evidence — the attached views or unambiguous features.",
       "Record the mapping in the user's functional words (which way is up in the machine, where the load comes from, which face locates against what).",
-      "Record what the user pointed at in howConfirmed.",
-      "Never guess from how the part sits in the file or from axis names; never commit without a user answer.",
+      "already_provided only when the user stated the mapping unprompted earlier in this conversation — cite it in howConfirmed.",
+      "not_applicable only when coordinates carry through verbatim AND direction is never referenced (pure format conversion); still record your best reading of the file's axes.",
+      "user_declined only when you actually asked and the user declined; say so in howConfirmed. Never guess from how the part sits in the file or from axis names alone.",
     ],
     parameters: Type.Object(
       {
+        disposition: Type.Enum({
+          confirmed: "confirmed",
+          already_provided: "already_provided",
+          not_applicable: "not_applicable",
+          user_declined: "user_declined",
+        }, {
+          description:
+            "confirmed: you asked and the user answered. already_provided: the user stated the mapping unprompted earlier. not_applicable: the coordinates carry through verbatim AND direction is never referenced (e.g. a pure format conversion). user_declined: you asked and the user explicitly declined to answer.",
+        }),
         axes: Type.Array(
           Type.Object(
             {
@@ -557,11 +567,16 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
             },
             { additionalProperties: false },
           ),
-          { minItems: 3, description: "All three artifact axes must be mapped" },
+          {
+            minItems: 3,
+            description:
+              "All three artifact axes must be mapped — including not_applicable/declined records (a best-effort reading of the file's own axes, honestly attributed)",
+          },
         ),
         howConfirmed: Type.String({
           minLength: 1,
-          description: "What the user pointed at or said when confirming (view + feature, or their explicit statement)",
+          description:
+            "What the user pointed at or said when confirming; for other dispositions, why that disposition applies (e.g. which earlier message stated the mapping)",
         }),
         notes: Type.Optional(Type.String()),
       },
@@ -574,6 +589,9 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const axes = new Set(params.axes.map((axis) => axis.axis));
       if (axes.size !== 3) {
         return errTool("axes must map each of x, y, z exactly once");
+      }
+      if (params.disposition === "confirmed" && params.howConfirmed.trim().length < 3) {
+        return errTool("disposition=confirmed requires howConfirmed to state what the user pointed at or said");
       }
       const result = commitPhaseRecord(state, "frame_context", params);
       if (!result.ok) return errTool(result.reason);
@@ -718,6 +736,14 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
 
       const spec = workflowSpec(state);
       if (params.event === "accepted" && spec?.acceptedPhases.includes(state.phase)) {
+        // The transition table is authoritative for where acceptance
+        // leads: "ready" CLOSES the run; any other target (audit, when a
+        // release suffix follows the design core) merely continues the
+        // process. Closure deliverables (presentation, workstreams) gate
+        // the closure only — the design review must not demand release
+        // artifacts it cannot even produce in that phase.
+        const acceptedTarget = spec.transitions[state.phase]?.accepted ?? "ready";
+        const isClosureAcceptance = acceptedTarget === "ready";
         const verification = await verifyCurrentArtifacts(ctx.cwd, state);
         if (verification) return errTool(`cannot accept: ${verification}`);
         if (!state.currentArtifactHash) {
@@ -739,10 +765,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           );
           if (simVerification) return errTool(`cannot accept: ${simVerification}`);
         }
-        const presentationVerification = await verifyPresentationDeliverables(ctx.cwd, state);
-        if (presentationVerification) return errTool(`cannot accept: ${presentationVerification}`);
-        const guard = spec.completionGuard?.(state);
-        if (guard) return errTool(`cannot accept: ${guard}`);
+        if (isClosureAcceptance) {
+          const presentationVerification = await verifyPresentationDeliverables(ctx.cwd, state);
+          if (presentationVerification) return errTool(`cannot accept: ${presentationVerification}`);
+          const guard = spec.completionGuard?.(state);
+          if (guard) return errTool(`cannot accept: ${guard}`);
+        }
       }
       if (
         params.event === "baseline_understood" &&
@@ -760,8 +788,13 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
 
       const result = transition(state, params.event, params.note);
       if (!result.ok) return errTool(result.reason);
+      // Head commits only when acceptance CLOSES the run (phase becomes
+      // ready). A design-review accepted that hands into a release suffix
+      // must not move the head: if the audit/gap_closure then fails or the
+      // user aborts, "abort leaves the project head unchanged" still holds.
       if (
         params.event === "accepted" &&
+        result.state.phase === "ready" &&
         spec?.updatesHeadOnAccept &&
         result.state.currentArtifactPath &&
         result.state.currentArtifactHash &&

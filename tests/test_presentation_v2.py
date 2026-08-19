@@ -341,3 +341,141 @@ class PresentationProvenance(unittest.TestCase):
             import shutil
 
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class PresentationFreezeBoundary(unittest.TestCase):
+    """The freeze spans the WHOLE invocation, including tessellation."""
+
+    def test_tessellation_window_tamper_discards(self):
+        import os
+        import subprocess
+        import sys
+        import threading
+        import time
+
+        if not (HAS_BLENDER and HAS_FFMPEG):
+            self.skipTest("blender/ffmpeg not installed")
+        tmp = Path(tempfile.mkdtemp(prefix="pi-cad-tess-race-"))
+        try:
+            source = tmp / "box.py"
+            source.write_text(
+                "import build123d as bd\n"
+                "with bd.BuildPart() as p:\n"
+                "    bd.Box(30, 30, 12)\n"
+                "result = p.part\n"
+            )
+            artifact = tmp / "box.step"
+            subprocess.run(
+                [sys.executable, "-m", "cadctl", "build", "--source", str(source), "--output", str(artifact), "--force"],
+                capture_output=True, text=True, timeout=300,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "artifact": str(artifact),
+                        "directions": [
+                            {"name": "hero", "reference": str(refs[0])},
+                            {"name": "top", "reference": str(refs[1])},
+                        ],
+                        "materials": [{"pattern": "machined", "family": "metal"}],
+                        "lighting": {"key": "softbox", "fill": "bounce", "rim": "strip"},
+                        "camera": {"lens": "50mm", "composition": "hero"},
+                        "resolution": {"width": 120, "height": 90},
+                        "fps": 12,
+                        "outputs": {"hero": True, "exploded": False, "turntable": False},
+                    }
+                )
+            )
+
+            # Tamper as soon as the mesh bundle appears: the tessellation is
+            # the first heavy read of the artifact and runs BEFORE the old
+            # (late) freeze point, so only the entry-time freeze catches it.
+            def tamper():
+                bundle = tmp / "out" / "mesh-bundle"
+                for _ in range(2000):
+                    if bundle.exists():
+                        break
+                    time.sleep(0.005)
+                artifact.write_bytes(artifact.read_bytes() + b"tampered")
+
+            thread = threading.Thread(target=tamper)
+            thread.start()
+            result = run_presentation(spec, tmp / "out", stage="preview")
+            thread.join()
+            self.assertEqual(result["status"], "discarded", result.get("reason"))
+            self.assertIn("changed during presentation", result["reason"])
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_manifest_seed_is_actually_applied(self):
+        """The manifest declares seed 0; the driver must set it."""
+        import re
+
+        driver = (ROOT / "python" / "cadctl" / "presentation_driver.py").read_text(encoding="utf-8")
+        self.assertRegex(driver, r"scene\.cycles\.seed\s*=\s*0")
+        # And the manifest still declares it (the two must agree).
+        manifest_src = (ROOT / "python" / "cadctl" / "presentation.py").read_text(encoding="utf-8")
+        self.assertIn('"seed": 0', manifest_src)
+
+    def test_cli_envelope_binds_reference_images(self):
+        """inputArtifacts carry spec, artifact, AND reference images."""
+        import os
+        import subprocess
+        import sys
+
+        if not (HAS_BLENDER and HAS_FFMPEG):
+            self.skipTest("blender/ffmpeg not installed")
+        tmp = Path(tempfile.mkdtemp(prefix="pi-cad-cli-roles-"))
+        try:
+            source = tmp / "box.py"
+            source.write_text(
+                "import build123d as bd\n"
+                "with bd.BuildPart() as p:\n"
+                "    bd.Box(24, 24, 10)\n"
+                "result = p.part\n"
+            )
+            artifact = tmp / "box.step"
+            subprocess.run(
+                [sys.executable, "-m", "cadctl", "build", "--source", str(source), "--output", str(artifact), "--force"],
+                capture_output=True, timeout=300,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "artifact": str(artifact),
+                        "directions": [
+                            {"name": "hero", "reference": str(refs[0])},
+                            {"name": "top", "reference": str(refs[1])},
+                        ],
+                        "materials": [{"pattern": "machined", "family": "metal"}],
+                        "lighting": {"key": "softbox", "fill": "bounce", "rim": "strip"},
+                        "camera": {"lens": "50mm", "composition": "hero"},
+                        "resolution": {"width": 120, "height": 90},
+                        "fps": 12,
+                        "outputs": {"hero": True, "exploded": False, "turntable": False},
+                    }
+                )
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "cadctl", "present", "preview", "--spec", str(spec), "--output-dir", str(tmp / "out")],
+                capture_output=True, text=True, timeout=900,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            envelope = json.loads(proc.stdout)
+            self.assertTrue(envelope["ok"], envelope)
+            roles = sorted(entry["role"] for entry in envelope.get("inputArtifacts", []))
+            self.assertIn("artifact", roles)
+            self.assertIn("spec", roles)
+            self.assertTrue(any(r.startswith("reference:") for r in roles), roles)
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)

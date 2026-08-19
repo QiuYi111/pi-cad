@@ -317,6 +317,10 @@ def main() -> int:
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
     scene.cycles.samples = args["samples"]
+    # The manifest declares seed 0; set it explicitly (the refactor that
+    # added denoising handling dropped this line, leaving the manifest
+    # describing a setting the renderer never received).
+    scene.cycles.seed = 0
     # Distros ship Blender without OpenImageDenoise; Cycles lazy-loads OIDN
     # at render time and then dies. We never ask for denoising — make that
     # explicit so builds without it render fine.
