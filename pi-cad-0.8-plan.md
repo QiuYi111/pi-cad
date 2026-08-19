@@ -3,6 +3,16 @@
 **主题:Physical Realizability + Workflow Compiler**(白皮书第 14 节)
 **基线:0.7.2 · `c12c0fa` · 白皮书《Pi-CAD 0.7 → 0.8 架构与产品总结书》**
 
+> **状态:已全部实现**(M1–M4 + 白皮书 15 验收矩阵,含 jet-engine 逆解
+> benchmark)。M1:route 本体 + compiler + schema v4 迁移(quick 删除,
+> part_design 快速路径为推导产物)。M2:maturity overlay(manufacturing
+> 图纸证据)+ assembly record 工具与 guard。M3:reroute(义务单调性 +
+> harness 一次性授权 token + earliest-unmet-phase)与
+> cad_inspect_interference(三态事实)。M4:analysisModel 分离(派生几何
+> 未声明即 fail closed,证据主体绑定 canonical 设计)、Blender 演示
+> v2(STEP → 确定性 STL bundle → Cycles CPU,manifest 哈希绑定,release
+> 交付物校验)、cad_scan_sections(解析截面事实)。
+
 ---
 
 ## 0. 总原则(白皮书冻结决定 → 实现约束)
