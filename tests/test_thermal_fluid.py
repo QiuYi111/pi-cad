@@ -557,8 +557,10 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             self.assertIn("spec", envelope["payload"]["error"])
             # Reported provenance is still the pre-solve frozen hash, never
             # the rewritten file's.
-            frozen_spec_hash = cli._freeze_simulation_inputs(str(spec_path), "validate")[0]["sha256"]
-            self.assertNotEqual(envelope["inputHashes"]["spec"], frozen_spec_hash)
+            from cadctl.provenance import FrozenInputs
+
+            rewritten_hash = FrozenInputs.freeze([("spec", spec_path)]).hashes()["spec"]
+            self.assertNotEqual(envelope["inputHashes"]["spec"], rewritten_hash)
 
     def test_incompressible_ns_runs_with_declared_viscosity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

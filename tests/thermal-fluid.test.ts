@@ -434,6 +434,10 @@ test("flow evidence re-verifies its hash-bound inputs (spec + fluidDomain) after
     const saved = await store.load();
     const ref = saved!.evidence.find((r: EvidenceRef) => r.kind === "simulation")!;
     assert.ok(ref.inputArtifacts?.length === 3, "inputArtifacts persisted on EvidenceRef");
+    // Subject (which design this is about) is distinct from consumed inputs.
+    assert.equal(ref.subjectArtifactHash, ref.artifactHash);
+    assert.equal(ref.artifactHash, result.details.artifactHash);
+    assert.ok(ref.inputArtifacts!.every((entry) => entry.sha256 !== undefined && entry.role !== undefined));
     assert.equal(await verifyEvidenceFilesForHash(cwd, saved!, result.details.artifactHash, ["simulation"]), null);
 
     // The loophole: rewrite the fluid-domain STEP after the solve. Outputs

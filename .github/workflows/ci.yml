@@ -15,15 +15,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Simulation evidence renders seven pyvista views; give VTK a headless
-      # software-rendering display so the suite exercises the real path.
-      - name: Set up headless display
-        uses: pyvista/setup-headless-display-action@v3
-
-      # The gmsh wheel's bundled libgmsh dlopens libGLU.so.1, which is not on
-      # GitHub runners (or minimal headless servers) by default.
-      - name: Install system libraries for gmsh
-        run: sudo apt-get update && sudo apt-get install -y libglu1-mesa
+      # gmsh's bundled libgmsh dlopens libGLU.so.1, and VTK needs a headless
+      # X server for the off-screen simulation views. Both come straight
+      # from apt: the third-party setup-headless-display action hung
+      # intermittently on its first step and stalled otherwise-green runs.
+      - name: Install system libraries (gmsh GLU + headless display for VTK)
+        run: >
+          sudo apt-get update && sudo apt-get install -y
+          libglu1-mesa xvfb libxrender1 libxcursor1 libxft2 libxinerama1
 
       - uses: actions/setup-node@v4
         with:
@@ -43,6 +42,6 @@ jobs:
         run: npm install
 
       - name: Full test suite (TypeScript harness + Python backend)
-        run: npm test
+        run: xvfb-run -a npm test
         env:
           MPLCONFIGDIR: /tmp/matplotlib-cache

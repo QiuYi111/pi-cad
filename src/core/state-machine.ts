@@ -243,6 +243,7 @@ export function evidenceFromBuild(
     kind: "build",
     tool: "cad_build_step",
     artifactHash,
+    subjectArtifactHash: artifactHash,
     sourceHash,
     paths: envelope.artifacts.map((artifact) => artifact.path),
     artifacts: envelope.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
@@ -268,6 +269,9 @@ export function evidenceFromEnvelope(
     kind,
     tool,
     artifactHash,
+    // The subject design this evidence is about, named explicitly; the
+    // inputs it consumed live in inputArtifacts.
+    subjectArtifactHash: artifactHash,
     sourceHash,
     specHash,
     caseId,

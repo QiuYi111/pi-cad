@@ -114,7 +114,15 @@ export interface EvidenceRef {
     | "assembly"
     | "optimization";
   tool: string;
+  /**
+   * The design this evidence belongs to (the subject artifact — normally the
+   * current candidate). This field has always carried that meaning; it is
+   * mirrored by subjectArtifactHash, which names the role explicitly, while
+   * inputArtifacts[] lists everything the invocation consumed.
+   */
   artifactHash: string;
+  /** Explicit alias of artifactHash: which design this evidence is about. */
+  subjectArtifactHash?: string;
   sourceHash?: string;
   /** Spec identity for spec-driven evidence (simulation load cases, optimization runs). */
   specHash?: string;
