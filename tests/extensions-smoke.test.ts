@@ -108,3 +108,26 @@ test("control tools execute through pure workflow machine", async () => {
   // verifies extension registration does not execute side effects at import.
   assert.ok(true);
 });
+
+test("baseline phase prompts mandate coordinate-frame confirmation with the user", async () => {
+  const { loadPrompt } = await import("../src/core/context.ts");
+  // loadPrompt falls back to generic text when a file is missing, so the
+  // distinctive phrases double as file-presence guards.
+  const baseline = await loadPrompt("baseline");
+  assert.match(baseline, /Confirm the coordinate frame with the user/i);
+  assert.match(baseline, /mandatory/i);
+  assert.match(baseline, /baseline_understood/);
+  // The question must be grounded in visible evidence (views or features).
+  assert.match(baseline, /views|features/i);
+  // Silent assumption is never an escape.
+  assert.match(baseline, /never assume silently|silent assumption is never an exception/i);
+
+  const sourceBaseline = await loadPrompt("source_baseline");
+  assert.match(sourceBaseline, /Confirm the coordinate frame with the user/i);
+  assert.match(sourceBaseline, /baseline_understood/);
+
+  // The requirements prompt defers the frame question to the baseline
+  // phase instead of duplicating it.
+  const requirements = await loadPrompt("requirements");
+  assert.match(requirements, /coordinate orientation/i);
+});

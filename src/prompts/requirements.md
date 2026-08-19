@@ -25,6 +25,7 @@ brief.
 - Keep explicit assumptions reversible and visible.
 - If the task is already fully specified (the V0 plate is an example), do not ask ceremonial questions: call cad_commit_requirements directly.
 - For routes that start from supplied STEP/CAD (analyze, legacy, hybrid, convert), put every supplied artifact path in inputs[].
+- Do not debate the artifact's coordinate orientation here — the harness binds and auto-inspects the baseline right after this commit, and the BASELINE phase confirms the frame mapping with the user using those views.
 
 ## Engineering simulation obligation
 
