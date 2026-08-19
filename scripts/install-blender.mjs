@@ -30,18 +30,20 @@ function platformKey() {
   return null;
 }
 
-function pythonExtract(python, env, root, archivePath, member, destPath) {
-  // tar.xz extraction (and dmg absence) via the Python runtime guaranteed
-  // by postinstall; Node has no built-in archive reader.
+function pythonExtract(python, env, root, archivePath, distribution, destDir) {
+  // Extract the whole distribution directory: the blender binary needs
+  // its bundled libraries (libblender_cpu_check.so etc.) next to it, so a
+  // lone binary cannot run. Via the Python runtime guaranteed by
+  // postinstall; Node has no built-in archive reader.
   const script =
     "import sys, tarfile, os\n" +
     "archive = tarfile.open(sys.argv[1])\n" +
-    "member = archive.extractfile(sys.argv[2])\n" +
-    "if member is None:\n" +
-    "    raise SystemExit('member is not a file: ' + sys.argv[2])\n" +
-    "os.makedirs(os.path.dirname(sys.argv[3]), exist_ok=True)\n" +
-    "open(sys.argv[3], 'wb').write(member.read())\n";
-  execFileSync(python, ["-c", script, archivePath, member, destPath], { cwd: root, env, stdio: "pipe" });
+    "members = [m for m in archive.getmembers() if m.name.startswith(sys.argv[2] + '/')]\n" +
+    "if not members:\n" +
+    "    raise SystemExit('distribution directory not found: ' + sys.argv[2])\n" +
+    "os.makedirs(sys.argv[3], exist_ok=True)\n" +
+    "archive.extractall(sys.argv[3], members=members, filter='data')\n";
+  execFileSync(python, ["-c", script, archivePath, distribution, destDir], { cwd: root, env, stdio: "pipe" });
 }
 
 export async function installBlender({ root, python, env = process.env }) {
@@ -83,6 +85,9 @@ export async function installBlender({ root, python, env = process.env }) {
   const tmpDir = join(runtimeRoot, "tmp");
   mkdirSync(tmpDir, { recursive: true });
   const archivePath = join(tmpDir, `blender-${version}-${key}.archive`);
+  // entry.binary is "<distribution-dir>/<binary-name>": the whole
+  // distribution directory is extracted so the binary finds its libs.
+  const distribution = entry.binary.split("/")[0];
   try {
     console.log(`[pi-cad] downloading Blender ${version} for ${key}...`);
     const res = await fetch(entry.url);
@@ -93,9 +98,29 @@ export async function installBlender({ root, python, env = process.env }) {
       throw new Error(`sha256 mismatch: expected ${entry.sha256}, got ${digest}`);
     }
     mkdirSync(targetDir, { recursive: true });
-    pythonExtract(python, env, root, archivePath, entry.binary, target);
+    // Extract into a staging directory beside the final layout, then
+    // flatten by moving entries up one level (a copy of a directory into
+    // its own parent would self-nest).
+    const staging = join(runtimeRoot, "tmp", "extract");
+    rmSync(staging, { recursive: true, force: true });
+    mkdirSync(staging, { recursive: true });
+    pythonExtract(python, env, root, archivePath, distribution, staging);
+    chmodSync(join(staging, distribution, "blender"), 0o755);
+    const { readdirSync, renameSync } = await import("node:fs");
+    for (const entry of readdirSync(join(staging, distribution))) {
+      renameSync(join(staging, distribution, entry), join(targetDir, entry));
+    }
     chmodSync(target, 0o755);
-    const check = execFileSync(target, ["--version"], { encoding: "utf-8", env: { ...env, OMP_NUM_THREADS: "1" } });
+    // The shipped launcher sets LD_LIBRARY_PATH to the bundled libs; probe
+    // with the same setup or the binary cannot find libIex et al.
+    const check = execFileSync(target, ["--version"], {
+      encoding: "utf-8",
+      env: {
+        ...env,
+        OMP_NUM_THREADS: "1",
+        LD_LIBRARY_PATH: [join(targetDir, "lib"), env.LD_LIBRARY_PATH].filter(Boolean).join(":"),
+      },
+    });
     if (!/Blender \d/.test(check)) throw new Error("binary did not identify as Blender");
     console.log(`[pi-cad] Blender ${version} installed: ${target}`);
     return { status: "ready", target };

@@ -196,19 +196,44 @@ def blender_binary() -> tuple[str | None, str]:
         return (override, "pinned-override") if Path(override).exists() else (None, "override-missing")
     on_path = shutil.which("blender")
     if on_path:
-        return on_path, "path"
-    for runtime_dir in sorted(Path(".runtime/blender").glob("*/")) if Path(".runtime/blender").exists() else []:
-        candidate = runtime_dir / "blender"
-        if candidate.exists():
-            return str(candidate), runtime_dir.name
+        # A PATH blender must actually run: distro stubs and broken
+        # entries fall through to the managed runtime instead of failing.
+        try:
+            lib_dir = Path(on_path).parent / "lib"
+            env = {**os.environ, "OMP_NUM_THREADS": "1"}
+            if lib_dir.exists():
+                env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
+            probe = subprocess.run(
+                [on_path, "--version"], capture_output=True, text=True, timeout=90,
+                env=env,
+            )
+            if probe.returncode == 0 and re.search(r"Blender \d", probe.stdout or ""):
+                return on_path, "path"
+        except Exception:
+            pass
+    # The runtime tree mirrors the SU2 layout: <root>/<version>/<platform>/.
+    # Search platform dirs first (they may contain non-binary entries at
+    # other levels), newest version first.
+    runtime_root = Path(os.environ.get("PI_CAD_BLENDER_RUNTIME", ".runtime/blender"))
+    if not runtime_root.exists():
+        return None, "missing"
+    for version_dir in sorted(runtime_root.glob("*/"), reverse=True):
+        for candidate_dir in sorted(version_dir.glob("*/"), reverse=True):
+            candidate = candidate_dir / "blender"
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve()), f"{version_dir.name}/{candidate_dir.name}"
     return None, "missing"
 
 
 def _blender_version(binary: str) -> str:
     try:
+        lib_dir = Path(binary).parent / "lib"
+        env = {**os.environ, "OMP_NUM_THREADS": "1"}
+        if lib_dir.exists():
+            env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
         result = subprocess.run(
             [binary, "--version"], capture_output=True, text=True, timeout=60,
-            env={**os.environ, "OMP_NUM_THREADS": "1"},
+            env=env,
         )
         match = re.search(r"Blender ([0-9.]+)", result.stdout or "")
         return match.group(1) if match else "unknown"
@@ -347,6 +372,14 @@ def run_presentation(
 
     driver = Path(__file__).with_name("presentation_driver.py")
     started = time.monotonic()
+    # Managed runtimes keep their libraries beside the binary (the shipped
+    # launcher does the same); PATH installs already resolve their own.
+    lib_dir = Path(binary).parent / "lib"
+    run_env = {**os.environ, "OMP_NUM_THREADS": "1"}
+    if lib_dir.exists():
+        run_env["LD_LIBRARY_PATH"] = (
+            f"{lib_dir}{os.pathsep}{run_env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
+        )
     result = subprocess.run(
         [
             binary,
@@ -361,7 +394,7 @@ def run_presentation(
         capture_output=True,
         text=True,
         timeout=1800,
-        env={**os.environ, "OMP_NUM_THREADS": "1"},
+        env=run_env,
     )
     (output_dir / "blender.log").write_text(
         f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}\nreturncode={result.returncode}\n",
