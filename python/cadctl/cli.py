@@ -408,15 +408,29 @@ def _simulation_input_hashes(spec_path: str, stage: str) -> dict[str, str]:
     input_hashes = {"spec": sha256_file(spec_path)}
     if stage != "run":
         return input_hashes
+    for role, _path in _simulation_input_paths(spec_path):
+        input_hashes[role] = sha256_file(_path)
+    return input_hashes
+
+
+def _simulation_input_paths(spec_path: str) -> list[tuple[str, str]]:
+    """(role, path) for every artifact input named by a spec.
+
+    Persisted evidence re-verifies these after the solve, so a flow result
+    can never silently outlive a rewritten fluid domain or spec.
+    """
+    entries: list[tuple[str, str]] = [("spec", str(Path(spec_path).resolve()))]
     try:
         spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
     except Exception:
-        return input_hashes
+        return entries
+    if not isinstance(spec, dict):
+        return entries
     for key in ("artifact", "fluidDomain"):
         value = spec.get(key)
         if isinstance(value, str) and value and Path(value).exists():
-            input_hashes[key] = sha256_file(value)
-    return input_hashes
+            entries.append((key, str(Path(value).resolve())))
+    return entries
 
 
 def _simulation_result_artifacts(payload: dict) -> list[dict[str, str]]:
@@ -459,12 +473,21 @@ def _cmd_simulate_flow(args: argparse.Namespace) -> int:
             )
             return 0
         artifacts = _simulation_result_artifacts(payload) if args.stage == "run" else []
+        input_artifacts = (
+            [
+                {"path": path, "role": role, "sha256": sha256_file(path)}
+                for role, path in _simulation_input_paths(args.spec)
+            ]
+            if args.stage == "run"
+            else None
+        )
         emit(
             "cad_simulate_flow",
             payload,
             input_hashes=input_hashes,
+            input_artifacts=input_artifacts,
             artifacts=artifacts,
-            warnings=[] if payload.get("status") in {"solved", "validated"} else ["flow simulation did not produce satisfying evidence"],
+            warnings=[] if payload.get("status") in {"solved", "validated"} else ["flow simulation status=" + str(payload.get("status")) + ": " + str(payload.get("reason", "did not produce satisfying evidence"))],
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0
@@ -489,12 +512,21 @@ def _cmd_simulate_thermal(args: argparse.Namespace) -> int:
             )
             return 0
         artifacts = _simulation_result_artifacts(payload) if args.stage == "run" else []
+        input_artifacts = (
+            [
+                {"path": path, "role": role, "sha256": sha256_file(path)}
+                for role, path in _simulation_input_paths(args.spec)
+            ]
+            if args.stage == "run"
+            else None
+        )
         emit(
             "cad_simulate_thermal",
             payload,
             input_hashes=input_hashes,
+            input_artifacts=input_artifacts,
             artifacts=artifacts,
-            warnings=[] if payload.get("status") in {"solved", "validated"} else ["thermal simulation did not produce satisfying evidence"],
+            warnings=[] if payload.get("status") in {"solved", "validated"} else ["thermal simulation status=" + str(payload.get("status")) + ": " + str(payload.get("reason", "did not produce satisfying evidence"))],
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0

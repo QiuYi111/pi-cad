@@ -180,6 +180,21 @@ test("simulation cases re-arm when a new candidate is committed", () => {
   assert.match(result.reason, /required simulation evidence is missing|nozzle-outlet/);
 });
 
+test("two obligations sharing a case id but different tools coexist", () => {
+  const cases = [
+    { id: "operating-point", tool: "cad_simulate_flow" as const },
+    { id: "operating-point", tool: "cad_simulate_thermal" as const },
+  ];
+  let state = greenfieldReadyState({ disposition: "required", cases });
+  state = simulationEvidence(state, "cad_simulate_flow", "operating-point");
+  // The thermal run must not evict the flow evidence despite the shared id.
+  state = simulationEvidence(state, "cad_simulate_thermal", "operating-point");
+  const caseEvidence = state.evidence.filter((ref: EvidenceRef) => ref.kind === "simulation" && ref.caseId === "operating-point");
+  assert.equal(caseEvidence.length, 2);
+  const result = transition(state, "accepted", "both closed under the shared id");
+  assert.ok(result.ok, result.reason);
+});
+
 test("case-less required simulation keeps the legacy any-evidence behavior", () => {
   let state = greenfieldReadyState({ disposition: "required" });
   let result = transition(state, "accepted", "no simulation yet");
@@ -188,6 +203,99 @@ test("case-less required simulation keeps the legacy any-evidence behavior", () 
   state = simulationEvidence(state, "cad_simulate");
   result = transition(state, "accepted", "structural closes legacy obligation");
   assert.ok(result.ok, result.reason);
+});
+
+const corePiHarness = async () => {
+  const pi: any = {
+    handlers: new Map<string, Function[]>(),
+    on(event: string, handler: Function) {
+      const list = pi.handlers.get(event) ?? [];
+      list.push(handler);
+      pi.handlers.set(event, list);
+    },
+    activeTools: [],
+    setActiveTools() {},
+    getActiveTools: () => [...pi.activeTools],
+    getAllTools: () => [],
+    appendEntry() {},
+    sendUserMessage() {},
+    events: { emit() {}, on() {} },
+    registerTool() {},
+    registerCommand() {},
+  };
+  const core = (await import("../src/extensions/core/index.ts")).default;
+  core(pi);
+  return pi;
+};
+
+test("not_converged flow runs create no simulation evidence and cannot close a required case", async () => {
+  const { CadProjectStore } = await import("../src/shared/store.ts");
+  const pi = await corePiHarness();
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-notconv-"));
+  try {
+    const store = new CadProjectStore(cwd);
+    await store.migrateLegacyProject();
+    await store.ensureProject();
+    const run = await store.createRun({ runId: "notconv-run" });
+    await run.ensureDirs();
+    let state = greenfieldReadyState({ disposition: "required", cases: [{ id: "nozzle-outlet", tool: "cad_simulate_flow" }] });
+    state = { ...state, runId: "notconv-run" };
+    await store.save(state);
+
+    const toolResult = pi.handlers.get("tool_result")![0] as Function;
+    const envelopeFor = (status: string) => ({
+      ok: true,
+      tool: "cad_simulate_flow",
+      toolVersion: "test",
+      inputHashes: { spec: "spec-hash" },
+      outputHashes: {},
+      durationMs: 1,
+      warnings: [],
+      artifacts: [{ path: ".pi-cad/runs/notconv-run/evidence/flow.json", kind: "simulation_result", sha256: "h" }],
+      payload: { status, caseId: "nozzle-outlet" },
+    });
+
+    // A completed-but-unconverged run must not record evidence.
+    await toolResult(
+      {
+        toolName: "cad_simulate_flow",
+        details: {
+          envelope: envelopeFor("not_converged"),
+          artifactHash: state.currentArtifactHash,
+          specHash: "spec-hash",
+          caseId: "nozzle-outlet",
+          kind: "simulation",
+        },
+      },
+      { cwd },
+    );
+    let after = await store.load();
+    assert.equal(after!.evidence.filter((ref: EvidenceRef) => ref.kind === "simulation").length, 0);
+
+    // The case therefore stays unmet and acceptance is blocked.
+    const blocked = transition(after!, "accepted", "unconverged run must not close the case");
+    assert.ok(!blocked.ok);
+    assert.match(blocked.reason, /required simulation evidence is missing|nozzle-outlet \(cad_simulate_flow\)/);
+
+    // A converged run records evidence and closes the case.
+    await toolResult(
+      {
+        toolName: "cad_simulate_flow",
+        details: {
+          envelope: envelopeFor("solved"),
+          artifactHash: state.currentArtifactHash,
+          specHash: "spec-hash",
+          caseId: "nozzle-outlet",
+          kind: "simulation",
+        },
+      },
+      { cwd },
+    );
+    after = await store.load();
+    assert.equal(after!.evidence.filter((ref: EvidenceRef) => ref.kind === "simulation").length, 1);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("thermal/fluid tools are excluded from source phases and present where evidence is produced", () => {
@@ -207,6 +315,96 @@ test("thermal/fluid tools are excluded from source phases and present where evid
     const tools = toolsForPhase(phase);
     if (!tools.includes("bash") && phase !== "build") continue;
     assert.ok(tools.includes("cad_inspect_surfaces"), `${phase} should expose cad_inspect_surfaces`);
+  }
+});
+
+test("flow evidence re-verifies its hash-bound inputs (spec + fluidDomain) after the solve", { skip: !(await su2Available()) }, async () => {
+  const { CadProjectStore } = await import("../src/shared/store.ts");
+  const { verifyEvidenceFilesForHash } = await import("../src/core/evidence.ts");
+  const pi = await corePiHarness();
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-inputs-"));
+  try {
+    const { buildStep } = await import("../src/shared/capability.ts");
+    await buildStep(cwd, { source: join(ROOT, "tests/fixtures/nozzle.py"), output: join(cwd, "nozzle.step"), force: true });
+
+    const geometry = (await import("../src/extensions/geometry/index.ts")).default;
+    const geometryPi = mockPi();
+    geometry(geometryPi as any);
+    const surfaces = geometryPi.tools.get("cad_inspect_surfaces");
+    const surfaceResult = await surfaces.execute("t1", { artifact: "nozzle.step", labels: false }, undefined, undefined, { cwd });
+    const facts = surfaceResult.details.envelope.payload.surfaces as Array<{ id: string; type: string; centroid: number[] }>;
+    const inlet = facts.find((s) => s.type === "plane" && s.centroid[0] === 0)!.id;
+    const outlet = facts.find((s) => s.type === "plane" && Math.abs(s.centroid[0] - 320) < 1e-6)!.id;
+    const walls = facts.filter((s) => s.type !== "plane").map((s) => s.id);
+
+    const simulationPi = mockPi();
+    (await import("../src/extensions/simulation/index.ts")).default(simulationPi as any);
+    const flow = simulationPi.tools.get("cad_simulate_flow");
+    const result = await flow.execute(
+      "t2",
+      {
+        caseId: "nozzle-outlet",
+        artifact: "nozzle.step",
+        fluidDomain: "nozzle.step",
+        geometryUnits: "mm",
+        physics: { type: "compressible_euler" },
+        fluid: { model: "ideal_gas", gamma: 1.4, gasConstantJPerKgK: 287.05 },
+        boundaries: [
+          { type: "total_conditions_inlet", surfaces: [inlet], totalPressurePa: 420000, totalTemperatureK: 1150, flowDirection: [1, 0, 0] },
+          { type: "pressure_outlet", surfaces: [outlet], staticPressurePa: 101325 },
+          { type: "wall", surfaces: walls, thermal: "adiabatic" },
+        ],
+        initial: { mach: 0.25, temperatureK: 288.15, pressurePa: 101325 },
+        mesh: { maxSizeMm: 14, minSizeMm: 5 },
+        convergence: { maxIterations: 1500, residualTarget: -6 },
+      },
+      undefined,
+      undefined,
+      { cwd },
+    );
+    assert.equal(result.details.envelope.payload.status, "solved");
+    const roles = (result.details.envelope.inputArtifacts ?? []).map((entry: { role: string }) => entry.role).sort();
+    assert.deepEqual(roles, ["artifact", "fluidDomain", "spec"]);
+
+    // Drive the harness tool_result path so the EvidenceRef persists with
+    // its inputArtifacts, then verify while inputs are still intact.
+    const store = new CadProjectStore(cwd);
+    await store.migrateLegacyProject();
+    await store.ensureProject();
+    const run = await store.createRun({ runId: "inputs-run" });
+    await run.ensureDirs();
+    const state = greenfieldReadyState({ disposition: "required", cases: [{ id: "nozzle-outlet", tool: "cad_simulate_flow" }] });
+    await store.save({ ...state, runId: "inputs-run" });
+    const toolResult = pi.handlers.get("tool_result")![0] as Function;
+    await toolResult(
+      {
+        toolName: "cad_simulate_flow",
+        details: {
+          envelope: result.details.envelope,
+          artifactHash: result.details.artifactHash,
+          specHash: result.details.specHash,
+          caseId: "nozzle-outlet",
+          kind: "simulation",
+        },
+      },
+      { cwd },
+    );
+    const saved = await store.load();
+    const ref = saved!.evidence.find((r: EvidenceRef) => r.kind === "simulation")!;
+    assert.ok(ref.inputArtifacts?.length === 3, "inputArtifacts persisted on EvidenceRef");
+    assert.equal(await verifyEvidenceFilesForHash(cwd, saved!, result.details.artifactHash, ["simulation"]), null);
+
+    // The loophole: rewrite the fluid-domain STEP after the solve. Outputs
+    // are untouched, but the input re-verification must now fail.
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(join(cwd, "nozzle.step"), "\n");
+    const failure = await verifyEvidenceFilesForHash(cwd, saved!, result.details.artifactHash, ["simulation"]);
+    assert.ok(failure, "tampered fluid domain must fail verification");
+    // artifact and fluidDomain are the same file in this fixture; either role
+    // surfacing proves the input re-verification fired.
+    assert.match(failure, /evidence input hash changed: (artifact|fluidDomain)/);
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
   }
 });
 
@@ -350,8 +548,8 @@ test("walking skeleton: inspect surfaces -> thermal slab with analytic heat rate
     assert.equal(thermalResult.details.kind, "simulation");
     assert.equal(thermalResult.details.caseId, "slab-axial");
     const analytic = (16.2 * 0.01 * 850) / 0.5; // 275.4 W
-    const hotRate = Math.abs(payload.boundaries[hot.id].heatRateW);
-    const coldRate = Math.abs(payload.boundaries[cold.id].heatRateW);
+    const hotRate = Math.abs(payload.boundaries[hot.id].reconstructedHeatRateW);
+    const coldRate = Math.abs(payload.boundaries[cold.id].reconstructedHeatRateW);
     assert.ok(
       Math.abs(hotRate - analytic) / analytic < 0.06,
       `hot face heat rate ${hotRate} vs analytic ${analytic}`,
@@ -361,7 +559,7 @@ test("walking skeleton: inspect surfaces -> thermal slab with analytic heat rate
       `cold face heat rate ${coldRate} vs analytic ${analytic}`,
     );
     assert.ok(payload.temperature.minK > 295 && payload.temperature.maxK < 1155);
-    assert.ok(typeof payload.energyBalance.relativeImbalance === "number");
+    assert.ok(typeof payload.energyBalance.relativeReconstructedImbalance === "number");
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }

@@ -53,6 +53,17 @@ export async function verifyEvidenceFilesForHash(
           return `${kind} evidence artifact hash changed: ${artifact.path}`;
         }
       }
+      // Hash-bound inputs (canonical spec, fluid domain, product artifact)
+      // must also still match: evidence must never outlive a rewritten input
+      // the harness does not otherwise track.
+      for (const input of ref.inputArtifacts ?? []) {
+        if (!existsSync(resolve(cwd, input.path))) {
+          return `${kind} evidence input is missing: ${input.role} (${input.path})`;
+        }
+        if ((await sha256File(resolve(cwd, input.path))) !== input.sha256) {
+          return `${kind} evidence input hash changed: ${input.role} (${input.path})`;
+        }
+      }
     }
   }
   return null;
@@ -109,7 +120,10 @@ export function recordToolEvidence(
         ref.kind === kind &&
         ref.artifactHash === artifactHash &&
         (caseId !== undefined
-          ? ref.caseId === caseId
+          ? // Case identity matches obligation identity exactly:
+            // (artifact, tool, caseId). Two obligations that share a case id
+            // but declare different tools must never evict each other.
+            ref.caseId === caseId && ref.tool === envelope.tool
           : specHash === undefined || ref.specHash === specHash)
       ),
   );

@@ -85,11 +85,12 @@ def _outward_normals(
     triangles: list[list[int]],
     nodes: np.ndarray,
     elements: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Outward unit normals and areas for marker triangles.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Outward unit normals, areas, and owning-element index per triangle.
 
     Orientation uses the tetrahedron owning each boundary face: the outward
-    normal points away from the owner's fourth vertex.
+    normal points away from the owner's fourth vertex. The owner index lets
+    callers use the owner's exact (constant) element gradient on the face.
     """
     face_to_owner: dict[tuple[int, int, int], int] = {}
     for element_index, tet in enumerate(elements):
@@ -101,6 +102,7 @@ def _outward_normals(
 
     normals = np.zeros((len(triangles), 3), dtype=np.float64)
     areas = np.zeros(len(triangles), dtype=np.float64)
+    owners = np.full(len(triangles), -1, dtype=np.int64)
     for tri_index, tri in enumerate(triangles):
         p0, p1, p2 = (nodes[tri[0]], nodes[tri[1]], nodes[tri[2]])
         cross = np.cross(p1 - p0, p2 - p0)
@@ -114,9 +116,10 @@ def _outward_normals(
             face_centroid = (p0 + p1 + p2) / 3.0
             if float(np.dot(normal, face_centroid - owner_centroid)) < 0.0:
                 normal = -normal
+            owners[tri_index] = owner
         normals[tri_index] = normal
         areas[tri_index] = 0.5 * norm
-    return normals, areas
+    return normals, areas, owners
 
 
 def marker_surface_stats(
@@ -128,7 +131,7 @@ def marker_surface_stats(
     density_field: str = "Density",
 ) -> dict[str, Any]:
     """Area-weighted field means and integrated mass flow for one marker."""
-    normals, areas = _outward_normals(triangles, nodes, elements)
+    normals, areas, _owners = _outward_normals(triangles, nodes, elements)
     total_area = float(areas.sum())
     stats: dict[str, Any] = {"areaM2": round(total_area, 9)}
     if total_area <= 0:
@@ -146,14 +149,14 @@ def marker_surface_stats(
     velocity = fields.get(velocity_field)
     density = fields.get(density_field)
     if velocity is not None and density is not None and velocity.shape == (len(nodes), 3):
-        tri_flux = sum(
-            float(
-                density[tri].mean()
-                * float(np.dot(velocity[tri].mean(axis=0), normals[index]))
-                * areas[index]
-            )
-            for index, tri in enumerate(triangles)
-        )
+        # Nodal quadrature of the exact integrand rho*(v.n): the solution is
+        # linear on each face, so averaging the pointwise product over the
+        # three nodes is exact (mean(rho)*mean(v).n is not, and introduces a
+        # covariance error on compressible boundaries).
+        tri_flux = 0.0
+        for index, tri in enumerate(triangles):
+            pointwise = density[tri] * (velocity[tri] @ normals[index])
+            tri_flux += float(pointwise.mean()) * areas[index]
         stats["massFlowKgPerS"] = round(tri_flux, 9)
     return stats
 
@@ -231,6 +234,25 @@ def read_su2_elements(path: str | Path) -> np.ndarray:
     return np.asarray(elements, dtype=np.int64)
 
 
+def element_gradients(
+    nodes: np.ndarray,
+    elements: np.ndarray,
+    values: np.ndarray,
+) -> np.ndarray:
+    """Exact constant gradient per tetrahedron (the solution is linear on
+    each element, so this is the plane through its four nodes)."""
+    gradients = np.zeros((elements.shape[0], 3), dtype=np.float64)
+    for index, tet in enumerate(elements):
+        pts = nodes[tet]
+        matrix = np.stack([pts[1] - pts[0], pts[2] - pts[0], pts[3] - pts[0]])
+        rhs = values[tet[1:]] - values[tet[0]]
+        try:
+            gradients[index] = np.linalg.solve(matrix, rhs)
+        except np.linalg.LinAlgError:
+            continue
+    return gradients
+
+
 def boundary_heat_rates(
     nodes: np.ndarray,
     elements: np.ndarray,
@@ -239,28 +261,31 @@ def boundary_heat_rates(
     conductivity: float,
     temperature_scale: float,
 ) -> dict[str, dict[str, float]]:
-    """Integrated conductive heat rate per boundary surface (W).
+    """Reconstructed conductive heat rate per boundary surface (W).
 
-    Uses ``node_gradients``; the reported rate is the surface integral of
-    -k (dT/dn) with n the outward normal, so a surface being heated reads
-    negative (flux into the solid).
+    Each boundary face uses its owning tetrahedron's exact constant element
+    gradient. This is still a *reconstruction* of the balance, not SU2's own
+    conservative face fluxes, so the field names say so; the reported rate is
+    the surface integral of -k (dT/dn) with n the outward normal (a surface
+    being heated reads negative).
     """
-    gradients = node_gradients(nodes, elements, temperature)
+    gradients = element_gradients(nodes, elements, temperature)
 
     rates: dict[str, dict[str, float]] = {}
     for marker, triangles in marker_triangles.items():
-        normals, areas = _outward_normals(triangles, nodes, elements)
+        normals, areas, owners = _outward_normals(triangles, nodes, elements)
         total = 0.0
         for index, tri in enumerate(triangles):
-            node_gradient = gradients[tri].mean(axis=0)
+            owner = int(owners[index])
+            gradient = gradients[owner] if owner >= 0 else np.zeros(3)
             total += (
                 -conductivity
                 * temperature_scale
-                * float(np.dot(node_gradient, normals[index]))
+                * float(np.dot(gradient, normals[index]))
                 * areas[index]
             )
         rates[marker] = {
-            "heatRateW": round(total, 9),
+            "reconstructedHeatRateW": round(total, 9),
             "areaM2": round(float(areas.sum()), 9),
         }
     return rates

@@ -14,7 +14,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve as PathResolve } from "node:path";
 
 function sha256File(path) {
   const hash = createHash("sha256");
@@ -66,14 +66,20 @@ export async function installSu2({ root, python, env = process.env }) {
     return { status: "unavailable" };
   }
   const version = manifest.version ?? "unknown";
-  const targetDir = join(root, ".runtime", "su2", version, key, "bin");
+  // PI_CAD_SU2_RUNTIME relocates the whole managed runtime tree; the
+  // backend resolves it with the same variable, so install and lookup
+  // always agree.
+  const runtimeRoot = process.env.PI_CAD_SU2_RUNTIME
+    ? PathResolve(process.env.PI_CAD_SU2_RUNTIME)
+    : join(root, ".runtime", "su2");
+  const targetDir = join(runtimeRoot, version, key, "bin");
   const binaryName = key.startsWith("win32") ? "SU2_CFD.exe" : "SU2_CFD";
   const target = join(targetDir, binaryName);
   if (existsSync(target)) {
     console.log(`[pi-cad] SU2 ${version} already installed (${key})`);
     return { status: "ready", target };
   }
-  const tmpDir = join(root, ".runtime", "tmp");
+  const tmpDir = join(runtimeRoot, "tmp");
   mkdirSync(tmpDir, { recursive: true });
   const zipPath = join(tmpDir, `su2-${version}-${key}.zip`);
   try {

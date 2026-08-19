@@ -230,15 +230,35 @@ def run_thermal(spec_path: str | Path, output_dir: str | Path, stage: str = "run
     fields["Temperature"] = temperature_k
 
     residual_target = (spec.get("convergence") or {}).get("residualTarget")
+    # Execution validity is the interpreter's call, not the Agent's: a run
+    # that did not meet its own declared residual standard (or declared no
+    # standard at all) is "not_converged". Its raw fields are still returned
+    # for inspection, but the harness records no simulation evidence from a
+    # not_converged run, so it can never close a required case.
     is_converged = converged(history, residual_target)
+    if not is_converged:
+        status = "not_converged"
+        if residual_target is None:
+            not_converged_reason = (
+                "no convergence.residualTarget was declared; a run only qualifies as "
+                "evidence when it declares and meets a residual standard"
+            )
+        else:
+            not_converged_reason = (
+                f"worst RMS residual log10 {history.get('worstResidualLog10')} did not reach "
+                f"the declared target {residual_target} within the iteration budget"
+            )
+    else:
+        status = "solved"
+        not_converged_reason = None
 
     conductivity = float(spec["material"]["conductivityWPerMK"])
     marker_triangles = {marker: stats["triangles"] for marker, stats in mesh["markers"].items()}
     heat_rates = boundary_heat_rates(
         nodes, elements, marker_triangles, temperature_star, conductivity, temperature_scale
     )
-    net_rate = sum(entry["heatRateW"] for entry in heat_rates.values())
-    largest = max((abs(entry["heatRateW"]) for entry in heat_rates.values()), default=0.0)
+    net_rate = sum(entry["reconstructedHeatRateW"] for entry in heat_rates.values())
+    largest = max((abs(entry["reconstructedHeatRateW"]) for entry in heat_rates.values()), default=0.0)
 
     # Heat-flux magnitude field on nodes (W/m^2), from node gradients.
     gradients = node_gradients(nodes, elements, temperature_star)
@@ -272,7 +292,8 @@ def run_thermal(spec_path: str | Path, output_dir: str | Path, stage: str = "run
     )
 
     result = {
-        "status": "solved",
+        "status": status,
+        **({"reason": not_converged_reason} if not_converged_reason else {}),
         "caseId": spec.get("caseId"),
         "backend": "su2",
         "backendVersion": run["version"],
@@ -300,9 +321,11 @@ def run_thermal(spec_path: str | Path, output_dir: str | Path, stage: str = "run
         },
         "boundaries": heat_rates,
         "energyBalance": {
-            "netHeatRateW": round(net_rate, 9),
-            "largestBoundaryHeatRateW": round(largest, 9),
-            "relativeImbalance": round(abs(net_rate) / largest, 9) if largest > 1e-12 else None,
+            # Reconstruction-based balance over boundary faces, not SU2's own
+            # conservative fluxes; names say so honestly.
+            "netReconstructedHeatRateW": round(net_rate, 9),
+            "largestReconstructedHeatRateW": round(largest, 9),
+            "relativeReconstructedImbalance": round(abs(net_rate) / largest, 9) if largest > 1e-12 else None,
         },
         "fields": fields_summary(fields),
         "visualization": visualization,

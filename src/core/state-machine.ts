@@ -5,6 +5,7 @@ import {
   type CadRunState,
   type CadRequirements,
   type CadWorkflow,
+  type EvidenceInputArtifact,
   type EvidenceRef,
   type MutationPolicy,
 } from "../shared/protocol.ts";
@@ -252,12 +253,16 @@ export function evidenceFromBuild(
 export function evidenceFromEnvelope(
   kind: EvidenceRef["kind"],
   tool: string,
-  envelope: { artifacts: Array<{ path: string; kind: string; sha256: string }> },
+  envelope: {
+    artifacts: Array<{ path: string; kind: string; sha256: string }>;
+    inputArtifacts?: EvidenceInputArtifact[];
+  },
   artifactHash: string,
   sourceHash?: string,
   specHash?: string,
   caseId?: string,
 ): EvidenceRef {
+  const inputArtifacts = (envelope as { inputArtifacts?: EvidenceInputArtifact[] }).inputArtifacts;
   return {
     id: makeEvidenceId(kind, artifactHash, specHash, caseId),
     kind,
@@ -268,6 +273,7 @@ export function evidenceFromEnvelope(
     caseId,
     paths: envelope.artifacts.map((artifact) => artifact.path),
     artifacts: envelope.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
+    ...(inputArtifacts?.length ? { inputArtifacts } : {}),
     createdAt: nowIso(),
   };
 }

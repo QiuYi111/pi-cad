@@ -42,8 +42,12 @@ _SPEC_KEYS = {
     "convergence",
 }
 _PHYSICS_KEYS = {"type", "turbulence"}
-_FLUID_KEYS_IDEAL_GAS = {"model", "gamma", "gasConstantJPerKgK"}
-_FLUID_KEYS_CONSTANT_DENSITY = {"model", "densityKgPerM3", "dynamicViscosityPas"}
+_FLUID_KEYS_IDEAL_GAS = {"model", "gamma", "gasConstantJPerKgK", "viscosity"}
+_FLUID_KEYS_CONSTANT_DENSITY = {"model", "densityKgPerM3", "viscosity"}
+_VISCOSITY_KEYS_CONSTANT = {"model", "muPas"}
+_VISCOSITY_KEYS_SUTHERLAND = {"model", "muRefPas", "temperatureRefK", "sutherlandConstantK"}
+# Euler is inviscid; every viscous solver requires an explicit contract.
+_VISCOUS_PHYSICS = {"compressible_rans", "incompressible_ns", "incompressible_rans"}
 _MESH_KEYS = {"maxSizeMm", "minSizeMm"}
 _BOUNDARY_KEYS = {
     "type",
@@ -133,7 +137,6 @@ def validate_flow_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
         elif model == "constant_density":
             _reject_unknown(fluid, _FLUID_KEYS_CONSTANT_DENSITY, "fluid", errors)
             _positive_number(fluid, "densityKgPerM3", "fluid", errors)
-            _positive_number(fluid, "dynamicViscosityPas", "fluid", errors)
         else:
             errors.append("fluid.model must be ideal_gas (compressible) or constant_density (incompressible)")
         if physics_type and model:
@@ -142,6 +145,28 @@ def validate_flow_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
                 errors.append("compressible physics requires fluid.model= ideal_gas")
             if not compressible and model != "constant_density":
                 errors.append("incompressible physics requires fluid.model= constant_density")
+        # Viscosity is part of the canonical physical contract: viscous
+        # solvers must declare it explicitly (no hidden air-Sutherland
+        # default), and inviscid Euler must not carry one.
+        viscosity = fluid.get("viscosity")
+        if physics_type in _VISCOUS_PHYSICS:
+            if not isinstance(viscosity, dict):
+                errors.append(
+                    f"{physics_type} requires fluid.viscosity with model constant "
+                    "{{muPas}} or sutherland {{muRefPas, temperatureRefK, sutherlandConstantK}}"
+                )
+            elif viscosity.get("model") == "constant":
+                _reject_unknown(viscosity, _VISCOSITY_KEYS_CONSTANT, "fluid.viscosity", errors)
+                _positive_number(viscosity, "muPas", "fluid.viscosity", errors)
+            elif viscosity.get("model") == "sutherland":
+                _reject_unknown(viscosity, _VISCOSITY_KEYS_SUTHERLAND, "fluid.viscosity", errors)
+                _positive_number(viscosity, "muRefPas", "fluid.viscosity", errors)
+                _positive_number(viscosity, "temperatureRefK", "fluid.viscosity", errors)
+                _positive_number(viscosity, "sutherlandConstantK", "fluid.viscosity", errors)
+            else:
+                errors.append("fluid.viscosity.model must be constant or sutherland")
+        elif viscosity is not None:
+            errors.append(f"fluid.viscosity is not applicable to {physics_type} (Euler is inviscid)")
 
     mesh = spec.get("mesh")
     if not isinstance(mesh, dict):
@@ -336,7 +361,27 @@ def run_flow(spec_path: str | Path, output_dir: str | Path, stage: str = "run") 
         }
 
     residual_target = (spec.get("convergence") or {}).get("residualTarget")
+    # Execution validity is the interpreter's call, not the Agent's: a run
+    # that did not meet its own declared residual standard (or declared no
+    # standard at all) is "not_converged". Its raw fields are still returned
+    # for inspection, but the harness records no simulation evidence from a
+    # not_converged run, so it can never close a required case.
     is_converged = converged(history, residual_target)
+    if not is_converged:
+        status = "not_converged"
+        if residual_target is None:
+            not_converged_reason = (
+                "no convergence.residualTarget was declared; a run only qualifies as "
+                "evidence when it declares and meets a residual standard"
+            )
+        else:
+            not_converged_reason = (
+                f"worst RMS residual log10 {history.get('worstResidualLog10')} did not reach "
+                f"the declared target {residual_target} within the iteration budget"
+            )
+    else:
+        status = "solved"
+        not_converged_reason = None
 
     marker_nodes: dict[str, set[int]] = {}
     marker_stats: dict[str, Any] = {}
@@ -381,7 +426,8 @@ def run_flow(spec_path: str | Path, output_dir: str | Path, stage: str = "run") 
     np.savez_compressed(fields_path, nodes=nodes, **{k: v for k, v in fields.items() if v.ndim == 1})
 
     result = {
-        "status": "solved",
+        "status": status,
+        **({"reason": not_converged_reason} if not_converged_reason else {}),
         "caseId": spec.get("caseId"),
         "backend": "su2",
         "backendVersion": run["version"],

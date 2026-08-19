@@ -151,6 +151,11 @@ const pythonPath = [join(root, "python")]
   .concat(process.env.PYTHONPATH ? [process.env.PYTHONPATH] : [])
   .join(delimiter);
 const env = { ...process.env, PYTHONPATH: pythonPath };
+
+// Optional SU2 runtime first: the snapshot below is the install-time
+// fallback diagnostic, so it must reflect the runtime as installed.
+await installSu2({ root, python, env });
+
 const doctor = JSON.parse(
   execFileSync(python, ["-m", "cadctl", "doctor", "--json"], {
     cwd: root,
@@ -159,7 +164,6 @@ const doctor = JSON.parse(
   }),
 );
 writeFileSync(join(root, ".pi-cad-runtime.json"), JSON.stringify({ mode, ...doctor }, null, 2));
-console.log(`[pi-cad] runtime ready (${mode}): ${doctor.python} simulation=${doctor.capabilities?.simulation?.status ?? "unknown"}`);
-
-// Optional SU2 runtime for flow/thermal simulation; fails soft by design.
-await installSu2({ root, python, env });
+console.log(
+  `[pi-cad] runtime ready (${mode}): ${doctor.python} simulation=${doctor.capabilities?.simulation?.status ?? "unknown"} thermalFluid=${doctor.capabilities?.thermalFluid?.status ?? "unknown"}`,
+);

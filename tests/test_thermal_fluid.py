@@ -169,6 +169,23 @@ class FlowValidationTests(unittest.TestCase):
         )
         expect_error(lambda s: s["mesh"].update(maxSizeMm=0), "maxSizeMm")
         expect_error(lambda s: s.update(geometryUnits="inch"), "geometryUnits")
+        expect_error(
+            lambda s: s["physics"].update(type="compressible_rans", turbulence="sst"),
+            "requires fluid.viscosity",
+        )
+        expect_error(
+            lambda s: s["fluid"].update(
+                viscosity={"model": "sutherland", "muRefPas": 1.716e-5, "temperatureRefK": 273.15}
+            ),
+            "not applicable to compressible_euler",
+        )
+        expect_error(
+            lambda s: (
+                s["physics"].update(type="incompressible_ns"),
+                s["fluid"].update(viscosity={"model": "water"}),
+            ),
+            "fluid.viscosity.model must be constant or sutherland",
+        )
 
     def test_compile_cfg_requires_full_surface_coverage(self) -> None:
         from cadctl.simulation.su2_config import compile_flow_cfg
@@ -183,6 +200,65 @@ class FlowValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             compile_flow_cfg(spec, "m.su2", 0.5, ["surf-a", "surf-b", "surf-c"])
         self.assertIn("uncovered", str(ctx.exception))
+
+    def test_rans_cfg_emits_declared_viscosity_and_derived_reynolds(self) -> None:
+        from cadctl.simulation.su2_config import compile_flow_cfg
+
+        spec = self.base_spec()
+        spec["physics"] = {"type": "compressible_rans", "turbulence": "sst"}
+        spec["fluid"]["viscosity"] = {
+            "model": "sutherland",
+            "muRefPas": 1.716e-5,
+            "temperatureRefK": 273.15,
+            "sutherlandConstantK": 110.4,
+        }
+        text = compile_flow_cfg(spec, "m.su2", 0.5, ["surf-a", "surf-b", "surf-c"])
+        # The declared constants reach SU2 verbatim; nothing defaults to air.
+        self.assertIn("VISCOSITY_MODEL= SUTHERLAND", text)
+        self.assertIn("MU_REF= 1.716e-05", text)
+        self.assertIn("MU_T_REF= 273.15", text)
+        self.assertIn("SUTHERLAND_CONSTANT= 110.4", text)
+        # Reynolds derived from the declared model at the freestream state,
+        # not from a hidden Sutherland assumption.
+        rho = 101325.0 / (287.05 * 288.15)
+        a = (1.4 * 287.05 * 288.15) ** 0.5
+        mu = 1.716e-5 * (288.15 / 273.15) ** 1.5 * (273.15 + 110.4) / (288.15 + 110.4)
+        expected = rho * 0.25 * a * 0.5 / mu
+        self.assertIn(f"REYNOLDS_NUMBER= {expected!r}", text)
+
+    def test_incompressible_cfg_requires_declared_constant_viscosity(self) -> None:
+        from cadctl.simulation.su2_config import compile_flow_cfg
+
+        spec = {
+            "caseId": "duct",
+            "fluidDomain": "duct.step",
+            "geometryUnits": "mm",
+            "physics": {"type": "incompressible_ns"},
+            "fluid": {
+                "model": "constant_density",
+                "densityKgPerM3": 1000.0,
+                "viscosity": {"model": "constant", "muPas": 1e-3},
+            },
+            "initial": {"velocityMPerS": 2.0},
+            "boundaries": [
+                {"type": "velocity_inlet", "surfaces": ["surf-a"], "velocityMPerS": 2.0, "temperatureK": 300.0, "flowDirection": [1, 0, 0]},
+                {"type": "pressure_outlet", "surfaces": ["surf-b"], "staticPressurePa": 0.0},
+                {"type": "wall", "surfaces": ["surf-c"], "thermal": "adiabatic"},
+            ],
+            "mesh": {"maxSizeMm": 8.0},
+        }
+        text = compile_flow_cfg(spec, "m.su2", 0.5, ["surf-a", "surf-b", "surf-c"])
+        self.assertIn("SOLVER= INC_NAVIER_STOKES", text)
+        self.assertIn("VISCOSITY_MODEL= CONSTANT_VISCOSITY", text)
+        self.assertIn("MU_CONSTANT= 0.001", text)
+        # A missing viscosity contract must fail closed, not fall back to air.
+        import copy
+
+        broken = copy.deepcopy(spec)
+        del broken["fluid"]["viscosity"]
+        with self.assertRaises(ValueError) as ctx:
+            compile_flow_cfg(broken, "m.su2", 0.5, ["surf-a", "surf-b", "surf-c"])
+        self.assertIn("requires fluid.viscosity", str(ctx.exception))
 
     def test_compiled_cfg_is_deterministic_and_dimensional(self) -> None:
         from cadctl.simulation.su2_config import compile_flow_cfg
@@ -296,8 +372,8 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             self.assertEqual(payload["backend"], "su2")
             self.assertEqual(payload["caseId"], "slab-axial")
             analytic = 16.2 * 0.01 * 850 / 0.5
-            hot_rate = abs(payload["boundaries"][hot]["heatRateW"])
-            cold_rate = abs(payload["boundaries"][cold]["heatRateW"])
+            hot_rate = abs(payload["boundaries"][hot]["reconstructedHeatRateW"])
+            cold_rate = abs(payload["boundaries"][cold]["reconstructedHeatRateW"])
             self.assertLess(abs(hot_rate - analytic) / analytic, 0.06, (hot_rate, analytic))
             self.assertLess(abs(cold_rate - analytic) / analytic, 0.06, (cold_rate, analytic))
             self.assertGreater(payload["temperature"]["minK"], 295.0)
@@ -308,6 +384,74 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             self.assertIn("simulation_result", kinds)
             self.assertIn("simulation_fields", kinds)
             self.assertIn("simulation_visual", kinds)
+
+    def test_unmet_residual_target_returns_not_converged_and_creates_no_evidence(self) -> None:
+        """Regression: a run that misses its own declared residual standard must
+        not claim "solved". The harness records simulation evidence only for
+        status == solved, so a not_converged run can never close a required
+        case even though its raw fields are still returned."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            step = make_slab(root)
+            surfaces = run_cadctl("inspect-surfaces", "--artifact", str(step), cwd=root)
+            facts = surfaces["payload"]["surfaces"]
+            hot = next(s["id"] for s in facts if s.get("normal", [0, 0, 1])[2] == -1)
+            cold = next(s["id"] for s in facts if s.get("normal", [0, 0, 1])[2] == 1)
+            spec = {
+                "caseId": "slab-impossible",
+                "artifact": str(step),
+                "geometryUnits": "mm",
+                "material": {"conductivityWPerMK": 16.2},
+                "boundaries": [
+                    {"type": "temperature", "surfaces": [hot], "temperatureK": 1150.0},
+                    {"type": "temperature", "surfaces": [cold], "temperatureK": 300.0},
+                ],
+                "mesh": {"maxSizeMm": 30.0},
+                "convergence": {"maxIterations": 1, "residualTarget": -12.0},
+            }
+            spec_path = root / "spec.json"
+            spec_path.write_text(json.dumps(spec), encoding="utf-8")
+            envelope = run_cadctl(
+                "simulate-thermal", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
+            )
+            payload = envelope["payload"]
+            self.assertEqual(payload["status"], "not_converged")
+            self.assertIn("did not reach", payload["reason"])
+            self.assertEqual(payload["caseId"], "slab-impossible")
+            # The envelope itself is ok (the tool ran); the harness's
+            # simulation gate keys on status, so this creates no evidence.
+            self.assertTrue(envelope["ok"])
+            self.assertTrue(any("not_converged" in w for w in envelope["warnings"]))
+            # Raw fields are still written for inspection.
+            self.assertTrue((root / "out" / "thermal-result.json").exists())
+
+    def test_missing_residual_target_never_qualifies_as_solved(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            step = make_slab(root)
+            surfaces = run_cadctl("inspect-surfaces", "--artifact", str(step), cwd=root)
+            facts = surfaces["payload"]["surfaces"]
+            hot = next(s["id"] for s in facts if s.get("normal", [0, 0, 1])[2] == -1)
+            cold = next(s["id"] for s in facts if s.get("normal", [0, 0, 1])[2] == 1)
+            spec = {
+                "caseId": "slab-no-target",
+                "artifact": str(step),
+                "geometryUnits": "mm",
+                "material": {"conductivityWPerMK": 16.2},
+                "boundaries": [
+                    {"type": "temperature", "surfaces": [hot], "temperatureK": 1150.0},
+                    {"type": "temperature", "surfaces": [cold], "temperatureK": 300.0},
+                ],
+                "mesh": {"maxSizeMm": 30.0},
+            }
+            spec_path = root / "spec.json"
+            spec_path.write_text(json.dumps(spec), encoding="utf-8")
+            envelope = run_cadctl(
+                "simulate-thermal", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
+            )
+            payload = envelope["payload"]
+            self.assertEqual(payload["status"], "not_converged")
+            self.assertIn("no convergence.residualTarget", payload["reason"])
 
     def test_nozzle_flow_produces_supersonic_outlet_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -349,6 +493,50 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             self.assertGreater(outlet_mach, 1.0, outlet_mach)
             self.assertLess(outlet_mach, 3.0, outlet_mach)
             self.assertIn("fluidDomain", envelope["inputHashes"])
+
+    def test_incompressible_ns_runs_with_declared_viscosity(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            step = make_nozzle(root)
+            surfaces = run_cadctl("inspect-surfaces", "--artifact", str(step), cwd=root)
+            facts = surfaces["payload"]["surfaces"]
+            inlet = next(s["id"] for s in facts if s["type"] == "plane" and abs(s["centroid"][0]) < 1e-9)
+            outlet = next(s["id"] for s in facts if s["type"] == "plane" and abs(s["centroid"][0] - 320.0) < 1e-6)
+            walls = [s["id"] for s in facts if s["type"] != "plane"]
+            spec = {
+                "caseId": "nozzle-water",
+                "fluidDomain": str(step),
+                "geometryUnits": "mm",
+                "physics": {"type": "incompressible_ns"},
+                "fluid": {
+                    "model": "constant_density",
+                    "densityKgPerM3": 1000.0,
+                    "viscosity": {"model": "constant", "muPas": 1e-3},
+                },
+                "initial": {"velocityMPerS": 2.0},
+                "boundaries": [
+                    {"type": "velocity_inlet", "surfaces": [inlet], "velocityMPerS": 2.0, "temperatureK": 300.0, "flowDirection": [1, 0, 0]},
+                    {"type": "pressure_outlet", "surfaces": [outlet], "staticPressurePa": 0.0},
+                    {"type": "wall", "surfaces": walls, "thermal": "adiabatic"},
+                ],
+                "mesh": {"maxSizeMm": 16.0},
+                "convergence": {"maxIterations": 600, "residualTarget": -6.0},
+            }
+            spec_path = root / "spec.json"
+            spec_path.write_text(json.dumps(spec), encoding="utf-8")
+            envelope = run_cadctl(
+                "simulate-flow", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
+            )
+            self.assertTrue(envelope["ok"], envelope)
+            payload = envelope["payload"]
+            self.assertIn(payload["status"], {"solved", "not_converged"})
+            # The declared viscosity is the one in the compiled cfg; nothing
+            # defaulted to air anywhere in the pipeline.
+            cfg = (root / "out" / "case.cfg").read_text(encoding="utf-8")
+            self.assertIn("VISCOSITY_MODEL= CONSTANT_VISCOSITY", cfg)
+            self.assertIn("MU_CONSTANT= 0.001", cfg)
+            if payload["status"] == "solved":
+                self.assertLess(payload["massBalance"]["relativeImbalance"], 0.05, payload["massBalance"])
 
     def test_mid_solve_artifact_mutation_discards_flow_result(self) -> None:
         import argparse

@@ -20,6 +20,14 @@ function shortThermalText(envelope: any): string {
   if (p.status === "failed") {
     return `cad_simulate_thermal failed: ${p.reason ?? "solver error"}`;
   }
+  if (p.status === "not_converged") {
+    return [
+      `cad_simulate_thermal DID NOT CONVERGE (case ${p.caseId}): ${p.reason ?? "residual target not met"}`,
+      `iterations=${p.convergence?.iterations} worstResidualLog10=${p.convergence?.worstResidualLog10} target=${p.convergence?.residualTargetLog10}`,
+      "Raw fields are returned for inspection only; this run creates NO simulation evidence and cannot close a required case.",
+      `resultArtifact=${p.artifact ?? ""}`,
+    ].join("\n");
+  }
   const lines = [
     `cad_simulate_thermal solved with ${p.backend} ${p.backendVersion} (case ${p.caseId})`,
     `mesh=${p.mesh?.nodeCount ?? "?"} nodes / ${p.mesh?.elementCount ?? "?"} tets (${p.mesh?.geometryUnits ?? "?"} geometry)`,
@@ -28,9 +36,9 @@ function shortThermalText(envelope: any): string {
   ];
   for (const [marker, stats] of Object.entries(p.boundaries ?? {})) {
     const s = stats as Record<string, number>;
-    lines.push(`  ${marker}: heatRate=${s.heatRateW} W over ${s.areaM2} m^2`);
+    lines.push(`  ${marker}: reconstructedHeatRate=${s.reconstructedHeatRateW} W over ${s.areaM2} m^2`);
   }
-  lines.push(`energyBalance: net=${p.energyBalance?.netHeatRateW} W largest=${p.energyBalance?.largestBoundaryHeatRateW} W imbalance=${p.energyBalance?.relativeImbalance}`);
+  lines.push(`energyBalance(reconstructed): net=${p.energyBalance?.netReconstructedHeatRateW} W largest=${p.energyBalance?.largestReconstructedHeatRateW} W imbalance=${p.energyBalance?.relativeReconstructedImbalance}`);
   lines.push(`resultArtifact=${p.artifact ?? ""}`);
   lines.push(`views=${(p.visualization?.views ?? []).length}`);
   lines.push("Solver output is evidence, not judgment; thermal safety and acceptance are your decisions.");
@@ -48,6 +56,7 @@ export default function cadThermalExtension(pi: ExtensionAPI) {
       "CAD geometry is interpreted per geometryUnits (mm default); thermal quantities are SI (K, W/m^2, W/(m*K)).",
       "Supply material conductivity explicitly; the tool never assumes a material.",
       "At least one fixed-temperature boundary is required; unclassified surfaces are adiabatic.",
+      "Declare convergence.residualTarget: a run that does not declare and meet its residual standard returns raw fields but creates NO evidence (status=not_converged).",
       "Check convergence and energy balance before interpreting temperatures or heat rates.",
     ],
     parameters: Type.Object(

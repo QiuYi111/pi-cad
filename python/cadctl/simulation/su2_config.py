@@ -2,11 +2,14 @@
 
 This is the "interpreter" half of the thermal/fluid story: Pi-CAD keeps a
 canonical context (explicit geometry units, SI physical quantities, surface
-selectors) and this module compiles it into the SU2 world. It adds no
-physics of its own: every quantity in the generated cfg comes from the spec
-or from a documented, fixed numerical scheme constant. Unknown spec keys are
-rejected upstream (fail closed), so the compiler can assume a validated
-spec.
+selectors) and this module compiles it into the SU2 world. Every physical
+quantity in the generated cfg comes from the spec; the only constants the
+compiler adds are documented, fixed numerical scheme choices (CFL, gradient
+method). Viscosity is part of the canonical contract, not an air default:
+RANS/NS specs must declare constant or Sutherland parameters and the
+Reynolds initialization scale is derived from exactly that model. Unknown
+spec keys are rejected upstream (fail closed), so the compiler can assume a
+validated spec.
 
 Unit contract (frozen):
 * CAD geometry is interpreted per ``geometryUnits`` (mm by default) and the
@@ -52,10 +55,40 @@ def _direction(vector: Any, where: str) -> list[float]:
     return [c / norm for c in v]
 
 
-def _sutherland_viscosity(temperature_k: float) -> float:
-    """Sutherland law for air (kg/(m*s)); used only to derive the Reynolds
-    initialization scale for compressible RANS runs."""
-    return 1.458e-6 * temperature_k**1.5 / (temperature_k + 110.4)
+def _viscosity_at(viscosity: dict[str, Any], temperature_k: float) -> float:
+    """Evaluate the canonical viscosity contract at one temperature.
+
+    No hidden "air" defaults: the spec declares either a constant or a full
+    Sutherland triple, and the Reynolds initialization scale is derived from
+    exactly the model SU2 will run with.
+    """
+    model = viscosity.get("model")
+    if model == "constant":
+        return float(viscosity["muPas"])
+    if model == "sutherland":
+        mu_ref = float(viscosity["muRefPas"])
+        t_ref = float(viscosity["temperatureRefK"])
+        s_constant = float(viscosity["sutherlandConstantK"])
+        return mu_ref * (temperature_k / t_ref) ** 1.5 * (t_ref + s_constant) / (temperature_k + s_constant)
+    raise ConfigCompileError(f"unsupported viscosity model {model!r}")
+
+
+def _emit_viscosity(lines: list[str], viscosity: dict[str, Any]) -> None:
+    """Emit the declared viscosity model; nothing about it is defaulted."""
+    model = viscosity.get("model")
+    if model == "constant":
+        lines.append("VISCOSITY_MODEL= CONSTANT_VISCOSITY")
+        lines.append(f"MU_CONSTANT= {_fmt(viscosity['muPas'])}")
+    elif model == "sutherland":
+        lines.append("VISCOSITY_MODEL= SUTHERLAND")
+        lines.append(f"MU_REF= {_fmt(viscosity['muRefPas'])}")
+        lines.append(f"MU_T_REF= {_fmt(viscosity['temperatureRefK'])}")
+        lines.append(f"SUTHERLAND_CONSTANT= {_fmt(viscosity['sutherlandConstantK'])}")
+    else:
+        raise ConfigCompileError(
+            "viscous physics requires fluid.viscosity with model constant "
+            "{muPas} or sutherland {muRefPas, temperatureRefK, sutherlandConstantK}"
+        )
 
 
 def _header(lines: list[str]) -> None:
@@ -159,26 +192,29 @@ def compile_flow_cfg(
         lines.append(f"FREESTREAM_TEMPERATURE= {_fmt(temperature)}")
         lines.append(f"FREESTREAM_PRESSURE= {_fmt(pressure)}")
         if rans:
+            viscosity = fluid.get("viscosity") or {}
+            _emit_viscosity(lines, viscosity)
             density = pressure / (gas_constant * temperature)
             speed_of_sound = math.sqrt(gamma * gas_constant * temperature)
-            reynolds = density * mach * speed_of_sound * domain_length_m / _sutherland_viscosity(temperature)
+            reynolds = (
+                density * mach * speed_of_sound * domain_length_m
+                / _viscosity_at(viscosity, temperature)
+            )
             lines.append(f"REYNOLDS_NUMBER= {_fmt(reynolds)}")
             lines.append(f"REYNOLDS_LENGTH= {_fmt(domain_length_m)}")
     else:
         if fluid.get("model") != "constant_density":
             raise ConfigCompileError("incompressible flow requires fluid.model= constant_density in V1")
         density = float(fluid.get("densityKgPerM3", 0.0))
-        viscosity = float(fluid.get("dynamicViscosityPas", 0.0))
-        if density <= 0 or viscosity <= 0:
-            raise ConfigCompileError("fluid.densityKgPerM3 and dynamicViscosityPas must be > 0")
+        if density <= 0:
+            raise ConfigCompileError("fluid.densityKgPerM3 must be > 0")
         velocity = float(initial.get("velocityMPerS", 0.0))
         if velocity <= 0:
             raise ConfigCompileError("incompressible flow requires initial velocityMPerS > 0")
         lines.append("INC_NONDIM= DIMENSIONAL")
         lines.append("INC_DENSITY_MODEL= CONSTANT")
         lines.append(f"INC_DENSITY_REF= {_fmt(density)}")
-        lines.append("VISCOSITY_MODEL= CONSTANT_VISCOSITY")
-        lines.append(f"MU_CONSTANT= {_fmt(viscosity)}")
+        _emit_viscosity(lines, fluid.get("viscosity") or {})
         lines.append("INC_ENERGY_EQUATION= NO")
         lines.append(f"INC_VELOCITY_INIT= {_fmt(velocity)}, 0.0, 0.0")
         lines.append("INC_INLET_TYPE= VELOCITY_INLET")

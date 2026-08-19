@@ -163,9 +163,20 @@ reaches the solver.
   results include convergence, per-surface area-weighted means, mass
   balance, raw fields, and views. A converged nozzle run reaches the
   isentropic-table outlet Mach within a few percent.
+- **No hidden fluid properties.** Viscous solvers require an explicit
+  `fluid.viscosity` contract (constant μ, or Sutherland with your own
+  constants); the Reynolds initialization scale is derived from exactly the
+  declared model — nothing defaults to air.
+- **Convergence is execution validity, not judgment.** A run that does not
+  declare and meet its `residualTarget` returns `status=not_converged`:
+  raw fields are still shown for diagnosis, but the run creates **no**
+  simulation evidence and cannot close a required case.
 - `cad_simulate_thermal` — steady solid heat conduction: fixed-temperature
   and fixed-heat-flux boundaries, adiabatic remainder, constant
   conductivity. The 1D slab fixture is checked against `q = kAΔT/L` in CI.
+  Boundary heat rates are labeled `reconstructedHeatRateW` because they are
+  integrated from the solution's element gradients, not SU2's own
+  conservative face fluxes.
 - `cad_inspect_surfaces` — deterministic boundary-surface facts (type, area,
   centroid, bbox, normal/axis) plus labeled views. Surface IDs are geometric
   selectors valid for one artifact hash, never semantic labels: deciding
@@ -199,6 +210,15 @@ density/surface evidence, never a CAD candidate.
 - **Simulation binds to the pre-solve artifact hash.** If the STEP file
   changes while the solver is running, the result is discarded rather than
   bound to the wrong version.
+- **Evidence inputs are re-verified too.** Flow/thermal evidence carries its
+  hash-bound inputs (canonical spec, product artifact, fluid domain) and
+  `cad_transition(accepted)` / `cad_finish` re-hash them; rewriting the
+  fluid-domain STEP after the solve invalidates the evidence just like
+  rewriting a result file.
+- **Unconverged runs are not evidence.** The interpreter decides execution
+  validity: runs that miss their declared residual target (or declare none)
+  return raw fields under `status=not_converged` and the harness records
+  nothing from them.
 - **Declared simulation cases must actually run.** When requirements declare
   case-scoped obligations (e.g. `nozzle-outlet` via `cad_simulate_flow`),
   acceptance and finish stay blocked until each case produced current-version

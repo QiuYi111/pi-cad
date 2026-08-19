@@ -91,6 +91,13 @@ export type CadMaturity =
   | "release";
 export type MutationPolicy = "read_only" | "source_only" | "allowed";
 
+export interface EvidenceInputArtifact {
+  path: string;
+  sha256: string;
+  /** Provenance role, e.g. spec | artifact | fluidDomain. Opaque to the harness. */
+  role: string;
+}
+
 export interface EvidenceRef {
   id: string;
   kind:
@@ -115,6 +122,12 @@ export interface EvidenceRef {
   caseId?: string;
   paths: string[];
   artifacts: Array<{ path: string; sha256: string }>;
+  /**
+   * Hash-bound inputs (canonical spec, product artifact, fluid domain, ...)
+   * re-verified at accept/finish. Without this, a flow result could silently
+   * outlive a rewritten fluid-domain STEP that the harness never tracks.
+   */
+  inputArtifacts?: EvidenceInputArtifact[];
   createdAt: string;
 }
 
@@ -235,6 +248,8 @@ export interface CadEventEnvelope {
   toolVersion: string;
   backendVersion?: string;
   inputHashes: Record<string, string>;
+  /** Hash-bound inputs with paths+roles, carried into EvidenceRef provenance. */
+  inputArtifacts?: EvidenceInputArtifact[];
   outputHashes: Record<string, string>;
   durationMs: number;
   warnings: string[];

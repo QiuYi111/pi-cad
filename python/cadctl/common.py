@@ -47,6 +47,7 @@ def emit(
     payload: dict[str, Any],
     *,
     input_hashes: dict[str, str] | None = None,
+    input_artifacts: list[dict[str, str]] | None = None,
     artifacts: list[dict[str, str]] | None = None,
     warnings: list[str] | None = None,
     duration_ms: int,
@@ -57,6 +58,9 @@ def emit(
         "toolVersion": __version__,
         "backendVersion": _backend_version(),
         "inputHashes": input_hashes or {},
+        # Inputs with paths+roles so persisted evidence can re-verify
+        # them after the solve (hashes alone cannot be re-checked on disk).
+        "inputArtifacts": input_artifacts or [],
         "outputHashes": {
             artifact["path"]: artifact["sha256"] for artifact in (artifacts or [])
         },

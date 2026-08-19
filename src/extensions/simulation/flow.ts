@@ -15,6 +15,31 @@ const FlowDirection = Type.Tuple([Type.Number(), Type.Number(), Type.Number()], 
   description: "Inlet flow direction (non-zero 3-vector; normalized internally)",
 });
 
+const ViscositySchema = Type.Union(
+  [
+    Type.Object(
+      {
+        model: Type.Literal("constant"),
+        muPas: Type.Number({ exclusiveMinimum: 0, description: "Dynamic viscosity (Pa*s)" }),
+      },
+      { additionalProperties: false },
+    ),
+    Type.Object(
+      {
+        model: Type.Literal("sutherland"),
+        muRefPas: Type.Number({ exclusiveMinimum: 0 }),
+        temperatureRefK: Type.Number({ exclusiveMinimum: 0 }),
+        sutherlandConstantK: Type.Number({ exclusiveMinimum: 0 }),
+      },
+      { additionalProperties: false },
+    ),
+  ],
+  {
+    description:
+      "Explicit viscosity model. Nothing is defaulted to air: Sutherland runs must declare their own constants.",
+  },
+);
+
 function shortFlowText(envelope: any): string {
   const p = envelope.payload ?? {};
   if (!envelope.ok) return `cad_simulate_flow failed: ${p.error ?? p.reason ?? "unknown error"}`;
@@ -23,6 +48,14 @@ function shortFlowText(envelope: any): string {
   }
   if (p.status === "failed") {
     return `cad_simulate_flow failed: ${p.reason ?? "solver error"}`;
+  }
+  if (p.status === "not_converged") {
+    return [
+      `cad_simulate_flow DID NOT CONVERGE (case ${p.caseId}): ${p.reason ?? "residual target not met"}`,
+      `iterations=${p.convergence?.iterations} worstResidualLog10=${p.convergence?.worstResidualLog10} target=${p.convergence?.residualTargetLog10}`,
+      "Raw fields are returned for inspection only; this run creates NO simulation evidence and cannot close a required case.",
+      `resultArtifact=${p.artifact ?? ""}`,
+    ].join("\n");
   }
   const lines = [
     `cad_simulate_flow solved with ${p.backend} ${p.backendVersion} (case ${p.caseId})`,
@@ -54,7 +87,9 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "CAD geometry is interpreted per geometryUnits (mm default); every physical quantity is SI with the unit in its name.",
       "Build an explicit fluid-domain STEP and classify every boundary surface exactly once (inlet, outlet, walls).",
+      "Declare fluid.viscosity explicitly for RANS/NS runs; the interpreter never assumes air properties. Omit it for Euler.",
       "Do not invent operating conditions; missing inlet/outlet states stay explicit unknowns or blocked_external.",
+      "Declare convergence.residualTarget: a run that does not declare and meet its residual standard returns raw fields but creates NO evidence (status=not_converged).",
       "Check convergence and mass balance before interpreting any Mach or pressure value.",
       "Treat results as evidence, not judgment: overclaiming nozzle results to full-engine behavior is your error, not the tool's.",
     ],
@@ -83,6 +118,7 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
                 model: Type.Literal("ideal_gas"),
                 gamma: Type.Number({ exclusiveMinimum: 1, maximum: 2 }),
                 gasConstantJPerKgK: Type.Number({ exclusiveMinimum: 0 }),
+                viscosity: ViscositySchema,
               },
               { additionalProperties: false },
             ),
@@ -90,12 +126,16 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
               {
                 model: Type.Literal("constant_density"),
                 densityKgPerM3: Type.Number({ exclusiveMinimum: 0 }),
-                dynamicViscosityPas: Type.Number({ exclusiveMinimum: 0 }),
+                viscosity: ViscositySchema,
               },
               { additionalProperties: false },
             ),
           ],
-          { description: "Compressible runs need ideal_gas; incompressible runs need constant_density" },
+          {
+            description:
+              "Compressible runs need ideal_gas; incompressible runs need constant_density. " +
+              "Viscous solvers (RANS/NS) require an explicit viscosity contract; Euler must omit it.",
+          },
         ),
         boundaries: Type.Array(
           Type.Union(
