@@ -118,7 +118,10 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
                 model: Type.Literal("ideal_gas"),
                 gamma: Type.Number({ exclusiveMinimum: 1, maximum: 2 }),
                 gasConstantJPerKgK: Type.Number({ exclusiveMinimum: 0 }),
-                viscosity: ViscositySchema,
+                // Optional at the schema level: Euler omits it, RANS/NS must
+                // declare it. The cross-field rule is enforced fail-closed by
+                // the backend rather than a giant union here.
+                viscosity: Type.Optional(ViscositySchema),
               },
               { additionalProperties: false },
             ),
@@ -126,7 +129,7 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
               {
                 model: Type.Literal("constant_density"),
                 densityKgPerM3: Type.Number({ exclusiveMinimum: 0 }),
-                viscosity: ViscositySchema,
+                viscosity: Type.Optional(ViscositySchema),
               },
               { additionalProperties: false },
             ),

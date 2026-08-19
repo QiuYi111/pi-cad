@@ -403,16 +403,6 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
         return 0
 
 
-def _simulation_input_hashes(spec_path: str, stage: str) -> dict[str, str]:
-    """Pre-hash every artifact input named by a spec (fail-soft per key)."""
-    input_hashes = {"spec": sha256_file(spec_path)}
-    if stage != "run":
-        return input_hashes
-    for role, _path in _simulation_input_paths(spec_path):
-        input_hashes[role] = sha256_file(_path)
-    return input_hashes
-
-
 def _simulation_input_paths(spec_path: str) -> list[tuple[str, str]]:
     """(role, path) for every artifact input named by a spec.
 
@@ -431,6 +421,35 @@ def _simulation_input_paths(spec_path: str) -> list[tuple[str, str]]:
         if isinstance(value, str) and value and Path(value).exists():
             entries.append((key, str(Path(value).resolve())))
     return entries
+
+
+def _freeze_simulation_inputs(spec_path: str, stage: str) -> list[dict[str, str]]:
+    """Freeze the invocation's inputs ONCE, before the solve.
+
+    Provenance (which files this invocation consumed, at which hashes) is
+    defined here and only verified afterwards — never re-derived from a
+    post-solve re-read. Re-parsing the spec after the solve would let a
+    concurrent rewrite redefine provenance instead of invalidating the run.
+    """
+    if stage != "run":
+        return [{"role": "spec", "path": str(Path(spec_path).resolve()), "sha256": sha256_file(spec_path)}]
+    return [
+        {"role": role, "path": path, "sha256": sha256_file(path)}
+        for role, path in _simulation_input_paths(spec_path)
+    ]
+
+
+def _verify_frozen_inputs(frozen: list[dict[str, str]]) -> str | None:
+    """Return the offending role when a frozen input changed, else None."""
+    for entry in frozen:
+        path = entry["path"]
+        if not Path(path).exists() or sha256_file(path) != entry["sha256"]:
+            return entry["role"]
+    return None
+
+
+def _frozen_hashes(frozen: list[dict[str, str]]) -> dict[str, str]:
+    return {entry["role"]: entry["sha256"] for entry in frozen}
 
 
 def _simulation_result_artifacts(payload: dict) -> list[dict[str, str]]:
@@ -460,10 +479,26 @@ def _simulation_result_artifacts(payload: dict) -> list[dict[str, str]]:
 def _cmd_simulate_flow(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
-        input_hashes = _simulation_input_hashes(args.spec, args.stage)
+        # Freeze the invocation inputs before the solve; provenance is
+        # defined once here and only verified afterwards.
+        frozen = _freeze_simulation_inputs(args.spec, args.stage)
+        input_hashes = _frozen_hashes(frozen)
         payload = run_flow(args.spec, args.output_dir, stage=args.stage)
         if args.stage == "run":
             payload["_workdir"] = str(Path(args.output_dir).resolve())
+            # Any completed run is bound to the frozen invocation inputs
+            # (the backend already covers artifact/fluidDomain mid-solve).
+            if payload.get("status") in {"solved", "not_converged"}:
+                changed = _verify_frozen_inputs(frozen)
+                if changed is not None:
+                    emit_error(
+                        "cad_simulate_flow",
+                        f"input artifact changed during simulation; result discarded because "
+                        f"provenance no longer matches the invocation inputs: {changed}",
+                        input_hashes=input_hashes,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    return 0
         if payload.get("status") in {"unavailable", "discarded"}:
             emit_error(
                 "cad_simulate_flow",
@@ -473,14 +508,7 @@ def _cmd_simulate_flow(args: argparse.Namespace) -> int:
             )
             return 0
         artifacts = _simulation_result_artifacts(payload) if args.stage == "run" else []
-        input_artifacts = (
-            [
-                {"path": path, "role": role, "sha256": sha256_file(path)}
-                for role, path in _simulation_input_paths(args.spec)
-            ]
-            if args.stage == "run"
-            else None
-        )
+        input_artifacts = [{"path": e["path"], "role": e["role"], "sha256": e["sha256"]} for e in frozen] if args.stage == "run" else None
         emit(
             "cad_simulate_flow",
             payload,
@@ -499,10 +527,26 @@ def _cmd_simulate_flow(args: argparse.Namespace) -> int:
 def _cmd_simulate_thermal(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
-        input_hashes = _simulation_input_hashes(args.spec, args.stage)
+        # Freeze the invocation inputs before the solve; provenance is
+        # defined once here and only verified afterwards.
+        frozen = _freeze_simulation_inputs(args.spec, args.stage)
+        input_hashes = _frozen_hashes(frozen)
         payload = run_thermal(args.spec, args.output_dir, stage=args.stage)
         if args.stage == "run":
             payload["_workdir"] = str(Path(args.output_dir).resolve())
+            # Any completed run is bound to the frozen invocation inputs
+            # (the backend already covers artifact/fluidDomain mid-solve).
+            if payload.get("status") in {"solved", "not_converged"}:
+                changed = _verify_frozen_inputs(frozen)
+                if changed is not None:
+                    emit_error(
+                        "cad_simulate_thermal",
+                        f"input artifact changed during simulation; result discarded because "
+                        f"provenance no longer matches the invocation inputs: {changed}",
+                        input_hashes=input_hashes,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                    )
+                    return 0
         if payload.get("status") in {"unavailable", "discarded"}:
             emit_error(
                 "cad_simulate_thermal",
@@ -512,14 +556,7 @@ def _cmd_simulate_thermal(args: argparse.Namespace) -> int:
             )
             return 0
         artifacts = _simulation_result_artifacts(payload) if args.stage == "run" else []
-        input_artifacts = (
-            [
-                {"path": path, "role": role, "sha256": sha256_file(path)}
-                for role, path in _simulation_input_paths(args.spec)
-            ]
-            if args.stage == "run"
-            else None
-        )
+        input_artifacts = [{"path": e["path"], "role": e["role"], "sha256": e["sha256"]} for e in frozen] if args.stage == "run" else None
         emit(
             "cad_simulate_thermal",
             payload,

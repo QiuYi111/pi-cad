@@ -149,10 +149,11 @@ def marker_surface_stats(
     velocity = fields.get(velocity_field)
     density = fields.get(density_field)
     if velocity is not None and density is not None and velocity.shape == (len(nodes), 3):
-        # Nodal quadrature of the exact integrand rho*(v.n): the solution is
-        # linear on each face, so averaging the pointwise product over the
-        # three nodes is exact (mean(rho)*mean(v).n is not, and introduces a
-        # covariance error on compressible boundaries).
+        # Vertex quadrature of the integrand rho*(v.n): rho and v are P1, so
+        # their product is quadratic on each face and the 3-vertex average is
+        # a quadrature rule, not an exact integral (a degree-2 triangle rule
+        # would be). It still avoids the covariance error of
+        # mean(rho)*mean(v).n on compressible boundaries.
         tri_flux = 0.0
         for index, tri in enumerate(triangles):
             pointwise = density[tri] * (velocity[tri] @ normals[index])

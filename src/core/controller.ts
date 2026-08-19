@@ -91,6 +91,53 @@ const WORKFLOW_ENUM = Type.Enum(
   Object.fromEntries(ALL_WORKFLOWS.map((wf) => [wf, wf])) as Record<CadWorkflow, CadWorkflow>,
 );
 
+/**
+ * Strict evidence-obligations schema, shared by requirements and plan.
+ *
+ * additionalProperties: false at EVERY level: a typo like "casez" must fail
+ * closed at the tool boundary. Silently dropping it would degrade a
+ * case-scoped obligation back to the legacy "any simulation evidence
+ * satisfies required" semantics.
+ */
+const SimulationCaseSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1 }),
+    tool: Type.Enum({
+      cad_simulate: "cad_simulate",
+      cad_simulate_flow: "cad_simulate_flow",
+      cad_simulate_thermal: "cad_simulate_thermal",
+    }),
+  },
+  { additionalProperties: false },
+);
+
+const EvidenceObligationsSchema = Type.Object(
+  {
+    simulation: Type.Optional(
+      Type.Object(
+        {
+          disposition: Type.Enum({
+            required: "required",
+            optional: "optional",
+            not_applicable: "not_applicable",
+            blocked_external: "blocked_external",
+          }),
+          rationale: Type.Optional(Type.String()),
+          cases: Type.Optional(
+            Type.Array(SimulationCaseSchema, {
+              minItems: 1,
+              description:
+                "Opaque simulation cases: the harness only checks that each interpreter invocation produced current-version evidence; it never interprets what a case means",
+            }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): void {
   pi.registerTool({
     name: "cad_route",
@@ -186,35 +233,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         release: "release",
       }),
       inputs: Type.Optional(Type.Array(Type.String())),
-      evidenceObligations: Type.Optional(
-        Type.Object({
-          simulation: Type.Optional(
-            Type.Object({
-              disposition: Type.Enum({
-                required: "required",
-                optional: "optional",
-                not_applicable: "not_applicable",
-                blocked_external: "blocked_external",
-              }),
-              rationale: Type.Optional(Type.String()),
-              cases: Type.Optional(
-                Type.Array(
-                  Type.Object({
-                    id: Type.String({ minLength: 1 }),
-                    tool: Type.Enum({
-                      cad_simulate: "cad_simulate",
-                      cad_simulate_flow: "cad_simulate_flow",
-                      cad_simulate_thermal: "cad_simulate_thermal",
-                    }),
-                  }),
-                  { minItems: 1 },
-                  { description: "Opaque simulation cases: the harness only checks that each interpreter invocation produced current-version evidence; it never interprets what a case means" },
-                ),
-              ),
-            }),
-          ),
-        }),
-      ),
+      evidenceObligations: Type.Optional(EvidenceObligationsSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
@@ -274,35 +293,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       reviewPlan: Type.Array(Type.String(), { default: [] }),
       architecture: Type.Optional(Type.Array(Type.String())),
       selectionRationale: Type.Optional(Type.String()),
-      evidenceObligations: Type.Optional(
-        Type.Object({
-          simulation: Type.Optional(
-            Type.Object({
-              disposition: Type.Enum({
-                required: "required",
-                optional: "optional",
-                not_applicable: "not_applicable",
-                blocked_external: "blocked_external",
-              }),
-              rationale: Type.Optional(Type.String()),
-              cases: Type.Optional(
-                Type.Array(
-                  Type.Object({
-                    id: Type.String({ minLength: 1 }),
-                    tool: Type.Enum({
-                      cad_simulate: "cad_simulate",
-                      cad_simulate_flow: "cad_simulate_flow",
-                      cad_simulate_thermal: "cad_simulate_thermal",
-                    }),
-                  }),
-                  { minItems: 1 },
-                  { description: "Opaque simulation cases: the harness only checks that each interpreter invocation produced current-version evidence; it never interprets what a case means" },
-                ),
-              ),
-            }),
-          ),
-        }),
-      ),
+      evidenceObligations: Type.Optional(EvidenceObligationsSchema),
       workstreams: Type.Optional(
         Type.Array(
           Type.Object({

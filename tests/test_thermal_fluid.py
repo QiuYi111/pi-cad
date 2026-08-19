@@ -494,6 +494,72 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             self.assertLess(outlet_mach, 3.0, outlet_mach)
             self.assertIn("fluidDomain", envelope["inputHashes"])
 
+    def test_mid_solve_spec_rewrite_discards_result(self) -> None:
+        """Regression: the canonical spec is part of the frozen invocation
+        inputs. Rewriting it while the solver runs must invalidate the run —
+        not silently redefine provenance from the rewritten file."""
+        import argparse
+        import contextlib
+        import io
+
+        from cadctl import cli
+        from cadctl.simulation import flow_api
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            step = make_nozzle(root)
+            surfaces = run_cadctl("inspect-surfaces", "--artifact", str(step), cwd=root)
+            facts = surfaces["payload"]["surfaces"]
+            inlet = next(s["id"] for s in facts if s["type"] == "plane" and abs(s["centroid"][0]) < 1e-9)
+            outlet = next(s["id"] for s in facts if s["type"] == "plane" and abs(s["centroid"][0] - 320.0) < 1e-6)
+            walls = [s["id"] for s in facts if s["type"] != "plane"]
+            spec = {
+                "caseId": "nozzle-outlet",
+                "fluidDomain": str(step),
+                "geometryUnits": "mm",
+                "physics": {"type": "compressible_euler"},
+                "fluid": {"model": "ideal_gas", "gamma": 1.4, "gasConstantJPerKgK": 287.05},
+                "initial": {"mach": 0.25, "temperatureK": 288.15, "pressurePa": 101325.0},
+                "boundaries": [
+                    {"type": "total_conditions_inlet", "surfaces": [inlet], "totalPressurePa": 420000.0, "totalTemperatureK": 1150.0, "flowDirection": [1, 0, 0]},
+                    {"type": "pressure_outlet", "surfaces": [outlet], "staticPressurePa": 101325.0},
+                    {"type": "wall", "surfaces": walls, "thermal": "adiabatic"},
+                ],
+                "mesh": {"maxSizeMm": 20.0},
+                "convergence": {"maxIterations": 50},
+            }
+            spec_path = root / "spec.json"
+            spec_path.write_text(json.dumps(spec), encoding="utf-8")
+
+            original_run_su2 = flow_api.run_su2
+
+            def spec_rewriting_run_su2(config_path, workdir, timeout_s=5400.0):
+                # The backend re-checks artifact/fluidDomain but not the spec;
+                # the CLI's frozen-input gate must catch this instead.
+                spec_path.write_text(
+                    json.dumps({**spec, "caseId": "tampered-case"}), encoding="utf-8"
+                )
+                return original_run_su2(config_path, workdir, timeout_s=timeout_s)
+
+            flow_api.run_su2 = spec_rewriting_run_su2
+            try:
+                captured = io.StringIO()
+                with contextlib.redirect_stdout(captured):
+                    exit_code = cli._cmd_simulate_flow(
+                        argparse.Namespace(spec=str(spec_path), output_dir=str(root / "out"), stage="run")
+                    )
+            finally:
+                flow_api.run_su2 = original_run_su2
+            self.assertEqual(exit_code, 0)
+            envelope = json.loads(captured.getvalue())
+            self.assertFalse(envelope["ok"])
+            self.assertIn("changed during simulation", envelope["payload"]["error"])
+            self.assertIn("spec", envelope["payload"]["error"])
+            # Reported provenance is still the pre-solve frozen hash, never
+            # the rewritten file's.
+            frozen_spec_hash = cli._freeze_simulation_inputs(str(spec_path), "validate")[0]["sha256"]
+            self.assertNotEqual(envelope["inputHashes"]["spec"], frozen_spec_hash)
+
     def test_incompressible_ns_runs_with_declared_viscosity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

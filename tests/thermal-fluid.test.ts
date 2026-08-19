@@ -298,6 +298,48 @@ test("not_converged flow runs create no simulation evidence and cannot close a r
   }
 });
 
+test("obligation typos fail closed instead of silently degrading the guarantee", async () => {
+  const pi = mockPi();
+  const core = (await import("../src/extensions/core/index.ts")).default;
+  void core;
+  const controller = (await import("../src/core/controller.ts")).registerControlTools;
+  // registerControlTools needs pi.registerTool only.
+  controller(pi as any, {
+    pi: pi as any,
+    persist: async () => {},
+    runBaselineAuto: async () => ({ state: {} as any, images: [], warnings: [] }),
+    runCandidateAuto: async () => ({ ok: true }),
+    runConvertCandidateAuto: async () => ({ ok: true }),
+  });
+  const requirements = pi.tools.get("cad_commit_requirements");
+  assert.ok(requirements, "cad_commit_requirements registered");
+  const obligations = requirements.parameters.properties.evidenceObligations;
+
+  const valid = {
+    simulation: {
+      disposition: "required",
+      rationale: "outlet Mach is an acceptance constraint",
+      cases: [{ id: "nozzle-outlet", tool: "cad_simulate_flow" }],
+    },
+  };
+  assert.equal(Check(obligations, valid), true, "well-formed obligations must validate");
+
+  // Each typo must be rejected rather than silently dropped: "casez" would
+  // fall back to the legacy any-evidence semantics under disposition=required.
+  assert.equal(Check(obligations, { simulation: { ...valid.simulation, casez: valid.simulation.cases } }), false);
+  assert.equal(
+    Check(obligations, { simulation: { ...valid.simulation, cases: [{ id: "x", tool: "cad_simulate_flow", toool: 1 }] } }),
+    false,
+  );
+  assert.equal(Check(obligations, { simulation: { ...valid.simulation, extra: 1 } }), false);
+  assert.equal(Check(obligations, { simulation: valid.simulation, thermal: {} }), false);
+  assert.equal(
+    Check(obligations, { simulation: { disposition: "required", cases: [{ id: "x", tool: "cad_simulate_flow_typo" }] } }),
+    false,
+  );
+  assert.equal(Check(obligations, { simulation: { disposition: "required", cases: [] } }), false);
+});
+
 test("thermal/fluid tools are excluded from source phases and present where evidence is produced", () => {
   for (const phase of ["build", "modify", "convert"] as const) {
     const tools = toolsForPhase(phase);
@@ -435,6 +477,33 @@ test("cad_simulate_flow schema is strict and case-scoped", async () => {
     Check(params.properties.boundaries.items, { ...validBoundary, totalPresurePa: 1 }),
     false,
     "typo'd pressure key must be rejected",
+  );
+  // Positive contract: the Euler walking-skeleton spec (no viscosity) MUST
+  // validate. Regression for viscosity accidentally becoming required.
+  assert.equal(Check(params, baselineFlowParams()), true, "Euler without viscosity must be valid");
+  // Viscous specs declare their contract explicitly.
+  assert.equal(
+    Check(params, {
+      ...baselineFlowParams(),
+      physics: { type: "compressible_rans", turbulence: "sst" },
+      fluid: {
+        model: "ideal_gas",
+        gamma: 1.4,
+        gasConstantJPerKgK: 287.05,
+        viscosity: { model: "sutherland", muRefPas: 1.716e-5, temperatureRefK: 273.15, sutherlandConstantK: 110.4 },
+      },
+    }),
+    true,
+    "RANS with declared Sutherland viscosity must be valid",
+  );
+  // A typo inside viscosity must fail closed.
+  assert.equal(
+    Check(params, {
+      ...baselineFlowParams(),
+      fluid: { model: "ideal_gas", gamma: 1.4, gasConstantJPerKgK: 287.05, viscosity: { model: "sutherland", muRefPas: 1.716e-5, temperatureRefK: 273.15, sutherlandContantK: 110.4 } },
+    }),
+    false,
+    "typo'd Sutherland constant must be rejected",
   );
   assert.equal(Check(params, { turbulenceInlt: {} , ...{} , ...baselineFlowParams() }), false);
 });
