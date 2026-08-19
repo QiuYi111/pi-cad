@@ -28,6 +28,13 @@ from pathlib import Path
 from typing import Any
 
 from .common import sha256_file
+from .presentation_driver import (  # noqa: E402  (driver imports bpy lazily)
+    COMPOSITION_PRESETS as _COMPOSITION_PRESETS,
+    MATERIAL_FAMILIES as _MATERIAL_FAMILIES,
+    MATERIAL_PATTERNS as _MATERIAL_PATTERNS,
+    parse_composition,
+    parse_focal_length,
+)
 
 _SPEC_KEYS = {
     "artifact",
@@ -90,6 +97,13 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     else:
         for material in materials:
             _reject_unknown(material, {"pattern", "family"}, "materials[]", errors)
+            if isinstance(material, dict):
+                family = str(material.get("family", "")).lower()
+                pattern = str(material.get("pattern", "")).lower()
+                if family not in _MATERIAL_FAMILIES:
+                    errors.append(f"materials[].family must be one of {sorted(_MATERIAL_FAMILIES)}; got {family!r}")
+                if pattern and pattern not in _MATERIAL_PATTERNS:
+                    errors.append(f"materials[].pattern must be one of {sorted(_MATERIAL_PATTERNS)}; got {pattern!r}")
 
     for key in ("lighting", "camera"):
         value = spec.get(key)
@@ -98,6 +112,16 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
         else:
             allowed = {"key", "fill", "rim"} if key == "lighting" else {"lens", "composition"}
             _reject_unknown(value, allowed, key, errors)
+    camera = spec.get("camera")
+    if isinstance(camera, dict):
+        lens = camera.get("lens")
+        if not isinstance(lens, str) or parse_focal_length(lens) is None:
+            errors.append(f"camera.lens must contain a focal length like '85mm'; got {lens!r}")
+        composition = camera.get("composition")
+        if not isinstance(composition, str) or parse_composition(composition) is None:
+            errors.append(
+                f"camera.composition must contain one of the supported keywords {sorted(_COMPOSITION_PRESETS)}; got {composition!r}"
+            )
 
     assembly = spec.get("assemblyDefinition")
     if assembly is not None:
@@ -140,13 +164,34 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     return not errors, errors
 
 
+def _occurrence_labels(artifact: Path, solid_count: int) -> list[str | None]:
+    """Assembly occurrence labels aligned with the explorer's solid order.
+
+    The presentation driver matches spec module names and explode
+    directions against THESE labels — never against generic mesh names —
+    so the moduleName -> occurrence mapping survives into Blender.
+    """
+    try:
+        from .assembly import assembly_tree
+
+        tree = assembly_tree(artifact)
+        labels = [leaf.get("label") or None for leaf in tree.get("occurrences", [])]
+        if len(labels) == solid_count:
+            return labels
+        return [None] * solid_count
+    except Exception:
+        return [None] * solid_count
+
+
 def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
     """Deterministically tessellate each world-positioned solid of a STEP
-    into its own ASCII STL (fixed tolerance from the bounding sphere).
+    into its own ASCII STL (fixed tolerance from the bounding sphere),
+    writing a bundle manifest that carries occurrence identity.
 
     Like SU2 meshing, this is the interpreter compiling the canonical
     artifact into the renderer's world; the STEP stays the evidence
-    subject. Blender never sees the STEP directly.
+    subject. Blender never sees the STEP directly — and it never has to
+    guess which mesh is which module.
     """
     import build123d as bd
 
@@ -155,6 +200,7 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
     solids = list(shape.solids())
     if not solids:
         raise ValueError("artifact contains no solids to present")
+    labels = _occurrence_labels(artifact, len(solids))
     all_bb = shape.bounding_box()
     diag = (all_bb.size.X + all_bb.size.Y + all_bb.size.Z) or 1.0
     tolerance = max(diag * 1e-4, 1e-4)
@@ -185,6 +231,20 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
         lines.append(f"endsolid pi-cad-part-{index:04d}")
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         paths.append(path)
+    manifest = {
+        "units": "mm",
+        "partCount": len(paths),
+        "parts": [
+            {
+                "meshPath": path.name,
+                "solidIndex": index,
+                "label": labels[index],
+                "occurrenceKey": labels[index] if labels[index] else f"solid-{index:04d}",
+            }
+            for index, path in enumerate(paths)
+        ],
+    }
+    (bundle_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return paths
 
 
@@ -354,7 +414,6 @@ def run_presentation(
         "meshBundle": mesh_bundle,
         "outputDir": str(output_dir.resolve()),
         "reportPath": str((output_dir / "render-report.json").resolve()),
-        "reportPath": str(output_dir / "render-report.json"),
         "samples": preset["samples"],
         "width": resolution["width"],
         "height": resolution["height"],
@@ -366,9 +425,38 @@ def run_presentation(
         "turntable": bool(outputs_requested.get("turntable", True)),
         "assemblyAnimation": bool(outputs_requested.get("assembly", False)) and bool(assembly),
         "explodeDirections": assembly.get("explodeDirections", {}),
+        "sequence": assembly.get("sequence", []),
+        # Semantic vocabulary the driver actually consumes (review P0-7):
+        # materials, lighting strings, lens, composition.
+        "materials": spec.get("materials", []),
+        "lighting": spec.get("lighting", {}),
+        "lens": spec.get("camera", {}).get("lens", ""),
+        "composition": spec.get("camera", {}).get("composition", ""),
     }
     args_path = output_dir / "driver-args.json"
     args_path.write_text(json.dumps(driver_args, indent=2), encoding="utf-8")
+
+    # Frozen provenance (same contract as the solvers): everything the
+    # render consumes is hashed BEFORE Blender runs and re-verified after —
+    # the manifest's subject/spec hashes can never describe inputs that
+    # changed mid-render.
+    from .provenance import FrozenInputs, spec_input_paths
+
+    frozen = FrozenInputs.freeze(
+        [("spec", str(spec_path.resolve()))]
+        + [("artifact", str(artifact_path))]
+        + [
+            (f"reference:{i}", str(Path(d['reference']).resolve()))
+            for i, d in enumerate(spec.get("directions", []))
+        ]
+    )
+    changed = frozen.changed_role()
+    if changed is not None:
+        return {
+            "status": "discarded",
+            "outputs": [str(scene_path)],
+            "reason": f"input changed during presentation; provenance no longer matches the invocation: {changed}",
+        }
 
     driver = Path(__file__).with_name("presentation_driver.py")
     started = time.monotonic()
@@ -406,6 +494,13 @@ def run_presentation(
         report = json.loads(report_path.read_text(encoding="utf-8"))
     except Exception:
         pass
+    changed_after = frozen.changed_role()
+    if changed_after is not None:
+        return {
+            "status": "discarded",
+            "outputs": [str(scene_path), str(output_dir / "blender.log")],
+            "reason": f"input changed during presentation; result discarded: {changed_after}",
+        }
     if result.returncode != 0 or report.get("status") != "rendered":
         tail = "\n".join((result.stderr or result.stdout or "").splitlines()[-8:])
         reason = tail or f"blender driver produced no render report (rc={result.returncode})"
@@ -467,6 +562,19 @@ def run_presentation(
     outputs = [str(scene_path), str(manifest_path)] + [
         entry["path"] for entry in manifest_outputs.values()
     ]
+    # Preview images for the Agent's own inspection: the preview->inspect
+    # ->revise loop needs the pixels in the conversation, not just paths.
+    preview_images = []
+    if stage == "preview":
+        for name in ("hero.png", "exploded.png"):
+            path = output_dir / name
+            if path.exists():
+                preview_images.append(str(path))
+        frames_dir = report.get("turntableFrames")
+        if frames_dir and Path(frames_dir).exists():
+            frames = sorted(Path(frames_dir).glob("frame_*.png"))
+            if frames:
+                preview_images.append(str(frames[len(frames) // 2]))
     return {
         "status": "rendered",
         "stage": stage,
@@ -474,6 +582,7 @@ def run_presentation(
         "manifest": str(manifest_path),
         "outputs": outputs,
         "videos": videos,
+        "previewImages": preview_images,
         "blenderVersion": manifest["blenderVersion"],
         "objectCount": report.get("objectCount"),
     }

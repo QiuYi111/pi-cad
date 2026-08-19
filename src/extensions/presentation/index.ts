@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
-import { presentationCommand } from "../../shared/capability.ts";
+import { imageContent, presentationCommand } from "../../shared/capability.ts";
 import { writeRunSpec } from "../../shared/run-spec.ts";
 
 export default function cadPresentationExtension(pi: ExtensionAPI) {
@@ -144,19 +144,34 @@ export default function cadPresentationExtension(pi: ExtensionAPI) {
         stage?: string;
         reason?: string;
         outputs?: string[];
+        previewImages?: string[];
         manifest?: string;
         error?: string;
       };
       const text = envelope.ok
-        ? `cad_render_scene stage=${params.stage} status=${payload.status ?? "ok"}${payload.reason ? `\nreason=${payload.reason}` : ""}\noutputs=${JSON.stringify(payload.outputs ?? [])}`
+        ? `cad_render_scene stage=${params.stage} status=${payload.status ?? "ok"}${payload.reason ? `\nreason=${payload.reason}` : ""}\noutputs=${JSON.stringify(payload.outputs ?? [])}${payload.stage === "preview" && (payload.previewImages ?? []).length ? `\npreview images attached — inspect them yourself before committing to the final run.` : ""}`
         : `cad_render_scene failed: ${payload.error ?? "unknown error"}`;
+      // Preview pixels come back multimodally: the preview -> inspect ->
+      // revise loop needs the images in the conversation, not just paths.
+      const previewParts =
+        envelope.ok && params.stage === "preview"
+          ? await Promise.all(
+              (payload.previewImages ?? []).map((path) => imageContent(path)),
+            )
+          : [];
       // Presentation evidence binds to the presented DESIGN; the spec is a
       // hash-bound input alongside it.
       const artifactHash =
         envelope.inputHashes.artifact ??
         (envelope.inputArtifacts ?? []).find((input) => input.role === "artifact")?.sha256;
+      const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
+        { type: "text", text },
+      ];
+      for (const part of previewParts) {
+        if (part) content.push(part);
+      }
       return {
-        content: [{ type: "text", text }],
+        content,
         details: {
           envelope,
           artifactHash: artifactHash ?? envelope.inputHashes.spec,

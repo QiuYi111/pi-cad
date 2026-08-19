@@ -80,6 +80,34 @@ class PresentationSchema(unittest.TestCase):
         ok, errors = validate_spec(self.spec(directions=[{"name": "only-one"}]))
         self.assertFalse(ok)
 
+    def test_semantic_vocabulary_fails_closed(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            artifact = tmp / "model.step"
+            artifact.write_text("step")
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            base = self.spec(
+                artifact=str(artifact),
+                directions=[
+                    {"name": "hero", "reference": str(refs[0])},
+                    {"name": "top", "reference": str(refs[1])},
+                ],
+            )
+            # Unknown material family/pattern rejected.
+            ok, errors = validate_spec({**base, "materials": [{"pattern": "p", "family": "unobtainium"}]})
+            self.assertFalse(ok)
+            self.assertTrue(any("family" in e for e in errors))
+            # Lens without a focal length rejected.
+            ok, errors = validate_spec({**base, "camera": {"lens": "fuzzy", "composition": "hero"}})
+            self.assertFalse(ok)
+            self.assertTrue(any("lens" in e for e in errors))
+            # Unknown composition rejected.
+            ok, errors = validate_spec({**base, "camera": {"lens": "85mm", "composition": "vibes"}})
+            self.assertFalse(ok)
+            self.assertTrue(any("composition" in e for e in errors))
+
     def test_assembly_definition_validated(self):
         import tempfile
 
@@ -187,6 +215,15 @@ class PresentationRender(unittest.TestCase):
         out = self.tmp / "preview"
         result = run_presentation(self.spec, out, stage="preview")
         self.assertEqual(result["status"], "rendered", result.get("reason"))
+        # The driver records how it consumed the spec's vocabulary.
+        report = json.loads((out / "render-report.json").read_text())
+        interp = report["interpretation"]
+        self.assertTrue(interp["camera"]["focalLengthMm"] > 0)
+        self.assertIn("composition", interp["camera"])
+        self.assertTrue(interp["materialAssignments"])
+        preview = [p for p in result.get("previewImages", [])]
+        self.assertTrue(any(p.endswith("hero.png") for p in preview), preview)
+        self.assertTrue(any(p.endswith("exploded.png") for p in preview), preview)
         manifest = json.loads((out / "manifest.json").read_text())
         self.assertEqual(manifest["status"], "rendered")
         self.assertEqual(manifest["stage"], "preview")
@@ -231,3 +268,76 @@ class PresentationRender(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PresentationProvenance(unittest.TestCase):
+    """FrozenInputs: mid-render input mutation discards the result."""
+
+    def test_mid_render_artifact_mutation_discards(self):
+        import threading
+
+        if not (HAS_BLENDER and HAS_FFMPEG):
+            self.skipTest("blender/ffmpeg not installed")
+        tmp = Path(tempfile.mkdtemp(prefix="pi-cad-present-race-"))
+        try:
+            source = tmp / "box.py"
+            source.write_text(
+                "import build123d as bd\n"
+                "with bd.BuildPart() as p:\n"
+                "    bd.Box(30, 30, 12)\n"
+                "result = p.part\n"
+            )
+            import os
+            import subprocess
+            import sys
+
+            artifact = tmp / "box.step"
+            subprocess.run(
+                [sys.executable, "-m", "cadctl", "build", "--source", str(source), "--output", str(artifact), "--force"],
+                capture_output=True, text=True, timeout=300,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "artifact": str(artifact),
+                        "directions": [
+                            {"name": "hero", "reference": str(refs[0])},
+                            {"name": "top", "reference": str(refs[1])},
+                        ],
+                        "materials": [{"pattern": "machined", "family": "metal"}],
+                        "lighting": {"key": "softbox", "fill": "bounce", "rim": "strip"},
+                        "camera": {"lens": "50mm", "composition": "hero"},
+                        "resolution": {"width": 120, "height": 90},
+                        "fps": 12,
+                        "outputs": {"hero": True, "exploded": False, "turntable": False},
+                    }
+                )
+            )
+
+            # Mutate the artifact DURING the render. The freeze happens at
+            # the start of run_presentation, so tamper from a racing thread
+            # that waits for the render to actually begin (driver-args.json
+            # is written just before Blender launches).
+            def tamper():
+                args_path = tmp / "out" / "driver-args.json"
+                for _ in range(600):
+                    if args_path.exists():
+                        break
+                    time.sleep(0.05)
+                artifact.write_bytes(artifact.read_bytes() + b"tampered")
+
+            import time
+
+            thread = threading.Thread(target=tamper)
+            thread.start()
+            result = run_presentation(spec, tmp / "out", stage="preview")
+            thread.join()
+            self.assertEqual(result["status"], "discarded", result.get("reason"))
+            self.assertIn("changed during presentation", result["reason"])
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)

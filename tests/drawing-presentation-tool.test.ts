@@ -157,12 +157,14 @@ test("cad_render_scene takes structured arguments and canonicalizes the spec", a
           { name: "hero", reference: "hero.jpg" },
           { name: "detail", reference: "detail.jpg" },
         ],
+        // Controlled vocabulary (review P0-7): the interpreter actually
+        // consumes family/pattern/lens/composition.
         materials: [
-          { pattern: "body_*", family: "aluminum" },
-          { pattern: "grip_*", family: "rubber" },
+          { pattern: "machined", family: "metal" },
+          { pattern: "matte", family: "rubber" },
         ],
-        lighting: { key: "softbox", fill: "white", rim: "cool" },
-        camera: { lens: "85mm", composition: "rule-of-thirds" },
+        lighting: { key: "softbox 45deg", fill: "bounce card", rim: "strip light" },
+        camera: { lens: "85mm", composition: "hero" },
       },
       undefined,
       undefined,
@@ -301,6 +303,10 @@ test("cad_render_scene preview renders with blender and binds evidence to the de
       { cwd },
     );
     assert.match(result.content[0].text as string, /status=rendered/);
+    // Preview pixels come back multimodally: the preview -> inspect ->
+    // revise loop needs the images in the conversation.
+    const imageParts = result.content.filter((part) => part.type === "image");
+    assert.ok(imageParts.length >= 2, `expected preview images, got ${imageParts.length}`);
     // Evidence subject is the DESIGN (boxes.step), not the spec.
     const artifactSha = result.details.envelope.inputHashes.artifact;
     assert.ok(artifactSha);
