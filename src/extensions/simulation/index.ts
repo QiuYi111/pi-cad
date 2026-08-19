@@ -11,6 +11,9 @@ import {
 import { writeRunSpec } from "../../shared/run-spec.ts";
 import { sha256File } from "../../shared/store.ts";
 
+import cadFlowExtension from "./flow.ts";
+import cadThermalExtension from "./thermal.ts";
+
 const RegionSchema = Type.Union(
   [
     Type.Object(
@@ -53,6 +56,9 @@ function shortSimulationText(envelope: any): string {
 }
 
 export default function cadSimulationExtension(pi: ExtensionAPI) {
+  cadFlowExtension(pi);
+  cadThermalExtension(pi);
+
   pi.registerTool({
     name: "cad_simulate",
     label: "CAD Simulate",

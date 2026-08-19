@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { currentRunEvidenceRoot } from "./capability.ts";
 import { CadProjectStore } from "./store.ts";
 
-export type SpecNamespace = "simulation" | "optimization" | "drawing" | "presentation";
+export type SpecNamespace = "simulation" | "flow" | "thermal" | "optimization" | "drawing" | "presentation";
 
 /**
  * Canonicalize a structured tool argument object into run-scoped evidence

@@ -58,8 +58,11 @@ export function makeEvidenceId(
   kind: EvidenceRef["kind"],
   artifactHash: string,
   specHash?: string,
+  caseId?: string,
 ): string {
-  const identity = specHash ? `${artifactHash.slice(0, 12)}-${specHash.slice(0, 12)}` : artifactHash.slice(0, 12);
+  let identity = artifactHash.slice(0, 12);
+  if (caseId) identity = `${identity}-case-${caseId}`;
+  else if (specHash) identity = `${identity}-${specHash.slice(0, 12)}`;
   return `${kind}-${identity}-${randomUUID().slice(0, 8)}`;
 }
 

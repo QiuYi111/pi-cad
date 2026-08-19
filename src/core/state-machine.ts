@@ -9,6 +9,7 @@ import {
   type MutationPolicy,
 } from "../shared/protocol.ts";
 import { hashRecord, makeEvidenceId, nowIso } from "../shared/store.ts";
+import { caseObligationFailure } from "./evidence-cases.ts";
 import { WORKFLOW_SPECS } from "../workflows/index.ts";
 import type { WorkflowSpec } from "../workflows/types.ts";
 
@@ -255,14 +256,16 @@ export function evidenceFromEnvelope(
   artifactHash: string,
   sourceHash?: string,
   specHash?: string,
+  caseId?: string,
 ): EvidenceRef {
   return {
-    id: makeEvidenceId(kind, artifactHash, specHash),
+    id: makeEvidenceId(kind, artifactHash, specHash, caseId),
     kind,
     tool,
     artifactHash,
     sourceHash,
     specHash,
+    caseId,
     paths: envelope.artifacts.map((artifact) => artifact.path),
     artifacts: envelope.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
     createdAt: nowIso(),
@@ -305,6 +308,8 @@ export function transition(
       if (!hasCurrentEvidence(state, "simulation")) {
         return { ok: false, reason: "cannot accept: required simulation evidence is missing for the current artifact" };
       }
+      const caseFailure = caseObligationFailure(state, state.currentArtifactHash, "cannot accept");
+      if (caseFailure) return { ok: false, reason: caseFailure };
     }
     const guard = spec.completionGuard?.(state);
     if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
@@ -340,6 +345,10 @@ export function transition(
     !hasEvidenceForArtifact(state, state.baselineArtifactHash, "simulation")
   ) {
     return { ok: false, reason: "cannot complete analyze: required simulation evidence is missing for the baseline artifact" };
+  }
+  if (event === "findings_delivered" && state.workflow === "analyze" && state.baselineArtifactHash) {
+    const caseFailure = caseObligationFailure(state, state.baselineArtifactHash, "cannot complete analyze");
+    if (caseFailure) return { ok: false, reason: caseFailure };
   }
   const target = transitionTarget(state, event);
   if (!target) {
@@ -387,6 +396,8 @@ export function finish(state: CadRunState): ActionResult {
     ) {
       return { ok: false, reason: "cad_finish requires required simulation evidence for the baseline artifact" };
     }
+    const baselineCaseFailure = caseObligationFailure(state, state.baselineArtifactHash, "cad_finish blocked");
+    if (baselineCaseFailure) return { ok: false, reason: baselineCaseFailure };
   } else {
     if (!state.currentSourceHash || !state.currentArtifactHash) {
       return { ok: false, reason: "cad_finish requires current source and artifact hashes" };
@@ -400,6 +411,8 @@ export function finish(state: CadRunState): ActionResult {
       if (!hasCurrentEvidence(state, "simulation")) {
         return { ok: false, reason: "cad_finish requires required simulation evidence for the current artifact" };
       }
+      const caseFailure = caseObligationFailure(state, state.currentArtifactHash, "cad_finish blocked");
+      if (caseFailure) return { ok: false, reason: caseFailure };
     }
   }
   const completionGuard = spec.completionGuard?.(state);

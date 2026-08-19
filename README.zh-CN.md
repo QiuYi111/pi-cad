@@ -108,13 +108,13 @@ harness 已经自动渲染七张视图、提取几何事实作为证据,并绑�
 (modify/convert)确定性对比 → 按哈希绑定证据 → 进入评审。
 
 **几何** —— `cad_build_step`、`cad_inspect_visual`、`cad_inspect_geometry`、
-`cad_inspect_section`、`cad_measure`、`cad_compare_geometry`、
-`cad_assembly_tree`、`cad_export`。
+`cad_inspect_surfaces`、`cad_inspect_section`、`cad_measure`、
+`cad_compare_geometry`、`cad_assembly_tree`、`cad_export`。
 
-**工程分析** —— `cad_simulate`、`cad_optimize`、`cad_generate_drawing`、
-`cad_render_scene`。
+**工程分析** —— `cad_simulate`、`cad_simulate_flow`、`cad_simulate_thermal`、
+`cad_optimize`、`cad_generate_drawing`、`cad_render_scene`。
 
-四个工程工具全部接收结构化参数(材料、载荷、约束、网格、视图、方向)。
+工程工具全部接收结构化参数(材料、载荷、约束、网格、视图、方向)。
 你不需要指定 spec 文件或输出目录——harness 自己把 spec 规范化写入 run 级
 证据存储。正因如此,即使是只读的评审阶段也能跑仿真而不碰你的项目目录。
 未知的物理类型、载荷类型、约束类型、区域、或第二份材料,都会报错拒绝,
@@ -135,9 +135,34 @@ V1 做得好的:
 - **设备诚实**:CPU 是一等公民;有匹配 CuPy 时用 CUDA;Metal 明确回退
   CPU。没有任何伪装。
 
-V1 刻意不做的:非线性材料、压力/牵引载荷、任意 CAD 面边界条件(确定性的
-网格边界检查器是下一步计划)、多材料零件。工具只返回原始确定性场——
-它永远不说"安全"或"合格";这个判断属于智能体,也属于你。
+### 热与流(SU2)
+
+`cad_simulate_flow` 与 `cad_simulate_thermal` 把 canonical spec 编译成 SU2
+世界,再把 SU2 结果翻译回 canonical 证据。单位规则冻结且直接写在字段名里:
+CAD 几何按 `geometryUnits` 解释(默认 mm),所有物理量用显式 SI
+(`totalPressurePa`、`temperatureK`、`maxSizeMm`……)——求解器永远不会遇到
+隐式 mm→m。
+
+- `cad_simulate_flow` —— 在显式水密流体域 STEP 上做稳态单区 CFD:
+  可压缩 Euler、可压缩 RANS(SA/SST)、不可压缩 NS/RANS。每个边界面必须
+  且只能分类一次(总条件进口、压力出口、壁面);结果含收敛历程、按面积的
+  面加权均值、质量平衡、原始场与视图。收敛的喷管算例出口马赫数与等熵
+  气动表相差百分之几。
+- `cad_simulate_thermal` —— 稳态固体导热:定温与定热流边界、其余绝热、
+  常导热系数。一维平板 fixture 在 CI 中与 `q = kAΔT/L` 解析解对比。
+- `cad_inspect_surfaces` —— 确定性的边界面事实(类型、面积、质心、包围盒、
+  法向/轴线)加带标注的视图。面 ID 只是对当前工件哈希有效的几何选择器,
+  绝不是语义标签:哪个面是进口,由智能体自己判断。
+
+SU2 以可选的固定版本运行时发布(官方 8.5.0 "Harrier" 预编译包,SHA256
+校验),安装在 `.runtime/su2/`;下载失败自动降级,`cadctl doctor` 如实
+报告能力。`PI_CAD_SU2_BIN` 可指向自带二进制,`PI_CAD_SKIP_SU2=1` 可完全
+跳过。`thermal-fluid-analysis` skill 描述如何组织与解读这类证据,但并不
+假装教模型 CFD。
+
+V1 刻意不做的:非线性材料、压力/牵引载荷、多材料结构零件、CHT/多区、
+瞬态流、燃烧、叶轮机械特性。工具只返回原始确定性场——它永远不说"安全"、
+"合格"或"能用";这个判断属于智能体,也属于你。
 
 `cad_optimize` 是标注清晰的走通骨架:可微分 SIMP 拓扑优化(二维矩形域、
 MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
@@ -151,6 +176,10 @@ MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
   改写结果文件会直接校验失败。
 - **仿真绑定求解前的工件哈希。** 求解期间 STEP 被改动,结果会被丢弃,
   而不是绑到错误的版本上。
+- **声明的仿真工况必须真的跑过。** 需求里声明了按工况的义务
+  (如 `nozzle-outlet` 用 `cad_simulate_flow`)时,验收与收尾会被一直挡住,
+  直到每个工况都用声明的工具产生了当前版本的证据——跑一次结构 FEA
+  关不掉一个流场工况。harness 只比对不透明标识,绝不理解物理。
 - **候选一变,旧证据自动过期。** 你无法拿上一版的仿真去验收新几何。
 - **不可用的后端会明说。** Blender、PDF 图纸、GD&T 缺失都会如实报告
   unavailable——harness 绝不伪造一个假验证器。
@@ -165,6 +194,9 @@ MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
 | `PI_CAD_PYTHON` | 所有 cadctl 调用使用此 Python 二进制 |
 | `PI_CAD_VENV` | 安装器与运行时共同指向一个已有 virtualenv |
 | `PI_CAD_SKIP_CUPY` | 跳过尽力而为的 CuPy 安装(设为 `1` 关闭) |
+| `PI_CAD_SU2_BIN` | 流/热分析使用外部 SU2_CFD 二进制 |
+| `PI_CAD_SKIP_SU2` | 跳过可选的 SU2 运行时下载(设为 `1` 关闭) |
+| `PI_CAD_SU2_RUNTIME` | 托管 SU2 运行时的替代根目录 |
 
 运行时能力检查("doctor" 报告)是对**实际会用到的那份 Python** 的实时
 探测,每个会话尊重一次——不是安装时刻的过期快照。

@@ -10,10 +10,12 @@ import {
 } from "./state-machine.ts";
 
 export { addEvidence, evidenceFromEnvelope, markEvidenceStale };
+export { unmetSimulationCases } from "./evidence-cases.ts";
 
 export const EVIDENCE_KINDS: EvidenceRef["kind"][] = [
   "visual",
   "geometry",
+  "surfaces",
   "build",
   "compare",
   "section",
@@ -91,22 +93,28 @@ export function recordToolEvidence(
   kind: EvidenceRef["kind"],
   artifactHash: string,
   specHash?: string,
+  caseId?: string,
 ): CadRunState {
   let next = { ...state };
   // Spec-driven evidence (simulation load cases, optimization runs) is
   // identified by kind + artifactHash + specHash, so distinct load cases on
   // the same artifact coexist and re-running one case replaces only itself.
+  // Case-scoped simulation evidence is identified by caseId instead, so
+  // re-running the same case with changed conditions replaces the stale
+  // observation rather than accumulating beside it.
   // Evidence without a spec identity stays latest-wins per kind+artifact.
   next.evidence = next.evidence.filter(
     (ref) =>
       !(
         ref.kind === kind &&
         ref.artifactHash === artifactHash &&
-        (specHash === undefined || ref.specHash === specHash)
+        (caseId !== undefined
+          ? ref.caseId === caseId
+          : specHash === undefined || ref.specHash === specHash)
       ),
   );
   return addEvidence(
     next,
-    evidenceFromEnvelope(kind, envelope.tool, envelope, artifactHash, state.currentSourceHash, specHash),
+    evidenceFromEnvelope(kind, envelope.tool, envelope, artifactHash, state.currentSourceHash, specHash, caseId),
   );
 }

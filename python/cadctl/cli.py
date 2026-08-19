@@ -21,6 +21,8 @@ from .presentation import run_presentation
 from .render import VIEW_NAMES, render_views
 from .section import render_section
 from .simulation.api import run_simulation
+from .simulation.flow_api import run_flow
+from .simulation.thermal_api import run_thermal
 from .simulation.topology import run_topology
 
 
@@ -401,6 +403,147 @@ def _cmd_simulate(args: argparse.Namespace) -> int:
         return 0
 
 
+def _simulation_input_hashes(spec_path: str, stage: str) -> dict[str, str]:
+    """Pre-hash every artifact input named by a spec (fail-soft per key)."""
+    input_hashes = {"spec": sha256_file(spec_path)}
+    if stage != "run":
+        return input_hashes
+    try:
+        spec = json.loads(Path(spec_path).read_text(encoding="utf-8"))
+    except Exception:
+        return input_hashes
+    for key in ("artifact", "fluidDomain"):
+        value = spec.get(key)
+        if isinstance(value, str) and value and Path(value).exists():
+            input_hashes[key] = sha256_file(value)
+    return input_hashes
+
+
+def _simulation_result_artifacts(payload: dict) -> list[dict[str, str]]:
+    artifacts: list[dict[str, str]] = []
+    for key in ("artifact",):
+        path = payload.get(key)
+        if path and Path(path).exists():
+            artifacts.append({"path": path, "kind": "simulation_result", "sha256": sha256_file(path)})
+    for field_artifact in payload.get("fieldArtifacts") or []:
+        if Path(field_artifact).exists():
+            artifacts.append(
+                {"path": field_artifact, "kind": "simulation_fields", "sha256": sha256_file(field_artifact)}
+            )
+    for raw in ("case.cfg", "history.csv", "vol_solution.vtu"):
+        path = Path(payload.get("_workdir", "")) / raw if payload.get("_workdir") else None
+        if path and path.exists():
+            artifacts.append({"path": str(path), "kind": "simulation_raw", "sha256": sha256_file(path)})
+    for view in (payload.get("visualization") or {}).get("views") or []:
+        view_path = view.get("path")
+        if view_path and Path(view_path).exists():
+            artifacts.append(
+                {"path": view_path, "kind": "simulation_visual", "sha256": sha256_file(view_path)}
+            )
+    return artifacts
+
+
+def _cmd_simulate_flow(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    try:
+        input_hashes = _simulation_input_hashes(args.spec, args.stage)
+        payload = run_flow(args.spec, args.output_dir, stage=args.stage)
+        if args.stage == "run":
+            payload["_workdir"] = str(Path(args.output_dir).resolve())
+        if payload.get("status") in {"unavailable", "discarded"}:
+            emit_error(
+                "cad_simulate_flow",
+                str(payload.get("reason", "SU2 backend unavailable")),
+                input_hashes=input_hashes,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return 0
+        artifacts = _simulation_result_artifacts(payload) if args.stage == "run" else []
+        emit(
+            "cad_simulate_flow",
+            payload,
+            input_hashes=input_hashes,
+            artifacts=artifacts,
+            warnings=[] if payload.get("status") in {"solved", "validated"} else ["flow simulation did not produce satisfying evidence"],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error("cad_simulate_flow", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
+        return 0
+
+
+def _cmd_simulate_thermal(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    try:
+        input_hashes = _simulation_input_hashes(args.spec, args.stage)
+        payload = run_thermal(args.spec, args.output_dir, stage=args.stage)
+        if args.stage == "run":
+            payload["_workdir"] = str(Path(args.output_dir).resolve())
+        if payload.get("status") in {"unavailable", "discarded"}:
+            emit_error(
+                "cad_simulate_thermal",
+                str(payload.get("reason", "SU2 backend unavailable")),
+                input_hashes=input_hashes,
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+            return 0
+        artifacts = _simulation_result_artifacts(payload) if args.stage == "run" else []
+        emit(
+            "cad_simulate_thermal",
+            payload,
+            input_hashes=input_hashes,
+            artifacts=artifacts,
+            warnings=[] if payload.get("status") in {"solved", "validated"} else ["thermal simulation did not produce satisfying evidence"],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error("cad_simulate_thermal", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
+        return 0
+
+
+def _cmd_inspect_surfaces(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    try:
+        from .simulation.surface_selector import enumerate_surfaces, render_labeled_views
+
+        payload = enumerate_surfaces(artifact)
+        artifacts: list[dict[str, str]] = []
+        if args.output:
+            out = Path(args.output)
+            write_json(out, payload)
+            artifacts.append({"path": str(out), "kind": "surfaces", "sha256": sha256_file(out)})
+        if args.labels:
+            out_dir = Path(args.out_dir) if args.out_dir else (out.parent / "views" if args.output else Path.cwd() / "surface-views")
+            views = render_labeled_views(
+                artifact,
+                out_dir,
+                payload["surfaces"],
+                views=args.views.split(",") if args.views else None,
+            )
+            payload["views"] = views
+            for view in views:
+                artifacts.append({"path": view["path"], "kind": "surfaces_visual", "sha256": sha256_file(view["path"])})
+        emit(
+            "cad_inspect_surfaces",
+            payload,
+            input_hashes={"artifact": sha256_file(artifact)},
+            artifacts=artifacts,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_inspect_surfaces",
+            str(exc),
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
 def _cmd_present(args: argparse.Namespace) -> int:
     started = time.monotonic()
     try:
@@ -539,6 +682,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--spec", required=True)
     p.add_argument("--output-dir", required=True)
     p.set_defaults(func=_cmd_simulate)
+
+    p = sub.add_parser("simulate-flow", help="Validate or run a spec-driven SU2 CFD case")
+    p.add_argument("stage", choices=("validate", "run"))
+    p.add_argument("--spec", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.set_defaults(func=_cmd_simulate_flow)
+
+    p = sub.add_parser("simulate-thermal", help="Validate or run a spec-driven SU2 solid heat case")
+    p.add_argument("stage", choices=("validate", "run"))
+    p.add_argument("--spec", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.set_defaults(func=_cmd_simulate_thermal)
+
+    p = sub.add_parser("inspect-surfaces", help="Return deterministic boundary-surface facts and surface IDs")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
+    p.add_argument("--labels", action="store_true", help="Render labeled selector views")
+    p.add_argument("--out-dir", default=None, help="Directory for labeled views (requires --labels)")
+    p.add_argument("--views", default=None, help="Comma-separated subset of iso,front,right,top")
+    p.set_defaults(func=_cmd_inspect_surfaces)
 
     p = sub.add_parser("present", help="Validate, generate, or run a spec-driven presentation")
     p.add_argument("stage", choices=("validate", "generate", "run"))

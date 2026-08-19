@@ -5,12 +5,15 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   CAPABILITY_TOOLS,
   CONTROL_TOOLS,
+  SIMULATION_TOOLS,
   type CadPhase,
   type CadRunState,
 } from "../shared/protocol.ts";
 
 export const BUILTIN_READONLY = ["read", "grep", "find", "ls"];
 export const BUILTIN_SOURCE = [...BUILTIN_READONLY, "bash", "edit", "write"];
+
+const SIMULATION_TOOL_SET = new Set<string>(SIMULATION_TOOLS);
 
 /**
  * Tools Pi-CAD is allowed to manage. Everything else in the host session —
@@ -74,17 +77,23 @@ const REVIEW_TOOLS = [
   "bash",
   "cad_inspect_visual",
   "cad_inspect_geometry",
+  "cad_inspect_surfaces",
   "cad_inspect_section",
   "cad_measure",
   "cad_compare_geometry",
   "cad_assembly_tree",
   "cad_simulate",
+  "cad_simulate_flow",
+  "cad_simulate_thermal",
   "cad_optimize",
   "cad_transition",
 ];
 
+// Simulation tools never join the source-phase capability set: source phases
+// build geometry; simulation evidence is produced against a committed
+// candidate or baseline in review/cognitive phases.
 const SOURCE_CAPABILITY_TOOLS = CAPABILITY_TOOLS.filter(
-  (name) => name !== "cad_simulate" && name !== "cad_optimize",
+  (name) => !SIMULATION_TOOL_SET.has(name) && name !== "cad_optimize",
 );
 
 const COGNITIVE_TOOLS = [
@@ -92,12 +101,15 @@ const COGNITIVE_TOOLS = [
   "bash",
   "cad_inspect_visual",
   "cad_inspect_geometry",
+  "cad_inspect_surfaces",
   "cad_inspect_section",
   "cad_measure",
   "cad_compare_geometry",
   "cad_assembly_tree",
   "cad_transition",
 ];
+
+const SIMULATION_EVIDENCE_TOOLS = ["cad_simulate", "cad_simulate_flow", "cad_simulate_thermal"];
 
 export function toolsForPhase(phase: CadPhase): string[] {
   switch (phase) {
@@ -128,7 +140,7 @@ export function toolsForPhase(phase: CadPhase): string[] {
     case "explain":
     case "concept":
     case "domain_analysis":
-      return [...COGNITIVE_TOOLS, "cad_simulate", "cad_wait_for_user"];
+      return [...COGNITIVE_TOOLS, ...SIMULATION_EVIDENCE_TOOLS, "cad_wait_for_user"];
     case "audit":
       return [
         ...COGNITIVE_TOOLS,
@@ -148,13 +160,15 @@ export function toolsForPhase(phase: CadPhase): string[] {
     case "package":
       return [...BUILTIN_READONLY, "bash", "edit", "write", ...CAPABILITY_TOOLS, "cad_commit_plan", "cad_transition", "cad_wait_for_user"];
     case "final_review":
-      return [...COGNITIVE_TOOLS, "cad_simulate", "cad_wait_for_user"];
+      return [...COGNITIVE_TOOLS, ...SIMULATION_EVIDENCE_TOOLS, "cad_wait_for_user"];
     case "ready":
       return [
         ...BUILTIN_READONLY,
         "bash",
         ...SOURCE_CAPABILITY_TOOLS,
         "cad_simulate",
+        "cad_simulate_flow",
+        "cad_simulate_thermal",
         "cad_finish",
       ];
     case "done":

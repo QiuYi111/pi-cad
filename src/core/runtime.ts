@@ -20,6 +20,8 @@ import { resumeFromUser } from "./state-machine.ts";
 const OPTIONAL_TOOL_NAMES = [
   "cad_generate_drawing",
   "cad_simulate",
+  "cad_simulate_flow",
+  "cad_simulate_thermal",
   "cad_optimize",
   "cad_render_scene",
 ] as const;
@@ -63,7 +65,7 @@ function customToolDetails(event: ToolResultEvent) {
     | {
         envelope?: {
           ok?: boolean;
-          payload?: { status?: string };
+          payload?: { status?: string; caseId?: string };
           inputHashes?: Record<string, string>;
           artifacts?: Array<{ path: string }>;
           tool?: string;
@@ -71,6 +73,7 @@ function customToolDetails(event: ToolResultEvent) {
         kind?: string;
         artifactHash?: string;
         specHash?: string;
+        caseId?: string;
       }
     | undefined;
 }
@@ -102,8 +105,11 @@ async function handleToolResult(
   const specHash =
     info.specHash ??
     (kind === "simulation" || kind === "optimization" ? info.envelope.inputHashes?.spec : undefined);
+  const caseId =
+    info.caseId ??
+    (kind === "simulation" ? (info.envelope.payload as { caseId?: string } | undefined)?.caseId : undefined);
   const envelope = info.envelope as Parameters<typeof recordToolEvidence>[1];
-  const next = recordToolEvidence(state, envelope, kind, artifactHash, specHash);
+  const next = recordToolEvidence(state, envelope, kind, artifactHash, specHash, caseId);
   await persist(pi, store, next, [
     {
       type: "EvidenceCreated",
@@ -111,6 +117,7 @@ async function handleToolResult(
         kind,
         artifactHash,
         ...(specHash ? { specHash } : {}),
+        ...(caseId ? { caseId } : {}),
         paths: envelope.artifacts?.map((artifact) => artifact.path) ?? [],
       },
     },
@@ -140,6 +147,13 @@ async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<
   if (doctor?.capabilities) {
     if (available.has("cad_simulate") && doctor.capabilities.simulation?.status !== "ready") {
       result.push("cad_simulate: doctor simulation backend not ready");
+    }
+    const thermalFluid = doctor.capabilities.thermalFluid as { status?: string } | undefined;
+    if (available.has("cad_simulate_flow") && thermalFluid?.status !== "ready") {
+      result.push("cad_simulate_flow: doctor thermalFluid backend not ready");
+    }
+    if (available.has("cad_simulate_thermal") && thermalFluid?.status !== "ready") {
+      result.push("cad_simulate_thermal: doctor thermalFluid backend not ready");
     }
     if (
       available.has("cad_optimize") &&

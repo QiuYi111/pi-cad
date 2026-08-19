@@ -28,16 +28,34 @@ export const CAPABILITY_TOOLS = [
   "cad_build_step",
   "cad_inspect_visual",
   "cad_inspect_geometry",
+  "cad_inspect_surfaces",
   "cad_inspect_section",
   "cad_measure",
   "cad_compare_geometry",
   "cad_assembly_tree",
   "cad_export",
   "cad_simulate",
+  "cad_simulate_flow",
+  "cad_simulate_thermal",
   "cad_optimize",
   "cad_generate_drawing",
   "cad_render_scene",
 ] as const;
+
+/**
+ * Spec-driven solver tools that produce simulation evidence. They are never
+ * part of the source-phase capability set: a source phase builds geometry,
+ * and simulations belong to review/cognitive phases against a committed
+ * candidate or baseline.
+ */
+export const SIMULATION_TOOLS = [
+  "cad_simulate",
+  "cad_simulate_flow",
+  "cad_simulate_thermal",
+] as const;
+
+/** Tools whose evidence obligations are case-scoped (opaque simulation cases). */
+export const SIMULATION_CASE_TOOLS = SIMULATION_TOOLS;
 
 export type CadWorkflow = (typeof ALL_WORKFLOWS)[number];
 export type CadPhase =
@@ -78,6 +96,7 @@ export interface EvidenceRef {
   kind:
     | "visual"
     | "geometry"
+    | "surfaces"
     | "build"
     | "compare"
     | "section"
@@ -92,6 +111,8 @@ export interface EvidenceRef {
   sourceHash?: string;
   /** Spec identity for spec-driven evidence (simulation load cases, optimization runs). */
   specHash?: string;
+  /** Opaque simulation case this evidence satisfies, when the obligation declared one. */
+  caseId?: string;
   paths: string[];
   artifacts: Array<{ path: string; sha256: string }>;
   createdAt: string;
@@ -116,10 +137,26 @@ export type EvidenceDisposition =
   | "not_applicable"
   | "blocked_external";
 
+/**
+ * Opaque simulation case: the harness only knows that this interpreter
+ * invocation must exist for the current artifact version. It deliberately
+ * knows nothing about Mach numbers, RANS, or heat conduction.
+ */
+export interface SimulationCaseObligation {
+  id: string;
+  tool: (typeof SIMULATION_CASE_TOOLS)[number];
+}
+
 export interface EvidenceObligations {
   simulation?: {
     disposition: EvidenceDisposition;
     rationale?: string;
+    /**
+     * Case-scoped obligations. When present, "required" means every listed
+     * case must have current simulation evidence from the declared tool;
+     * when absent, any current simulation evidence satisfies the obligation.
+     */
+    cases?: SimulationCaseObligation[];
   };
 }
 

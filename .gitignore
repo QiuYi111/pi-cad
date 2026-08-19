@@ -21,3 +21,4 @@ benchmarks/results/*
 .postinstall-test.log
 .postinstall-test.pid
 .uv-cache/
+.runtime/

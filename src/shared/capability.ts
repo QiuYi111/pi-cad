@@ -359,6 +359,55 @@ export async function simulationCommand(
   );
 }
 
+export async function flowCommand(
+  cwd: string,
+  stage: "validate" | "run",
+  spec: string,
+  outputDir: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    ["simulate-flow", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
+    { cwd, timeoutMs },
+  );
+}
+
+export async function thermalCommand(
+  cwd: string,
+  stage: "validate" | "run",
+  spec: string,
+  outputDir: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    ["simulate-thermal", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
+    { cwd, timeoutMs },
+  );
+}
+
+export interface InspectSurfacesOptions {
+  output?: string;
+  labels?: boolean;
+  outDir?: string;
+  views?: string[];
+}
+
+export async function inspectSurfaces(
+  cwd: string,
+  artifact: string,
+  options: InspectSurfacesOptions = {},
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  const args = ["inspect-surfaces", "--artifact", resolve(cwd, artifact)];
+  if (options.output) args.push("--output", resolve(cwd, options.output));
+  if (options.labels) {
+    args.push("--labels");
+    if (options.outDir) args.push("--out-dir", resolve(cwd, options.outDir));
+    if (options.views?.length) args.push("--views", options.views.join(","));
+  }
+  return runCadctl(args, { cwd, timeoutMs });
+}
+
 export async function presentationCommand(
   cwd: string,
   stage: "validate" | "generate" | "run",

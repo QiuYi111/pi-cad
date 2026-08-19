@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { installSu2 } from "./install-su2.mjs";
+
 const root = fileURLToPath(new URL("..", import.meta.url));
 const requestedVenv = process.env.PI_CAD_VENV ?? join(root, ".venv");
 const venvPython = process.platform === "win32" ? join(requestedVenv, "Scripts", "python.exe") : join(requestedVenv, "bin", "python");
@@ -158,3 +160,6 @@ const doctor = JSON.parse(
 );
 writeFileSync(join(root, ".pi-cad-runtime.json"), JSON.stringify({ mode, ...doctor }, null, 2));
 console.log(`[pi-cad] runtime ready (${mode}): ${doctor.python} simulation=${doctor.capabilities?.simulation?.status ?? "unknown"}`);
+
+// Optional SU2 runtime for flow/thermal simulation; fails soft by design.
+await installSu2({ root, python, env });

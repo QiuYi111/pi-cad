@@ -115,13 +115,14 @@ visual views → geometry facts → deterministic compare (modify/convert) →
 evidence bound to hashes → review.
 
 **Geometry** — `cad_build_step`, `cad_inspect_visual`, `cad_inspect_geometry`,
-`cad_inspect_section`, `cad_measure`, `cad_compare_geometry`,
-`cad_assembly_tree`, `cad_export`.
+`cad_inspect_surfaces`, `cad_inspect_section`, `cad_measure`,
+`cad_compare_geometry`, `cad_assembly_tree`, `cad_export`.
 
-**Engineering analysis** — `cad_simulate`, `cad_optimize`,
-`cad_generate_drawing`, `cad_render_scene`.
+**Engineering analysis** — `cad_simulate`, `cad_simulate_flow`,
+`cad_simulate_thermal`, `cad_optimize`, `cad_generate_drawing`,
+`cad_render_scene`.
 
-All four engineering tools take structured arguments (material, loads,
+All engineering tools take structured arguments (material, loads,
 constraints, mesh, views, directions). You never point them at a spec file or
 an output directory — the harness canonicalizes the spec into run-scoped
 evidence storage itself, which is why even read-only review phases can run a
@@ -146,11 +147,42 @@ What V1 does well:
 - **Devices, honestly**: CPU is first-class; CUDA is used when a matching
   CuPy is present; Metal reports an explicit CPU fallback. Nothing pretends.
 
+### Thermal & flow (SU2)
+
+`cad_simulate_flow` and `cad_simulate_thermal` compile canonical specs into
+SU2 runs and translate the results back into canonical evidence. The unit
+rule is frozen and explicit in the field names: CAD geometry is interpreted
+per `geometryUnits` (mm by default) and every physical quantity is SI
+(`totalPressurePa`, `temperatureK`, `maxSizeMm`, …) — no implicit mm→m ever
+reaches the solver.
+
+- `cad_simulate_flow` — steady single-zone CFD on an explicit watertight
+  fluid-domain STEP: compressible Euler, compressible RANS (SA/SST),
+  incompressible Navier–Stokes/RANS. Every boundary surface must be
+  classified exactly once (total-conditions inlet, pressure outlet, walls);
+  results include convergence, per-surface area-weighted means, mass
+  balance, raw fields, and views. A converged nozzle run reaches the
+  isentropic-table outlet Mach within a few percent.
+- `cad_simulate_thermal` — steady solid heat conduction: fixed-temperature
+  and fixed-heat-flux boundaries, adiabatic remainder, constant
+  conductivity. The 1D slab fixture is checked against `q = kAΔT/L` in CI.
+- `cad_inspect_surfaces` — deterministic boundary-surface facts (type, area,
+  centroid, bbox, normal/axis) plus labeled views. Surface IDs are geometric
+  selectors valid for one artifact hash, never semantic labels: deciding
+  which face is an inlet is the agent's job.
+
+SU2 ships as an optional pinned runtime (official 8.5.0 "Harrier"
+precompiled builds, SHA256-verified) under `.runtime/su2/`; the download
+fails soft and `cadctl doctor` reports the capability honestly. Set
+`PI_CAD_SU2_BIN` to use your own binary or `PI_CAD_SKIP_SU2=1` to opt out.
+A `thermal-fluid-analysis` skill describes how to formulate and interpret
+this evidence without pretending to teach the model CFD.
+
 What V1 deliberately does not do: nonlinear materials, pressure/traction
-loads, arbitrary CAD-face boundary conditions (a deterministic mesh-boundary
-inspector is the planned next step), and multi-material parts. The tool
-returns raw deterministic fields — it never says "safe" or "passes"; that
-judgment belongs to the agent and to you.
+loads, multi-material structural parts, CHT/multi-zone, transient flow,
+combustion, or turbomachinery features. The tools return raw deterministic
+fields — they never say "safe", "passes", or "works"; that judgment belongs
+to the agent and to you.
 
 `cad_optimize` is a clearly-labeled walking skeleton: differentiable SIMP
 topology optimization (2D rectangular domain, MMA inner loop) whose output is
@@ -167,6 +199,12 @@ density/surface evidence, never a CAD candidate.
 - **Simulation binds to the pre-solve artifact hash.** If the STEP file
   changes while the solver is running, the result is discarded rather than
   bound to the wrong version.
+- **Declared simulation cases must actually run.** When requirements declare
+  case-scoped obligations (e.g. `nozzle-outlet` via `cad_simulate_flow`),
+  acceptance and finish stay blocked until each case produced current-version
+  evidence from the declared tool — a structural FEA run cannot close a flow
+  case. The harness compares opaque identities only; it never interprets the
+  physics.
 - **Candidate changes stale old evidence automatically.** You cannot accept
   a new geometry against last revision's simulation.
 - **Unavailable backends say so.** Missing Blender, PDF drawing, or GD&T
@@ -184,6 +222,9 @@ density/surface evidence, never a CAD candidate.
 | `PI_CAD_PYTHON` | Use this Python binary for all cadctl calls |
 | `PI_CAD_VENV` | Point installer and runtime at an existing virtualenv |
 | `PI_CAD_SKIP_CUPY` | Skip the best-effort CuPy install (`1` to opt out) |
+| `PI_CAD_SU2_BIN` | Use an external SU2_CFD binary for flow/thermal |
+| `PI_CAD_SKIP_SU2` | Skip the optional SU2 runtime download (`1` to opt out) |
+| `PI_CAD_SU2_RUNTIME` | Alternative root for the managed SU2 runtime |
 
 Runtime capability checks (the "doctor" report) are a **live probe** of the
 Python that would actually be used, honored once per session — not a stale
@@ -195,11 +236,14 @@ install-time snapshot.
 npm test          # or: bash scripts/test.sh
 ```
 
-31 TypeScript harness tests + 19 Python backend tests, including a
-cantilever mesh-convergence check against beam theory, load/constraint
-overlap semantics, negative validation matrices, evidence tampering, and
-artifact-mutation races. CI runs the full suite on a fresh install (Linux
-CPU) on every push.
+TypeScript harness tests + Python backend tests, including a cantilever
+mesh-convergence check against beam theory, load/constraint overlap
+semantics, negative validation matrices, evidence tampering,
+artifact-mutation races, an SU2 1D-conduction slab against `q = kAΔT/L`,
+and a supersonic-nozzle flow smoke case (convergence, mass balance,
+isentropic-ballpark outlet Mach). SU2 cases skip themselves when the
+optional runtime is unavailable. CI runs the full suite on a fresh install
+(Linux CPU) on every push.
 
 ## What lives on disk
 
@@ -227,6 +271,8 @@ layouts are migrated automatically.
 | Workflow definitions (all seven) | `src/workflows/` |
 | Layered prompts | `src/prompts/` |
 | Deterministic Python backend | `python/cadctl/` |
+| SU2 interpreter (config compiler, mesh bridge, parsers) | `python/cadctl/simulation/su2_*.py` |
+| Skills (thermal-fluid analysis) | `skills/` |
 | Spec templates | `assets/templates/` |
 
 ## Validation performed

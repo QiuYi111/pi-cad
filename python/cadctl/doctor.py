@@ -55,6 +55,31 @@ def _optimization_status() -> dict[str, Any]:
     }
 
 
+def _thermal_fluid_status() -> dict[str, Any]:
+    try:
+        from .simulation.su2_backend import su2_status
+
+        status = su2_status()
+    except Exception as exc:
+        return {"status": "error", "backend": "su2", "error": str(exc)}
+    gmsh_ready = _module("gmsh") and _module("pyvista")
+    if status.get("status") == "ready" and not gmsh_ready:
+        status = {
+            "status": "unavailable",
+            "backend": "su2",
+            "reason": "SU2 is present but gmsh/pyvista meshing support is missing",
+        }
+    if status.get("status") == "ready":
+        status["modes"] = [
+            "compressible_euler",
+            "compressible_rans",
+            "incompressible_ns",
+            "incompressible_rans",
+            "solid_heat",
+        ]
+    return status
+
+
 def doctor() -> dict[str, Any]:
     return {
         "package": "pi-cad",
@@ -71,6 +96,7 @@ def doctor() -> dict[str, Any]:
                 "status": "ready" if _module("ezdxf") else "unavailable",
             },
             "simulation": _torch_fem_status(),
+            "thermalFluid": _thermal_fluid_status(),
             "differentiableOptimization": _optimization_status(),
             "assembly": {"status": "ready"},
             "export": {"status": "ready"},

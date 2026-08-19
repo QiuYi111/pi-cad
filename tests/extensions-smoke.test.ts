@@ -77,6 +77,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_finish",
     "cad_build_step",
     "cad_inspect_geometry",
+    "cad_inspect_surfaces",
     "cad_measure",
     "cad_inspect_visual",
     "cad_inspect_section",
@@ -85,6 +86,8 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_export",
     "cad_generate_drawing",
     "cad_simulate",
+    "cad_simulate_flow",
+    "cad_simulate_thermal",
     "cad_optimize",
     "cad_render_scene",
   ];

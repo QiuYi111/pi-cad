@@ -197,6 +197,20 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
                 blocked_external: "blocked_external",
               }),
               rationale: Type.Optional(Type.String()),
+              cases: Type.Optional(
+                Type.Array(
+                  Type.Object({
+                    id: Type.String({ minLength: 1 }),
+                    tool: Type.Enum({
+                      cad_simulate: "cad_simulate",
+                      cad_simulate_flow: "cad_simulate_flow",
+                      cad_simulate_thermal: "cad_simulate_thermal",
+                    }),
+                  }),
+                  { minItems: 1 },
+                  { description: "Opaque simulation cases: the harness only checks that each interpreter invocation produced current-version evidence; it never interprets what a case means" },
+                ),
+              ),
             }),
           ),
         }),
@@ -271,6 +285,20 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
                 blocked_external: "blocked_external",
               }),
               rationale: Type.Optional(Type.String()),
+              cases: Type.Optional(
+                Type.Array(
+                  Type.Object({
+                    id: Type.String({ minLength: 1 }),
+                    tool: Type.Enum({
+                      cad_simulate: "cad_simulate",
+                      cad_simulate_flow: "cad_simulate_flow",
+                      cad_simulate_thermal: "cad_simulate_thermal",
+                    }),
+                  }),
+                  { minItems: 1 },
+                  { description: "Opaque simulation cases: the harness only checks that each interpreter invocation produced current-version evidence; it never interprets what a case means" },
+                ),
+              ),
             }),
           ),
         }),

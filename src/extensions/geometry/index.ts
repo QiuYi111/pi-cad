@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { Type } from "typebox";
 
 import {
@@ -17,6 +17,7 @@ import {
   hashOrEmpty,
   inspectGeometry,
   inspectSection,
+  inspectSurfaces,
   measure,
   measurePayload,
   readImageContents,
@@ -102,6 +103,66 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
           envelope,
           artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
           kind: "geometry" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_inspect_surfaces",
+    label: "CAD Inspect Surfaces",
+    description:
+      "Enumerate deterministic boundary-surface facts for a STEP artifact and return current-artifact-scoped surface IDs, geometry properties, and optional labeled views. Surface IDs are selectors only; this tool never decides which surface is an inlet, outlet, wall, thermal boundary, interface, or manufacturing feature.",
+    promptSnippet: "Inspect deterministic STEP boundary surfaces and obtain surface selectors",
+    promptGuidelines: [
+      "Use cad_inspect_surfaces before assigning flow/thermal/structural boundary conditions.",
+      "Surface IDs are scoped to the current artifact hash; any geometry change invalidates them.",
+      "Decide inlet/outlet/wall meaning yourself from geometry, area, position, normal, and the labeled views.",
+    ],
+    parameters: Type.Object({
+      artifact: artifactParam,
+      labels: Type.Optional(Type.Boolean({ description: "Render labeled selector views (default true)" })),
+      views: Type.Optional(Type.Array(Type.Enum({ iso: "iso", front: "front", right: "right", top: "top" }), { description: "Labeled view subset (default iso, front, right, top)" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const root = await currentRunEvidenceRoot(ctx.cwd);
+      const outDir = root
+        ? join(root, "surfaces", basename(params.artifact).replace(/\.[^.]+$/, ""))
+        : resolve(ctx.cwd, ".pi-cad", "evidence", "surfaces", basename(params.artifact).replace(/\.[^.]+$/, ""));
+      const output = join(outDir, "surfaces.json");
+      const envelope = await inspectSurfaces(ctx.cwd, params.artifact, {
+        output,
+        labels: params.labels ?? true,
+        outDir,
+        views: params.views,
+      });
+      const payload = envelope.payload as {
+        error?: string;
+        surfaces?: Array<{ id: string; type: string; area: number; centroid: number[] }>;
+        views?: Array<{ path: string; name: string }>;
+      };
+      if (!envelope.ok) {
+        return {
+          content: [{ type: "text", text: `cad_inspect_surfaces failed: ${payload.error ?? "unknown error"}` }],
+          details: { envelope },
+        };
+      }
+      const summary = (payload.surfaces ?? [])
+        .map((s) => `${s.id}: ${s.type} area=${s.area} centroid=[${s.centroid.map((v) => v.toFixed(3)).join(", ")}]`)
+        .join("\n");
+      const images = await readImageContents((payload.views ?? []).map((view) => view.path));
+      return {
+        content: [
+          {
+            type: "text",
+            text: `cad_inspect_surfaces: ${payload.surfaces?.length ?? 0} boundary surfaces (selectors, not semantics).\n${summary}\nSurface IDs are valid for this artifact hash only; classify their meaning yourself.`,
+          },
+          ...images,
+        ],
+        details: {
+          envelope,
+          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
+          kind: "surfaces" as const,
         },
       };
     },
