@@ -23,6 +23,7 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y
           libglu1-mesa xvfb libxrender1 libxcursor1 libxft2 libxinerama1
+          blender ffmpeg
 
       - uses: actions/setup-node@v4
         with:
@@ -40,6 +41,12 @@ jobs:
 
       - name: Fresh install (postinstall builds the Python runtime)
         run: npm install
+        env:
+          # Blender comes from apt in CI; the 350MB pinned download is not
+          # worth the minutes. Presentation renders against the distro
+          # Blender and the pinned-manifest path is exercised by its
+          # fail-soft logic instead.
+          PI_CAD_SKIP_BLENDER: "1"
 
       - name: Full test suite (TypeScript harness + Python backend)
         run: xvfb-run -a npm test

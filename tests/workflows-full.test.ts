@@ -64,7 +64,7 @@ function candidate(state: CadRunState) {
 
 function withEvidence(
   state: CadRunState,
-  kinds: Array<"visual" | "geometry" | "compare" | "assembly" | "drawing">,
+  kinds: Array<"visual" | "geometry" | "compare" | "assembly" | "drawing" | "interference" | "presentation">,
   hash = "artifact-hash",
 ) {
   return {
@@ -191,8 +191,9 @@ test("release path requires all workstream statuses before finish", () => {
   assert.equal(t.state.phase, "gap_closure");
   state = candidate(t.state);
   assert.equal(state.phase, "audit");
-  // Maturity overlay: release owes drawing evidence on top of visual/geometry.
-  state = withEvidence(state, ["visual", "geometry", "drawing"] as never);
+  // Maturity overlay: release owes drawing + presentation evidence on top
+  // of visual/geometry.
+  state = withEvidence(state, ["visual", "geometry", "drawing", "presentation"] as never);
   t = transition(state, "workstreams_structurally_closed", "closed");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "package");
@@ -209,7 +210,7 @@ test("release path requires all workstream statuses before finish", () => {
     currentArtifactPath: "build/release.step",
     currentArtifactHash: "artifact-hash",
   };
-  const f = finish(withEvidence(readyWithArtifact, ["visual", "geometry", "drawing"]));
+  const f = finish(withEvidence(readyWithArtifact, ["visual", "geometry", "drawing", "presentation"]));
   assert.equal(f.ok, true); if (!f.ok) return;
   assert.equal(f.state.phase, "done");
 });
@@ -431,4 +432,73 @@ test("part route owes no records: plan enters build directly", () => {
   assert.equal(p.state.phase, "build");
   const badRecord = commitPhaseRecord(c.state, "assembly_design", {});
   assert.equal(badRecord.ok, false);
+});
+
+test("release closure requires presentation deliverables in current evidence", async () => {
+  const { verifyPresentationDeliverables } = await import("../src/core/evidence.ts");
+  const { createHash } = await import("node:crypto");
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-rel-pres-"));
+  try {
+    const base = routeTo("release");
+    assert.equal(base.ok, true); if (!base.ok) return;
+    const hash = "h".repeat(64);
+    const atReady: CadRunState = {
+      ...base.state,
+      phase: "ready",
+      status: "ready",
+      currentSourcePath: "models/x.py",
+      currentSourceHash: "s".repeat(64),
+      currentArtifactPath: "build/x.step",
+      currentArtifactHash: hash,
+    };
+    // Presentation evidence with NO manifest deliverables -> blocked.
+    const noManifest = withEvidence(atReady, ["visual", "geometry", "drawing", "presentation"]);
+    const blocked = await verifyPresentationDeliverables(cwd, noManifest);
+    assert.ok(blocked);
+    assert.match(blocked, /deliverables missing/);
+
+    // With a rendered manifest declaring the deliverables -> pass.
+    const evidenceDir = join(cwd, "evidence", "presentation");
+    mkdirSync(evidenceDir, { recursive: true });
+    for (const name of ["exploded.png", "hero.png"]) {
+      writeFileSync(join(evidenceDir, name), "png bytes");
+    }
+    const manifest = {
+      status: "rendered",
+      outputs: {
+        "exploded.png": { path: join(evidenceDir, "exploded.png"), sha256: "x" },
+        "turntable.mp4": { path: join(evidenceDir, "turntable.mp4"), sha256: "y" },
+        "assembly.mp4": { path: join(evidenceDir, "assembly.mp4"), sha256: "z" },
+      },
+    };
+    writeFileSync(join(evidenceDir, "manifest.json"), JSON.stringify(manifest));
+    const withManifest: CadRunState = {
+      ...atReady,
+      evidence: [
+        ...noManifest.evidence,
+        {
+          id: "pres-2",
+          kind: "presentation" as const,
+          tool: "cad_render_scene",
+          artifactHash: hash,
+          paths: [join(evidenceDir, "manifest.json")],
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    };
+    const ok = await verifyPresentationDeliverables(cwd, withManifest);
+    assert.equal(ok, null);
+
+    // Part release does not demand the assembly animation.
+    const partRelease = route(null, { objective: "design", lineage: "greenfield", structure: "part", maturity: "release" }, "t");
+    assert.equal(partRelease.ok, true); if (!partRelease.ok) return;
+    const partState = { ...withManifest, route: partRelease.state.route };
+    const partCheck = await verifyPresentationDeliverables(cwd, { ...partState });
+    assert.equal(partCheck, null);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

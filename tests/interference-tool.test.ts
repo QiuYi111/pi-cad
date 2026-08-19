@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 type ToolDef = {
@@ -240,4 +241,66 @@ function assert_almost_equal(actual: number, expected: number, tol: number) {
     Math.abs(actual - expected) <= tol,
     `expected ~${expected}, got ${actual}`,
   );
+}
+
+test("cad_scan_sections reports area/moment facts for a box", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const venvPython = join(cwdRoot(), ".venv", "bin", "python");
+  let blenderless = true;
+  try {
+    execFileSync("blender", ["--version"], { encoding: "utf-8" });
+  } catch {
+    blenderless = false;
+  }
+  if (!existsSyncLocal(venvPython)) return;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-sections-"));
+  try {
+    writeFileSync(
+      join(cwd, "box.py"),
+      [
+        "import build123d as bd",
+        "with bd.BuildPart() as p:",
+        "    bd.Box(40, 30, 12)",
+        "result = p.part",
+        "",
+      ].join("\n"),
+    );
+    execFileSync(venvPython, ["-m", "cadctl", "build", "--source", "box.py", "--output", "box.step", "--force"], {
+      cwd,
+      encoding: "utf-8",
+      env: { ...process.env, PYTHONPATH: join(cwdRoot(), "python") },
+    });
+    const pi = mockPi();
+    const geometry = (await import("../src/extensions/geometry/index.ts")).default;
+    geometry(pi as never);
+    const tool = pi.tools.get("cad_scan_sections");
+    const bad = await tool.execute("s0", { artifact: "box.step", axis: "z" }, undefined, undefined, { cwd });
+    assert.match(bad.content[0].text as string, /exactly one of count or step/);
+
+    const result = await tool.execute(
+      "s1",
+      { artifact: "box.step", axis: "z", count: 3 },
+      undefined,
+      undefined,
+      { cwd },
+    );
+    assert.match(result.content[0].text as string, /3 sections along Z/);
+    assert.match(result.content[0].text as string, /critical section is your judgment/);
+    const payload = result.details.envelope.payload as {
+      sections: Array<{ totalArea: number; faces: Array<{ Iu: number; Iv: number }> }>;
+    };
+    assert_almost_equal(payload.sections[0].totalArea, 1200, 1e-6);
+    assert_almost_equal(payload.sections[0].faces[0].Iu, 90000, 1e-6);
+    assert_almost_equal(payload.sections[0].faces[0].Iv, 160000, 1e-6);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+function cwdRoot(): string {
+  return fileURLToPath(new URL("..", import.meta.url));
+}
+
+function existsSyncLocal(path: string): boolean {
+  return existsSync(path);
 }

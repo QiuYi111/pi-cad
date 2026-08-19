@@ -6,6 +6,7 @@ import {
   artifactPathForKind,
   assemblyTree,
   inspectInterference,
+  scanSections,
   buildPayload,
   buildStep,
   compareGeometry,
@@ -378,6 +379,56 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
           envelope,
           artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
           kind: "interference" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_scan_sections",
+    label: "CAD Scan Sections",
+    description:
+      "Scan deterministic cross-section facts along an axis: per-section area, centroid, in-plane second moments, principal moments, bbox, and loop count. Facts only — which section is critical is your engineering judgment.",
+    promptSnippet: "Scan cross-section area/moments along an axis",
+    promptGuidelines: [
+      "Use for stiffness-critical parts (beams, spars, shafts) to see how area and moments vary along the axis.",
+      "Provide exactly one of count (evenly spaced) or step (fixed spacing).",
+      "The scan reports facts; interpreting the critical section is yours.",
+    ],
+    parameters: Type.Object(
+      {
+        artifact: artifactParam,
+        axis: Type.Enum({ x: "x", y: "y", z: "z" }),
+        count: Type.Optional(Type.Integer({ minimum: 1 })),
+        step: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+        output: Type.Optional(Type.String()),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if ((params.count === undefined) === (params.step === undefined)) {
+        return {
+          content: [{ type: "text", text: "cad_scan_sections failed: provide exactly one of count or step" }],
+        };
+      }
+      const root = await currentRunEvidenceRoot(ctx.cwd);
+      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "sections", `${Date.now().toString(36)}.json`);
+      const envelope = await scanSections(ctx.cwd, params.artifact, {
+        axis: params.axis,
+        count: params.count,
+        step: params.step,
+        output,
+      });
+      const payload = envelope.payload as { error?: string; positionCount?: number; areaRange?: number[] };
+      const text = envelope.ok
+        ? `cad_scan_sections: ${payload.positionCount ?? "?"} sections along ${params.axis.toUpperCase()} — area range ${JSON.stringify(payload.areaRange ?? [])}. Facts only; the critical section is your judgment.`
+        : `cad_scan_sections failed: ${payload.error ?? "unknown error"}`;
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          envelope,
+          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
+          kind: "sections" as const,
         },
       };
     },

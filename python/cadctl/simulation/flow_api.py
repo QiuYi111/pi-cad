@@ -29,6 +29,7 @@ from .su2_parse import (
 )
 
 _SPEC_KEYS = {
+    "analysisModel",
     "caseId",
     "artifact",
     "fluidDomain",
@@ -64,6 +65,41 @@ _THERMAL_KEYS = {"heatFluxWPerM2"}
 _INITIAL_KEYS = {"mach", "temperatureK", "pressurePa", "velocityMPerS"}
 _TURBULENCE_INLET_KEYS = {"intensity", "viscosityRatio"}
 _CONVERGENCE_KEYS = {"maxIterations", "residualTarget"}
+
+
+_ANALYSIS_MODEL_KEYS = {"source", "operations"}
+_ANALYSIS_OPERATIONS = {"fused", "bonded", "simplified", "defeatured", "sectioned"}
+
+
+def _validate_analysis_model(spec: dict[str, Any], errors: list[str]) -> None:
+    """Fail-closed validation of the analysisModel declaration (0.8 M4).
+
+    Declaring it means: the geometry this spec consumes is DERIVED from the
+    authoritative design via deterministic operations, and the evidence
+    subject is the source design, not the derived copy.
+    """
+    model = spec.get("analysisModel")
+    if model is None:
+        return
+    if not isinstance(model, dict):
+        errors.append("analysisModel must be an object {source, operations}")
+        return
+    _reject_unknown(model, _ANALYSIS_MODEL_KEYS, "analysisModel", errors)
+    source = model.get("source")
+    if not isinstance(source, str) or not source.strip():
+        errors.append("analysisModel.source is required (the authoritative design path)")
+    elif Path(source).suffix.lower() not in (".step", ".stp"):
+        errors.append("analysisModel.source must be .step or .stp")
+    elif not Path(source).is_file():
+        errors.append(f"analysisModel.source does not exist: {source}")
+    operations = model.get("operations")
+    if not isinstance(operations, list) or not operations:
+        errors.append("analysisModel.operations must be a non-empty list")
+    else:
+        for op in operations:
+            if op not in _ANALYSIS_OPERATIONS:
+                errors.append(f"analysisModel.operations entries must be one of {sorted(_ANALYSIS_OPERATIONS)}; got {op!r}")
+
 
 _BOUNDARY_TYPES = ("total_conditions_inlet", "velocity_inlet", "pressure_outlet", "wall")
 
@@ -112,6 +148,8 @@ def validate_flow_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
 
     if spec.get("geometryUnits", "mm") not in ("mm", "m"):
         errors.append("geometryUnits must be mm or m in V1")
+
+    _validate_analysis_model(spec, errors)
 
     physics = spec.get("physics")
     _reject_unknown(physics, _PHYSICS_KEYS, "physics", errors)

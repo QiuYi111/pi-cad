@@ -5,6 +5,7 @@ import { Type } from "typebox";
 
 import { readImageContents, thermalCommand } from "../../shared/capability.ts";
 import { writeRunSpec } from "../../shared/run-spec.ts";
+import { AnalysisModelSchema, verifyAnalysisModel } from "./analysis-model.ts";
 import { sha256File } from "../../shared/store.ts";
 
 const SurfaceRef = Type.Array(Type.String({
@@ -63,6 +64,9 @@ export default function cadThermalExtension(pi: ExtensionAPI) {
       {
         caseId: Type.String({ description: "Case identity that binds this run to the declared evidence obligation" }),
         artifact: Type.String({ description: "STEP solid to analyze" }),
+        analysisModel: Type.Optional(
+          Type.Unsafe({ ...(AnalysisModelSchema as object), description: "Declare when the analyzed solid is a derived model: evidence binds to the authoritative source, never to a fused copy" }),
+        ),
         geometryUnits: Type.Optional(Type.Enum({ mm: "mm", m: "m" }, { description: "How STEP coordinates should be interpreted (default mm)" })),
         material: Type.Object(
           { conductivityWPerMK: Type.Number({ exclusiveMinimum: 0 }) },
@@ -116,19 +120,30 @@ export default function cadThermalExtension(pi: ExtensionAPI) {
       if (!existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`artifact does not exist: ${params.artifact}`);
       }
+      if (params.analysisModel && !existsSync(resolve(ctx.cwd, params.analysisModel.source))) {
+        throw new Error(`analysisModel.source does not exist: ${params.analysisModel.source}`);
+      }
+      // Fail closed when the analyzed solid is a derived model with no
+      // declared provenance; the evidence then binds to the source design.
+      const analysisCheck = await verifyAnalysisModel(ctx.cwd, {
+        subject: params.artifact,
+        analysisModel: params.analysisModel,
+      });
+      if (analysisCheck.error) throw new Error(analysisCheck.error);
       const spec = { ...params, geometryUnits: params.geometryUnits ?? "mm" };
       const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "thermal", spec);
       const envelope = await thermalCommand(ctx.cwd, "run", specPath, outputDir, 3_600_000);
-      let artifactHash = envelope.inputHashes.spec;
-      if (envelope.inputHashes.artifact) {
+      let artifactHash = analysisCheck.subjectOverrideHash ?? null;
+      if (!artifactHash && envelope.inputHashes.artifact) {
         artifactHash = envelope.inputHashes.artifact;
-      } else {
+      } else if (!artifactHash) {
         try {
           artifactHash = await sha256File(resolve(ctx.cwd, params.artifact));
         } catch {
           // Keep spec hash as provenance fallback.
         }
       }
+      if (!artifactHash) artifactHash = envelope.inputHashes.spec;
       const images =
         envelope.ok && (envelope.payload as any)?.status === "solved"
           ? await readImageContents(

@@ -10,6 +10,7 @@ from typing import Sequence
 from . import __version__
 from .assembly import assembly_tree
 from .interference import inspect_interference
+from .sections import scan_sections
 from .capability import capabilities
 from .common import emit, emit_error, sha256_file, write_json
 from .doctor import doctor
@@ -288,6 +289,36 @@ def _cmd_inspect_interference(args: argparse.Namespace) -> int:
     except Exception as exc:
         emit_error(
             "cad_inspect_interference",
+            str(exc),
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_scan_sections(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    try:
+        count = args.count if args.count is not None else None
+        step = args.step if args.step is not None else None
+        payload = scan_sections(artifact, axis=args.axis, count=count, step=step)
+        artifacts = []
+        if args.output:
+            write_json(args.output, payload)
+            artifacts.append({"path": args.output, "kind": "sections", "sha256": sha256_file(args.output)})
+        emit(
+            "cad_scan_sections",
+            payload,
+            input_hashes={"artifact": sha256_file(artifact)},
+            input_artifacts=[{"path": str(artifact.resolve()), "sha256": sha256_file(artifact), "role": "artifact"}],
+            artifacts=artifacts,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_scan_sections",
             str(exc),
             input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
             duration_ms=int((time.monotonic() - started) * 1000),
@@ -610,10 +641,26 @@ def _cmd_present(args: argparse.Namespace) -> int:
             for p in payload.get("outputs", [])
             if Path(p).exists()
         ]
+        # Presentation evidence binds to the presented DESIGN (the artifact),
+        # with the canonical spec hash-bound alongside it.
+        input_hashes = {"spec": sha256_file(args.spec)}
+        input_artifacts = [{"path": str(Path(args.spec).resolve()), "sha256": sha256_file(args.spec), "role": "spec"}]
+        try:
+            spec_json = json.loads(Path(args.spec).read_text(encoding="utf-8"))
+            artifact = spec_json.get("artifact")
+            if isinstance(artifact, str) and Path(artifact).exists():
+                artifact_hash = sha256_file(artifact)
+                input_hashes["artifact"] = artifact_hash
+                input_artifacts.append(
+                    {"path": str(Path(artifact).resolve()), "sha256": artifact_hash, "role": "artifact"}
+                )
+        except Exception:
+            pass
         emit(
             "cad_render_scene",
             payload,
-            input_hashes={"spec": sha256_file(args.spec)},
+            input_hashes=input_hashes,
+            input_artifacts=input_artifacts,
             artifacts=artifacts,
             warnings=["presentation run is optional and may be unavailable"] if payload.get("status") in {"unavailable", "script-generated"} else [],
             duration_ms=int((time.monotonic() - started) * 1000),
@@ -715,6 +762,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
     p.set_defaults(func=_cmd_inspect_interference)
 
+    p = sub.add_parser("scan-sections", help="Scan cross-section facts (area, centroid, moments) along an axis")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--axis", default="z", choices=("x", "y", "z"))
+    p.add_argument("--count", type=int, default=None, help="Number of evenly spaced sections")
+    p.add_argument("--step", type=float, default=None, help="Spacing between sections")
+    p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
+    p.set_defaults(func=_cmd_scan_sections)
+
     p = sub.add_parser("export", help="Export STEP/STL/GLB/BREP deterministically")
     p.add_argument("--source", required=True)
     p.add_argument("--output", required=True)
@@ -765,8 +820,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--views", default=None, help="Comma-separated subset of iso,front,right,top")
     p.set_defaults(func=_cmd_inspect_surfaces)
 
-    p = sub.add_parser("present", help="Validate, generate, or run a spec-driven presentation")
-    p.add_argument("stage", choices=("validate", "generate", "run"))
+    p = sub.add_parser("present", help="Validate, preview, generate, or run a spec-driven presentation")
+    p.add_argument("stage", choices=("validate", "preview", "generate", "run"))
     p.add_argument("--spec", required=True)
     p.add_argument("--output-dir", required=True)
     p.set_defaults(func=_cmd_present)

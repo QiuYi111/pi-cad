@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import type { CadEventEnvelope, CadRunState, EvidenceRef } from "../shared/protocol.ts";
@@ -25,6 +26,7 @@ export const EVIDENCE_KINDS: EvidenceRef["kind"][] = [
   "convert",
   "assembly",
   "interference",
+  "sections",
   "optimization",
 ];
 
@@ -132,4 +134,52 @@ export function recordToolEvidence(
     next,
     evidenceFromEnvelope(kind, envelope.tool, envelope, artifactHash, state.currentSourceHash, specHash, caseId),
   );
+}
+
+/**
+ * Release presentation deliverables (0.8 M4b): for maturity=release routes,
+ * current-version presentation evidence must carry a render manifest that
+ * declares the required deliverables — exploded + turntable always, the
+ * assembly animation for assembly structure. The manifest and every output
+ * it names are hash-verified by verifyEvidenceFilesForHash; this check
+ * only reads the declared deliverable set.
+ */
+export async function verifyPresentationDeliverables(
+  cwd: string,
+  state: CadRunState,
+): Promise<string | null> {
+  const route = state.route;
+  if (route?.objective !== "design" || route.maturity !== "release") return null;
+  const required = route.structure === "assembly"
+    ? ["exploded.png", "assembly.mp4", "turntable.mp4"]
+    : ["exploded.png", "turntable.mp4"];
+  const refs = state.evidence.filter(
+    (ref) =>
+      ref.kind === "presentation" &&
+      ref.artifactHash === state.currentArtifactHash &&
+      !state.staleEvidence.includes(ref),
+  );
+  if (refs.length === 0) {
+    // No presentation evidence at all: report the missing deliverables —
+    // the compiled evidence kinds separately enforce presence at accept,
+    // and this check must not silently pass without any evidence.
+    return `release presentation deliverables missing (no presentation evidence for the current artifact; required: ${required.join(", ")})`;
+  }
+  for (const ref of refs) {
+    const manifestPath = ref.paths.find((path) => path.endsWith("manifest.json"));
+    if (!manifestPath) continue;
+    try {
+      const manifest = JSON.parse(await readFile(resolve(cwd, manifestPath), "utf-8")) as {
+        status?: string;
+        outputs?: Record<string, unknown>;
+      };
+      if (manifest.status !== "rendered") continue;
+      const outputs = manifest.outputs ?? {};
+      const missing = required.filter((name) => !(name in outputs));
+      if (missing.length === 0) return null;
+    } catch {
+      // unreadable manifest: keep looking at other presentation evidence
+    }
+  }
+  return `release presentation deliverables missing from current evidence (required: ${required.join(", ")})`;
 }

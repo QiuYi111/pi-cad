@@ -26,7 +26,7 @@ import {
   waitForUser,
 } from "./state-machine.ts";
 import { loadPrompt } from "./context.ts";
-import { verifyCurrentArtifacts, verifyEvidenceFilesForHash } from "./evidence.ts";
+import { verifyCurrentArtifacts, verifyEvidenceFilesForHash, verifyPresentationDeliverables } from "./evidence.ts";
 import type { PersistFn } from "./auto-actions.ts";
 
 export interface ControllerDeps {
@@ -677,6 +677,8 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           );
           if (simVerification) return errTool(`cannot accept: ${simVerification}`);
         }
+        const presentationVerification = await verifyPresentationDeliverables(ctx.cwd, state);
+        if (presentationVerification) return errTool(`cannot accept: ${presentationVerification}`);
         const guard = spec.completionGuard?.(state);
         if (guard) return errTool(`cannot accept: ${guard}`);
       }
@@ -785,6 +787,8 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           );
           if (simVerification) return errTool(`cad_finish blocked: ${simVerification}`);
         }
+        const finishPresentation = await verifyPresentationDeliverables(ctx.cwd, state);
+        if (finishPresentation) return errTool(`cad_finish blocked: ${finishPresentation}`);
       }
       const result = finish(state);
       if (!result.ok) return errTool(result.reason);

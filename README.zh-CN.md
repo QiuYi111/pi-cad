@@ -65,8 +65,7 @@ pi -e src/extensions/core/index.ts \
 
 ```text
 /cad
-"路由一个 quick 工作流:100 x 80 x 5 mm 板,四个 6 mm 通孔,
-孔心距边缘 10 mm。"
+"设计一块 100 x 80 x 5 mm 板,四个 6 mm 通孔,孔心距边缘 10 mm。"
 ```
 
 智能体会路由 run、提交需求、构建 STEP——然后在它发表任何意见**之前**,
@@ -85,31 +84,53 @@ harness 已经自动渲染七张视图、提取几何事实作为证据,并绑�
 | `/cad-status` | run 的权威状态、阶段与证据 |
 | `/cad-abort` | 仅中止当前 run;项目设计头不受影响 |
 
-## 七种工作流
+## 路由,而非工作流
 
-用自然语言路由("分析这个 STEP"、"发布当前设计头"),Pi-CAD 自动选择
-工作流,你不需要管理 run ID。
+路由是一个层次化描述,智能体一次调用决定,harness 据此**编译**出流程——
+不存在可选的捷径:
 
-| 工作流 | 适用场景 |
+```
+route = objective × lineage × structure × maturity
+        analyze | convert | design
+                        greenfield | legacy | hybrid
+                                     part | assembly
+                                          prototype | engineering | manufacturing | release
+```
+
+| 路由(示例) | 编译出的流程 |
 | --- | --- |
-| `quick` | 零件已完全定义——直接建 |
-| `analyze` | 已有 STEP,想做只读诊断 |
-| `modify` | 对现有零件做受控再设计,带前后对比 |
-| `greenfield` | 全新概念 → 意图 → 构建,可选领域分析 |
-| `hybrid` | 旧基线与全新概念合并 |
-| `convert` | 把源基线转换成其他格式(如 STEP → STL) |
-| `release` | 审计 → 补缺口 → 打包 → 交付,含图纸/BOM 工作流 |
+| `design/greenfield/part/engineering` | requirements → part_design → build → review(快速路径是*推导*出来的) |
+| `design/legacy/part/engineering` | requirements → baseline → plan → modify → review,带前后对比 |
+| `design/greenfield/assembly/engineering` | requirements → system_concept → assembly_design → interface_design → part_design → build → integration_review |
+| `design/*/release` | baseline(若有)→ audit → gap_closure → package → final_review,九个工作流 |
+| `analyze` | baseline → investigate → explain(只读) |
+| `convert` | source_baseline → transform_plan → convert → compare |
+
+两条 0.8 规则比表格更重要:
+
+- **Maturity 是现实底线,不是心情。** prototype 意味着 REAL / BUILDABLE /
+  FUNCTIONAL。maturity 只*增加*义务(manufacturing 要求图纸证据;release
+  增加工作流与演示交付物)——绝不会换来更短的流程。
+- **义务无法被绕过。** assembly 路由必须提交 `cad_commit_assembly_design`
+  与 `cad_commit_interface_contracts` 记录(它们是所处阶段的唯一出口),
+  并持有当前版本的装配树与干涉证据。过程中 `cad_reroute` 只增义务时自主
+  生效并回到最早未满足的阶段;任何降级都需要 harness 签发的一次性授权
+  token——而 token 只在你真实回复过智能体的提问后才签发,智能体自称
+  "用户已同意"永远不算数。
 
 ## 智能体到底能做什么
 
-**流程控制** —— `cad_route`、`cad_commit_requirements`、`cad_commit_plan`、
-`cad_commit_candidate`、`cad_transition`、`cad_wait_for_user`、`cad_finish`。
-`cad_commit_candidate` 负责自动观测循环:构建 → 七张视图 → 几何事实 →
-(modify/convert)确定性对比 → 按哈希绑定证据 → 进入评审。
+**流程控制** —— `cad_route`、`cad_reroute`、`cad_commit_requirements`、
+`cad_commit_plan`、`cad_commit_assembly_design`、
+`cad_commit_interface_contracts`、`cad_commit_candidate`、`cad_transition`、
+`cad_wait_for_user`、`cad_finish`。`cad_commit_candidate` 负责自动观测循环:
+构建 → 七张视图 → 几何事实 → 装配树 + 干涉(assembly 路由)→(legacy/
+release)确定性对比 → 按哈希绑定证据 → 进入评审。
 
 **几何** —— `cad_build_step`、`cad_inspect_visual`、`cad_inspect_geometry`、
-`cad_inspect_surfaces`、`cad_inspect_section`、`cad_measure`、
-`cad_compare_geometry`、`cad_assembly_tree`、`cad_export`。
+`cad_inspect_surfaces`、`cad_inspect_section`、`cad_scan_sections`、
+`cad_measure`、`cad_compare_geometry`、`cad_assembly_tree`、
+`cad_inspect_interference`、`cad_export`。
 
 **工程分析** —— `cad_simulate`、`cad_simulate_flow`、`cad_simulate_thermal`、
 `cad_optimize`、`cad_generate_drawing`、`cad_render_scene`。
@@ -255,7 +276,7 @@ npm test          # 或:bash scripts/test.sh
 ## 已做过的验证
 
 真实端到端运行(使用 `openai-codex/gpt-5.6-luna`,thinking=medium):
-quick 板件构建、只读板件分析、5→4 mm 板件修改(带对比证据)、greenfield
+板件构建(快速路径)、只读板件分析、5→4 mm 板件修改(带对比证据)、greenfield
 笔架、以及一次诚实地报告 closed/blocked 工作流的 release 交付——
 全部到达 `done` 且证据完好。
 

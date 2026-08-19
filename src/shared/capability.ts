@@ -266,6 +266,24 @@ export async function assemblyTree(
 }
 
 /**
+ * Cross-section facts along an axis: area, centroid, second moments,
+ * principal moments, loop count per section. Facts only — never a
+ * "critical section" judgment.
+ */
+export async function scanSections(
+  cwd: string,
+  artifact: string,
+  options: { axis?: string; count?: number; step?: number; output?: string },
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  const args = ["scan-sections", "--artifact", resolve(cwd, artifact), "--axis", options.axis ?? "z"];
+  if (options.count !== undefined) args.push("--count", String(options.count));
+  if (options.step !== undefined) args.push("--step", String(options.step));
+  if (options.output) args.push("--output", resolve(cwd, options.output));
+  return runCadctl(args, { cwd, timeoutMs });
+}
+
+/**
  * Pairwise solid interference facts. The interpreter reports
  * penetration/contact/clearance per part pair — raw facts with volumes and
  * distances; engineering meaning (press fit vs collision) is the Agent's.

@@ -5,6 +5,7 @@ import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { installSu2 } from "./install-su2.mjs";
+import { installBlender } from "./install-blender.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const requestedVenv = process.env.PI_CAD_VENV ?? join(root, ".venv");
@@ -152,9 +153,10 @@ const pythonPath = [join(root, "python")]
   .join(delimiter);
 const env = { ...process.env, PYTHONPATH: pythonPath };
 
-// Optional SU2 runtime first: the snapshot below is the install-time
-// fallback diagnostic, so it must reflect the runtime as installed.
+// Optional runtimes first: the snapshot below is the install-time
+// fallback diagnostic, so it must reflect the runtimes as installed.
 await installSu2({ root, python, env });
+await installBlender({ root, python, env });
 
 const doctor = JSON.parse(
   execFileSync(python, ["-m", "cadctl", "doctor", "--json"], {

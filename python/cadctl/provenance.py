@@ -98,4 +98,11 @@ def spec_input_paths(
         value = spec.get(role)
         if isinstance(value, str) and value and Path(value).exists():
             entries.append((role, str(Path(value).resolve())))
+    # The authoritative design an analysisModel derives from is a frozen
+    # input like any other: mid-solve mutation discards the invocation.
+    model = spec.get("analysisModel")
+    if isinstance(model, dict):
+        source = model.get("source")
+        if isinstance(source, str) and source and Path(source).exists():
+            entries.append(("analysisSource", str(Path(source).resolve())))
     return entries

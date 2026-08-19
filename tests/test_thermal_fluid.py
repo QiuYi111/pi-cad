@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -666,3 +667,131 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from cadctl.simulation.flow_api import validate_flow_spec  # noqa: E402
+from cadctl.simulation.thermal_api import validate_thermal_spec  # noqa: E402
+
+
+class AnalysisModelDeclaration(unittest.TestCase):
+    """0.8 M4: canonical design vs analysis model (whitepaper section 10)."""
+
+    def _flow_spec(self, domain="duct.step", **extra):
+        spec = {
+            "caseId": "am-1",
+            "fluidDomain": domain,
+            "geometryUnits": "mm",
+            "physics": {"type": "compressible_euler"},
+            "fluid": {"model": "ideal_gas", "gamma": 1.4, "gasConstantJPerKgK": 287.05},
+            "initial": {"mach": 0.25, "temperatureK": 288.15, "pressurePa": 101325.0},
+            "boundaries": [
+                {"type": "total_conditions_inlet", "surfaces": ["surf-a"], "totalPressurePa": 150000.0, "totalTemperatureK": 300.0, "flowDirection": [1, 0, 0]},
+                {"type": "pressure_outlet", "surfaces": ["surf-b"], "staticPressurePa": 101325.0},
+                {"type": "wall", "surfaces": ["surf-c"], "thermal": "adiabatic"},
+            ],
+            "mesh": {"maxSizeMm": 8.0},
+            "convergence": {"maxIterations": 100, "residualTarget": -6.0},
+        }
+        spec.update(extra)
+        return spec
+
+    def test_analysis_model_is_optional_and_validated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            domain = Path(tmp) / "domain.step"
+            domain.write_text("fluid volume")
+            source = Path(tmp) / "part.step"
+            source.write_text("canonical")
+            # absent -> fine
+            ok, errors = validate_flow_spec(self._flow_spec(domain=str(domain)))
+            self.assertTrue(ok, errors)
+
+            model = {"source": str(source), "operations": ["fused", "simplified"]}
+            ok, errors = validate_flow_spec(
+                self._flow_spec(domain=str(domain), analysisModel=model)
+            )
+            self.assertTrue(ok, errors)
+
+            missing = {"source": str(Path(tmp) / "nope.step"), "operations": ["fused"]}
+            ok, errors = validate_flow_spec(
+                self._flow_spec(domain=str(domain), analysisModel=missing)
+            )
+            self.assertFalse(ok)
+            self.assertIn("analysisModel.source does not exist", " ".join(errors))
+
+    def test_analysis_model_rejects_unknown_keys_and_ops(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            domain = Path(tmp) / "domain.step"
+            domain.write_text("fluid volume")
+
+            def check(model):
+                return validate_flow_spec(
+                    self._flow_spec(domain=str(domain), analysisModel=model)
+                )
+
+            ok, errors = check({"source": "models/part.step", "operations": ["fused"], "why": "x"})
+            self.assertFalse(ok)
+            self.assertTrue(any("analysisModel has unknown keys" in e for e in errors))
+
+            ok, errors = check({"source": "models/part.step", "operations": ["exploded"]})
+            self.assertFalse(ok)
+            self.assertTrue(any("analysisModel.operations entries" in e for e in errors))
+
+            ok, errors = check({"source": "models/part.step", "operations": []})
+            self.assertFalse(ok)
+            self.assertTrue(any("non-empty" in e for e in errors))
+
+    def test_thermal_spec_accepts_analysis_model_key(self):
+        # Schema shape only: use a real file for source, boundaries that
+        # reference arbitrary surface ids pass structural validation.
+        with tempfile.TemporaryDirectory() as tmp:
+            slab = Path(tmp) / "slab.step"
+            slab.write_text("step bytes")
+            spec = {
+                "caseId": "am-2",
+                "artifact": str(slab),
+                "material": {"conductivityWPerMK": 15.0},
+                "boundaries": [
+                    {"type": "temperature", "surfaces": ["surf-hot"], "temperatureK": 1150.0},
+                ],
+                "mesh": {"maxSizeMm": 5.0},
+                "convergence": {"maxIterations": 10},
+                "analysisModel": {"source": str(slab), "operations": ["simplified"]},
+            }
+            ok, errors = validate_thermal_spec(spec)
+            self.assertTrue(ok, errors)
+
+
+class AnalysisModelProvenance(unittest.TestCase):
+    """analysisModel.source is a frozen input: mid-solve mutation discards."""
+
+    def test_spec_input_paths_includes_analysis_source_role(self):
+        import tempfile
+
+        from cadctl.provenance import FrozenInputs, spec_input_paths
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            source = tmp / "design.step"
+            source.write_text("canonical design bytes")
+            derived = tmp / "fused.step"
+            derived.write_text("derived bytes")
+            spec_path = tmp / "spec.json"
+            spec_path.write_text(
+                json.dumps(
+                    {
+                        "caseId": "c",
+                        "artifact": str(derived),
+                        "analysisModel": {"source": str(source), "operations": ["fused"]},
+                    }
+                )
+            )
+            entries = spec_input_paths(spec_path)
+            roles = [role for role, _ in entries]
+            self.assertIn("analysisSource", roles)
+
+            frozen = FrozenInputs.freeze(entries)
+            self.assertEqual(frozen.changed_role(), None)
+
+            # Mutating the authoritative source mid-solve discards.
+            source.write_text("tampered")
+            self.assertEqual(frozen.changed_role(), "analysisSource")

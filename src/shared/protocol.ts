@@ -49,6 +49,7 @@ export const CAPABILITY_TOOLS = [
   "cad_compare_geometry",
   "cad_assembly_tree",
   "cad_inspect_interference",
+  "cad_scan_sections",
   "cad_export",
   "cad_simulate",
   "cad_simulate_flow",
@@ -126,6 +127,7 @@ export interface EvidenceRef {
     | "convert"
     | "assembly"
     | "interference"
+    | "sections"
     | "optimization";
   tool: string;
   /**

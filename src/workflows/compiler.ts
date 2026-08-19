@@ -375,6 +375,11 @@ function applyOverlays(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
     // including release, where the audit workstreams do not replace them.
     extra.push("assembly", "interference");
   }
+  if (route.maturity === "release") {
+    // Release closure owes rendered presentation evidence for the current
+    // design version (the manifest's deliverables are verified separately).
+    extra.push("presentation");
+  }
   if (extra.length === 0) return spec;
   const wrap =
     (fn: EvidenceKindsResolver) =>

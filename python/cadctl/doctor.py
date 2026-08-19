@@ -80,6 +80,24 @@ def _thermal_fluid_status() -> dict[str, Any]:
     return status
 
 
+def _presentation_status() -> dict[str, Any]:
+    """Blender+FFmpeg presentation capability (optional, fail-soft)."""
+    import shutil as _shutil
+
+    from .presentation import blender_binary
+
+    binary, source = blender_binary()
+    ffmpeg = _shutil.which("ffmpeg")
+    if binary and ffmpeg:
+        return {"status": "ready", "blender": source, "ffmpeg": ffmpeg}
+    missing = []
+    if not binary:
+        missing.append("blender")
+    if not ffmpeg:
+        missing.append("ffmpeg")
+    return {"status": "unavailable", "missing": missing, "blender": source}
+
+
 def doctor() -> dict[str, Any]:
     return {
         "package": "pi-cad",
@@ -100,6 +118,7 @@ def doctor() -> dict[str, Any]:
             "differentiableOptimization": _optimization_status(),
             "assembly": {"status": "ready"},
             "export": {"status": "ready"},
+            "presentation": _presentation_status(),
         },
     }
 

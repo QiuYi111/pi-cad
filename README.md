@@ -61,7 +61,7 @@ pi -e src/extensions/core/index.ts \
 ```
 
 (When Pi-CAD is installed as a Pi package, the `pi` key in `package.json`
-loads all seven automatically — no flags needed.)
+loads them automatically — no flags needed.)
 
 ## Your first part
 
@@ -69,8 +69,8 @@ Try this in a fresh directory:
 
 ```text
 /cad
-"Route a quick workflow: a 100 x 80 x 5 mm plate with four 6 mm through
-holes, centers 10 mm from the edges."
+"Design a 100 x 80 x 5 mm plate with four 6 mm through holes, centers
+10 mm from the edges."
 ```
 
 The agent will route the run, commit requirements, build the STEP file, and
@@ -91,32 +91,57 @@ Useful slash commands:
 | `/cad-status` | Canonical run state, phase, and evidence |
 | `/cad-abort` | Abort the active run only; the project head is untouched |
 
-## Seven workflows
+## Routes, not workflows
 
-Route with plain language ("analyze this STEP", "release the current head")
-and Pi-CAD picks the workflow; you never manage run IDs.
+Routing is a hierarchical description the agent decides in one turn and
+the harness compiles a process from — there is no shortcut to select:
 
-| Workflow | Use it when |
+```
+route = objective × lineage × structure × maturity
+        analyze | convert | design
+                        greenfield | legacy | hybrid
+                                     part | assembly
+                                          prototype | engineering | manufacturing | release
+```
+
+| Route (examples) | Compiled process |
 | --- | --- |
-| `quick` | The part is fully specified — just build it |
-| `analyze` | You have a STEP and want a read-only diagnosis |
-| `modify` | Controlled redesign of an existing part, with before/after compare |
-| `greenfield` | New concept → intent → build, with optional domain analysis |
-| `hybrid` | Merge a legacy baseline with a new concept |
-| `convert` | Convert a source baseline to another format (e.g. STEP → STL) |
-| `release` | Audit, close gaps, package, and hand off — with drawing/BOM workstreams |
+| `design/greenfield/part/engineering` | requirements → part_design → build → review (the fast path, *derived*) |
+| `design/legacy/part/engineering` | requirements → baseline → plan → modify → review, with before/after compare |
+| `design/greenfield/assembly/engineering` | requirements → system_concept → assembly_design → interface_design → part_design → build → integration_review |
+| `design/*/release` | baseline (if any) → audit → gap_closure → package → final_review over nine workstreams |
+| `analyze` | baseline → investigate → explain (read-only) |
+| `convert` | source_baseline → transform_plan → convert → compare |
+
+Two 0.8 rules matter more than the table:
+
+- **Maturity is a reality floor, not a mood.** Prototype means REAL,
+  BUILDABLE, FUNCTIONAL. Maturity only *adds* obligations (manufacturing
+  requires drawing evidence; release adds workstreams and presentation
+  deliverables) — it never buys a shorter process.
+- **Obligations cannot be routed around.** Assembly routes owe
+  `cad_commit_assembly_design` and `cad_commit_interface_contracts`
+  records (they are the only exits from their phases) plus current-version
+  assembly-tree and interference evidence. A mid-process `cad_reroute`
+  that only adds obligations applies autonomously and resumes at the
+  earliest unmet phase; any downgrade requires a one-time authority token
+  the harness issues only after a real user turn answers your question —
+  an agent-claimed "user approved" never counts.
 
 ## What the agent can actually do
 
-**Control** — `cad_route`, `cad_commit_requirements`, `cad_commit_plan`,
-`cad_commit_candidate`, `cad_transition`, `cad_wait_for_user`, `cad_finish`.
-`cad_commit_candidate` runs the automatic observation loop: build → seven
-visual views → geometry facts → deterministic compare (modify/convert) →
-evidence bound to hashes → review.
+**Control** — `cad_route`, `cad_reroute`, `cad_commit_requirements`,
+`cad_commit_plan`, `cad_commit_assembly_design`,
+`cad_commit_interface_contracts`, `cad_commit_candidate`, `cad_transition`,
+`cad_wait_for_user`, `cad_finish`. `cad_commit_candidate` runs the automatic
+observation loop: build → seven visual views → geometry facts →
+assembly-tree + interference (assembly routes) → deterministic compare
+(legacy/release) → evidence bound to hashes → review.
 
 **Geometry** — `cad_build_step`, `cad_inspect_visual`, `cad_inspect_geometry`,
-`cad_inspect_surfaces`, `cad_inspect_section`, `cad_measure`,
-`cad_compare_geometry`, `cad_assembly_tree`, `cad_export`.
+`cad_inspect_surfaces`, `cad_inspect_section`, `cad_scan_sections`,
+`cad_measure`, `cad_compare_geometry`, `cad_assembly_tree`,
+`cad_inspect_interference`, `cad_export`.
 
 **Engineering analysis** — `cad_simulate`, `cad_simulate_flow`,
 `cad_simulate_thermal`, `cad_optimize`, `cad_generate_drawing`,
@@ -226,7 +251,22 @@ density/surface evidence, never a CAD candidate.
   case. The harness compares opaque identities only; it never interprets the
   physics.
 - **Candidate changes stale old evidence automatically.** You cannot accept
-  a new geometry against last revision's simulation.
+  a new geometry against last revision's simulation or interference facts.
+- **The canonical design is never rewritten for solvers.** When a
+  simulation consumes a derived model (fused/bonded/simplified), the spec
+  must declare `analysisModel {source, operations}`; the evidence then
+  binds to the authoritative design while the derived copy stays a
+  hash-bound input. An undeclared derived subject fails closed, and fake
+  provenance (a "source" that is not a canonical artifact) fails too.
+- **Assembly reality is observed, not assumed.** Every assembly candidate
+  auto-records an assembly tree and pairwise interference facts
+  (penetration/contact/clearance with volumes and distances — never a
+  pass/fail), and integration review cannot accept without them.
+- **Release presentation is hash-bound.** The Blender interpreter renders
+  from the Assembly Definition (hero/exploded stills, turntable and
+  assembly animation) and writes a manifest binding the subject artifact
+  hash, spec hash, renderer settings, and every output sha256; release
+  closure verifies the required deliverables exist in current evidence.
 - **Unavailable backends say so.** Missing Blender, PDF drawing, or GD&T
   support is reported as unavailable — the harness never substitutes a fake
   verifier.
@@ -245,6 +285,16 @@ density/surface evidence, never a CAD candidate.
 | `PI_CAD_SU2_BIN` | Use an external SU2_CFD binary for flow/thermal |
 | `PI_CAD_SKIP_SU2` | Skip the optional SU2 runtime download (`1` to opt out) |
 | `PI_CAD_SU2_RUNTIME` | Alternative root for the managed SU2 runtime |
+| `PI_CAD_BLENDER_BIN` | Use an external Blender binary for presentation |
+| `PI_CAD_SKIP_BLENDER` | Skip the optional Blender runtime download (`1` to opt out) |
+| `PI_CAD_BLENDER_RUNTIME` | Alternative root for the managed Blender runtime |
+
+Blender follows the same optional-pinned-runtime contract as SU2: a
+`blender` on PATH always wins, the manifest-pinned 4.5 LTS archive is
+SHA256-verified, the download fails soft, and `cadctl doctor` reports the
+capability honestly. When no Blender is available, `cad_render_scene`
+returns an explicit `unavailable` — an honest evidence state, never a
+substitute render.
 
 Runtime capability checks (the "doctor" report) are a **live probe** of the
 Python that would actually be used, honored once per session — not a stale
@@ -288,11 +338,13 @@ layouts are migrated automatically.
 | --- | --- |
 | Harness core (state machine, policies, evidence) | `src/core/` |
 | Tool extensions (geometry, visual, drawing, simulation, presentation, UI) | `src/extensions/` |
-| Workflow definitions (all seven) | `src/workflows/` |
+| Route ontology + workflow compiler | `src/shared/route.ts`, `src/workflows/compiler.ts` |
 | Layered prompts | `src/prompts/` |
 | Deterministic Python backend | `python/cadctl/` |
 | SU2 interpreter (config compiler, mesh bridge, parsers) | `python/cadctl/simulation/su2_*.py` |
-| Skills (thermal-fluid analysis) | `skills/` |
+| Interference & section interpreters | `python/cadctl/interference.py`, `python/cadctl/sections.py` |
+| Blender presentation interpreter | `python/cadctl/presentation.py`, `presentation_driver.py` |
+| Skills (thermal-fluid analysis, assembly design) | `skills/` |
 | Spec templates | `assets/templates/` |
 
 ## Validation performed

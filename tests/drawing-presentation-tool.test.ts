@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { Check } from "typebox/value";
 
@@ -209,3 +211,111 @@ test("cad_render_scene takes structured arguments and canonicalizes the spec", a
     await rm(cwd, { recursive: true, force: true });
   }
 });
+
+test("cad_render_scene preview renders with blender and binds evidence to the design", async () => {
+  const { execFileSync } = await import("node:child_process");
+  let blender = "";
+  try {
+    blender = execFileSync("blender", ["--version"], { encoding: "utf-8" });
+  } catch {
+    blender = "";
+  }
+  const venvPython = join(cwd0(), ".venv", "bin", "python");
+  if (!blender || !existsSync(venvPython)) {
+    // Honest skip: same fail-soft contract as the capability itself.
+    return;
+  }
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-render-"));
+  try {
+    // Build a real two-box STEP through the deterministic backend.
+    writeFileSync(
+      join(cwd, "boxes.py"),
+      [
+        "import build123d as bd",
+        "with bd.BuildPart() as p:",
+        "    bd.Box(40, 30, 12)",
+        "    a = p.part",
+        "with bd.BuildPart() as p:",
+        "    bd.Box(20, 20, 35)",
+        "    b = p.part",
+        "result = bd.Compound([a, b.moved(bd.Location((0, 0, 23.5)))])",
+        "",
+      ].join("\n"),
+    );
+    execFileSync(venvPython, ["-m", "cadctl", "build", "--source", "boxes.py", "--output", "boxes.step", "--force"], {
+      cwd,
+      encoding: "utf-8",
+      env: { ...process.env, PYTHONPATH: join(cwd0(), "python") },
+    });
+    // Minimal valid 1x1 grayscale PNG, written without image libraries.
+    for (const name of ["ref1.png", "ref2.png"]) {
+      const { deflateSync, crc32 } = await import("node:zlib");
+      const chunk = (type: string, data: Buffer) => {
+        const length = Buffer.alloc(4);
+        length.writeUInt32BE(data.length);
+        const typeBuf = Buffer.from(type, "ascii");
+        const crcBuf = Buffer.alloc(4);
+        crcBuf.writeUInt32BE(crc32(Buffer.concat([typeBuf, data])) >>> 0);
+        return Buffer.concat([length, typeBuf, data, crcBuf]);
+      };
+      const ihdr = Buffer.alloc(13);
+      ihdr.writeUInt32BE(1, 0);
+      ihdr.writeUInt32BE(1, 4);
+      ihdr[8] = 8;
+      ihdr[9] = 0;
+      const idat = deflateSync(Buffer.from([0, 128]));
+      const png = Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        chunk("IHDR", ihdr),
+        chunk("IDAT", idat),
+        chunk("IEND", Buffer.alloc(0)),
+      ]);
+      await writeFile(join(cwd, name), png);
+    }
+    const pi = mockPi();
+    const presentation = (await import("../src/extensions/presentation/index.ts")).default;
+    presentation(pi as never);
+    const tool = pi.tools.get("cad_render_scene");
+    const result = await tool.execute(
+      "p1",
+      {
+        stage: "preview",
+        artifact: "boxes.step",
+        directions: [
+          { name: "hero", reference: "ref1.png" },
+          { name: "top", reference: "ref2.png" },
+        ],
+        materials: [{ pattern: "brushed", family: "metal" }],
+        lighting: { key: "softbox", fill: "bounce", rim: "strip" },
+        camera: { lens: "85mm", composition: "hero" },
+        assemblyDefinition: {
+          sequence: [{ step: 1, installs: ["base"] }, { step: 2, installs: ["tower"] }],
+          explodeDirections: { tower: [0, 0, 1], base: [0, 0, -0.3] },
+        },
+        resolution: { width: 160, height: 120 },
+        fps: 12,
+        outputs: { hero: true, exploded: true, turntable: false, assembly: false },
+      },
+      undefined,
+      undefined,
+      { cwd },
+    );
+    assert.match(result.content[0].text as string, /status=rendered/);
+    // Evidence subject is the DESIGN (boxes.step), not the spec.
+    const artifactSha = result.details.envelope.inputHashes.artifact;
+    assert.ok(artifactSha);
+    assert.equal(result.details.artifactHash, artifactSha);
+    // The manifest binds subject + spec + hashed outputs.
+    const manifestPath = (result.details.envelope.payload as { manifest: string }).manifest;
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8"));
+    assert.equal(manifest.subjectArtifactHash, artifactSha);
+    assert.equal(manifest.status, "rendered");
+    assert.ok(manifest.outputs["hero.png"].sha256);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+function cwd0(): string {
+  return fileURLToPath(new URL("..", import.meta.url));
+}

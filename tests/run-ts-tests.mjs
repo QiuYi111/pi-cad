@@ -6,6 +6,7 @@ await jiti.import("./route-compiler.test.ts", { default: true });
 await jiti.import("./schema-migration.test.ts", { default: true });
 await jiti.import("./interference-tool.test.ts", { default: true });
 await jiti.import("./reroute.test.ts", { default: true });
+await jiti.import("./analysis-model.test.ts", { default: true });
 await jiti.import("./extensions-smoke.test.ts", { default: true });
 await jiti.import("./harness-v0.test.ts", { default: true });
 await jiti.import("./restore.test.ts", { default: true });

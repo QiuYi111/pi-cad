@@ -1,0 +1,30 @@
+{
+  "version": "4.5.3",
+  "notes": "Blender LTS runtime for release presentation (optional capability, fail-soft). PATH blender always wins; this manifest pins the official download when none is installed.",
+  "platforms": {
+    "linux-x64": {
+      "url": "https://mirror.clarkson.edu/blender/release/Blender4.5/blender-4.5.3-linux-x64.tar.xz",
+      "mirror": "https://download.blender.org/release/Blender4.5/blender-4.5.3-linux-x64.tar.xz",
+      "sha256": "pending-download-verification",
+      "binary": "blender-4.5.3-linux-x64/blender"
+    },
+    "darwin-arm64": {
+      "url": "https://download.blender.org/release/Blender4.5/blender-4.5.3-macos-arm64.dmg",
+      "mirror": "https://mirror.clarkson.edu/blender/release/Blender4.5/blender-4.5.3-macos-arm64.dmg",
+      "sha256": "pending-download-verification",
+      "binary": null
+    },
+    "darwin-x64": {
+      "url": "https://download.blender.org/release/Blender4.5/blender-4.5.3-macos-x64.dmg",
+      "mirror": "https://mirror.clarkson.edu/blender/release/Blender4.5/blender-4.5.3-macos-x64.dmg",
+      "sha256": "pending-download-verification",
+      "binary": null
+    },
+    "win32-x64": {
+      "url": "https://download.blender.org/release/Blender4.5/blender-4.5.3-windows-x64.zip",
+      "mirror": "https://mirror.clarkson.edu/blender/release/Blender4.5/blender-4.5.3-windows-x64.zip",
+      "sha256": "pending-download-verification",
+      "binary": "blender-4.5.3-windows-x64/blender.exe"
+    }
+  }
+}

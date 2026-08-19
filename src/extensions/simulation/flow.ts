@@ -5,6 +5,7 @@ import { Type } from "typebox";
 
 import { flowCommand, readImageContents } from "../../shared/capability.ts";
 import { writeRunSpec } from "../../shared/run-spec.ts";
+import { AnalysisModelSchema, verifyAnalysisModel } from "./analysis-model.ts";
 import { sha256File } from "../../shared/store.ts";
 
 const SurfaceRef = Type.Array(Type.String({
@@ -98,6 +99,9 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
         caseId: Type.String({ description: "Case identity that binds this run to the declared evidence obligation" }),
         fluidDomain: Type.String({ description: "Watertight fluid-volume STEP to mesh and solve" }),
         artifact: Type.Optional(Type.String({ description: "Solid/part STEP for provenance context (pre-hashed and re-verified)" })),
+        analysisModel: Type.Optional(
+          Type.Unsafe({ ...(AnalysisModelSchema as object), description: "Declare when the meshed geometry is a derived model: evidence binds to the authoritative source, never to a fused copy" }),
+        ),
         geometryUnits: Type.Optional(Type.Enum({ mm: "mm", m: "m" }, { description: "How STEP coordinates should be interpreted (default mm)" })),
         physics: Type.Object(
           {
@@ -238,25 +242,39 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
       if (params.artifact && !existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`artifact does not exist: ${params.artifact}`);
       }
+      if (params.analysisModel && !existsSync(resolve(ctx.cwd, params.analysisModel.source))) {
+        throw new Error(`analysisModel.source does not exist: ${params.analysisModel.source}`);
+      }
+      // The canonical design is never rewritten for solver convenience: a
+      // derived subject must declare its provenance (fail closed), and the
+      // evidence then binds to the authoritative source.
+      const analysisCheck = await verifyAnalysisModel(ctx.cwd, {
+        subject: params.artifact ?? params.fluidDomain,
+        analysisModel: params.analysisModel,
+      });
+      if (analysisCheck.error) throw new Error(analysisCheck.error);
       const spec = { ...params, geometryUnits: params.geometryUnits ?? "mm" };
       const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "flow", spec);
       const envelope = await flowCommand(ctx.cwd, "run", specPath, outputDir, 3_600_000);
-      // Evidence identity follows the PART artifact when one is declared
-      // (that is what the harness tracks as the current candidate); the
-      // fluid-domain hash stays bound in the envelope's inputHashes either
-      // way. Both are re-hashed by the backend after the solve.
-      let artifactHash = envelope.inputHashes.spec;
-      if (envelope.inputHashes.artifact) {
+      // Evidence identity follows the authoritative design: the declared
+      // analysisModel source when the subject is derived, else the PART
+      // artifact when one is declared (that is what the harness tracks as
+      // the current candidate); the fluid-domain hash stays bound in the
+      // envelope's inputHashes either way, and both are re-hashed by the
+      // backend after the solve.
+      let artifactHash = analysisCheck.subjectOverrideHash ?? null;
+      if (!artifactHash && envelope.inputHashes.artifact) {
         artifactHash = envelope.inputHashes.artifact;
-      } else if (envelope.inputHashes.fluidDomain) {
+      } else if (!artifactHash && envelope.inputHashes.fluidDomain) {
         artifactHash = envelope.inputHashes.fluidDomain;
-      } else if (params.artifact) {
+      } else if (!artifactHash && params.artifact) {
         try {
           artifactHash = await sha256File(resolve(ctx.cwd, params.artifact));
         } catch {
           // Keep spec hash as provenance fallback.
         }
       }
+      if (!artifactHash) artifactHash = envelope.inputHashes.spec;
       const images =
         envelope.ok && (envelope.payload as any)?.status === "solved"
           ? await readImageContents(
