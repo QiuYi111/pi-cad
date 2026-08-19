@@ -15,6 +15,7 @@ export {
   obligationsOf,
   recordObligations,
   MATURITIES,
+  MATURITY_RANK,
   RELEASE_WORKSTREAMS,
 } from "./route.ts";
 export type {
@@ -28,6 +29,7 @@ export type {
 export const CAD_STATE_SCHEMA_VERSION = 4;
 export const CONTROL_TOOLS = [
   "cad_route",
+  "cad_reroute",
   "cad_commit_requirements",
   "cad_commit_plan",
   "cad_commit_assembly_design",
@@ -46,6 +48,7 @@ export const CAPABILITY_TOOLS = [
   "cad_measure",
   "cad_compare_geometry",
   "cad_assembly_tree",
+  "cad_inspect_interference",
   "cad_export",
   "cad_simulate",
   "cad_simulate_flow",
@@ -122,6 +125,7 @@ export interface EvidenceRef {
     | "presentation"
     | "convert"
     | "assembly"
+    | "interference"
     | "optimization";
   tool: string;
   /**
@@ -220,6 +224,19 @@ export interface CadRunState {
    * reroute check them against route obligations.
    */
   phaseRecords?: string[];
+
+  /**
+   * A reroute the Agent requested but could not perform autonomously
+   * (it would drop obligations). Recorded so the harness can issue a
+   * one-time authority token after a real user turn answers the pause.
+   */
+  pendingReroute?: { route: Route; reason: string } | null;
+  /**
+   * One-time downgrade authority, issued by the harness only after a real
+   * user turn resolved a cad_wait_for_user pause. Consumed on use; never
+   * set from Agent input.
+   */
+  rerouteAuthorityToken?: string | null;
 
   requirementsVersion?: string;
   planVersion?: string;

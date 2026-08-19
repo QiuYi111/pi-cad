@@ -10,6 +10,8 @@ import {
   isRoute,
   obligationsOf,
   recordObligations,
+  routeKey,
+  MATURITY_RANK,
 } from "../shared/protocol.ts";
 import { hashRecord, makeEvidenceId, nowIso } from "../shared/store.ts";
 import { caseObligationFailure } from "./evidence-cases.ts";
@@ -550,6 +552,130 @@ export function finish(state: CadRunState): ActionResult {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Reroute (0.8 M3)
+// ---------------------------------------------------------------------------
+
+const RECORD_PHASE_ORDER: CadPhase[] = [
+  "system_concept",
+  "assembly_design",
+  "interface_design",
+  "part_design",
+  "audit",
+];
+
+/**
+ * Where a rerouted run must resume: the earliest phase with an unmet
+ * obligation. Reroute never grants progress and never accepts a target
+ * phase — the harness derives it from what is missing:
+ *
+ *   1. baseline not bound (new route requires one)      -> baseline phase
+ *   2. record obligations missing                       -> the phase owing
+ *      the earliest missing record (assembly_design, interface_design,
+ *      or release audit)
+ *   3. no current artifact                              -> first source phase
+ *   4. review-phase evidence kinds unmet                -> review phase
+ *   5. otherwise                                        -> current phase when
+ *      it still exists in the new process, else the review phase
+ */
+export function earliestUnmetPhase(state: CadRunState, nextRoute: Route): CadPhase {
+  const spec = compiledSpec(nextRoute);
+  if (spec.requiresBaselineInput && !state.baselineArtifactHash) {
+    return spec.nextAfterRequirements === "baseline" || spec.nextAfterRequirements === "source_baseline"
+      ? spec.nextAfterRequirements
+      : "baseline";
+  }
+  const committed = new Set(state.phaseRecords ?? []);
+  const missingRecordPhases = RECORD_PHASE_ORDER.filter(
+    (phase) =>
+      (spec.phaseRecords[phase] ?? []).some((type) => !committed.has(type)),
+  );
+  if (missingRecordPhases.length) return missingRecordPhases[0];
+  if (!state.currentArtifactHash) return spec.sourcePhases[0] ?? spec.nextAfterRequirements;
+  const unmetEvidence = spec.acceptedEvidence(state).some((kind) => !hasCurrentEvidence(state, kind));
+  if (unmetEvidence) return spec.candidateReviewPhase;
+  const processPhases: CadPhase[] = [
+    ...spec.sourcePhases,
+    ...Object.keys(spec.planNext) as CadPhase[],
+    ...spec.planStayPhases,
+    spec.candidateReviewPhase,
+    ...spec.acceptedPhases,
+    spec.nextAfterRequirements,
+  ];
+  return processPhases.includes(state.phase) ? state.phase : spec.candidateReviewPhase;
+}
+
+export interface RerouteOutcome extends ActionResult {
+  /** Set when the reroute needs user authority: the pause to perform. */
+  requiresAuthority?: boolean;
+}
+
+/**
+ * Reroute to a new route mid-process. Autonomous exactly when the new
+ * obligation set is a superset of the old one; any obligation drop needs
+ * the one-time authority token the harness issued after a real user turn.
+ */
+export function reroute(
+  state: CadRunState,
+  nextRoute: Route,
+  reason: string,
+  token?: string,
+): RerouteOutcome {
+  if (!state.route) return { ok: false, reason: "route is not selected" };
+  if (state.phase === "intake" || state.phase === "ready" || state.phase === "done") {
+    return { ok: false, reason: `cad_reroute is not valid in phase ${state.phase}` };
+  }
+  if (!isRoute(nextRoute)) {
+    return { ok: false, reason: "reroute target must be a valid route" };
+  }
+  if (!reason.trim()) return { ok: false, reason: "cad_reroute requires a reason" };
+  if (routeKey(nextRoute) === routeKey(state.route)) {
+    return { ok: false, reason: "reroute target equals the current route" };
+  }
+  const autonomous = rerouteIsAutonomous(state.route, nextRoute);
+  let authority: "autonomous" | "user-token";
+  if (autonomous) {
+    authority = "autonomous";
+  } else {
+    if (!token || !state.rerouteAuthorityToken || token !== state.rerouteAuthorityToken) {
+      return {
+        ok: false,
+        requiresAuthority: true,
+        reason:
+          "reroute drops obligations and needs user authority: call cad_wait_for_user to ask the user for the downgrade, then re-run cad_reroute with the authorityToken the harness issues after their answer",
+      };
+    }
+    authority = "user-token";
+  }
+  const nextPhase = earliestUnmetPhase(state, nextRoute);
+  const next: CadRunState = {
+    ...state,
+    route: nextRoute,
+    phase: nextPhase,
+    status: "active",
+    mutationPolicy: mutationPolicyForPhase(nextPhase, nextRoute),
+    pendingReroute: null,
+    rerouteAuthorityToken: null,
+    updatedAt: nowIso(),
+  };
+  return {
+    ok: true,
+    state: next,
+    events: [
+      {
+        type: "RouteRerouted",
+        data: {
+          from: routeKey(state.route),
+          to: routeKey(nextRoute),
+          authority,
+          phase: nextPhase,
+          reason,
+        },
+      },
+    ],
+  };
+}
+
 /**
  * Obligation monotonicity for reroute (0.8 M3): a reroute is autonomous
  * exactly when the old obligation set is a subset of the new one.
@@ -559,5 +685,10 @@ export function rerouteIsAutonomous(from: Route, to: Route): boolean {
   for (const key of obligationsOf(from)) {
     if (!newKeys.has(key)) return false;
   }
-  return true;
+  if (from.objective === "design" && to.objective === "design") {
+    return MATURITY_RANK[to.maturity] >= MATURITY_RANK[from.maturity];
+  }
+  // Objective changes (design -> analyze/convert) always drop the design
+  // commitment structure.
+  return from.objective === to.objective;
 }

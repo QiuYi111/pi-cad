@@ -9,13 +9,16 @@ import {
   buildStep,
   compareGeometry,
   defaultBuildOutput,
+  runAssemblyEvidencePath,
   runCompareEvidencePath,
   runGeometryEvidencePath,
+  runInterferenceEvidencePath,
   runVisualEvidenceDir,
   envelopeArtifactHash,
   exportArtifact,
   geometryPayload,
   inspectGeometry,
+  inspectInterference,
   inspectVisual,
   readImageContents,
   visualPayload,
@@ -186,12 +189,14 @@ export async function runCandidateAuto(
     warnings.push(`geometry auto-action failed: ${geometryPayload(geometryEnvelope).error ?? "unknown error"}`);
   }
 
-  // Assembly structure routes owe assembly-tree evidence for the current
-  // candidate version (obligation "evidence:assembly"); the harness
-  // observes it automatically, the Agent interprets it.
+  // Assembly structure routes owe assembly-tree and interference evidence
+  // for the current candidate version (obligations "evidence:assembly" and
+  // "evidence:interference"); the harness observes the facts automatically,
+  // the Agent interprets them at integration review.
   let assemblyRecorded = false;
+  let interferenceRecorded = false;
   if (state.route?.objective === "design" && state.route.structure === "assembly") {
-    const treeEnvelope = await assemblyTree(cwd, stepPath);
+    const treeEnvelope = await assemblyTree(cwd, stepPath, runAssemblyEvidencePath(cwd, state.runId, stepPath));
     if (treeEnvelope.ok) {
       next = addEvidence(
         next,
@@ -201,6 +206,18 @@ export async function runCandidateAuto(
       events.push({ type: "EvidenceCreated", data: { kind: "assembly", artifactHash } });
     } else {
       warnings.push(`assembly tree auto-action failed: ${String(treeEnvelope.payload.error ?? "unknown error")}`);
+    }
+    const interferencePath = runInterferenceEvidencePath(cwd, state.runId, stepPath);
+    const interferenceEnvelope = await inspectInterference(cwd, stepPath, interferencePath);
+    if (interferenceEnvelope.ok) {
+      next = addEvidence(
+        next,
+        evidenceFromEnvelope("interference", "cad_inspect_interference", interferenceEnvelope, artifactHash, sourceHash),
+      );
+      interferenceRecorded = true;
+      events.push({ type: "EvidenceCreated", data: { kind: "interference", artifactHash } });
+    } else {
+      warnings.push(`interference auto-action failed: ${String(interferenceEnvelope.payload.error ?? "unknown error")}`);
     }
   }
 
@@ -261,7 +278,7 @@ export async function runCandidateAuto(
     ? await readImageContents((visualPayload(visualEnvelope).views ?? []).map((view) => view.path))
     : [];
   const summary = [
-    `Candidate ${label} committed. Harness executed build, visual, geometry${assemblyRecorded ? ", assembly tree" : ""}${compareRecorded ? ", compare" : ""}.`,
+    `Candidate ${label} committed. Harness executed build, visual, geometry${assemblyRecorded ? ", assembly tree" : ""}${interferenceRecorded ? ", interference" : ""}${compareRecorded ? ", compare" : ""}.`,
     `- ${buildEnvelope.ok ? "build: ok" : "build: failed"}`,
     `- ${visualEnvelope.ok ? "visual: ok" : "visual: failed"}`,
     `- ${geometryEnvelope.ok ? "geometry: ok" : "geometry: failed"}`,

@@ -9,6 +9,7 @@ from typing import Sequence
 
 from . import __version__
 from .assembly import assembly_tree
+from .interference import inspect_interference
 from .capability import capabilities
 from .common import emit, emit_error, sha256_file, write_json
 from .doctor import doctor
@@ -259,6 +260,34 @@ def _cmd_assembly_tree(args: argparse.Namespace) -> int:
     except Exception as exc:
         emit_error(
             "cad_assembly_tree",
+            str(exc),
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_inspect_interference(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    try:
+        payload = inspect_interference(artifact)
+        artifacts = []
+        if args.output:
+            write_json(args.output, payload)
+            artifacts.append({"path": args.output, "kind": "interference", "sha256": sha256_file(args.output)})
+        emit(
+            "cad_inspect_interference",
+            payload,
+            input_hashes={"artifact": sha256_file(artifact)},
+            input_artifacts=[{"path": str(artifact), "sha256": sha256_file(artifact), "role": "artifact"}],
+            artifacts=artifacts,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_inspect_interference",
             str(exc),
             input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
             duration_ms=int((time.monotonic() - started) * 1000),
@@ -680,6 +709,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--artifact", required=True)
     p.add_argument("--output", default=None)
     p.set_defaults(func=_cmd_assembly_tree)
+
+    p = sub.add_parser("inspect-interference", help="Return pairwise solid interference facts (penetration/contact/clearance)")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
+    p.set_defaults(func=_cmd_inspect_interference)
 
     p = sub.add_parser("export", help="Export STEP/STL/GLB/BREP deterministically")
     p.add_argument("--source", required=True)

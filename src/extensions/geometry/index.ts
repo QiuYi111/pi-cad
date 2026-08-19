@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import {
   artifactPathForKind,
   assemblyTree,
+  inspectInterference,
   buildPayload,
   buildStep,
   compareGeometry,
@@ -338,6 +339,45 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
           envelope,
           artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
           kind: "assembly" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_inspect_interference",
+    label: "CAD Interference Facts",
+    description:
+      "Pairwise solid interference facts for a STEP assembly: intersection volume, minimum distance, and a three-state classification (penetration/contact/clearance) per part pair. Raw facts only — the tool never says pass or fail.",
+    promptSnippet: "Report pairwise penetration/contact/clearance facts",
+    promptGuidelines: [
+      "Required evidence for assembly routes at integration review; re-observed automatically after every candidate commit.",
+      "Interpretation is yours: a press fit is penetration, a deliberate stop is contact, a needed gap is clearance.",
+      "Use the same artifact you are reviewing; pair facts are bound to the artifact hash.",
+    ],
+    parameters: Type.Object({
+      artifact: artifactParam,
+      output: Type.Optional(Type.String()),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const root = await currentRunEvidenceRoot(ctx.cwd);
+      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "interference", `${Date.now().toString(36)}.json`);
+      const envelope = await inspectInterference(ctx.cwd, params.artifact, output);
+      const payload = envelope.payload as {
+        error?: string;
+        partCount?: number;
+        pairCount?: number;
+        summary?: Record<string, number>;
+      };
+      const text = envelope.ok
+        ? `cad_inspect_interference: ${payload.partCount ?? "?"} parts, ${payload.pairCount ?? "?"} pairs — ${JSON.stringify(payload.summary ?? {})}. Facts only: interpret penetration vs intentional contact yourself.`
+        : `cad_inspect_interference failed: ${payload.error ?? "unknown error"}`;
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          envelope,
+          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
+          kind: "interference" as const,
         },
       };
     },

@@ -376,10 +376,10 @@ test("assembly route: build is blocked until assembly_design and interface_contr
   state = candidate(p.state);
   assert.equal(state.phase, "integration_review");
 
-  // Integration review requires assembly evidence alongside visual/geometry.
+  // Integration review requires assembly + interference evidence alongside visual/geometry.
   const blocked = transition(state, "accepted", "no assembly evidence");
   assert.equal(blocked.ok, false);
-  const withAll = withEvidence(state, ["visual", "geometry", "assembly"] as never);
+  const withAll = withEvidence(state, ["visual", "geometry", "assembly", "interference"] as never);
   const accepted = transition(withAll, "accepted", "integration verified");
   assert.equal(accepted.ok, true); if (!accepted.ok) return;
   assert.equal(accepted.state.phase, "ready");

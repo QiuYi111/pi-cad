@@ -6,6 +6,7 @@ import {
   routeKey,
   type EvidenceRef,
 } from "../shared/protocol.ts";
+import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CadProjectStore, nowIso } from "../shared/store.ts";
@@ -227,9 +228,24 @@ export default function cadCore(pi: ExtensionAPI) {
     let state = await store.load();
     if (state && state.status === "waiting_user") {
       state = resumeFromUser(state);
-      await persist(pi, store, state, [
+      const events: Array<{ type: string; data?: unknown }> = [
         { type: "UserInputResolved", data: { phase: state.phase } },
-      ]);
+      ];
+      // A pending reroute that drops obligations was asked to the user in
+      // this pause. Their real answer is the authority: issue a one-time
+      // token the Agent must present to perform the downgrade. The token
+      // is never set from Agent input.
+      if (state.pendingReroute && !state.rerouteAuthorityToken) {
+        state = { ...state, rerouteAuthorityToken: randomBytes(16).toString("hex") };
+        events.push({
+          type: "RerouteAuthorityIssued",
+          data: {
+            pendingRoute: routeKey(state.pendingReroute.route),
+            note: "one-time downgrade authority; consumed by the next cad_reroute",
+          },
+        });
+      }
+      await persist(pi, store, state, events);
     }
     const active = state && state.status !== "done" && state.status !== "aborted";
     // Always apply — also when idle/done/aborted — so a finished run drops

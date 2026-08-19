@@ -266,8 +266,8 @@ function assemblyFragment(lineage: "greenfield" | "legacy" | "hybrid"): Workflow
     planStayPhases: [],
     transitions,
     acceptedPhases: ["integration_review"],
-    acceptedEvidence: () => [...opts.accepted, "assembly"],
-    finishEvidence: () => [...opts.accepted, "assembly"],
+    acceptedEvidence: () => [...opts.accepted],
+    finishEvidence: () => [...opts.accepted],
     requiresBaselineInput: lineage !== "greenfield",
     baselineEvidenceRequired: lineage !== "greenfield",
     updatesHeadOnAccept: true,
@@ -354,21 +354,26 @@ export function compileWorkflow(route: Route): CompiledProcess {
     phaseRecords.interface_design = ["interface_contracts"];
   }
 
-  return { ...base, ...applyMaturityOverlay(spec, route), phaseRecords };
+  return { ...base, ...applyOverlays(spec, route), phaseRecords };
 }
 
 /**
- * Maturity overlay (whitepaper 3.1/6.1): maturity adds obligations, never
- * rewrites the process. Evidence obligations turn into extra accepted and
- * finish evidence kinds; record obligations are enforced by the phase
- * record guards.
+ * Maturity and structure overlays (whitepaper 3.1/6.1): overlays add
+ * obligations, never rewrite the process. Evidence obligations turn into
+ * extra accepted and finish evidence kinds; record obligations are
+ * enforced by the phase record guards.
  */
-function applyMaturityOverlay(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
+function applyOverlays(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
   const extra: EvidenceRef["kind"][] = [];
   const rank = MATURITY_RANK[route.maturity];
   if (rank >= MATURITY_RANK.manufacturing) {
     // A design you intend to manufacture must have been drawn.
     extra.push("drawing");
+  }
+  if (route.structure === "assembly") {
+    // Assemblies owe their structural observations at every maturity —
+    // including release, where the audit workstreams do not replace them.
+    extra.push("assembly", "interference");
   }
   if (extra.length === 0) return spec;
   const wrap =

@@ -265,6 +265,22 @@ export async function assemblyTree(
   return runCadctl(args, { cwd, timeoutMs });
 }
 
+/**
+ * Pairwise solid interference facts. The interpreter reports
+ * penetration/contact/clearance per part pair — raw facts with volumes and
+ * distances; engineering meaning (press fit vs collision) is the Agent's.
+ */
+export async function inspectInterference(
+  cwd: string,
+  artifact: string,
+  output?: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  const args = ["inspect-interference", "--artifact", resolve(cwd, artifact)];
+  if (output) args.push("--output", resolve(cwd, output));
+  return runCadctl(args, { cwd, timeoutMs });
+}
+
 export interface ExportOptions {
   source: string;
   output: string;
@@ -480,6 +496,14 @@ export function runGeometryEvidencePath(cwd: string, runId: string, artifact: st
 
 export function runCompareEvidencePath(cwd: string, runId: string, label: string): string {
   return join(runEvidenceRoot(cwd, runId), "compare", `${label.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`);
+}
+
+export function runInterferenceEvidencePath(cwd: string, runId: string, artifact: string): string {
+  return join(runEvidenceRoot(cwd, runId), "interference", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
+}
+
+export function runAssemblyEvidencePath(cwd: string, runId: string, artifact: string): string {
+  return join(runEvidenceRoot(cwd, runId), "assembly", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
 }
 
 export async function currentRunEvidenceRoot(cwd: string): Promise<string | null> {

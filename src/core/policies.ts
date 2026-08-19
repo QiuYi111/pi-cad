@@ -82,6 +82,7 @@ const REVIEW_TOOLS = [
   "cad_measure",
   "cad_compare_geometry",
   "cad_assembly_tree",
+  "cad_inspect_interference",
   "cad_simulate",
   "cad_simulate_flow",
   "cad_simulate_thermal",
@@ -111,7 +112,15 @@ const COGNITIVE_TOOLS = [
 
 const SIMULATION_EVIDENCE_TOOLS = ["cad_simulate", "cad_simulate_flow", "cad_simulate_thermal"];
 
+const NO_REROUTE_PHASES = new Set<CadPhase>(["intake", "requirements", "ready", "done"]);
+
 export function toolsForPhase(phase: CadPhase): string[] {
+  const base = toolsForPhaseBase(phase);
+  if (!NO_REROUTE_PHASES.has(phase)) return [...base, "cad_reroute"];
+  return base;
+}
+
+function toolsForPhaseBase(phase: CadPhase): string[] {
   switch (phase) {
     case "intake":
       return [...BUILTIN_READONLY, "cad_route"];

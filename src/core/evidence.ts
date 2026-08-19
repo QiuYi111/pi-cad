@@ -24,6 +24,7 @@ export const EVIDENCE_KINDS: EvidenceRef["kind"][] = [
   "presentation",
   "convert",
   "assembly",
+  "interference",
   "optimization",
 ];
 

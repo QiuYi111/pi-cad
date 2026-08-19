@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { compileWorkflow } from "../src/workflows/compiler.ts";
+import { rerouteIsAutonomous as rerouteIsAutonomousRef } from "../src/core/state-machine.ts";
 import { compiledSpec } from "../src/workflows/index.ts";
 import {
   isRoute,
@@ -91,6 +92,7 @@ test("compiler: assembly structure injects the full design chain", () => {
   });
   // Assembly evidence obligations ride along with visual/geometry.
   assert.ok(greenAssembly.acceptedEvidence({} as never).includes("assembly"));
+  assert.ok(greenAssembly.acceptedEvidence({} as never).includes("interference"));
 
   const legacyAssembly = compileWorkflow(design("legacy", "assembly", "engineering"));
   assert.equal(legacyAssembly.nextAfterRequirements, "baseline");
@@ -98,7 +100,7 @@ test("compiler: assembly structure injects the full design chain", () => {
   assert.deepEqual(legacyAssembly.sourcePhases, ["modify"]);
   assert.deepEqual(
     legacyAssembly.acceptedEvidence({} as never).sort(),
-    ["assembly", "compare", "geometry", "visual"],
+    ["assembly", "compare", "geometry", "interference", "visual"],
   );
 
   const hybridAssembly = compileWorkflow(design("hybrid", "assembly", "engineering"));
@@ -163,10 +165,22 @@ test("obligations: reroute monotonicity (part->assembly autonomous, downgrade no
     const toKeys = obligationsOf(to);
     return [...obligationsOf(from)].every((k) => toKeys.has(k));
   };
-  assert.ok(subsetOf(partEng, assemblyProto)); // adds structure keys, drops none
-  assert.ok(!subsetOf(assemblyProto, design("greenfield", "part", "prototype"))); // drops everything
-  assert.ok(!subsetOf(design("greenfield", "part", "release"), partEng)); // maturity downgrade
+  // Obligation-only view: partEng -> assemblyProto grows obligations...
+  assert.ok(subsetOf(partEng, assemblyProto));
+  // ...but maturity also dropped, so the reroute is NOT autonomous — the
+  // reality floor never drops without user authority.
+  const { rerouteIsAutonomous } = await_import_reroute();
+  assert.ok(rerouteIsAutonomous(partEng, design("greenfield", "assembly", "engineering")));
+  assert.ok(!rerouteIsAutonomous(partEng, assemblyProto));
+  assert.ok(!rerouteIsAutonomous(design("greenfield", "assembly", "engineering"), design("greenfield", "assembly", "prototype")));
+  assert.ok(!rerouteIsAutonomous(assemblyProto, design("greenfield", "part", "prototype"))); // drops everything
+  assert.ok(!rerouteIsAutonomous(design("greenfield", "part", "release"), partEng)); // maturity downgrade
 });
+
+function await_import_reroute() {
+  // Local indirection over the state-machine import below.
+  return { rerouteIsAutonomous: rerouteIsAutonomousRef };
+}
 
 test("routeKey and isRoute structural validation", () => {
   assert.equal(routeKey({ objective: "analyze" }), "analyze");

@@ -69,6 +69,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
 
   const expectedTools = [
     "cad_route",
+    "cad_reroute",
     "cad_commit_requirements",
     "cad_commit_plan",
     "cad_commit_assembly_design",
@@ -85,6 +86,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_inspect_section",
     "cad_compare_geometry",
     "cad_assembly_tree",
+    "cad_inspect_interference",
     "cad_export",
     "cad_generate_drawing",
     "cad_simulate",

@@ -20,6 +20,7 @@ import {
   commitRequirements,
   createIntakeState,
   finish,
+  reroute,
   route,
   transition,
   waitForUser,
@@ -335,6 +336,78 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       await deps.persist(pi, store, result.state, result.events);
       return okTool(
         `Routed to ${routeKey(nextRoute)}. Harness state is now authoritative.\n\n${await loadPrompt("requirements")}`,
+        { state: result.state },
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_reroute",
+    label: "Pi-CAD Reroute",
+    description:
+      "Change the route mid-process. Autonomous when the new route only adds obligations (e.g. part -> assembly); any obligation drop (downgrade) needs the one-time authorityToken the harness issued after the user answered your cad_wait_for_user pause. Reroute never grants progress: the harness resumes at the earliest phase with unmet obligations.",
+    promptSnippet: "Reroute mid-process; downgrades need user-issued authority",
+    promptGuidelines: [
+      "Call when the task's true shape differs from the routed one (part turned out to be an assembly, maturity was over-estimated).",
+      "Autonomous upgrades apply immediately and resume at the earliest unmet phase.",
+      "For a downgrade: this call records the request and fails; then ask the user with cad_wait_for_user; after their answer the harness issues a one-time authorityToken; re-run cad_reroute with it.",
+      "Never claim the user approved a downgrade — only the harness-issued token counts.",
+      "There is no target phase: the harness decides where the run resumes.",
+    ],
+    parameters: Type.Object(
+      {
+        objective: Type.Enum({ analyze: "analyze", convert: "convert", design: "design" }),
+        lineage: Type.Optional(Type.Enum({ greenfield: "greenfield", legacy: "legacy", hybrid: "hybrid" })),
+        structure: Type.Optional(Type.Enum({ part: "part", assembly: "assembly" })),
+        maturity: Type.Optional(
+          Type.Enum({
+            prototype: "prototype",
+            engineering: "engineering",
+            manufacturing: "manufacturing",
+            release: "release",
+          }),
+        ),
+        reason: Type.String({ description: "What changed about the task's shape and why the new route fits" }),
+        authorityToken: Type.Optional(Type.String({ description: "One-time harness-issued downgrade authority" })),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await guardState(store);
+      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
+      const nextRoute = buildRoute(params);
+      if (typeof nextRoute === "string") return errTool(nextRoute);
+      if (!isRoute(nextRoute)) return errTool("invalid route");
+      const result = reroute(state, nextRoute, params.reason, params.authorityToken);
+      if (!result.ok) {
+        if (result.requiresAuthority) {
+          // Record the pending reroute so the harness can issue authority
+          // after a real user turn; the Agent must ask via cad_wait_for_user.
+          const pending: CadRunState = {
+            ...state,
+            pendingReroute: { route: nextRoute, reason: params.reason },
+          };
+          await deps.persist(pi, store, pending, [
+            {
+              type: "RerouteAuthorityRequested",
+              data: { route: routeKey(nextRoute), reason: params.reason },
+            },
+          ]);
+          return errTool(
+            `${result.reason}.\n\nPending reroute recorded: ${routeKey(nextRoute)}. Ask the user now (cad_wait_for_user); after their answer the harness will issue a one-time authorityToken in the state summary.`,
+          );
+        }
+        return errTool(result.reason);
+      }
+      await deps.persist(pi, store, result.state, result.events);
+      return okTool(
+        [
+          `Rerouted ${routeKey(state.route!)} -> ${routeKey(nextRoute)} (authority: ${result.events[0].data?.authority}).`,
+          `Harness resumed at ${result.state.phase.toUpperCase()} — the earliest phase with unmet obligations. No progress was granted.`,
+          "",
+          await loadPrompt(result.state.phase),
+        ].join("\n"),
         { state: result.state },
       );
     },
