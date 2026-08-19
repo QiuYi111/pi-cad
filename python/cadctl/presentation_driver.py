@@ -122,6 +122,15 @@ def main() -> int:
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
     scene.cycles.samples = args["samples"]
+    # Distros ship Blender without OpenImageDenoise; Cycles lazy-loads OIDN
+    # at render time and then dies. We never ask for denoising — make that
+    # explicit so builds without it render fine.
+    try:
+        scene.cycles.use_denoising = False
+        for view_layer in bpy.context.scene.view_layers:
+            view_layer.cycles.use_denoising = False
+    except Exception:
+        pass
     scene.cycles.seed = 0
     scene.render.resolution_x = args["width"]
     scene.render.resolution_y = args["height"]
