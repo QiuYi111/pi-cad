@@ -200,3 +200,33 @@ test("compiler: hybrid part keeps baseline + concept chain (0.7 hybrid equivalen
   // 0.7 hybrid did not require compare evidence at review; keep it that way.
   assert.deepEqual(hybrid.acceptedEvidence({} as never), ["visual", "geometry"]);
 });
+
+test("maturity overlay: manufacturing and release require drawing evidence", () => {
+  const proto = compileWorkflow(design("greenfield", "part", "prototype"));
+  const eng = compileWorkflow(design("greenfield", "part", "engineering"));
+  const mfg = compileWorkflow(design("greenfield", "part", "manufacturing"));
+  const rel = compileWorkflow(design("legacy", "part", "release"));
+  assert.ok(!proto.acceptedEvidence({} as never).includes("drawing"));
+  assert.ok(!eng.acceptedEvidence({} as never).includes("drawing"));
+  assert.ok(mfg.acceptedEvidence({} as never).includes("drawing"));
+  assert.ok(rel.finishEvidence({} as never).includes("drawing"));
+  // The overlay never drops the fragment's own kinds (legacy release keeps
+  // compare once baseline and current differ).
+  const changedState = {
+    baselineArtifactHash: "b".repeat(64),
+    currentArtifactHash: "c".repeat(64),
+  } as never;
+  assert.ok(rel.acceptedEvidence(changedState).includes("compare"));
+  // ...and never duplicates them.
+  const kinds = mfg.acceptedEvidence({} as never);
+  assert.equal(kinds.filter((k) => k === "geometry").length, 1);
+});
+
+test("maturity overlay: assembly engineering adds record obligations and review evidence", () => {
+  const proto = compileWorkflow(design("greenfield", "assembly", "prototype"));
+  const eng = compileWorkflow(design("greenfield", "assembly", "engineering"));
+  assert.ok(proto.acceptedEvidence({} as never).includes("assembly"));
+  assert.ok(eng.acceptedEvidence({} as never).includes("assembly"));
+  assert.ok(!proto.acceptedEvidence({} as never).includes("drawing"));
+  assert.ok(compileWorkflow(design("greenfield", "assembly", "manufacturing")).acceptedEvidence({} as never).includes("drawing"));
+});

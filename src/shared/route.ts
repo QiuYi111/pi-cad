@@ -41,6 +41,8 @@ const MATURITY_RANK: Record<CadMaturity, number> = {
   release: 3,
 };
 
+export { MATURITY_RANK };
+
 export interface AnalyzeRoute {
   objective: "analyze";
 }

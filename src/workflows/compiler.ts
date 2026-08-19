@@ -18,9 +18,10 @@
  */
 
 import type { CadPhase, CadRunState, EvidenceRef } from "../shared/protocol.ts";
-import type { ObligationKey, Route } from "../shared/route.ts";
-import { obligationsOf, RELEASE_WORKSTREAMS } from "../shared/route.ts";
-import type { WorkflowSpec } from "./types.ts";
+import type { CadMaturity, ObligationKey, Route } from "../shared/route.ts";
+import type { DesignRoute } from "../shared/route.ts";
+import { MATURITY_RANK, obligationsOf, RELEASE_WORKSTREAMS } from "../shared/route.ts";
+import type { EvidenceKindsResolver, WorkflowSpec } from "./types.ts";
 
 export interface CompiledProcess extends WorkflowSpec {
   route: Route;
@@ -353,5 +354,32 @@ export function compileWorkflow(route: Route): CompiledProcess {
     phaseRecords.interface_design = ["interface_contracts"];
   }
 
-  return { ...base, ...spec, phaseRecords };
+  return { ...base, ...applyMaturityOverlay(spec, route), phaseRecords };
+}
+
+/**
+ * Maturity overlay (whitepaper 3.1/6.1): maturity adds obligations, never
+ * rewrites the process. Evidence obligations turn into extra accepted and
+ * finish evidence kinds; record obligations are enforced by the phase
+ * record guards.
+ */
+function applyMaturityOverlay(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
+  const extra: EvidenceRef["kind"][] = [];
+  const rank = MATURITY_RANK[route.maturity];
+  if (rank >= MATURITY_RANK.manufacturing) {
+    // A design you intend to manufacture must have been drawn.
+    extra.push("drawing");
+  }
+  if (extra.length === 0) return spec;
+  const wrap =
+    (fn: EvidenceKindsResolver) =>
+    (state: CadRunState): EvidenceRef["kind"][] => {
+      const kinds = fn(state);
+      return [...kinds, ...extra.filter((kind) => !kinds.includes(kind))];
+    };
+  return {
+    ...spec,
+    acceptedEvidence: wrap(spec.acceptedEvidence),
+    finishEvidence: wrap(spec.finishEvidence),
+  };
 }
