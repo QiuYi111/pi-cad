@@ -444,13 +444,30 @@ export async function inspectSurfaces(
 
 export async function presentationCommand(
   cwd: string,
-  stage: "validate" | "generate" | "run",
+  stage: "validate" | "preview" | "generate" | "run",
   spec: string,
   outputDir: string,
   timeoutMs?: number,
 ): Promise<CadEventEnvelope> {
   return runCadctl(
     ["present", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
+    { cwd, timeoutMs },
+  );
+}
+
+/**
+ * Create a harness-owned analysis-model derivation record. fused/bonded
+ * are executed by the backend (boolean union); authored operations hash
+ * both ends at record time.
+ */
+export async function deriveAnalysisModel(
+  cwd: string,
+  spec: string,
+  outputDir: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    ["derive-analysis-model", "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
     { cwd, timeoutMs },
   );
 }

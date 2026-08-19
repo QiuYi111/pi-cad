@@ -10,6 +10,8 @@ import {
 } from "../../shared/capability.ts";
 import { writeRunSpec } from "../../shared/run-spec.ts";
 import { sha256File } from "../../shared/store.ts";
+import { AnalysisModelSchema, DeriveAnalysisModelSchema, verifyAnalysisModel } from "./analysis-model.ts";
+import { deriveAnalysisModel } from "../../shared/capability.ts";
 
 import cadFlowExtension from "./flow.ts";
 import cadThermalExtension from "./thermal.ts";
@@ -73,6 +75,9 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
     parameters: Type.Object(
       {
         artifact: Type.Optional(Type.String({ description: "STEP/STP artifact to simulate; required unless mesh.box is supplied (exactly one of the two)" })),
+        analysisModel: Type.Optional(
+          Type.Unsafe({ ...(AnalysisModelSchema as object), description: "Declare when the artifact is a derived model (e.g. a fused assembly for solid FEA): evidence binds to the authoritative source" }),
+        ),
         units: Type.Optional(Type.Literal("mm_N_MPa")),
         backend: Type.Optional(Type.Literal("torch-fem")),
         device: Type.Optional(Type.Enum({ auto: "auto", cpu: "cpu", cuda: "cuda", mps: "mps" })),
@@ -136,6 +141,16 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       if (params.artifact && !existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`simulation artifact does not exist: ${params.artifact}`);
       }
+      // The canonical design is never fused for solver convenience: a
+      // derived subject must carry a harness-owned derivation record, and
+      // the evidence then binds to the authoritative source.
+      const analysisCheck = params.artifact
+        ? await verifyAnalysisModel(ctx.cwd, {
+            subject: params.artifact,
+            analysisModel: params.analysisModel,
+          })
+        : null;
+      if (analysisCheck?.error) throw new Error(analysisCheck.error);
       const spec = {
         ...params,
         units: params.units ?? "mm_N_MPa",
@@ -147,8 +162,8 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       // inputHashes.artifact is hashed by cadctl BEFORE the solve; binding
       // evidence to it makes the provenance immune to concurrent artifact
       // mutation. Re-hashing here would only be a weaker post-solve check.
-      let artifactHash = envelope.inputHashes.spec;
-      if (params.artifact) {
+      let artifactHash = analysisCheck?.subjectOverrideHash ?? null;
+      if (!artifactHash && params.artifact) {
         if (envelope.inputHashes.artifact) {
           artifactHash = envelope.inputHashes.artifact;
         } else {
@@ -159,6 +174,7 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
           }
         }
       }
+      if (!artifactHash) artifactHash = envelope.inputHashes.spec;
       const images =
         envelope.ok && (envelope.payload as any)?.status === "solved"
           ? await readImageContents(
@@ -174,6 +190,50 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
           artifactHash,
           specHash: envelope.inputHashes.spec,
           kind: "simulation" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_derive_analysis_model",
+    label: "CAD Derive Analysis Model",
+    description:
+      "Create a harness-owned analysis-model derivation from the authoritative design. fused/bonded are EXECUTED by the harness (boolean union, output written by the harness — mechanically verified); simplified/defeatured/sectioned record your authored model with both ends hashed. Simulations declare the resulting record via analysisModel.derivationRef.",
+    promptSnippet: "Derive a verified analysis model from the canonical design",
+    promptGuidelines: [
+      "Use fused/bonded when a solver needs the assembly as one solid: the harness performs the union, so the derivation cannot be an unrelated model in disguise.",
+      "Use simplified/defeatured/sectioned for your own authored reduction; the record honestly labels it authored.",
+      "Never hand-edit the derivation record; create a fresh one when either end changes.",
+    ],
+    parameters: DeriveAnalysisModelSchema,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (!existsSync(resolve(ctx.cwd, params.source))) {
+        throw new Error(`derivation source does not exist: ${params.source}`);
+      }
+      if (params.output && !existsSync(resolve(ctx.cwd, params.output))) {
+        const mechanical = params.operations.every((op) => op === "fused" || op === "bonded");
+        if (!mechanical) {
+          throw new Error(`authored derivations require an existing output: ${params.output}`);
+        }
+      }
+      const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "derivation", params);
+      const envelope = await deriveAnalysisModel(ctx.cwd, specPath, outputDir, 3_600_000);
+      const payload = envelope.payload as {
+        error?: string;
+        recordPath?: string;
+        sourceHash?: string;
+        outputHash?: string;
+        executed?: boolean;
+      };
+      const text = envelope.ok
+        ? `cad_derive_analysis_model: derivation record ${payload.recordPath} (${payload.executed ? "harness-executed" : "authored"}). Simulations declare analysisModel {derivationRef: "${payload.recordPath}"}.`
+        : `cad_derive_analysis_model failed: ${payload.error ?? "unknown error"}`;
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          envelope,
+          kind: "build" as const,
         },
       };
     },

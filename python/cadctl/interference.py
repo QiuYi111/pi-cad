@@ -8,6 +8,10 @@ disjoint, and a three-state classification:
 
 The interpreter never says "fail" or "bad": a press fit is penetration, a
 deliberate stop is contact. Engineering meaning is the Agent's call.
+
+Computation failures raise InterferenceUnresolvedError instead of
+degrading to a distance-based guess: a failed boolean must never be
+reported as "contact".
 """
 
 from __future__ import annotations
@@ -24,6 +28,16 @@ from OCP.GProp import GProp_GProps
 from OCP.TopTools import TopTools_ListOfShape
 
 
+class InterferenceUnresolvedError(RuntimeError):
+    """A geometric computation failed; the observation is unresolved.
+
+    Raising (rather than degrading to a distance-based classification)
+    keeps the interpreter fail-closed: the harness records no interference
+    evidence, and integration review stays blocked until the facts can
+    actually be computed.
+    """
+
+
 def _volume_of(shape: Any) -> float:
     props = GProp_GProps()
     BRepGProp.VolumeProperties_s(shape, props)
@@ -33,7 +47,7 @@ def _volume_of(shape: Any) -> float:
 def _distance(a: Any, b: Any) -> float:
     computer = BRepExtrema_DistShapeShape(a, b)
     if not computer.IsDone():
-        return float("inf")
+        raise InterferenceUnresolvedError("distance computation failed: interference facts are unresolved")
     return float(computer.Value())
 
 
@@ -115,7 +129,10 @@ def inspect_interference(artifact: str | Path) -> dict[str, Any]:
             gap = _aabb_gap(a, b)
             intersection_volume = 0.0
             if gap <= 0.0:
-                # AABBs overlap: exact boolean common.
+                # AABBs overlap: exact boolean common. A boolean FAILURE is
+                # an unresolved observation, never a fact: reporting the
+                # pair as "contact" (the likely distance-based fallback)
+                # would translate a solver failure into a physical claim.
                 args = TopTools_ListOfShape()
                 args.Append(solids[i].wrapped)
                 tools = TopTools_ListOfShape()
@@ -125,8 +142,12 @@ def inspect_interference(artifact: str | Path) -> dict[str, Any]:
                 common.SetTools(tools)
                 common.SetRunParallel(False)
                 common.Build()
-                if common.IsDone():
-                    intersection_volume = _volume_of(common.Shape())
+                if not common.IsDone():
+                    raise InterferenceUnresolvedError(
+                        f"boolean common failed for pair {a['label']}<->{b['label']}: "
+                        "interference facts are unresolved for this artifact"
+                    )
+                intersection_volume = _volume_of(common.Shape())
             if intersection_volume > volume_tol:
                 classification = "penetration"
                 distance = 0.0

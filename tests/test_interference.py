@@ -33,6 +33,25 @@ def _write(compound: bd.Compound, name: str) -> Path:
     return path
 
 
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _penetration_fixture() -> Path:
+    """Rebuild (or reuse) the two-overlapping-boxes fixture."""
+    target = FIXTURES / "interference_penetration.step"
+    if target.exists():
+        return target
+    FIXTURES.mkdir(parents=True, exist_ok=True)
+    with bd.BuildPart() as p:
+        bd.Box(20, 20, 20)
+        a = p.part
+    with bd.BuildPart() as p:
+        bd.Box(20, 20, 20)
+        b = p.part
+    bd.export_step(bd.Compound([a, b.moved(bd.Location((10, 0, 0)))]), target)
+    return target
+
+
 class InterferenceFacts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -111,3 +130,50 @@ class InterferenceFacts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InterferenceFailClosed(unittest.TestCase):
+    """A boolean failure must never be reported as a physical fact."""
+
+    def test_unresolved_error_is_raised_not_classified(self):
+        from cadctl.interference import InterferenceUnresolvedError, inspect_interference
+
+        # Simulate the boolean failing for an overlapping pair by monkey-
+        # patching the common builder; the observation must raise, and the
+        # raising propagates out of inspect_interference unchanged.
+        import cadctl.interference as interference
+
+        class FailingCommon:
+            def SetArguments(self, *a):
+                pass
+
+            def SetTools(self, *a):
+                pass
+
+            def SetRunParallel(self, *a):
+                pass
+
+            def Build(self):
+                pass
+
+            def IsDone(self):
+                return False
+
+        original = interference.BRepAlgoAPI_Common
+        interference.BRepAlgoAPI_Common = FailingCommon
+        try:
+            with self.assertRaises(InterferenceUnresolvedError):
+                inspect_interference(self.__class__ and _penetration_fixture())
+        finally:
+            interference.BRepAlgoAPI_Common = original
+
+    def test_error_message_names_the_pair(self):
+        from cadctl.interference import InterferenceUnresolvedError
+
+        error = InterferenceUnresolvedError(
+            "boolean common failed for pair #s0<->#s1: interference facts are unresolved for this artifact"
+        )
+        # The raising surfaces through the CLI's error envelope unchanged,
+        # so the Agent sees exactly which pair is unresolved.
+        self.assertIn("#s0<->#s1", str(error))
+        self.assertIn("unresolved", str(error))

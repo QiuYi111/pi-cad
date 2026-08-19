@@ -84,3 +84,66 @@ class SectionScan(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SectionAxesExact(unittest.TestCase):
+    """Exact analytics for ALL three scan axes (0.8 review P0).
+
+    The original implementation read OCCT's face-local inertia entries as
+    global XY, so x- and y-axis sections were silently wrong. These tests
+    pin the corrected (u, v, n) basis projection for every axis.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        FIXTURES.mkdir(parents=True, exist_ok=True)
+        with bd.BuildPart() as p:
+            bd.Box(40, 30, 12)  # x-extent 40, y-extent 30, z-extent 12
+        cls.box = FIXTURES / "section_axes_box.step"
+        bd.export_step(p.part, cls.box)
+
+    def _midsection(self, axis: str) -> dict:
+        result = scan_sections(self.box, axis=axis, count=1)
+        self.assertEqual(result["sections"][0]["faceCount"], 1)
+        return result["sections"][0]["faces"][0]
+
+    def test_z_axis(self):
+        face = self._midsection("z")
+        # plane (x, y): u=x(40), v=y(30). Iu=∫y²dA=40*30³/12; Iv=30*40³/12.
+        self.assertAlmostEqual(face["Iu"], 40 * 30**3 / 12, places=-1)
+        self.assertAlmostEqual(face["Iv"], 30 * 40**3 / 12, places=-1)
+        self.assertAlmostEqual(face["bbox"]["x"][1] - face["bbox"]["x"][0], 40.0, places=3)
+        self.assertAlmostEqual(face["bbox"]["y"][1] - face["bbox"]["y"][0], 30.0, places=3)
+
+    def test_x_axis(self):
+        face = self._midsection("x")
+        # plane (y, z): u=y(30), v=z(12). Iu=∫z²dA=30*12³/12; Iv=12*30³/12.
+        self.assertAlmostEqual(face["Iu"], 30 * 12**3 / 12, places=-1)
+        self.assertAlmostEqual(face["Iv"], 12 * 30**3 / 12, places=-1)
+        self.assertAlmostEqual(face["bbox"]["y"][1] - face["bbox"]["y"][0], 30.0, places=3)
+        self.assertAlmostEqual(face["bbox"]["z"][1] - face["bbox"]["z"][0], 12.0, places=3)
+
+    def test_y_axis(self):
+        face = self._midsection("y")
+        # plane (x, z): u=x(40), v=z(12). Iu=∫z²dA=40*12³/12; Iv=12*40³/12.
+        self.assertAlmostEqual(face["Iu"], 40 * 12**3 / 12, places=-1)
+        self.assertAlmostEqual(face["Iv"], 12 * 40**3 / 12, places=-1)
+        self.assertAlmostEqual(face["bbox"]["x"][1] - face["bbox"]["x"][0], 40.0, places=3)
+        self.assertAlmostEqual(face["bbox"]["z"][1] - face["bbox"]["z"][0], 12.0, places=3)
+
+    def test_centroid_symmetric_all_axes(self):
+        for axis in ("x", "y", "z"):
+            face = self._midsection(axis)
+            for key, value in face["centroid"].items():
+                if key != axis:
+                    self.assertAlmostEqual(value, 0.0, places=6, msg=f"{axis}/{key}")
+
+    def test_off_center_section_still_exact(self):
+        # A section away from the origin exercises the parallel-axis shift.
+        result = scan_sections(self.box, axis="x", count=2)
+        face = result["sections"][0]["faces"][0]
+        self.assertAlmostEqual(face["Iu"], 30 * 12**3 / 12, places=-1)
+        self.assertAlmostEqual(face["Iv"], 12 * 30**3 / 12, places=-1)
+        # Centroid y,z of the box section are 0 (box centered) but the
+        # section POSITION is at the x bound.
+        self.assertAlmostEqual(result["sections"][0]["position"], -20.0, places=6)

@@ -98,11 +98,19 @@ def spec_input_paths(
         value = spec.get(role)
         if isinstance(value, str) and value and Path(value).exists():
             entries.append((role, str(Path(value).resolve())))
-    # The authoritative design an analysisModel derives from is a frozen
-    # input like any other: mid-solve mutation discards the invocation.
+    # The analysis-model derivation chain is frozen like any other input:
+    # the record itself and the authoritative design it names. Mid-solve
+    # mutation of either discards the invocation.
     model = spec.get("analysisModel")
     if isinstance(model, dict):
-        source = model.get("source")
-        if isinstance(source, str) and source and Path(source).exists():
-            entries.append(("analysisSource", str(Path(source).resolve())))
+        ref = model.get("derivationRef")
+        if isinstance(ref, str) and ref and Path(ref).exists():
+            entries.append(("derivationRecord", str(Path(ref).resolve())))
+            try:
+                record = json.loads(Path(ref).read_text(encoding="utf-8"))
+                source = record.get("source") if isinstance(record, dict) else None
+                if isinstance(source, str) and source and Path(source).exists():
+                    entries.append(("analysisSource", str(Path(source).resolve())))
+            except Exception:
+                pass
     return entries

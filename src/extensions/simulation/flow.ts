@@ -100,7 +100,7 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
         fluidDomain: Type.String({ description: "Watertight fluid-volume STEP to mesh and solve" }),
         artifact: Type.Optional(Type.String({ description: "Solid/part STEP for provenance context (pre-hashed and re-verified)" })),
         analysisModel: Type.Optional(
-          Type.Unsafe({ ...(AnalysisModelSchema as object), description: "Declare when the meshed geometry is a derived model: evidence binds to the authoritative source, never to a fused copy" }),
+          Type.Unsafe({ ...(AnalysisModelSchema as object), description: "Declare when the geometry is a derived model: {derivationRef} from cad_derive_analysis_model; evidence binds to the authoritative source, never to a fused copy" }),
         ),
         geometryUnits: Type.Optional(Type.Enum({ mm: "mm", m: "m" }, { description: "How STEP coordinates should be interpreted (default mm)" })),
         physics: Type.Object(
@@ -242,8 +242,8 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
       if (params.artifact && !existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`artifact does not exist: ${params.artifact}`);
       }
-      if (params.analysisModel && !existsSync(resolve(ctx.cwd, params.analysisModel.source))) {
-        throw new Error(`analysisModel.source does not exist: ${params.analysisModel.source}`);
+      if (params.analysisModel && !existsSync(resolve(ctx.cwd, params.analysisModel.derivationRef))) {
+        throw new Error(`analysisModel.derivationRef does not exist: ${params.analysisModel.derivationRef}`);
       }
       // The canonical design is never rewritten for solver convenience: a
       // derived subject must declare its provenance (fail closed), and the

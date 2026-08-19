@@ -67,41 +67,28 @@ _TURBULENCE_INLET_KEYS = {"intensity", "viscosityRatio"}
 _CONVERGENCE_KEYS = {"maxIterations", "residualTarget"}
 
 
-_ANALYSIS_MODEL_KEYS = {"source", "operations"}
-_ANALYSIS_OPERATIONS = {"fused", "bonded", "simplified", "defeatured", "sectioned"}
+_ANALYSIS_MODEL_KEYS = {"derivationRef"}
+_BOUNDARY_TYPES = ("total_conditions_inlet", "velocity_inlet", "pressure_outlet", "wall")
 
 
 def _validate_analysis_model(spec: dict[str, Any], errors: list[str]) -> None:
-    """Fail-closed validation of the analysisModel declaration (0.8 M4).
+    """Fail-closed validation of the analysisModel declaration (0.8 review P0-6).
 
-    Declaring it means: the geometry this spec consumes is DERIVED from the
-    authoritative design via deterministic operations, and the evidence
-    subject is the source design, not the derived copy.
+    The declaration points at a harness-owned derivation record created by
+    cad_derive_analysis_model — not a free-form {source, operations} claim.
     """
     model = spec.get("analysisModel")
     if model is None:
         return
     if not isinstance(model, dict):
-        errors.append("analysisModel must be an object {source, operations}")
+        errors.append("analysisModel must be an object {derivationRef}")
         return
     _reject_unknown(model, _ANALYSIS_MODEL_KEYS, "analysisModel", errors)
-    source = model.get("source")
-    if not isinstance(source, str) or not source.strip():
-        errors.append("analysisModel.source is required (the authoritative design path)")
-    elif Path(source).suffix.lower() not in (".step", ".stp"):
-        errors.append("analysisModel.source must be .step or .stp")
-    elif not Path(source).is_file():
-        errors.append(f"analysisModel.source does not exist: {source}")
-    operations = model.get("operations")
-    if not isinstance(operations, list) or not operations:
-        errors.append("analysisModel.operations must be a non-empty list")
-    else:
-        for op in operations:
-            if op not in _ANALYSIS_OPERATIONS:
-                errors.append(f"analysisModel.operations entries must be one of {sorted(_ANALYSIS_OPERATIONS)}; got {op!r}")
-
-
-_BOUNDARY_TYPES = ("total_conditions_inlet", "velocity_inlet", "pressure_outlet", "wall")
+    ref = model.get("derivationRef")
+    if not isinstance(ref, str) or not ref.strip():
+        errors.append("analysisModel.derivationRef is required (a cad_derive_analysis_model record path)")
+    elif not Path(ref).is_file():
+        errors.append(f"analysisModel.derivationRef does not exist: {ref}")
 
 
 def _reject_unknown(obj: Any, allowed: set[str], where: str, errors: list[str]) -> None:

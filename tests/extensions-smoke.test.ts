@@ -94,6 +94,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_simulate",
     "cad_simulate_flow",
     "cad_simulate_thermal",
+    "cad_derive_analysis_model",
     "cad_optimize",
     "cad_render_scene",
   ];

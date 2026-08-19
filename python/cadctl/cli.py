@@ -9,6 +9,7 @@ from typing import Sequence
 
 from . import __version__
 from .assembly import assembly_tree
+from .analysis_model import run_derivation
 from .interference import inspect_interference
 from .sections import scan_sections
 from .capability import capabilities
@@ -321,6 +322,35 @@ def _cmd_scan_sections(args: argparse.Namespace) -> int:
             "cad_scan_sections",
             str(exc),
             input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_derive_analysis_model(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    try:
+        record = run_derivation(args.spec, args.output_dir)
+        emit(
+            "cad_derive_analysis_model",
+            record,
+            input_hashes={"spec": sha256_file(args.spec), "source": record["sourceHash"]},
+            input_artifacts=[
+                {"path": str(Path(args.spec).resolve()), "sha256": sha256_file(args.spec), "role": "spec"},
+                {"path": record["source"], "sha256": record["sourceHash"], "role": "source"},
+            ],
+            artifacts=[
+                {"path": record["output"], "kind": "analysis_model", "sha256": record["outputHash"]},
+                {"path": record["recordPath"], "kind": "derivation_record", "sha256": sha256_file(record["recordPath"])},
+            ],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_derive_analysis_model",
+            str(exc),
+            input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""},
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0
@@ -769,6 +799,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--step", type=float, default=None, help="Spacing between sections")
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
     p.set_defaults(func=_cmd_scan_sections)
+
+    p = sub.add_parser("derive-analysis-model", help="Create a harness-owned analysis-model derivation record (fused/bonded executed by the harness)")
+    p.add_argument("--spec", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.set_defaults(func=_cmd_derive_analysis_model)
 
     p = sub.add_parser("export", help="Export STEP/STL/GLB/BREP deterministically")
     p.add_argument("--source", required=True)

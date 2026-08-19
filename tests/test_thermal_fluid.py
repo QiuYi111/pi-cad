@@ -674,9 +674,9 @@ from cadctl.simulation.thermal_api import validate_thermal_spec  # noqa: E402
 
 
 class AnalysisModelDeclaration(unittest.TestCase):
-    """0.8 M4: canonical design vs analysis model (whitepaper section 10)."""
+    """0.8 review P0-6: derivation records, not free-form declarations."""
 
-    def _flow_spec(self, domain="duct.step", **extra):
+    def _flow_spec(self, domain, **extra):
         spec = {
             "caseId": "am-1",
             "fluidDomain": domain,
@@ -695,57 +695,58 @@ class AnalysisModelDeclaration(unittest.TestCase):
         spec.update(extra)
         return spec
 
-    def test_analysis_model_is_optional_and_validated(self):
+    def _record(self, tmp, source_hash="a" * 64, output_hash="b" * 64, executed=True):
+        path = Path(tmp) / "derivation.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schemaVersion": 1,
+                    "sourceHash": source_hash,
+                    "outputHash": output_hash,
+                    "operations": ["fused"],
+                    "executed": executed,
+                }
+            )
+        )
+        return path
+
+    def test_analysis_model_is_optional_and_takes_derivation_ref(self):
         with tempfile.TemporaryDirectory() as tmp:
             domain = Path(tmp) / "domain.step"
             domain.write_text("fluid volume")
-            source = Path(tmp) / "part.step"
-            source.write_text("canonical")
-            # absent -> fine
-            ok, errors = validate_flow_spec(self._flow_spec(domain=str(domain)))
+            ok, errors = validate_flow_spec(self._flow_spec(str(domain)))
             self.assertTrue(ok, errors)
 
-            model = {"source": str(source), "operations": ["fused", "simplified"]}
+            record = self._record(tmp)
             ok, errors = validate_flow_spec(
-                self._flow_spec(domain=str(domain), analysisModel=model)
+                self._flow_spec(str(domain), analysisModel={"derivationRef": str(record)})
             )
             self.assertTrue(ok, errors)
 
-            missing = {"source": str(Path(tmp) / "nope.step"), "operations": ["fused"]}
+            missing = self._record(tmp)
+            missing.unlink()
             ok, errors = validate_flow_spec(
-                self._flow_spec(domain=str(domain), analysisModel=missing)
+                self._flow_spec(str(domain), analysisModel={"derivationRef": str(missing)})
             )
             self.assertFalse(ok)
-            self.assertIn("analysisModel.source does not exist", " ".join(errors))
+            self.assertIn("derivationRef does not exist", " ".join(errors))
 
-    def test_analysis_model_rejects_unknown_keys_and_ops(self):
+    def test_free_form_source_operations_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             domain = Path(tmp) / "domain.step"
             domain.write_text("fluid volume")
-
-            def check(model):
-                return validate_flow_spec(
-                    self._flow_spec(domain=str(domain), analysisModel=model)
-                )
-
-            ok, errors = check({"source": "models/part.step", "operations": ["fused"], "why": "x"})
+            legacy = {"source": "models/part.step", "operations": ["fused"]}
+            ok, errors = validate_flow_spec(
+                self._flow_spec(str(domain), analysisModel=legacy)
+            )
             self.assertFalse(ok)
-            self.assertTrue(any("analysisModel has unknown keys" in e for e in errors))
+            self.assertTrue(any("unknown keys" in e and "derivationRef" in e for e in errors))
 
-            ok, errors = check({"source": "models/part.step", "operations": ["exploded"]})
-            self.assertFalse(ok)
-            self.assertTrue(any("analysisModel.operations entries" in e for e in errors))
-
-            ok, errors = check({"source": "models/part.step", "operations": []})
-            self.assertFalse(ok)
-            self.assertTrue(any("non-empty" in e for e in errors))
-
-    def test_thermal_spec_accepts_analysis_model_key(self):
-        # Schema shape only: use a real file for source, boundaries that
-        # reference arbitrary surface ids pass structural validation.
+    def test_thermal_spec_accepts_derivation_ref(self):
         with tempfile.TemporaryDirectory() as tmp:
             slab = Path(tmp) / "slab.step"
             slab.write_text("step bytes")
+            record = self._record(tmp)
             spec = {
                 "caseId": "am-2",
                 "artifact": str(slab),
@@ -755,18 +756,16 @@ class AnalysisModelDeclaration(unittest.TestCase):
                 ],
                 "mesh": {"maxSizeMm": 5.0},
                 "convergence": {"maxIterations": 10},
-                "analysisModel": {"source": str(slab), "operations": ["simplified"]},
+                "analysisModel": {"derivationRef": str(record)},
             }
             ok, errors = validate_thermal_spec(spec)
             self.assertTrue(ok, errors)
 
 
 class AnalysisModelProvenance(unittest.TestCase):
-    """analysisModel.source is a frozen input: mid-solve mutation discards."""
+    """The derivation chain is frozen: mid-solve mutation discards."""
 
-    def test_spec_input_paths_includes_analysis_source_role(self):
-        import tempfile
-
+    def test_spec_input_paths_freezes_record_and_analysis_source(self):
         from cadctl.provenance import FrozenInputs, spec_input_paths
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -775,18 +774,31 @@ class AnalysisModelProvenance(unittest.TestCase):
             source.write_text("canonical design bytes")
             derived = tmp / "fused.step"
             derived.write_text("derived bytes")
+            record = tmp / "derivation.json"
+            record.write_text(
+                json.dumps(
+                    {
+                        "sourceHash": "x" * 64,
+                        "outputHash": "y" * 64,
+                        "source": str(source),
+                        "output": str(derived),
+                        "executed": True,
+                    }
+                )
+            )
             spec_path = tmp / "spec.json"
             spec_path.write_text(
                 json.dumps(
                     {
                         "caseId": "c",
                         "artifact": str(derived),
-                        "analysisModel": {"source": str(source), "operations": ["fused"]},
+                        "analysisModel": {"derivationRef": str(record)},
                     }
                 )
             )
             entries = spec_input_paths(spec_path)
             roles = [role for role, _ in entries]
+            self.assertIn("derivationRecord", roles)
             self.assertIn("analysisSource", roles)
 
             frozen = FrozenInputs.freeze(entries)
@@ -795,3 +807,57 @@ class AnalysisModelProvenance(unittest.TestCase):
             # Mutating the authoritative source mid-solve discards.
             source.write_text("tampered")
             self.assertEqual(frozen.changed_role(), "analysisSource")
+
+            # Mutating the record itself discards too.
+            source.write_text("canonical design bytes")
+            record.write_text("{}")
+            self.assertEqual(frozen.changed_role(), "derivationRecord")
+
+
+class DerivationExecution(unittest.TestCase):
+    """cad_derive_analysis_model executes fuses mechanically."""
+
+    def test_fused_derivation_executes_and_hashes(self):
+        import build123d as bd
+
+        from cadctl.analysis_model import run_derivation, validate_derive_spec
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            with bd.BuildPart() as p:
+                bd.Box(20, 20, 20, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MIN))
+                a = p.part
+            with bd.BuildPart() as p:
+                bd.Box(20, 20, 20, align=(bd.Align.CENTER, bd.Align.CENTER, bd.Align.MAX))
+                b = p.part
+            source = tmp / "assembly.step"
+            bd.export_step(bd.Compound([a, b]), source)
+
+            spec = tmp / "spec.json"
+            spec.write_text(json.dumps({"source": str(source), "operations": ["fused"]}))
+            record = run_derivation(spec, tmp / "out")
+            self.assertTrue(record["executed"])
+            fused = bd.import_step(record["output"])
+            self.assertEqual(len(fused.solids()), 1)
+            self.assertAlmostEqual(fused.volume, 16000.0, places=-1)
+            # Re-running is byte-stable for the same source.
+            record2 = run_derivation(spec, tmp / "out2")
+            self.assertEqual(record["outputHash"], record2["outputHash"])
+
+    def test_authored_derivation_requires_existing_output(self):
+        from cadctl.analysis_model import run_derivation, validate_derive_spec
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            source = tmp / "design.step"
+            source.write_text("step bytes")
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps({"source": str(source), "operations": ["simplified"], "output": str(tmp / "nope.step")})
+            )
+            with self.assertRaises(ValueError):
+                run_derivation(spec, tmp / "out")
+
+            ok, errors = validate_derive_spec({"source": str(source), "operations": ["fused", "simplified"]})
+            self.assertFalse(ok)
+            self.assertTrue(any("cannot be combined" in e for e in errors))

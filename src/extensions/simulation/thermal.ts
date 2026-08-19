@@ -120,8 +120,8 @@ export default function cadThermalExtension(pi: ExtensionAPI) {
       if (!existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`artifact does not exist: ${params.artifact}`);
       }
-      if (params.analysisModel && !existsSync(resolve(ctx.cwd, params.analysisModel.source))) {
-        throw new Error(`analysisModel.source does not exist: ${params.analysisModel.source}`);
+      if (params.analysisModel && !existsSync(resolve(ctx.cwd, params.analysisModel.derivationRef))) {
+        throw new Error(`analysisModel.derivationRef does not exist: ${params.analysisModel.derivationRef}`);
       }
       // Fail closed when the analyzed solid is a derived model with no
       // declared provenance; the evidence then binds to the source design.

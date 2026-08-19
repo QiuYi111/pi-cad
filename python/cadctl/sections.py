@@ -34,23 +34,23 @@ def _bounds_along(shape: bd.Shape, axis: str) -> tuple[float, float]:
 
 
 def _section_facts(face: bd.Face, axis: str, position: float) -> dict[str, Any] | None:
+    """Exact planar-section facts, computed in an explicit (u, v, n) basis.
+
+    For scan axis n, the in-plane coordinates are the other two axes in
+    x < y < z order (u before v). The OCCT surface-inertia matrix is
+    global, so the raw second moments are recovered by solving the
+    planar-face relations (one coordinate is constant on the face) and
+    then projected onto (u, v). The 0.8-review bug — reading Value(1,1)/
+    Value(2,2) as if the face-local frame were always global XY — made
+    every x/y-axis section wrong; this version is axis-symmetric.
+    """
     area = float(face.area)
     if area <= 1e-12:
         return None
     center = face.center()
-    # Coordinates in the section plane: the two axes other than the scan
-    # axis, named u/v deterministically (u before v in x<y<z order).
     others = [a for a in ("x", "y", "z") if a != axis]
     u_name, v_name = others[0], others[1]
-    center_u = getattr(center, u_name.upper())
-    center_v = getattr(center, v_name.upper())
 
-    # Second moments via boundary-quadrature-free exact properties:
-    # build a planar sketch face in u,v and read its moments. OCCT surface
-    # of inertia gives volume-equivalent moments for planar faces directly.
-    props = face.to_pln() if hasattr(face, "to_pln") else None
-    # Fall back to mesh-free computation: moment properties of the planar
-    # face computed in its own plane coordinate system.
     from OCP.BRepGProp import BRepGProp
     from OCP.GProp import GProp_GProps
 
@@ -58,21 +58,39 @@ def _section_facts(face: bd.Face, axis: str, position: float) -> dict[str, Any] 
     BRepGProp.SurfaceProperties_s(face.wrapped, surface_props)
     com = surface_props.CentreOfMass()
     inertia = surface_props.MatrixOfInertia()
-    # MatrixOfInertia for a planar face returns mass = area and moments
-    # about the origin; extract the planar components.
-    iu = inertia.Value(1, 1)  # about u axis through origin
-    iv = inertia.Value(2, 2)  # about v axis through origin
-    iuv = -inertia.Value(1, 2)  # product of inertia (sign convention)
-    # Reinterpret in the section plane: axes 1,2 are in-plane, so moments
-    # about the plane's origin of the GLOBAL system; shift to centroid.
-    u_c = float(com.X())
-    v_c = float(com.Y())
-    # For planar faces OCCT reports in the face's own coordinate system.
-    iu_c = float(iu) - area * v_c * v_c
-    iv_c = float(iv) - area * u_c * u_c
-    iuv_c = float(iuv) + area * u_c * v_c
+    # Global second-moment raw integrals. For a planar face with the scan
+    # coordinate constant: M11 = Iyy + Izz, M22 = Ixx + Izz,
+    # M33 = Ixx + Iyy, and the products carry a minus sign.
+    m11, m22, m33 = (float(inertia.Value(i, i)) for i in (1, 2, 3))
+    raw_xx = (m22 + m33 - m11) / 2.0
+    raw_yy = (m11 + m33 - m22) / 2.0
+    raw_xy = -float(inertia.Value(1, 2))
 
-    # Principal moments in the section plane.
+    # Products carry a minus sign in OCCT's matrix; recover all six raw
+    # planar integrals once, then look up by axis name.
+    raw_zz = (m11 + m22 - m33) / 2.0
+    raw_by_name = {
+        "xx": raw_xx,
+        "yy": raw_yy,
+        "zz": raw_zz,
+        "xy": raw_xy,
+        "xz": -float(inertia.Value(1, 3)),
+        "yz": -float(inertia.Value(2, 3)),
+    }
+    raw_u2 = raw_by_name[u_name + u_name]
+    raw_v2 = raw_by_name[v_name + v_name]
+    raw_uv = raw_by_name[u_name + v_name]
+
+    component = {"x": float(com.X()), "y": float(com.Y()), "z": float(com.Z())}
+    cu = component[u_name]
+    cv = component[v_name]
+
+    # Iu = moment about the u axis = ∫v²dA; Iv = ∫u²dA; Iuv = ∫u·v·dA.
+    # Shift to the centroid with the parallel-axis theorem.
+    iu_c = raw_v2 - area * cv * cv
+    iv_c = raw_u2 - area * cu * cu
+    iuv_c = raw_uv - area * cu * cv
+
     mean = (iu_c + iv_c) / 2
     radius = math.sqrt(max(((iu_c - iv_c) / 2) ** 2 + iuv_c**2, 0.0))
     i1 = mean + radius
@@ -84,11 +102,16 @@ def _section_facts(face: bd.Face, axis: str, position: float) -> dict[str, Any] 
 
     loops = len(face.wires() if hasattr(face, "wires") else [])
     bb = face.bounding_box()
+    bounds = {
+        "x": [float(bb.min.X), float(bb.max.X)],
+        "y": [float(bb.min.Y), float(bb.max.Y)],
+        "z": [float(bb.min.Z), float(bb.max.Z)],
+    }
     return {
         "area": round(area, 9),
         "centroid": {
-            u_name: round(center_u, 6),
-            v_name: round(center_v, 6),
+            u_name: round(cu, 6),
+            v_name: round(cv, 6),
             axis: round(position, 6),
         },
         "Iu": round(iu_c, 9),
@@ -97,8 +120,8 @@ def _section_facts(face: bd.Face, axis: str, position: float) -> dict[str, Any] 
         "principalMoments": [round(i1, 9), round(i2, 9)],
         "principalAngleRad": round(theta, 9),
         "bbox": {
-            u_name: [round(float(bb.min.X if u_name != "z" else bb.min.Z), 6), round(float(bb.max.X if u_name != "z" else bb.max.Z), 6)],
-            v_name: [round(float(bb.min.Y if v_name != "z" else bb.max.Y), 6), round(float(bb.max.Y if v_name != "z" else bb.max.Y), 6)],
+            u_name: [round(bounds[u_name][0], 6), round(bounds[u_name][1], 6)],
+            v_name: [round(bounds[v_name][0], 6), round(bounds[v_name][1], 6)],
         },
         "loopCount": loops,
     }
