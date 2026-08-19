@@ -350,8 +350,8 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptGuidelines: [
       "Call when the task's true shape differs from the routed one (part turned out to be an assembly, maturity was over-estimated).",
       "Autonomous upgrades apply immediately and resume at the earliest unmet phase.",
-      "For a downgrade: this call records the request and fails; then ask the user with cad_wait_for_user; after their answer the harness issues a one-time authorityToken; re-run cad_reroute with it.",
-      "Never claim the user approved a downgrade — only the harness-issued token counts.",
+      "For a downgrade: this call records the request and fails; ask the user with cad_wait_for_user; when they agree they must run /cad-approve-reroute themselves (an ordinary reply issues nothing); the command issues a one-time authorityToken bound to exactly the approved route; re-run cad_reroute with it.",
+      "Never claim the user approved a downgrade — only the /cad-approve-reroute token counts, and it works for the approved route only.",
       "There is no target phase: the harness decides where the run resumes.",
     ],
     parameters: Type.Object(
@@ -382,11 +382,19 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const result = reroute(state, nextRoute, params.reason, params.authorityToken);
       if (!result.ok) {
         if (result.requiresAuthority) {
-          // Record the pending reroute so the harness can issue authority
-          // after a real user turn; the Agent must ask via cad_wait_for_user.
+          // Record the pending reroute so the user can approve it with
+          // /cad-approve-reroute. A request for a DIFFERENT route voids any
+          // outstanding approval (it was granted for another request); a
+          // re-request of the same approved route keeps its token.
+          const sameAsApproved =
+            Boolean(state.rerouteAuthorityToken) &&
+            state.rerouteAuthorityRoute === routeKey(nextRoute);
           const pending: CadRunState = {
             ...state,
             pendingReroute: { route: nextRoute, reason: params.reason },
+            ...(sameAsApproved
+              ? {}
+              : { rerouteAuthorityToken: null, rerouteAuthorityRoute: null }),
           };
           await deps.persist(pi, store, pending, [
             {
@@ -395,7 +403,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
             },
           ]);
           return errTool(
-            `${result.reason}.\n\nPending reroute recorded: ${routeKey(nextRoute)}. Ask the user now (cad_wait_for_user); after their answer the harness will issue a one-time authorityToken in the state summary.`,
+            `${result.reason}.\n\nPending reroute recorded: ${routeKey(nextRoute)}. Ask the user (cad_wait_for_user); when they agree, they must run /cad-approve-reroute themselves — an ordinary reply issues nothing. The command issues a one-time authorityToken bound to exactly this route, shown in the state summary.`,
           );
         }
         return errTool(result.reason);
@@ -520,6 +528,60 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       return okTool(
         `Plan committed (${result.state.planVersion?.slice(0, 12)}). Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
         { state: result.state, planVersion: result.state.planVersion },
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_commit_frame_context",
+    label: "Pi-CAD Commit Frame Context",
+    description:
+      "Record the coordinate-frame mapping of a user-supplied artifact, confirmed WITH the user during the baseline phase. Mandatory for every baseline-bound route before baseline_understood: a part's local axes are often arbitrary, and every later interpretation inherits the assumed mapping.",
+    promptSnippet: "Record the user-confirmed coordinate frame mapping",
+    promptGuidelines: [
+      "Ask the user (one question, cad_wait_for_user) pointing at visible evidence: the attached views or unambiguous features.",
+      "Record the mapping in the user's functional words (which way is up in the machine, where the load comes from, which face locates against what).",
+      "Record what the user pointed at in howConfirmed.",
+      "Never guess from how the part sits in the file or from axis names; never commit without a user answer.",
+    ],
+    parameters: Type.Object(
+      {
+        axes: Type.Array(
+          Type.Object(
+            {
+              axis: Type.Enum({ x: "x", y: "y", z: "z" }),
+              mapsTo: Type.String({
+                minLength: 1,
+                description: "Functional meaning of this artifact axis, in the user's words",
+              }),
+            },
+            { additionalProperties: false },
+          ),
+          { minItems: 3, description: "All three artifact axes must be mapped" },
+        ),
+        howConfirmed: Type.String({
+          minLength: 1,
+          description: "What the user pointed at or said when confirming (view + feature, or their explicit statement)",
+        }),
+        notes: Type.Optional(Type.String()),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await guardState(store);
+      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
+      const axes = new Set(params.axes.map((axis) => axis.axis));
+      if (axes.size !== 3) {
+        return errTool("axes must map each of x, y, z exactly once");
+      }
+      const result = commitPhaseRecord(state, "frame_context", params);
+      if (!result.ok) return errTool(result.reason);
+      await store.writeRecord("frame_context", params);
+      await deps.persist(pi, store, result.state, result.events);
+      return okTool(
+        `Frame context recorded (confirmed: ${params.howConfirmed.slice(0, 80)}). Phase remains ${result.state.phase.toUpperCase()}; call cad_transition(baseline_understood) when the baseline is understood.`,
+        { state: result.state },
       );
     },
   });

@@ -58,6 +58,7 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
 
   const route = pi.tools.get("cad_route");
   const req = pi.tools.get("cad_commit_requirements");
+  const frameContext = pi.tools.get("cad_commit_frame_context");
   const transition = pi.tools.get("cad_transition");
   const plan = pi.tools.get("cad_commit_plan");
   const candidate = pi.tools.get("cad_commit_candidate");
@@ -75,7 +76,19 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
     inputs: ["plate.step"],
   }, undefined, undefined, ctx);
   assert.match(r2.content[0].text, /SOURCE_BASELINE/);
-  const r3 = await transition.execute("3", { event: "baseline_understood", note: "reviewed baseline" }, undefined, undefined, ctx);
+  // Frame context is mandatory before leaving the source baseline.
+  const blocked = await transition.execute("2b", { event: "baseline_understood", note: "skipped frame check" }, undefined, undefined, ctx);
+  assert.match(blocked.content[0].text, /frame_context/);
+  const r2c = await frameContext.execute("2c", {
+    axes: [
+      { axis: "x", mapsTo: "long edge direction" },
+      { axis: "y", mapsTo: "short edge direction" },
+      { axis: "z", mapsTo: "plate normal, up" },
+    ],
+    howConfirmed: "user confirmed the long edge runs along X in their fixture",
+  }, undefined, undefined, ctx);
+  assert.match(r2c.content[0].text, /SOURCE_BASELINE/);
+  const r3 = await transition.execute("3", { event: "baseline_understood", note: "reviewed baseline; frame confirmed" }, undefined, undefined, ctx);
   assert.match(r3.content[0].text, /TRANSFORM_PLAN/);
   const r4 = await plan.execute("4", { summary: "export STL sidecar", protected: [], plannedChanges: [], interfaces: [], datums: [], reviewPlan: [] }, undefined, undefined, ctx);
   assert.match(r4.content[0].text, /CONVERT/);

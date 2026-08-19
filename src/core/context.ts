@@ -35,7 +35,11 @@ export function stateSummary(state: CadRunState): string {
   if (state.staleEvidence.length) lines.push(`staleEvidence=${state.staleEvidence.length}`);
   if (state.phaseRecords?.length) lines.push(`phaseRecords=${state.phaseRecords.join(",")}`);
   if (state.pendingReroute) lines.push(`pendingReroute=${routeKey(state.pendingReroute.route)}`);
-  if (state.rerouteAuthorityToken) lines.push(`rerouteAuthorityToken=${state.rerouteAuthorityToken} (one-time)`);
+  if (state.rerouteAuthorityToken) {
+    lines.push(
+      `rerouteAuthorityToken=${state.rerouteAuthorityToken} (one-time, bound to ${state.rerouteAuthorityRoute ?? "unknown"})`,
+    );
+  }
   if (state.route?.objective === "design" && state.route.maturity === "release") {
     lines.push(
       `workstreams=${Object.entries(state.workstreamStatuses ?? {})

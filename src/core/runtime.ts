@@ -219,6 +219,48 @@ export default function cadCore(pi: ExtensionAPI) {
     },
   });
 
+  // Explicit user-side reroute authority. An ordinary user reply proves
+  // only that the user spoke; approving a downgrade is a separate, visible
+  // action. The issued token is bound to the exact pending route and is
+  // consumed by the next cad_reroute for that route only.
+  pi.registerCommand("cad-approve-reroute", {
+    description: "Approve the pending Pi-CAD reroute (issues a one-time authority token for that exact route)",
+    handler: async (_args, ctx) => {
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await store.load();
+      if (!state || state.status === "done" || state.status === "aborted") {
+        if (ctx.hasUI) ctx.ui.notify("No active Pi-CAD workflow", "info");
+        return;
+      }
+      if (!state.pendingReroute) {
+        if (ctx.hasUI) {
+          ctx.ui.notify(
+            "No pending reroute to approve. The Agent must record one with cad_reroute first.",
+            "warning",
+          );
+        }
+        return;
+      }
+      const approvedKey = routeKey(state.pendingReroute.route);
+      const next: CadRunState = {
+        ...state,
+        status: "active",
+        rerouteAuthorityToken: randomBytes(16).toString("hex"),
+        rerouteAuthorityRoute: approvedKey,
+        updatedAt: nowIso(),
+      };
+      await persist(pi, store, next, [
+        { type: "RerouteAuthorityIssued", data: { approvedRoute: approvedKey, note: "one-time authority bound to this exact route; consumed by the next cad_reroute" } },
+      ]);
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `Reroute to ${approvedKey} approved. The Agent may perform this reroute exactly once.`,
+          "info",
+        );
+      }
+    },
+  });
+
   registerControlTools(pi, deps);
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -228,24 +270,12 @@ export default function cadCore(pi: ExtensionAPI) {
     let state = await store.load();
     if (state && state.status === "waiting_user") {
       state = resumeFromUser(state);
-      const events: Array<{ type: string; data?: unknown }> = [
+      // Deliberately NO reroute authority here: an ordinary user reply only
+      // proves the user spoke, not that they approved a downgrade. Downgrade
+      // authority is issued exclusively by the /cad-approve-reroute command.
+      await persist(pi, store, state, [
         { type: "UserInputResolved", data: { phase: state.phase } },
-      ];
-      // A pending reroute that drops obligations was asked to the user in
-      // this pause. Their real answer is the authority: issue a one-time
-      // token the Agent must present to perform the downgrade. The token
-      // is never set from Agent input.
-      if (state.pendingReroute && !state.rerouteAuthorityToken) {
-        state = { ...state, rerouteAuthorityToken: randomBytes(16).toString("hex") };
-        events.push({
-          type: "RerouteAuthorityIssued",
-          data: {
-            pendingRoute: routeKey(state.pendingReroute.route),
-            note: "one-time downgrade authority; consumed by the next cad_reroute",
-          },
-        });
-      }
-      await persist(pi, store, state, events);
+      ]);
     }
     const active = state && state.status !== "done" && state.status !== "aborted";
     // Always apply — also when idle/done/aborted — so a finished run drops

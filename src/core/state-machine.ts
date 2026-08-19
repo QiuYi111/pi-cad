@@ -196,21 +196,15 @@ export function commitPlan(state: CadRunState, record: CadPlan): ActionResult {
 // Phase records (assembly structure fragment)
 // ---------------------------------------------------------------------------
 
-const RECORD_EVENTS: Record<string, string> = {
-  assembly_design: "assembly_design_committed",
-  interface_contracts: "interface_contracts_committed",
-};
-
-const RECORD_EVENT_TO_TYPE: Record<string, string> = Object.fromEntries(
-  Object.entries(RECORD_EVENTS).map(([type, event]) => [event, type]),
-);
-
 /**
- * Commit a phase record (assembly design / interface contracts). The record
- * commit IS the transition wherever the compiled process declares one for
- * the record event (assembly chain); in release audit the record is
- * committed without moving. There is no cad_transition escape that skips
- * the record trail.
+ * Commit a phase record (frame context, assembly design, interface
+ * contracts...). The record commit IS the transition wherever the compiled
+ * process declares an event for it (assembly chain); otherwise the record
+ * is committed in place (frame context in baseline, records in audit).
+ *
+ * There is no cad_transition escape: record events are rejected by the
+ * generic transition path, so the record trail cannot be bypassed or
+ * replayed.
  */
 export function commitPhaseRecord(
   state: CadRunState,
@@ -219,14 +213,15 @@ export function commitPhaseRecord(
 ): ActionResult {
   const spec = workflowSpec(state);
   if (!spec) return { ok: false, reason: "route is not selected" };
-  const event = RECORD_EVENTS[recordType];
-  if (!event) return { ok: false, reason: `unknown phase record type: ${recordType}` };
   const owed = spec.phaseRecords[state.phase] ?? [];
   if (!owed.includes(recordType)) {
     return { ok: false, reason: `phase ${state.phase} owes no ${recordType} record for this route (owed: ${owed.join(", ") || "none"})` };
   }
+  const event = recordEventFor(recordType);
   // No declared transition for this record event means "commit and stay".
-  const target = spec.transitions[state.phase]?.[event] ?? state.phase;
+  const target = (event && spec.transitions[state.phase]?.[event]) || state.phase;
+  const stale = spec.recordStaleOnEnter?.[target] ?? [];
+  const keptRecords = (state.phaseRecords ?? []).filter((r) => !stale.includes(r));
   const next: CadRunState = {
     ...state,
     ...(target !== state.phase
@@ -236,7 +231,7 @@ export function commitPhaseRecord(
           mutationPolicy: mutationPolicyForPhase(target, state.route),
         }
       : {}),
-    phaseRecords: [...new Set([...(state.phaseRecords ?? []), recordType])],
+    phaseRecords: [...new Set([...keptRecords, recordType])],
     updatedAt: nowIso(),
   };
   return {
@@ -244,9 +239,24 @@ export function commitPhaseRecord(
     state: next,
     events: [
       { type: "PhaseRecordCommitted", data: { recordType, record, phase: target } },
+      ...(stale.length ? [{ type: "PhaseRecordsStaled", data: { entering: target, staled: stale } }] : []),
     ],
   };
 }
+
+/** Deterministic event name for a record type, when the process has one. */
+function recordEventFor(recordType: string): string | null {
+  if (recordType === "assembly_design") return "assembly_design_committed";
+  if (recordType === "interface_contracts") return "interface_contracts_committed";
+  return null;
+}
+
+/** All record-commit event names (cad_transition must reject these). */
+const RECORD_EVENT_NAMES = new Set([
+  "assembly_design_committed",
+  "interface_contracts_committed",
+  "frame_context_committed",
+]);
 
 export interface CandidateReceipt {
   label: string;
@@ -273,9 +283,12 @@ export function acceptCandidate(
   if (missing.length) {
     return { ok: false, reason: `cannot commit candidate: phase records missing (${missing.join(", ")})` };
   }
+  // Release processes have two candidate loops: design sources land in the
+  // design review, gap_closure lands in audit.
+  const reviewPhase = spec.sourcePhaseReviews?.[state.phase] ?? spec.candidateReviewPhase;
   const next: CadRunState = {
     ...state,
-    phase: spec.candidateReviewPhase,
+    phase: reviewPhase,
     status: "active",
     mutationPolicy: "read_only",
     candidateLabel: receipt.label,
@@ -402,11 +415,14 @@ export function transition(
   const spec = workflowSpec(state);
   if (!spec) return { ok: false, reason: "route is not selected" };
 
-  // Record events may only be re-fired by cad_transition when the record
-  // already exists — otherwise the transition would bypass the record trail.
-  const recordType = RECORD_EVENT_TO_TYPE[event];
-  if (recordType && !(state.phaseRecords ?? []).includes(recordType)) {
-    return { ok: false, reason: `transition ${event} requires the ${recordType} record to be committed first` };
+  // Record-commit events are ONLY fired by their commit tools. Allowing
+  // cad_transition to replay them would let a stale record trail (after a
+  // review regression) skip re-committing the record.
+  if (RECORD_EVENT_NAMES.has(event)) {
+    return {
+      ok: false,
+      reason: `transition ${event} is not valid: record commits happen only through their cad_commit_* tool`,
+    };
   }
 
   if (event === "accepted" && spec.acceptedPhases.includes(state.phase)) {
@@ -427,14 +443,26 @@ export function transition(
     }
     const guard = spec.completionGuard?.(state);
     if (guard) return { ok: false, reason: `cannot accept: ${guard}` };
+    // The transition table is authoritative for where acceptance leads:
+    // "ready" closes the run; any other target (audit, when a release
+    // suffix follows the design core) continues the process.
+    const acceptedTarget = spec.transitions[state.phase]?.accepted ?? "ready";
     const next: CadRunState = {
       ...state,
-      phase: "ready",
-      status: "ready",
+      phase: acceptedTarget,
+      status: acceptedTarget === "ready" ? "ready" : "active",
       mutationPolicy: "read_only",
       updatedAt: nowIso(),
     };
-    return { ok: true, state: next, events: [{ type: "WorkflowReady", data: { event, note } }] };
+    return {
+      ok: true,
+      state: next,
+      events: [
+        acceptedTarget === "ready"
+          ? { type: "WorkflowReady", data: { event, note } }
+          : { type: "TransitionRequested", data: { event, note, to: acceptedTarget } },
+      ],
+    };
   }
 
   if (event === "baseline_understood" && (state.phase === "baseline" || state.phase === "source_baseline")) {
@@ -469,20 +497,44 @@ export function transition(
   if (!target) {
     return { ok: false, reason: `transition ${event} is not valid in phase ${state.phase} for route ${state.route?.objective ?? "unset"}` };
   }
+  // Leaving a phase requires the records that phase owes (e.g. the frame
+  // context before baseline_understood). The record commit tools satisfy
+  // this by adding the record in the same action.
+  const owedHere = spec.phaseRecords[state.phase] ?? [];
+  const committed = new Set(state.phaseRecords ?? []);
+  const unmetHere = owedHere.filter((recordType) => !committed.has(recordType));
+  if (unmetHere.length && target !== state.phase) {
+    return {
+      ok: false,
+      reason: `cannot leave ${state.phase}: phase records missing (${unmetHere.join(", ")})`,
+    };
+  }
   if (SOURCE_PHASES.has(target)) {
     const missing = missingRecordObligations(state);
     if (missing.length) {
       return { ok: false, reason: `cannot enter ${target}: phase records missing (${missing.join(", ")})` };
     }
   }
+  // Entering a phase stales the records it declares: review regressions
+  // invalidate the downstream record trail so it cannot be reused.
+  const stale = spec.recordStaleOnEnter?.[target] ?? [];
+  const keptRecords = (state.phaseRecords ?? []).filter((r) => !stale.includes(r));
   const next: CadRunState = {
     ...state,
     phase: target,
     status: "active",
     mutationPolicy: mutationPolicyForPhase(target, state.route),
+    ...(stale.length ? { phaseRecords: keptRecords } : {}),
     updatedAt: nowIso(),
   };
-  return { ok: true, state: next, events: [{ type: "TransitionRequested", data: { event, note, to: target } }] };
+  return {
+    ok: true,
+    state: next,
+    events: [
+      { type: "TransitionRequested", data: { event, note, to: target } },
+      ...(stale.length ? [{ type: "PhaseRecordsStaled", data: { entering: target, staled: stale } }] : []),
+    ],
+  };
 }
 
 export function waitForUser(state: CadRunState, reason: string): ActionResult {
@@ -557,6 +609,8 @@ export function finish(state: CadRunState): ActionResult {
 // ---------------------------------------------------------------------------
 
 const RECORD_PHASE_ORDER: CadPhase[] = [
+  "baseline",
+  "source_baseline",
   "system_concept",
   "assembly_design",
   "interface_design",
@@ -571,8 +625,8 @@ const RECORD_PHASE_ORDER: CadPhase[] = [
  *
  *   1. baseline not bound (new route requires one)      -> baseline phase
  *   2. record obligations missing                       -> the phase owing
- *      the earliest missing record (assembly_design, interface_design,
- *      or release audit)
+ *      the earliest missing record (frame context in the baseline phase,
+ *      assembly_design, interface_design, ...)
  *   3. no current artifact                              -> first source phase
  *   4. review-phase evidence kinds unmet                -> review phase
  *   5. otherwise                                        -> current phase when
@@ -592,8 +646,11 @@ export function earliestUnmetPhase(state: CadRunState, nextRoute: Route): CadPha
   );
   if (missingRecordPhases.length) return missingRecordPhases[0];
   if (!state.currentArtifactHash) return spec.sourcePhases[0] ?? spec.nextAfterRequirements;
-  const unmetEvidence = spec.acceptedEvidence(state).some((kind) => !hasCurrentEvidence(state, kind));
-  if (unmetEvidence) return spec.candidateReviewPhase;
+  const closurePhase = spec.acceptedPhases.includes("final_review")
+    ? "final_review"
+    : spec.candidateReviewPhase;
+  const unmetEvidence = spec.finishEvidence(state).some((kind) => !hasCurrentEvidence(state, kind));
+  if (unmetEvidence) return closurePhase;
   const processPhases: CadPhase[] = [
     ...spec.sourcePhases,
     ...Object.keys(spec.planNext) as CadPhase[],
@@ -602,7 +659,7 @@ export function earliestUnmetPhase(state: CadRunState, nextRoute: Route): CadPha
     ...spec.acceptedPhases,
     spec.nextAfterRequirements,
   ];
-  return processPhases.includes(state.phase) ? state.phase : spec.candidateReviewPhase;
+  return processPhases.includes(state.phase) ? state.phase : closurePhase;
 }
 
 export interface RerouteOutcome extends ActionResult {
@@ -637,12 +694,24 @@ export function reroute(
   if (autonomous) {
     authority = "autonomous";
   } else {
-    if (!token || !state.rerouteAuthorityToken || token !== state.rerouteAuthorityToken) {
+    // The token is issued ONLY by the user running /cad-approve-reroute,
+    // and it is bound to the exact pending route: a token granted for one
+    // downgrade cannot authorize a different (possibly harsher) one, and
+    // an ordinary user reply never issues anything.
+    const pendingKey = state.pendingReroute ? routeKey(state.pendingReroute.route) : null;
+    const tokenValid =
+      Boolean(token) &&
+      Boolean(state.rerouteAuthorityToken) &&
+      token === state.rerouteAuthorityToken &&
+      pendingKey !== null &&
+      routeKey(nextRoute) === pendingKey;
+    if (!tokenValid) {
       return {
         ok: false,
         requiresAuthority: true,
-        reason:
-          "reroute drops obligations and needs user authority: call cad_wait_for_user to ask the user for the downgrade, then re-run cad_reroute with the authorityToken the harness issues after their answer",
+        reason: pendingKey
+          ? `reroute drops obligations and needs explicit user authority for ${pendingKey}: ask the user to run /cad-approve-reroute, then re-run cad_reroute with the issued authorityToken`
+          : "reroute drops obligations and needs explicit user authority: record the request with cad_reroute, ask the user to run /cad-approve-reroute, then re-run with the issued authorityToken",
       };
     }
     authority = "user-token";
@@ -656,6 +725,7 @@ export function reroute(
     mutationPolicy: mutationPolicyForPhase(nextPhase, nextRoute),
     pendingReroute: null,
     rerouteAuthorityToken: null,
+    rerouteAuthorityRoute: null,
     updatedAt: nowIso(),
   };
   return {

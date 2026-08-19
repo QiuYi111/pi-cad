@@ -12,13 +12,26 @@ export interface WorkflowSpec {
   nextAfterRequirements: CadPhase;
   /** Phases from which cad_commit_candidate is accepted. */
   sourcePhases: CadPhase[];
-  /** Phase entered after a successful candidate commit. */
+  /**
+   * Review phase a committed candidate lands in, for source phases without
+   * a more specific entry in sourcePhaseReviews (e.g. build → review,
+   * gap_closure → audit).
+   */
   candidateReviewPhase: CadPhase;
+  /**
+   * Per-source-phase review targets. Release processes have two loops:
+   * design sources land in the design review, gap_closure lands in audit.
+   */
+  sourcePhaseReviews?: Partial<Record<CadPhase, CadPhase>>;
   /** Phases where cad_commit_plan moves to a new phase. */
   planNext: Partial<Record<CadPhase, CadPhase>>;
   /** Phases where cad_commit_plan stays in place (e.g. release audit). */
   planStayPhases: CadPhase[];
-  /** Explicit transition table. */
+  /**
+   * Explicit transition table. The "accepted" event's target here is
+   * authoritative: "ready" closes the run, any other phase (e.g. "audit"
+   * when a release suffix follows the design core) continues the process.
+   */
   transitions: Partial<Record<CadPhase, Record<string, CadPhase>>>;
   /** Phases where event "accepted" has procedural evidence guards. */
   acceptedPhases: CadPhase[];
@@ -39,4 +52,9 @@ export interface WorkflowSpec {
   completionGuard?: (state: CadRunState) => string | null;
   /** True when accepted candidate should become the new Project Head. */
   updatesHeadOnAccept?: boolean;
+  /**
+   * Records staled by ENTERING a phase: review regressions invalidate the
+   * downstream record trail so it cannot be reused to skip re-committing.
+   */
+  recordStaleOnEnter?: Partial<Record<CadPhase, string[]>>;
 }

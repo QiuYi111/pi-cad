@@ -7,6 +7,7 @@ import {
   commitRequirements,
   createIntakeState,
   reroute,
+  rerouteIsAutonomous as rerouteIsAutonomousRef,
   route,
 } from "../src/core/state-machine.ts";
 import type { CadRunState, Route } from "../src/shared/protocol.ts";
@@ -163,6 +164,7 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
   const { join } = await import("node:path");
   const pi: any = {
     tools: new Map(),
+    commands: new Map(),
     handlers: new Map(),
     activeTools: [] as string[],
     events: { emit() {}, on() {} },
@@ -174,7 +176,9 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
       list.push(handler);
       pi.handlers.set(event, list);
     },
-    registerCommand() {},
+    registerCommand(name: string, options: any) {
+      pi.commands.set(name, options);
+    },
     setActiveTools() {},
     getActiveTools: () => [] as string[],
     getAllTools: () => [] as unknown[],
@@ -225,17 +229,81 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
     let state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
     assert.ok(state.pendingReroute);
 
-    // 2. The Agent asks the user.
-    await waitTool.execute("f4", { reason: " downgrade to prototype maturity?" }, undefined, undefined, ctx);
-
-    // 3. The user answers: before_agent_start resumes and issues the token.
+    // 2. The Agent asks the user; an ordinary reply issues NOTHING.
+    await waitTool.execute("f4", { reason: "downgrade to prototype maturity?" }, undefined, undefined, ctx);
     const beforeAgentStart = pi.handlers.get("before_agent_start")[0];
     await beforeAgentStart({ systemPrompt: "" }, { cwd });
     state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
     assert.equal(state.status, "active");
-    assert.ok(state.rerouteAuthorityToken, "harness issued the one-time token");
+    assert.ok(!state.rerouteAuthorityToken, "an ordinary user reply must not issue authority");
 
-    // 4. The Agent performs the reroute with the token.
+    // 3. The user approves explicitly via the command.
+    const approve = pi.commands.get("cad-approve-reroute");
+    assert.ok(approve, "cad-approve-reroute command is registered");
+    await approve.handler("", { cwd, hasUI: false });
+    state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
+    assert.ok(state.rerouteAuthorityToken, "the command issued the one-time token");
+    assert.equal(state.rerouteAuthorityRoute, "design/greenfield/part/prototype");
+    let issuedToken = state.rerouteAuthorityToken;
+
+    // 3b. The token is bound to the approved route: a DIFFERENT downgrade
+    // with the same token is rejected, and the stray request VOIDS the
+    // approval (it was granted for another route).
+    const misdirected = await rerouteTool.execute(
+      "f4b",
+      {
+        objective: "design",
+        lineage: "greenfield",
+        structure: "assembly",
+        maturity: "prototype",
+        reason: "trying to spend the token on another route",
+        authorityToken: issuedToken,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(misdirected.content[0].text as string, /needs explicit user authority/);
+    state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
+    assert.ok(!state.rerouteAuthorityToken, "stray request voided the approval");
+    // The old token cannot spend itself on the new pending either.
+    const launder = await rerouteTool.execute(
+      "f4c",
+      {
+        objective: "design",
+        lineage: "greenfield",
+        structure: "assembly",
+        maturity: "prototype",
+        reason: "old token on the new pending",
+        authorityToken: issuedToken,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(launder.content[0].text as string, /needs explicit user authority/);
+
+    // 3c. Re-request the original downgrade and approve it again.
+    const reRequest = await rerouteTool.execute(
+      "f4d",
+      {
+        objective: "design",
+        lineage: "greenfield",
+        structure: "part",
+        maturity: "prototype",
+        reason: "re-requesting the original downgrade",
+        authorityToken: issuedToken,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(reRequest.content[0].text as string, /needs explicit user authority/);
+    await approve.handler("", { cwd, hasUI: false });
+    state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
+    issuedToken = state.rerouteAuthorityToken;
+
+    // 4. The Agent performs the approved reroute with the token.
     const applied = await rerouteTool.execute(
       "f5",
       {
@@ -243,8 +311,8 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
         lineage: "greenfield",
         structure: "part",
         maturity: "prototype",
-        reason: "user agreed to prototype",
-        authorityToken: state.rerouteAuthorityToken,
+        reason: "user approved via /cad-approve-reroute",
+        authorityToken: issuedToken,
       },
       undefined,
       undefined,
@@ -259,23 +327,26 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
     // No target phase was accepted: harness chose the earliest unmet phase.
     assert.equal(state.phase, "build");
 
-    // 5. The used token cannot authorize anything anymore.
-    const replay = await rerouteTool.execute(
+    // 5. The consumed authority is gone: re-requesting the same route now
+    // records a fresh pending with no token (single-use proven at the
+    // state-machine level in the unit test above).
+    const again = await rerouteTool.execute(
       "f6",
       {
         objective: "design",
         lineage: "greenfield",
         structure: "part",
-        maturity: "engineering",
+        maturity: "prototype",
         reason: "token replay attempt",
-        authorityToken: "not-the-token",
+        authorityToken: issuedToken,
       },
       undefined,
       undefined,
       ctx,
     );
-    // upgrading back is autonomous anyway; a stale token is simply ignored.
-    assert.match(replay.content[0].text as string, /autonomous/);
+    assert.match(again.content[0].text as string, /reroute target equals the current route/);
+    state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
+    assert.ok(!state.rerouteAuthorityToken);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -286,4 +357,49 @@ async function currentRunIdOf(cwd: string): Promise<string> {
   const { join } = await import("node:path");
   const project = JSON.parse(readFileSync(join(cwd, ".pi-cad", "project.json"), "utf-8"));
   return project.currentRunId;
+}
+
+test("reroute: dropping a lineage (legacy/hybrid -> greenfield) is never autonomous", () => {
+  const legacy: Route = { objective: "design", lineage: "legacy", structure: "part", maturity: "engineering" };
+  const hybrid: Route = { objective: "design", lineage: "hybrid", structure: "part", maturity: "engineering" };
+  const greenfield: Route = { objective: "design", lineage: "greenfield", structure: "part", maturity: "engineering" };
+  const { rerouteIsAutonomous } = require_reroute_helpers();
+  // "the existing design is too annoying to modify" removes real duties.
+  assert.ok(!rerouteIsAutonomous(legacy, greenfield));
+  assert.ok(!rerouteIsAutonomous(hybrid, greenfield));
+  // Discovering you ARE modifying an existing design only adds duties.
+  assert.ok(rerouteIsAutonomous(greenfield, legacy));
+  assert.ok(rerouteIsAutonomous(greenfield, hybrid));
+  // legacy <-> hybrid swap different lineage duties: authority needed.
+  assert.ok(!rerouteIsAutonomous(legacy, hybrid));
+  assert.ok(!rerouteIsAutonomous(hybrid, legacy));
+  // And through the tool path: legacy -> greenfield is rejected without
+  // explicit approval.
+  const routed = route(null, legacy, "test");
+  if (!routed.ok) throw new Error(routed.reason);
+  const committed = commitRequirements(routed.state, req);
+  if (!committed.ok) throw new Error(committed.reason);
+  // Legacy starts in baseline; commit the frame context there (the record
+  // gate on baseline_understood is exercised in workflows-full tests).
+  const withFrame = commitFrameContextIfOwed(committed.state);
+  const attempt = reroute(withFrame, greenfield, "start fresh instead");
+  assert.equal(attempt.ok, false);
+  if (!attempt.ok) assert.equal(attempt.requiresAuthority, true);
+});
+
+function require_reroute_helpers() {
+  // Local indirection over the import at the top of this file.
+  return { rerouteIsAutonomous: rerouteIsAutonomousRef };
+}
+
+function commitFrameContextIfOwed(state: CadRunState): CadRunState {
+  const r = commitPhaseRecord(state, "frame_context", {
+    axes: [
+      { axis: "x", mapsTo: "x" },
+      { axis: "y", mapsTo: "y" },
+      { axis: "z", mapsTo: "up" },
+    ],
+    howConfirmed: "test",
+  });
+  return r.ok ? r.state : state;
 }

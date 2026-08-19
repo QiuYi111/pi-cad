@@ -11,16 +11,24 @@
  *                          interface_design → part_design → build →
  *                          integration_review; part → part_design → build
  *                          → review — the fast path)
- *   - maturity overlay    (obligations only; never rewrites the process)
+ *   - maturity suffix     (release appends audit → gap_closure → package
+ *                          → final_review AFTER the design core; overlays
+ *                          never replace the design process)
  *
  * The execution engine (WorkflowSpec / state machine) is unchanged: the
  * compiler is a definition mechanism, not a second engine.
+ *
+ * SINGLE SOURCE OF TRUTH: record/evidence enforcement (phaseRecords,
+ * overlay kinds) is derived from obligationsOf(route) in shared/route.ts.
+ * The compiler never maintains its own obligation list — a consistency
+ * test pins that every record obligation maps onto the compiled process
+ * and every phaseRecord traces back to an obligation.
  */
 
 import type { CadPhase, CadRunState, EvidenceRef } from "../shared/protocol.ts";
 import type { CadMaturity, ObligationKey, Route } from "../shared/route.ts";
 import type { DesignRoute } from "../shared/route.ts";
-import { MATURITY_RANK, obligationsOf, RELEASE_WORKSTREAMS } from "../shared/route.ts";
+import { MATURITY_RANK, obligationsOf, recordObligations, RELEASE_WORKSTREAMS } from "../shared/route.ts";
 import type { EvidenceKindsResolver, WorkflowSpec } from "./types.ts";
 
 export interface CompiledProcess extends WorkflowSpec {
@@ -29,8 +37,8 @@ export interface CompiledProcess extends WorkflowSpec {
   obligations: ObligationKey[];
   /**
    * Phase → record types owed BY that phase before progress can continue.
-   * In the assembly chain the record commit is also the phase transition;
-   * in release audit the records are committed without moving.
+   * DERIVED from recordObligations(route): the process enforces exactly
+   * what the route owes, never more, never less.
    */
   phaseRecords: Partial<Record<CadPhase, string[]>>;
 }
@@ -57,7 +65,7 @@ const visualGeometryCompare = (): EvidenceRef["kind"][] => [
   "compare",
 ];
 
-const releaseEvidence = (state: CadRunState): EvidenceRef["kind"][] =>
+const releaseClosureEvidence = (state: CadRunState): EvidenceRef["kind"][] =>
   state.baselineArtifactHash &&
   state.currentArtifactHash &&
   state.baselineArtifactHash !== state.currentArtifactHash
@@ -118,32 +126,8 @@ function convertFragment(): WorkflowSpec {
 }
 
 // ---------------------------------------------------------------------------
-// Design fragments
+// Design core fragments (lineage × structure)
 // ---------------------------------------------------------------------------
-
-interface DesignOptions {
-  /** Source phase: legacy edits existing sources; others author new ones. */
-  sourcePhase: "build" | "modify";
-  /** Review phase: assemblies integrate, parts review. */
-  reviewPhase: "review" | "integration_review";
-  /** Accepted evidence follows lineage, not structure. */
-  accepted: EvidenceRef["kind"][];
-}
-
-function designReviewTransitions(
-  opts: DesignOptions,
-  backToPlan: CadPhase,
-  backToArchitecture: CadPhase,
-): Partial<Record<CadPhase, Record<string, CadPhase>>> {
-  const review: Record<string, CadPhase> = {
-    revise: opts.sourcePhase,
-    local_geometry_issue: opts.sourcePhase,
-    interface_or_detail_issue: backToPlan,
-    architecture_issue: backToArchitecture,
-    accepted: "ready",
-  };
-  return { [opts.reviewPhase]: review };
-}
 
 /**
  * Legacy part: the exact 0.7 modify process. This fragment is the
@@ -218,18 +202,14 @@ function partFragment(lineage: "greenfield" | "hybrid"): WorkflowSpec {
 
 /**
  * Assembly structure fragment:
- *   system_concept → assembly_design → interface_design → part_design →
- *   build → integration_review
+ *   [baseline] → system_concept → assembly_design → interface_design →
+ *   part_design → build/modify → integration_review
  * Legacy assemblies skip system_concept (the architecture already exists)
  * but still owe the assembly_design and interface_contracts records.
  */
 function assemblyFragment(lineage: "greenfield" | "legacy" | "hybrid"): WorkflowSpec {
   const sourcePhase = lineage === "legacy" ? "modify" : "build";
-  const opts: DesignOptions = {
-    sourcePhase,
-    reviewPhase: "integration_review",
-    accepted: lineage === "legacy" ? ["visual", "geometry", "compare"] : ["visual", "geometry"],
-  };
+  const accepted = lineage === "legacy" ? ["visual", "geometry", "compare"] : ["visual", "geometry"];
   const transitions: Partial<Record<CadPhase, Record<string, CadPhase>>> = {
     // Record commits are the only exits from the design phases; they are
     // performed by cad_commit_assembly_design / cad_commit_interface_contracts.
@@ -266,60 +246,118 @@ function assemblyFragment(lineage: "greenfield" | "legacy" | "hybrid"): Workflow
     planStayPhases: [],
     transitions,
     acceptedPhases: ["integration_review"],
-    acceptedEvidence: () => [...opts.accepted],
-    finishEvidence: () => [...opts.accepted],
+    acceptedEvidence: () => [...accepted],
+    finishEvidence: () => [...accepted],
     requiresBaselineInput: lineage !== "greenfield",
     baselineEvidenceRequired: lineage !== "greenfield",
     updatesHeadOnAccept: true,
+    // Review regressions stale the downstream record trail: re-entering
+    // assembly_design invalidates both records, re-entering
+    // interface_design invalidates the contracts — the review loop must
+    // re-commit, never reuse the stale trail.
+    recordStaleOnEnter: {
+      assembly_design: ["assembly_design", "interface_contracts"],
+      interface_design: ["interface_contracts"],
+    },
   };
 }
 
-/**
- * Maturity=release replaces the productive process with the release
- * workstream process (audit → gap_closure → package → final_review),
- * prefixed by the lineage baseline when one is required.
- */
-function releaseFragment(lineage: "greenfield" | "legacy" | "hybrid"): WorkflowSpec {
-  const withBaseline = lineage !== "greenfield";
-  const transitions: Partial<Record<CadPhase, Record<string, CadPhase>>> = {
-    audit: {
-      audit_complete: "gap_closure",
-      workstreams_structurally_closed: "package",
-    },
-    gap_closure: { workstreams_structurally_closed: "package" },
-    package: { package_prepared: "final_review" },
-    final_review: {
-      artifact_issue: "package",
-      engineering_issue: "gap_closure",
-      accepted: "ready",
-    },
-  };
-  if (withBaseline) {
-    transitions.baseline = { baseline_understood: "audit" };
+/** The design core of a route: lineage × structure, ending in its review. */
+function designCoreFragment(route: DesignRoute): WorkflowSpec {
+  if (route.structure === "part") {
+    return route.lineage === "legacy" ? legacyPartFragment() : partFragment(route.lineage);
   }
+  return assemblyFragment(route.lineage);
+}
+
+// ---------------------------------------------------------------------------
+// Maturity suffix (release)
+// ---------------------------------------------------------------------------
+
+/**
+ * Release SUFFIX (whitepaper 6.1): release never replaces the design
+ * process — it appends the workstream process AFTER the design core's
+ * review. The design review's "accepted" event enters the audit instead of
+ * closing the run; final_review's "accepted" closes it.
+ *
+ *   design core ... → review/integration_review --accepted--> audit →
+ *   gap_closure → package → final_review --accepted--> ready
+ */
+const RELEASE_SUFFIX_TRANSITIONS: Partial<Record<CadPhase, Record<string, CadPhase>>> = {
+  audit: {
+    audit_complete: "gap_closure",
+    workstreams_structurally_closed: "package",
+  },
+  gap_closure: { workstreams_structurally_closed: "package" },
+  package: { package_prepared: "final_review" },
+  final_review: {
+    artifact_issue: "package",
+    engineering_issue: "gap_closure",
+    accepted: "ready",
+  },
+};
+
+function appendReleaseSuffix(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
+  const designReview = spec.candidateReviewPhase;
+  const transitions: Partial<Record<CadPhase, Record<string, CadPhase>>> = {
+    ...spec.transitions,
+    ...RELEASE_SUFFIX_TRANSITIONS,
+  };
+  // The design review hands INTO the release suffix instead of closing.
+  const designRow = { ...(transitions[designReview] ?? {}) };
+  designRow.accepted = "audit";
+  transitions[designReview] = designRow;
+
   return {
-    nextAfterRequirements: withBaseline ? "baseline" : "audit",
-    // Gap closure is the productive engineering phase of release work:
-    // edit CAD source, commit a candidate, and let the harness rebuild.
-    sourcePhases: ["gap_closure"],
-    candidateReviewPhase: "audit",
-    planNext: {},
-    planStayPhases: ["audit", "gap_closure", "package"],
+    ...spec,
     transitions,
-    acceptedPhases: ["final_review"],
-    acceptedEvidence: releaseEvidence,
-    finishEvidence: releaseEvidence,
-    requiresBaselineInput: withBaseline,
-    baselineEvidenceRequired: withBaseline,
-    mutationPolicies: { gap_closure: "allowed", package: "allowed" },
-    updatesHeadOnAccept: true,
-    completionGuard: releaseCompletionGuard,
+    // gap_closure is the productive engineering phase of the release
+    // suffix: edit CAD source, commit a candidate, and the harness
+    // rebuilds — those candidates land in audit, not the design review.
+    sourcePhases: [...spec.sourcePhases, "gap_closure"],
+    sourcePhaseReviews: { gap_closure: "audit" },
+    planStayPhases: [...spec.planStayPhases, "audit", "gap_closure", "package"],
+    acceptedPhases: [...spec.acceptedPhases, "final_review"],
+    mutationPolicies: {
+      ...(spec.mutationPolicies ?? {}),
+      gap_closure: "allowed",
+      package: "allowed",
+    },
   };
 }
 
 // ---------------------------------------------------------------------------
 // Compiler
 // ---------------------------------------------------------------------------
+
+/**
+ * Map a record obligation to the phase that owes it. frame_context is owed
+ * by whichever baseline phase the route's objective uses.
+ */
+function recordPhaseFor(recordType: string, route: Route): CadPhase {
+  switch (recordType) {
+    case "frame_context":
+      return route.objective === "convert" ? "source_baseline" : "baseline";
+    case "assembly_design":
+      return "assembly_design";
+    case "interface_contracts":
+      return "interface_design";
+    default:
+      // Unknown record types have no phase to bind to; the consistency
+      // test catches these before they can ship.
+      return "audit";
+  }
+}
+
+function phaseRecordsFor(route: Route): Partial<Record<CadPhase, string[]>> {
+  const byPhase: Partial<Record<CadPhase, string[]>> = {};
+  for (const key of recordObligations(route)) {
+    const recordType = key.slice("record:".length);
+    const phase = recordPhaseFor(recordType, route);
+    byPhase[phase] = [...(byPhase[phase] ?? []), recordType];
+  }
+  return byPhase;
+}
 
 export function compileWorkflow(route: Route): CompiledProcess {
   const obligations = [...obligationsOf(route)].sort();
@@ -330,38 +368,25 @@ export function compileWorkflow(route: Route): CompiledProcess {
   };
 
   if (route.objective === "analyze") {
-    return { ...base, ...analyzeFragment() };
+    return { ...base, ...analyzeFragment(), phaseRecords: phaseRecordsFor(route) };
   }
   if (route.objective === "convert") {
-    return { ...base, ...convertFragment() };
+    return { ...base, ...convertFragment(), phaseRecords: phaseRecordsFor(route) };
   }
 
-  const phaseRecords: Partial<Record<CadPhase, string[]>> = {};
-  let spec: WorkflowSpec;
+  let spec = designCoreFragment(route);
   if (route.maturity === "release") {
-    spec = releaseFragment(route.lineage);
-    if (route.structure === "assembly") {
-      // Assembly records are audited in the release audit phase and must
-      // exist before gap closure starts changing sources. The audit phase
-      // exposes both record tools; committing them does not move the phase.
-      phaseRecords.audit = ["assembly_design", "interface_contracts"];
-    }
-  } else if (route.structure === "part") {
-    spec = route.lineage === "legacy" ? legacyPartFragment() : partFragment(route.lineage);
-  } else {
-    spec = assemblyFragment(route.lineage);
-    phaseRecords.assembly_design = ["assembly_design"];
-    phaseRecords.interface_design = ["interface_contracts"];
+    spec = appendReleaseSuffix(spec, route);
   }
-
-  return { ...base, ...applyOverlays(spec, route), phaseRecords };
+  return { ...base, ...applyOverlays(spec, route), phaseRecords: phaseRecordsFor(route) };
 }
 
 /**
  * Maturity and structure overlays (whitepaper 3.1/6.1): overlays add
  * obligations, never rewrite the process. Evidence obligations turn into
- * extra accepted and finish evidence kinds; record obligations are
- * enforced by the phase record guards.
+ * extra evidence kinds — for release routes only at the FINAL review and
+ * at finish, because the design review's accepted merely hands into the
+ * release suffix and must not demand release deliverables prematurely.
  */
 function applyOverlays(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
   const extra: EvidenceRef["kind"][] = [];
@@ -381,15 +406,26 @@ function applyOverlays(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
     extra.push("presentation");
   }
   if (extra.length === 0) return spec;
-  const wrap =
-    (fn: EvidenceKindsResolver) =>
-    (state: CadRunState): EvidenceRef["kind"][] => {
-      const kinds = fn(state);
-      return [...kinds, ...extra.filter((kind) => !kinds.includes(kind))];
-    };
+
+  const withExtra = (kinds: EvidenceRef["kind"][]): EvidenceRef["kind"][] => [
+    ...kinds,
+    ...extra.filter((kind) => !kinds.includes(kind)),
+  ];
+  const isClosureReview = (state: CadRunState): boolean =>
+    route.maturity !== "release" || state.phase === "final_review";
+
+  const acceptedEvidence: EvidenceKindsResolver = (state) => {
+    const kinds = spec.acceptedEvidence(state);
+    return isClosureReview(state) ? withExtra(kinds) : kinds;
+  };
   return {
     ...spec,
-    acceptedEvidence: wrap(spec.acceptedEvidence),
-    finishEvidence: wrap(spec.finishEvidence),
+    acceptedEvidence,
+    finishEvidence: (state) => withExtra(spec.finishEvidence(state)),
+    // Release workstreams gate the closure only, never the design review.
+    completionGuard:
+      route.maturity === "release"
+        ? (state) => (state.phase === "final_review" ? releaseCompletionGuard(state) : null)
+        : spec.completionGuard,
   };
 }

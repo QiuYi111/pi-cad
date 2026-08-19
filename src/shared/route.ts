@@ -116,22 +116,52 @@ export const RELEASE_WORKSTREAMS = [
 export type ObligationKey = string;
 
 /**
- * Obligations of a route, composed from the structure fragment and the
- * maturity overlay. Cumulative by construction:
+ * Obligations of a route. This function is the SINGLE SOURCE the compiled
+ * process derives its record/evidence enforcement from — the compiler
+ * never maintains a second list, so the two cannot drift apart.
+ *
+ * Cumulative by construction:
  *   prototype ⊆ engineering ⊆ manufacturing ⊆ release
  * and part ⊆ assembly for every maturity.
+ *
+ * Lineage keys exist so that dropping a lineage is never an autonomous
+ * reroute: "the existing design is too annoying to modify, I'll just do a
+ * greenfield" removes real duties (baseline binding, continuity against
+ * the design being replaced) and must require user authority.
  */
 export function obligationsOf(route: Route): Set<ObligationKey> {
   const keys = new Set<ObligationKey>();
+  if (route.objective === "analyze" || route.objective === "convert") {
+    // Baseline-bound objectives owe the confirmed frame context: a
+    // user-supplied artifact's coordinate system is often arbitrary, and
+    // every later interpretation inherits the assumed mapping.
+    keys.add("record:frame_context");
+    return keys;
+  }
   if (route.objective !== "design") return keys;
+
+  // Lineage obligations: dropping a lineage drops these.
+  if (route.lineage !== "greenfield") {
+    keys.add("lineage:baseline");
+    keys.add("record:frame_context");
+  }
+  if (route.lineage === "legacy") {
+    keys.add("lineage:continuity");
+  }
+  if (route.lineage === "hybrid") {
+    keys.add("lineage:retained_interfaces");
+  }
 
   if (route.structure === "assembly") {
     keys.add("evidence:assembly");
     keys.add("evidence:interference");
     keys.add("record:assembly_design");
-    if (MATURITY_RANK[route.maturity] >= MATURITY_RANK.engineering) {
-      keys.add("record:interface_contracts");
-    }
+    // An assembly you can build has defined interfaces, at EVERY maturity —
+    // a prototype is still REAL/BUILDABLE/FUNCTIONAL, so the interface
+    // contracts record is owed from prototype up. (The compiled process
+    // enforces exactly this: the interface_design phase exists for all
+    // assembly routes.)
+    keys.add("record:interface_contracts");
   }
   if (MATURITY_RANK[route.maturity] >= MATURITY_RANK.manufacturing) {
     keys.add("evidence:drawing");

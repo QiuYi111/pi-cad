@@ -152,6 +152,7 @@ function toolsForPhaseBase(phase: CadPhase): string[] {
       return [...COGNITIVE_TOOLS, "cad_commit_interface_contracts", "cad_wait_for_user"];
     case "baseline":
     case "source_baseline":
+      return [...COGNITIVE_TOOLS, ...SIMULATION_EVIDENCE_TOOLS, "cad_commit_frame_context", "cad_wait_for_user"];
     case "investigate":
     case "explain":
     case "concept":

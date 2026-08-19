@@ -55,9 +55,14 @@ test("compiler: legacy part matches the 0.7 modify process exactly", () => {
   assert.equal(legacyPart.requiresBaselineInput, true);
   assert.equal(legacyPart.baselineEvidenceRequired, true);
   assert.equal(legacyPart.updatesHeadOnAccept, true);
-  // No records owed by a part route.
-  assert.deepEqual(legacyPart.obligations, []);
-  assert.deepEqual(legacyPart.phaseRecords, {});
+  // Lineage obligations: dropping legacy would drop these, so the reroute
+  // can never be autonomous; frame context is confirmed in baseline.
+  assert.deepEqual(legacyPart.obligations, [
+    "lineage:baseline",
+    "lineage:continuity",
+    "record:frame_context",
+  ]);
+  assert.deepEqual(legacyPart.phaseRecords, { baseline: ["frame_context"] });
 });
 
 test("compiler: fast path — greenfield part is four phases with no concept exploration", () => {
@@ -108,22 +113,51 @@ test("compiler: assembly structure injects the full design chain", () => {
   assert.equal(hybridAssembly.transitions.baseline?.baseline_understood, "system_concept");
 });
 
-test("compiler: maturity=release compiles the workstream process", () => {
+test("compiler: release is a suffix on the design core, never a replacement", () => {
+  // Greenfield part + release: the DESIGN CORE runs first (fast path), the
+  // design review's accepted hands INTO the suffix instead of closing.
   const release = compileWorkflow(design("greenfield", "part", "release"));
-  assert.equal(release.nextAfterRequirements, "audit");
-  assert.deepEqual(release.sourcePhases, ["gap_closure"]);
-  assert.deepEqual(release.acceptedPhases, ["final_review"]);
+  assert.equal(release.nextAfterRequirements, "part_design");
+  assert.deepEqual(release.sourcePhases, ["build", "gap_closure"]);
+  assert.equal(release.sourcePhaseReviews?.gap_closure, "audit");
+  assert.deepEqual(release.acceptedPhases, ["review", "final_review"]);
+  assert.equal(release.transitions.review?.accepted, "audit");
+  assert.equal(release.transitions.final_review?.accepted, "ready");
+  assert.equal(release.transitions.audit?.audit_complete, "gap_closure");
+  assert.equal(release.transitions.package?.package_prepared, "final_review");
   assert.equal(release.mutationPolicies?.gap_closure, "allowed");
+  assert.equal(release.mutationPolicies?.package, "allowed");
   assert.ok(release.completionGuard);
+
+  // Greenfield assembly + release: the full structure chain is NOT
+  // replaced — records bind their own phases, audit only audits.
+  const releaseAssembly = compileWorkflow(design("greenfield", "assembly", "release"));
+  assert.equal(releaseAssembly.nextAfterRequirements, "system_concept");
+  assert.equal(releaseAssembly.transitions.assembly_design?.assembly_design_committed, "interface_design");
+  assert.equal(releaseAssembly.transitions.integration_review?.accepted, "audit");
+  assert.deepEqual(releaseAssembly.phaseRecords, {
+    assembly_design: ["assembly_design"],
+    interface_design: ["interface_contracts"],
+  });
+
+  // Legacy + release keeps the lineage baseline and the modify loop.
   const legacyRelease = compileWorkflow(design("legacy", "part", "release"));
   assert.equal(legacyRelease.nextAfterRequirements, "baseline");
-  assert.equal(legacyRelease.transitions.baseline?.baseline_understood, "audit");
+  assert.equal(legacyRelease.transitions.baseline?.baseline_understood, "plan");
+  assert.deepEqual(legacyRelease.sourcePhases, ["modify", "gap_closure"]);
   assert.equal(legacyRelease.requiresBaselineInput, true);
-  // Release+assembly audits the records in the audit phase.
-  const releaseAssembly = compileWorkflow(design("greenfield", "assembly", "release"));
-  assert.deepEqual(releaseAssembly.phaseRecords, {
-    audit: ["assembly_design", "interface_contracts"],
-  });
+
+  // The maturity overlays gate the CLOSURE review only: the design review
+  // accepted must not demand release deliverables prematurely.
+  const designReviewState = { phase: "review" } as never;
+  assert.ok(!release.acceptedEvidence(designReviewState).includes("presentation"));
+  assert.ok(!release.acceptedEvidence(designReviewState).includes("drawing"));
+  const finalState = { phase: "final_review" } as never;
+  assert.ok(release.acceptedEvidence(finalState).includes("presentation"));
+  assert.ok(release.acceptedEvidence(finalState).includes("drawing"));
+  // Workstream guard runs at the closure only.
+  assert.equal(release.completionGuard?.(designReviewState), null);
+  assert.ok(release.completionGuard?.(finalState));
 });
 
 test("obligations: maturity chain is cumulative per structure", () => {
@@ -144,17 +178,31 @@ test("obligations: maturity chain is cumulative per structure", () => {
 
   assert.ok(assembly("prototype").includes("evidence:interference"));
   assert.ok(assembly("prototype").includes("record:assembly_design"));
-  assert.ok(!assembly("prototype").includes("record:interface_contracts"));
-  assert.ok(assembly("engineering").includes("record:interface_contracts"));
+  // An assembly you can build has defined interfaces at every maturity —
+  // the compiled process enforces the interface_design phase for all of
+  // them, so the obligation exists from prototype up.
+  assert.ok(assembly("prototype").includes("record:interface_contracts"));
   assert.ok(part("manufacturing").includes("evidence:drawing"));
   assert.ok(part("release").includes("workstream:bom"));
   assert.ok(part("release").includes("presentation:exploded"));
   // A prototype is not a concept: obligations never drop to zero for
   // assemblies.
   assert.ok(assembly("prototype").length > 0);
-  // analyze/convert owe nothing.
-  assert.equal(obligationsOf({ objective: "analyze" }).size, 0);
-  assert.equal(obligationsOf({ objective: "convert" }).size, 0);
+  // Baseline-bound objectives owe the frame context record.
+  assert.deepEqual([...obligationsOf({ objective: "analyze" })].sort(), ["record:frame_context"]);
+  assert.deepEqual([...obligationsOf({ objective: "convert" })].sort(), ["record:frame_context"]);
+  // Lineage obligations: legacy/hybrid owe baseline + frame context, and
+  // their specific continuity duties.
+  const legacyPartKeys = obligationsOf(design("legacy", "part", "engineering"));
+  assert.ok(legacyPartKeys.has("lineage:baseline"));
+  assert.ok(legacyPartKeys.has("lineage:continuity"));
+  assert.ok(legacyPartKeys.has("record:frame_context"));
+  const hybridPartKeys = obligationsOf(design("hybrid", "part", "engineering"));
+  assert.ok(hybridPartKeys.has("lineage:retained_interfaces"));
+  assert.ok(!hybridPartKeys.has("lineage:continuity"));
+  const greenfieldKeys = obligationsOf(design("greenfield", "part", "engineering"));
+  assert.ok(!greenfieldKeys.has("lineage:baseline"));
+  assert.ok(!greenfieldKeys.has("record:frame_context"));
 });
 
 test("obligations: reroute monotonicity (part->assembly autonomous, downgrade not)", () => {
@@ -243,4 +291,73 @@ test("maturity overlay: assembly engineering adds record obligations and review 
   assert.ok(eng.acceptedEvidence({} as never).includes("assembly"));
   assert.ok(!proto.acceptedEvidence({} as never).includes("drawing"));
   assert.ok(compileWorkflow(design("greenfield", "assembly", "manufacturing")).acceptedEvidence({} as never).includes("drawing"));
+});
+
+test("consistency: obligations and compiled process are the same source of truth", () => {
+  // Every record obligation maps onto a phase that exists in the compiled
+  // process, and every phaseRecord traces back to an obligation — the two
+  // can never drift apart silently.
+  const lineages = ["greenfield", "legacy", "hybrid"] as const;
+  const structures = ["part", "assembly"] as const;
+  const maturities = ["prototype", "engineering", "manufacturing", "release"] as const;
+  for (const lineage of lineages) {
+    for (const structure of structures) {
+      for (const maturity of maturities) {
+        const route = design(lineage, structure, maturity);
+        const compiled = compileWorkflow(route);
+        // 1. obligations in the compiled process == obligationsOf(route).
+        assert.deepEqual(
+          [...compiled.obligations].sort(),
+          [...obligationsOf(route)].sort(),
+        );
+        // 2. every record obligation has a phase in the process.
+        const phasesWithRecords = new Set(Object.keys(compiled.phaseRecords));
+        for (const key of recordObligations(route)) {
+          const recordType = key.slice("record:".length);
+          const owning = [...phasesWithRecords].filter((phase) =>
+            (compiled.phaseRecords[phase as keyof typeof compiled.phaseRecords] ?? []).includes(recordType),
+          );
+          assert.equal(
+            owning.length,
+            1,
+            `${routeKey(route)}: record ${recordType} owned by ${owning.length} phases`,
+          );
+          // The owning phase is reachable in the process (it is the entry
+          // point or appears in some transition row).
+          const phase = owning[0];
+          const reachable =
+            compiled.nextAfterRequirements === phase ||
+            Object.values(compiled.transitions).some((row) => Object.values(row ?? {}).includes(phase as never));
+          assert.ok(reachable, `${routeKey(route)}: phase ${phase} owning ${recordType} is unreachable`);
+        }
+        // 3. every phaseRecord traces back to an obligation.
+        const owed = new Set(recordObligations(route));
+        for (const records of Object.values(compiled.phaseRecords)) {
+          for (const recordType of records ?? []) {
+            assert.ok(
+              owed.has(`record:${recordType}`),
+              `${routeKey(route)}: phaseRecords demand ${recordType} without an obligation`,
+            );
+          }
+        }
+      }
+    }
+  }
+  // Objective routes owe frame_context and bind it to their baseline phase.
+  const analyze = compileWorkflow({ objective: "analyze" });
+  assert.deepEqual(analyze.phaseRecords, { baseline: ["frame_context"] });
+  const convert = compileWorkflow({ objective: "convert" });
+  assert.deepEqual(convert.phaseRecords, { source_baseline: ["frame_context"] });
+});
+
+test("compiler: review regressions stale the downstream record trail", () => {
+  const assembly = compileWorkflow(design("greenfield", "assembly", "engineering"));
+  assert.deepEqual(assembly.recordStaleOnEnter?.assembly_design, [
+    "assembly_design",
+    "interface_contracts",
+  ]);
+  assert.deepEqual(assembly.recordStaleOnEnter?.interface_design, ["interface_contracts"]);
+  // Part routes have no records to stale.
+  const part = compileWorkflow(design("greenfield", "part", "engineering"));
+  assert.equal(part.recordStaleOnEnter, undefined);
 });

@@ -31,6 +31,7 @@ export const CONTROL_TOOLS = [
   "cad_route",
   "cad_reroute",
   "cad_commit_requirements",
+  "cad_commit_frame_context",
   "cad_commit_plan",
   "cad_commit_assembly_design",
   "cad_commit_interface_contracts",
@@ -234,11 +235,15 @@ export interface CadRunState {
    */
   pendingReroute?: { route: Route; reason: string } | null;
   /**
-   * One-time downgrade authority, issued by the harness only after a real
-   * user turn resolved a cad_wait_for_user pause. Consumed on use; never
-   * set from Agent input.
+   * One-time downgrade authority, issued by the harness ONLY when the user
+   * runs /cad-approve-reroute. Consumed on use; never set from Agent input.
    */
   rerouteAuthorityToken?: string | null;
+  /**
+   * Route key the authority token was issued for: the token cannot
+   * authorize a different reroute than the one the user approved.
+   */
+  rerouteAuthorityRoute?: string | null;
 
   requirementsVersion?: string;
   planVersion?: string;

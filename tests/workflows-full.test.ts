@@ -12,6 +12,22 @@ import {
   waitForUser,
   resumeFromUser,
 } from "../src/core/state-machine.ts";
+
+const frameContext = {
+  axes: [
+    { axis: "x", mapsTo: "machine X (rail direction)" },
+    { axis: "y", mapsTo: "machine Y" },
+    { axis: "z", mapsTo: "machine up" },
+  ],
+  howConfirmed: "user confirmed the bolt-pattern face is the mounting plane",
+};
+
+function commitFrameContext(state: CadRunState) {
+  const r = commitPhaseRecord(state, "frame_context", frameContext);
+  assert.equal(r.ok, true, r.ok ? "" : r.reason);
+  if (!r.ok) throw new Error(r.reason);
+  return r.state;
+}
 import type { CadRunState, CadRequirements, Route } from "../src/shared/protocol.ts";
 
 const req: CadRequirements = {
@@ -85,6 +101,7 @@ test("analyze path: baseline -> investigate -> explain -> ready -> done", () => 
   assert.equal(c.ok, true); if (!c.ok) return;
   let state: CadRunState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
+  state = commitFrameContext(state);
   let t = transition(state, "baseline_understood", "understood");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "investigate");
@@ -106,6 +123,7 @@ test("modify path: plan -> modify -> review -> accepted requires compare evidenc
   assert.equal(c.ok, true); if (!c.ok) return;
   let state: CadRunState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
+  state = commitFrameContext(state);
   let t = transition(state, "baseline_understood", "understood");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "plan");
@@ -127,6 +145,7 @@ test("hybrid part path: baseline -> concept -> part_design -> build -> review ->
   assert.equal(c.ok, true); if (!c.ok) return;
   let state: CadRunState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
+  state = commitFrameContext(state);
   let t = transition(state, "baseline_understood", "understood");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "concept");
@@ -153,6 +172,7 @@ test("convert path: source_baseline -> transform_plan -> convert -> compare -> a
   let state: CadRunState = { ...c.state, baselineArtifactPath: "old.step", baselineArtifactHash: "baseline-hash" };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
   assert.equal(state.phase, "source_baseline");
+  state = commitFrameContext(state);
   let t = transition(state, "baseline_understood", "understood");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "transform_plan");
@@ -167,11 +187,26 @@ test("convert path: source_baseline -> transform_plan -> convert -> compare -> a
   assert.equal(t.state.phase, "ready");
 });
 
-test("release path requires all workstream statuses before finish", () => {
+test("release path: design core runs first, then the release suffix closes", () => {
   const c = routeTo("release");
   assert.equal(c.ok, true); if (!c.ok) return;
   let state = c.state;
-  assert.equal(state.phase, "audit");
+  // Greenfield part + release: the DESIGN CORE (fast path) runs first —
+  // release never replaces the design process.
+  assert.equal(state.phase, "part_design");
+  const planned = commitPlan(state, minimalPlan);
+  assert.equal(planned.ok, true); if (!planned.ok) return;
+  assert.equal(planned.state.phase, "build");
+  state = candidate(planned.state);
+  assert.equal(state.phase, "review");
+  // The design review accepted needs the core evidence only — drawing and
+  // presentation gate the CLOSURE (final_review), not the hand-off.
+  state = withEvidence(state, ["visual", "geometry"]);
+  let t = transition(state, "accepted", "design accepted");
+  assert.equal(t.ok, true); if (!t.ok) return;
+  assert.equal(t.state.phase, "audit");
+  assert.equal(t.state.status, "active");
+  state = t.state;
   const ws = [
     "design_definition",
     "manufacturing_definition",
@@ -186,7 +221,7 @@ test("release path requires all workstream statuses before finish", () => {
   const p = commitPlan(state, { summary: "release audit", protected: [], plannedChanges: [], interfaces: [], datums: [], reviewPlan: [], workstreams: ws });
   assert.equal(p.ok, true); if (!p.ok) return;
   state = p.state;
-  let t = transition(state, "audit_complete", "gaps closed");
+  t = transition(state, "audit_complete", "gaps closed");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "gap_closure");
   state = candidate(t.state);
@@ -283,6 +318,7 @@ test("analyze required simulation evidence is bound to the baseline artifact", (
     baselineArtifactHash: "baseline-hash",
   };
   state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
+  state = commitFrameContext(state);
   let t = transition(state, "baseline_understood", "understood baseline");
   assert.equal(t.ok, true); if (!t.ok) return;
   t = transition(t.state, "cause_understood", "cause understood");
@@ -501,4 +537,125 @@ test("release closure requires presentation deliverables in current evidence", a
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
+});
+
+test("frame context gates baseline_understood for every baseline-bound route", () => {
+  const r = route(null, { objective: "design", lineage: "legacy", structure: "part", maturity: "engineering" }, "t");
+  assert.equal(r.ok, true); if (!r.ok) return;
+  const c = commitRequirements(r.state, req);
+  assert.equal(c.ok, true); if (!c.ok) return;
+  let state: CadRunState = {
+    ...c.state,
+    baselineArtifactPath: "old.step",
+    baselineArtifactHash: "baseline-hash",
+  };
+  state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
+  // Without the frame context record, leaving baseline is blocked.
+  const blocked = transition(state, "baseline_understood", "skipped the frame question");
+  assert.equal(blocked.ok, false);
+  if (!blocked.ok) assert.match(blocked.reason, /frame_context/);
+  state = commitFrameContext(state);
+  const t = transition(state, "baseline_understood", "frame confirmed with user");
+  assert.equal(t.ok, true); if (!t.ok) return;
+  assert.equal(t.state.phase, "plan");
+  assert.deepEqual(t.state.phaseRecords, ["frame_context"]);
+});
+
+test("analyze routes also owe the frame context before leaving baseline", () => {
+  const c = routeTo("analyze");
+  assert.equal(c.ok, true); if (!c.ok) return;
+  let state: CadRunState = {
+    ...c.state,
+    baselineArtifactPath: "old.step",
+    baselineArtifactHash: "baseline-hash",
+  };
+  state = withEvidence(state, ["visual", "geometry"], "baseline-hash");
+  const blocked = transition(state, "baseline_understood", "no frame context");
+  assert.equal(blocked.ok, false);
+  state = commitFrameContext(state);
+  const t = transition(state, "baseline_understood", "confirmed");
+  assert.equal(t.ok, true); if (!t.ok) return;
+  assert.equal(t.state.phase, "investigate");
+});
+
+test("review regression stales downstream records and forces re-commit", () => {
+  const r = route(
+    null,
+    { objective: "design", lineage: "greenfield", structure: "assembly", maturity: "engineering" },
+    "staleness",
+  );
+  assert.equal(r.ok, true); if (!r.ok) return;
+  const c = commitRequirements(r.state, req);
+  assert.equal(c.ok, true); if (!c.ok) return;
+  let state = c.state;
+  let t = transition(state, "direction_selected", "chosen");
+  assert.equal(t.ok, true); if (!t.ok) return;
+  const design = commitPhaseRecord(t.state, "assembly_design", {
+    summary: "v1", modules: [{ name: "a", purpose: "x" }, { name: "b", purpose: "y" }],
+    datums: [{ name: "A", kind: "primary", definedBy: "f" }],
+    sequence: [{ step: 1, installs: ["a"] }],
+  });
+  assert.equal(design.ok, true); if (!design.ok) return;
+  const contracts = commitPhaseRecord(design.state, "interface_contracts", {
+    contracts: [{ id: "i", a: "a", b: "b", purpose: "x", locating: "x", dof: "x", fasteners: "x", fits: "x", assemblyDirection: "+Z", toolAccess: "x" }],
+  });
+  assert.equal(contracts.ok, true); if (!contracts.ok) return;
+  assert.deepEqual(contracts.state.phaseRecords, ["assembly_design", "interface_contracts"]);
+
+  // Simulate being in integration_review (candidate path is exercised
+  // elsewhere); the architecture regression sends the run back...
+  const regression = transition({ ...contracts.state, phase: "integration_review" }, "architecture_issue", "decomposition wrong");
+  assert.equal(regression.ok, true); if (!regression.ok) return;
+  // ...and BOTH records are stale: the trail cannot be reused.
+  assert.equal(regression.state.phase, "assembly_design");
+  assert.deepEqual(regression.state.phaseRecords, []);
+  const journal = regression.events.map((e) => e.type);
+  assert.ok(journal.includes("PhaseRecordsStaled"));
+
+  // Re-committing the assembly design is required to progress again; a
+  // plan commit from assembly_design is still not valid.
+  const premature = commitPlan(regression.state, minimalPlan);
+  assert.equal(premature.ok, false);
+  const redesign = commitPhaseRecord(regression.state, "assembly_design", {
+    summary: "v2", modules: [{ name: "a2", purpose: "x" }, { name: "b2", purpose: "y" }],
+    datums: [{ name: "A", kind: "primary", definedBy: "f" }],
+    sequence: [{ step: 1, installs: ["a2"] }],
+  });
+  assert.equal(redesign.ok, true); if (!redesign.ok) return;
+  assert.deepEqual(redesign.state.phaseRecords, ["assembly_design"]);
+  assert.equal(redesign.state.phase, "interface_design");
+
+  // interface_contracts was staled too: entering interface_design fresh
+  // means the contracts must be committed again before part_design.
+  const recontracts = commitPhaseRecord(redesign.state, "interface_contracts", {
+    contracts: [{ id: "i2", a: "a2", b: "b2", purpose: "x", locating: "x", dof: "x", fasteners: "x", fits: "x", assemblyDirection: "+Z", toolAccess: "x" }],
+  });
+  assert.equal(recontracts.ok, true);
+});
+
+test("interface_or_detail_issue stales only the interface contracts", () => {
+  const r = route(
+    null,
+    { objective: "design", lineage: "greenfield", structure: "assembly", maturity: "engineering" },
+    "staleness2",
+  );
+  assert.equal(r.ok, true); if (!r.ok) return;
+  const c = commitRequirements(r.state, req);
+  assert.equal(c.ok, true); if (!c.ok) return;
+  let t = transition(c.state, "direction_selected", "chosen");
+  assert.equal(t.ok, true); if (!t.ok) return;
+  const design = commitPhaseRecord(t.state, "assembly_design", {
+    summary: "v1", modules: [{ name: "a", purpose: "x" }, { name: "b", purpose: "y" }],
+    datums: [{ name: "A", kind: "primary", definedBy: "f" }],
+    sequence: [{ step: 1, installs: ["a"] }],
+  });
+  const contracts = commitPhaseRecord(design.state, "interface_contracts", {
+    contracts: [{ id: "i", a: "a", b: "b", purpose: "x", locating: "x", dof: "x", fasteners: "x", fits: "x", assemblyDirection: "+Z", toolAccess: "x" }],
+  });
+  assert.equal(contracts.ok, true); if (!contracts.ok) return;
+  const regression = transition({ ...contracts.state, phase: "integration_review" }, "interface_or_detail_issue", "contract wrong");
+  assert.equal(regression.ok, true); if (!regression.ok) return;
+  assert.equal(regression.state.phase, "interface_design");
+  // The assembly design record SURVIVES: only the contracts are stale.
+  assert.deepEqual(regression.state.phaseRecords, ["assembly_design"]);
 });
