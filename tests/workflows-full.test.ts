@@ -62,7 +62,11 @@ function candidate(state: CadRunState) {
   return r.state;
 }
 
-function withEvidence(state: CadRunState, kinds: Array<"visual" | "geometry" | "compare">, hash = "artifact-hash") {
+function withEvidence(
+  state: CadRunState,
+  kinds: Array<"visual" | "geometry" | "compare" | "assembly" | "drawing">,
+  hash = "artifact-hash",
+) {
   return {
     ...state,
     evidence: kinds.map((kind) => ({
@@ -187,7 +191,8 @@ test("release path requires all workstream statuses before finish", () => {
   assert.equal(t.state.phase, "gap_closure");
   state = candidate(t.state);
   assert.equal(state.phase, "audit");
-  state = withEvidence(state, ["visual", "geometry"]);
+  // Maturity overlay: release owes drawing evidence on top of visual/geometry.
+  state = withEvidence(state, ["visual", "geometry", "drawing"] as never);
   t = transition(state, "workstreams_structurally_closed", "closed");
   assert.equal(t.ok, true); if (!t.ok) return;
   assert.equal(t.state.phase, "package");
@@ -204,7 +209,7 @@ test("release path requires all workstream statuses before finish", () => {
     currentArtifactPath: "build/release.step",
     currentArtifactHash: "artifact-hash",
   };
-  const f = finish(withEvidence(readyWithArtifact, ["visual", "geometry"]));
+  const f = finish(withEvidence(readyWithArtifact, ["visual", "geometry", "drawing"]));
   assert.equal(f.ok, true); if (!f.ok) return;
   assert.equal(f.state.phase, "done");
 });
