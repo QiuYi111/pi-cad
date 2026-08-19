@@ -13,7 +13,7 @@ test("project head persists across runs and current run can return to idle", asy
     const project = new CadProjectStore(cwd);
     const first = await project.createRun();
     const firstState = createIntakeState({ runId: first.runId, projectId: project.projectId });
-    firstState.workflow = "greenfield";
+    firstState.route = { objective: "design", lineage: "hybrid", structure: "part", maturity: "prototype" };
     firstState.phase = "done";
     firstState.status = "done";
     firstState.currentSourcePath = "models/planetary.py";
@@ -54,10 +54,9 @@ test("legacy V0 single-state layout migrates into project + runs", async () => {
     const legacy = {
       schemaVersion: 2,
       taskId: "legacy-task",
-      workflow: "quick",
+      route: null,
       phase: "done",
       status: "done",
-      maturity: "prototype",
       mutationPolicy: "read_only",
       evidence: [],
       staleEvidence: [],

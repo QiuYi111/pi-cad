@@ -42,6 +42,21 @@ export type PersistFn = (
   events: Array<{ type: string; data?: unknown }>,
 ) => Promise<void>;
 
+/**
+ * Whether candidate commits auto-record compare evidence against the
+ * baseline. 0.8 derives this from the route: convert objective, legacy
+ * design lineage, and release maturity all compare (matching the 0.7
+ * modify/convert/release behavior exactly; hybrid keeps its 0.7
+ * no-compare semantics).
+ */
+function wantsCompareEvidence(state: CadRunState): boolean {
+  const route = state.route;
+  if (!route) return false;
+  if (route.objective === "convert") return true;
+  if (route.objective !== "design") return false;
+  return route.lineage === "legacy" || route.maturity === "release";
+}
+
 export interface AutoActionResult {
   state: CadRunState;
   images: Array<{ type: "image"; data: string; mimeType: string }>;
@@ -71,7 +86,7 @@ export async function runBaselineAuto(
     baselineArtifactPath: artifactRel,
     baselineArtifactHash: artifactHash,
   };
-  if (next.workflow === "release") {
+  if (next.route?.objective === "design" && next.route.maturity === "release") {
     next = {
       ...next,
       currentSourcePath: artifactRel,
@@ -171,9 +186,27 @@ export async function runCandidateAuto(
     warnings.push(`geometry auto-action failed: ${geometryPayload(geometryEnvelope).error ?? "unknown error"}`);
   }
 
+  // Assembly structure routes owe assembly-tree evidence for the current
+  // candidate version (obligation "evidence:assembly"); the harness
+  // observes it automatically, the Agent interprets it.
+  let assemblyRecorded = false;
+  if (state.route?.objective === "design" && state.route.structure === "assembly") {
+    const treeEnvelope = await assemblyTree(cwd, stepPath);
+    if (treeEnvelope.ok) {
+      next = addEvidence(
+        next,
+        evidenceFromEnvelope("assembly", "cad_assembly_tree", treeEnvelope, artifactHash, sourceHash),
+      );
+      assemblyRecorded = true;
+      events.push({ type: "EvidenceCreated", data: { kind: "assembly", artifactHash } });
+    } else {
+      warnings.push(`assembly tree auto-action failed: ${String(treeEnvelope.payload.error ?? "unknown error")}`);
+    }
+  }
+
   let compareRecorded = false;
   if (
-    ["modify", "convert", "release"].includes(state.workflow ?? "") &&
+    wantsCompareEvidence(state) &&
     state.baselineArtifactPath &&
     existsSync(resolve(cwd, state.baselineArtifactPath))
   ) {
@@ -228,7 +261,7 @@ export async function runCandidateAuto(
     ? await readImageContents((visualPayload(visualEnvelope).views ?? []).map((view) => view.path))
     : [];
   const summary = [
-    `Candidate ${label} committed. Harness executed build, visual, geometry${compareRecorded ? ", compare" : ""}.`,
+    `Candidate ${label} committed. Harness executed build, visual, geometry${assemblyRecorded ? ", assembly tree" : ""}${compareRecorded ? ", compare" : ""}.`,
     `- ${buildEnvelope.ok ? "build: ok" : "build: failed"}`,
     `- ${visualEnvelope.ok ? "visual: ok" : "visual: failed"}`,
     `- ${geometryEnvelope.ok ? "geometry: ok" : "geometry: failed"}`,

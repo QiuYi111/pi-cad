@@ -69,7 +69,19 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
     const transition = pi.tools.get("cad_transition")!;
     const finish = pi.tools.get("cad_finish")!;
 
-    const routed = await route.execute("t1", { workflow: "quick", reason: "fully specified plate" }, undefined, undefined, ctx);
+    const routed = await route.execute(
+      "t1",
+      {
+        objective: "design",
+        lineage: "greenfield",
+        structure: "part",
+        maturity: "prototype",
+        reason: "fully specified plate",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
     assert.match(routed.content[0].text!, /REQUIREMENTS/);
 
     const committed = await requirements.execute(
@@ -81,13 +93,23 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
         preferences: [],
         assumptions: [],
         openUnknowns: [],
-        maturity: "prototype",
       },
       undefined,
       undefined,
       ctx,
     );
-    assert.match(committed.content[0].text!, /BUILD/);
+    assert.match(committed.content[0].text!, /PART DESIGN/);
+
+    // Fast path: part_design is the plan phase; committing the plan enters build.
+    const plan = pi.tools.get("cad_commit_plan")!;
+    const planned = await plan.execute(
+      "t2b",
+      { summary: "plate plan", protected: [], plannedChanges: [], interfaces: [], datums: [], reviewPlan: [] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(planned.content[0].text!, /BUILD/);
 
     mkdirSync(join(cwd, "models"), { recursive: true });
     writeFileSync(join(cwd, "models", "plate.py"), fixture);
@@ -118,7 +140,13 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
 
     const illegalRoute = await route.execute(
       "t5",
-      { workflow: "quick", reason: "trying to re-route from review" },
+      {
+        objective: "design",
+        lineage: "greenfield",
+        structure: "part",
+        maturity: "prototype",
+        reason: "trying to re-route from review",
+      },
       undefined,
       undefined,
       ctx,

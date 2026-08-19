@@ -73,7 +73,7 @@ export async function verifyCurrentArtifacts(
   cwd: string,
   state: CadRunState,
 ): Promise<string | null> {
-  if (state.workflow === "analyze") {
+  if (state.route?.objective === "analyze") {
     if (!state.baselineArtifactPath) return "baseline artifact path is not bound";
     const baseline = resolve(cwd, state.baselineArtifactPath);
     if (!existsSync(baseline)) return `baseline artifact is missing: ${state.baselineArtifactPath}`;

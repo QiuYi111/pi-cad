@@ -8,7 +8,14 @@ import { ProjectStateStore } from "../src/shared/store.ts";
 import { route as routeQuick } from "../src/core/state-machine.ts";
 
 test("before_agent_start restores canonical state and active tool policy after restart", async () => {
-  const pi = {
+  const quickRoute = {
+  objective: "design",
+  lineage: "greenfield",
+  structure: "part",
+  maturity: "prototype",
+} as const;
+
+const pi = {
     tools: [] as string[],
     commands: [] as string[],
     handlers: new Map<string, Function[]>(),
@@ -45,11 +52,11 @@ test("before_agent_start restores canonical state and active tool policy after r
   try {
     const store = new ProjectStateStore(cwd);
     await store.createRun({ runId: "restore-run" });
-    const routed = routeQuick(null, "quick", "fully specified plate");
+    const routed = routeQuick(null, quickRoute, "fully specified plate");
     assert.ok(routed.ok);
     if (!routed.ok) return;
     await store.save({ ...routed.state, runId: "restore-run" });
-    await store.appendEvent("WorkflowRouted", { workflow: "quick" });
+    await store.appendEvent("RouteSelected", { route: quickRoute });
 
     const handler = pi.handlers.get("before_agent_start")![0] as Function;
     const result = (await handler(

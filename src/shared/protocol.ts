@@ -5,20 +5,33 @@
  * engineering semantics ("this is a motor mount", "the design is safe").
  */
 
-export const CAD_STATE_SCHEMA_VERSION = 3;
-export const ALL_WORKFLOWS = [
-  "quick",
-  "analyze",
-  "modify",
-  "greenfield",
-  "hybrid",
-  "convert",
-  "release",
-] as const;
+import type { Route } from "./route.ts";
+
+export type { Route } from "./route.ts";
+export {
+  isRoute,
+  routeKey,
+  routeLabel,
+  obligationsOf,
+  recordObligations,
+  MATURITIES,
+  RELEASE_WORKSTREAMS,
+} from "./route.ts";
+export type {
+  RouteObjective,
+  RouteLineage,
+  RouteStructure,
+  CadMaturity,
+  ObligationKey,
+} from "./route.ts";
+
+export const CAD_STATE_SCHEMA_VERSION = 4;
 export const CONTROL_TOOLS = [
   "cad_route",
   "cad_commit_requirements",
   "cad_commit_plan",
+  "cad_commit_assembly_design",
+  "cad_commit_interface_contracts",
   "cad_commit_candidate",
   "cad_transition",
   "cad_wait_for_user",
@@ -57,7 +70,6 @@ export const SIMULATION_TOOLS = [
 /** Tools whose evidence obligations are case-scoped (opaque simulation cases). */
 export const SIMULATION_CASE_TOOLS = SIMULATION_TOOLS;
 
-export type CadWorkflow = (typeof ALL_WORKFLOWS)[number];
 export type CadPhase =
   | "intake"
   | "requirements"
@@ -72,7 +84,6 @@ export type CadPhase =
   | "modify"
   | "concept"
   | "domain_analysis"
-  | "intent"
   | "source_baseline"
   | "transform_plan"
   | "convert"
@@ -80,15 +91,14 @@ export type CadPhase =
   | "audit"
   | "gap_closure"
   | "package"
-  | "final_review";
+  | "final_review"
+  // 0.8 structure fragment phases
+  | "system_concept"
+  | "assembly_design"
+  | "interface_design"
+  | "part_design"
+  | "integration_review";
 export type CadStatus = "active" | "waiting_user" | "ready" | "done" | "aborted";
-export type CadMaturity =
-  | "review"
-  | "concept"
-  | "prototype"
-  | "engineering"
-  | "manufacturing"
-  | "release";
 export type MutationPolicy = "read_only" | "source_only" | "allowed";
 
 export interface EvidenceInputArtifact {
@@ -147,7 +157,6 @@ export interface CadRequirements {
   preferences: string[];
   assumptions: string[];
   openUnknowns: string[];
-  maturity: CadMaturity;
   /** Artifacts supplied by the user and bound by the baseline auto-action. */
   inputs?: string[];
 }
@@ -199,11 +208,18 @@ export interface CadRunState {
   runId: string;
   projectId: string;
   createdAt: string;
-  workflow: CadWorkflow | null;
+  /** Route ontology: objective × lineage × structure × maturity (0.8). */
+  route: Route | null;
   phase: CadPhase;
   status: CadStatus;
-  maturity: CadMaturity;
   mutationPolicy: MutationPolicy;
+
+  /**
+   * Phase-record types committed during this run (e.g. "assembly_design",
+   * "interface_contracts"). Accumulated, never cleared — record guards and
+   * reroute check them against route obligations.
+   */
+  phaseRecords?: string[];
 
   requirementsVersion?: string;
   planVersion?: string;

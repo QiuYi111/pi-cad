@@ -3,6 +3,7 @@ import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-ag
 import {
   CAPABILITY_TOOLS,
   type CadRunState,
+  routeKey,
   type EvidenceRef,
 } from "../shared/protocol.ts";
 import { readFile } from "node:fs/promises";
@@ -178,7 +179,7 @@ export default function cadCore(pi: ExtensionAPI) {
     description: "Show the Pi-CAD workspace: project, design head, and active run",
     handler: async (args, ctx) => {
       const store = new CadProjectStore(ctx.cwd);
-      await store.migrateLegacyProject();
+      await store.migrate();
       const project = await store.ensureProject();
       const run = await store.load();
       if (ctx.hasUI) {
@@ -189,7 +190,7 @@ export default function cadCore(pi: ExtensionAPI) {
             ? `head=${project.head.artifactPath} @ ${project.head.artifactHash?.slice(0, 12)}`
             : "head=none",
           run
-            ? `activeRun=${run.runId} workflow=${run.workflow ?? "intake"} phase=${run.phase}`
+            ? `activeRun=${run.runId} route=${run.route ? routeKey(run.route) : "intake"} phase=${run.phase}`
             : "activeRun=none (IDLE)",
         ];
         ctx.ui.notify(lines.join(" · "), run ? "info" : "info");
@@ -221,7 +222,7 @@ export default function cadCore(pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     const store = new CadProjectStore(ctx.cwd);
-    await store.migrateLegacyProject();
+    await store.migrate();
     const project = await store.ensureProject();
     let state = await store.load();
     if (state && state.status === "waiting_user") {

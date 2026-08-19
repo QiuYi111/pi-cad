@@ -4,16 +4,18 @@ import { extname, resolve } from "node:path";
 import { Type } from "typebox";
 
 import {
-  ALL_WORKFLOWS,
   type CadPlan,
-  type CadRunState,
   type CadRequirements,
-  type CadWorkflow,
+  type CadRunState,
   type EvidenceRef,
+  type Route,
+  isRoute,
+  routeKey,
 } from "../shared/protocol.ts";
 import { CadProjectStore } from "../shared/store.ts";
 import { workflowSpec } from "./state-machine.ts";
 import {
+  commitPhaseRecord,
   commitPlan,
   commitRequirements,
   createIntakeState,
@@ -87,8 +89,27 @@ function acceptedEvidenceKinds(state: CadRunState): EvidenceRef["kind"][] {
   return spec?.acceptedEvidence(state) ?? ["visual", "geometry"];
 }
 
-const WORKFLOW_ENUM = Type.Enum(
-  Object.fromEntries(ALL_WORKFLOWS.map((wf) => [wf, wf])) as Record<CadWorkflow, CadWorkflow>,
+/**
+ * Route parameter schemas. Cross-field rules are enforced fail-closed in the
+ * backend after structural validation: objective=design requires the full
+ * tuple, analyze/convert must not carry it.
+ */
+const RouteParamsSchema = Type.Object(
+  {
+    objective: Type.Enum({ analyze: "analyze", convert: "convert", design: "design" }),
+    lineage: Type.Optional(Type.Enum({ greenfield: "greenfield", legacy: "legacy", hybrid: "hybrid" })),
+    structure: Type.Optional(Type.Enum({ part: "part", assembly: "assembly" })),
+    maturity: Type.Optional(
+      Type.Enum({
+        prototype: "prototype",
+        engineering: "engineering",
+        manufacturing: "manufacturing",
+        release: "release",
+      }),
+    ),
+    reason: Type.String({ description: "Why this route matches the task, decided level by level" }),
+  },
+  { additionalProperties: false },
 );
 
 /**
@@ -138,32 +159,145 @@ const EvidenceObligationsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/**
+ * Fail-closed cross-field validation of route params: design requires the
+ * full tuple, analyze/convert must not carry any of it. Returns the Route
+ * or an error string.
+ */
+function buildRoute(
+  params: Record<string, string | undefined>,
+): Route | string {
+  const { objective, lineage, structure, maturity } = params;
+  if (objective === "analyze" || objective === "convert") {
+    if (lineage !== undefined || structure !== undefined || maturity !== undefined) {
+      return `${objective} routes take no lineage/structure/maturity; those belong to objective=design`;
+    }
+    return { objective } as Route;
+  }
+  if (objective !== "design") return `unsupported objective: ${objective}`;
+  if (!lineage || !structure || !maturity) {
+    return "objective=design requires lineage, structure, and maturity together";
+  }
+  return { objective: "design", lineage, structure, maturity } as Route;
+}
+
+/**
+ * Assembly design record (whitepaper 7.3): the four architecture questions.
+ * Strict at every level — unknown fields fail closed at the tool boundary.
+ */
+const AssemblyDesignRecordSchema = Type.Object(
+  {
+    summary: Type.String({ minLength: 1 }),
+    modules: Type.Array(
+      Type.Object(
+        {
+          name: Type.String({ minLength: 1 }),
+          purpose: Type.String({ minLength: 1 }),
+          envelopeMm: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number()])),
+          notes: Type.Optional(Type.String()),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 2, description: "An assembly has at least two modules" },
+    ),
+    datums: Type.Array(
+      Type.Object(
+        {
+          name: Type.String({ minLength: 1 }),
+          kind: Type.Enum({ primary: "primary", secondary: "secondary", tertiary: "tertiary" }),
+          definedBy: Type.String({ minLength: 1, description: "Physical features that realize this datum" }),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 1 },
+    ),
+    sequence: Type.Array(
+      Type.Object(
+        {
+          step: Type.Number(),
+          installs: Type.Array(Type.String(), { minItems: 1 }),
+          notes: Type.Optional(Type.String()),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 1, description: "Install order; each step names the modules it installs" },
+    ),
+    envelopes: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            module: Type.String(),
+            bboxMm: Type.Tuple([
+              Type.Number(),
+              Type.Number(),
+              Type.Number(),
+              Type.Number(),
+              Type.Number(),
+              Type.Number(),
+            ]),
+            massKg: Type.Optional(Type.Number()),
+          },
+          { additionalProperties: false },
+        ),
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+/**
+ * Interface contracts record (whitepaper 7.4): one entry per A↔B pair with
+ * the ten contract items.
+ */
+const InterfaceContractsRecordSchema = Type.Object(
+  {
+    contracts: Type.Array(
+      Type.Object(
+        {
+          id: Type.String({ minLength: 1 }),
+          a: Type.String({ minLength: 1, description: "Module on side A" }),
+          b: Type.String({ minLength: 1, description: "Module on side B" }),
+          purpose: Type.String({ minLength: 1 }),
+          locating: Type.String({ minLength: 1, description: "Locating scheme: which features/datums locate A against B" }),
+          dof: Type.String({ minLength: 1, description: "Which degrees of freedom the interface constrains" }),
+          fasteners: Type.String({ minLength: 1, description: "Fastener plan (type, size, count) or 'none/integral'" }),
+          fits: Type.String({ minLength: 1, description: "Fits and tolerances at the locating features" }),
+          assemblyDirection: Type.String({ minLength: 1, description: "Direction the parts approach along" }),
+          toolAccess: Type.String({ minLength: 1, description: "Tool access for fastening/inspection" }),
+          notes: Type.Optional(Type.String()),
+        },
+        { additionalProperties: false },
+      ),
+      { minItems: 1 },
+    ),
+  },
+  { additionalProperties: false },
+);
+
 export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): void {
   pi.registerTool({
     name: "cad_route",
     label: "Pi-CAD Route",
     description:
-      "Route the current CAD task into one of seven workflows. Routing is the Agent's semantic decision; the harness only validates the route name.",
-    promptSnippet: "Choose the Pi-CAD workflow for a CAD task",
+      "Route the current CAD task by its hierarchical description: objective (analyze/convert/design), and for design the lineage, structure, and maturity. The harness compiles the process from the route; there is no shortcut past obligations.",
+    promptSnippet: "Choose the route: objective → lineage → structure → maturity, in one call",
     promptGuidelines: [
       "Call cad_route from intake before any CAD mutation.",
-      "quick: fully specified direct geometry.",
-      "analyze: read-only diagnosis and explanation.",
-      "modify: existing artifact plus controlled geometry changes.",
-      "greenfield: no complete design exists; architecture must be chosen.",
-      "hybrid: retained legacy interfaces plus free greenfield modules.",
-      "convert: STEP/GLB/mesh/format or hierarchy conversion.",
-      "release: production-oriented complete engineering workstreams.",
+      "Decide the full hierarchy in one turn: objective first, then (design only) lineage, structure, maturity.",
+      "objective=analyze: read-only diagnosis and explanation of an existing artifact.",
+      "objective=convert: STEP/GLB/mesh/format or hierarchy conversion.",
+      "objective=design: lineage greenfield (nothing exists yet) / legacy (change a complete existing design) / hybrid (retained legacy interfaces plus free new modules).",
+      "structure=assembly whenever the deliverable is more than one part; maturity is the reality floor (prototype is still REAL/BUILDABLE/FUNCTIONAL).",
     ],
-    parameters: Type.Object({
-      workflow: WORKFLOW_ENUM,
-      reason: Type.String({ description: "Why this task matches the selected workflow" }),
-    }),
+    parameters: RouteParamsSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
-      await store.migrateLegacyProject();
+      await store.migrate();
       const project = await store.ensureProject();
       let state = await store.load();
+      const nextRoute: Route = buildRoute(params);
+      if (typeof nextRoute === "string") return errTool(nextRoute);
+      if (!isRoute(nextRoute)) return errTool("invalid route");
       if (!state) {
         const existingRunId = await store.currentRunId();
         const run = existingRunId
@@ -184,7 +318,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
             baselineArtifactHash: head.artifactHash,
           };
         }
-        if (params.workflow === "release" && head.artifactPath) {
+        if (nextRoute.objective === "design" && nextRoute.maturity === "release" && head.artifactPath) {
           state = {
             ...state,
             currentSourcePath: head.sourcePath,
@@ -196,11 +330,11 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         await run.save(state);
         await run.appendEvent("RunStarted", { runId: run.runId, projectId: project.projectId });
       }
-      const result = route(state, params.workflow as CadWorkflow, params.reason);
+      const result = route(state, nextRoute, params.reason);
       if (!result.ok) return errTool(result.reason);
       await deps.persist(pi, store, result.state, result.events);
       return okTool(
-        `Routed to ${params.workflow}. Harness state is now authoritative.\n\n${await loadPrompt("requirements")}`,
+        `Routed to ${routeKey(nextRoute)}. Harness state is now authoritative.\n\n${await loadPrompt("requirements")}`,
         { state: result.state },
       );
     },
@@ -210,12 +344,13 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     name: "cad_commit_requirements",
     label: "Pi-CAD Commit Requirements",
     description:
-      "Commit the current maturity working brief. For baseline workflows the harness automatically binds and inspects supplied STEP inputs.",
-    promptSnippet: "Commit the working brief and enter the next workflow phase",
+      "Commit the working brief. Maturity lives on the route, not here. For baseline-binding routes the harness automatically binds and inspects supplied STEP inputs.",
+    promptSnippet: "Commit the working brief and enter the next process phase",
     promptGuidelines: [
       "Do not commit before shared understanding is reached.",
-      "For analyze/modify/hybrid/convert, list supplied STEP/STP files in inputs.",
-      "Fully specified quick tasks may commit with zero extra questions.",
+      "For legacy/hybrid lineages, analyze, and convert, list supplied STEP/STP files in inputs.",
+      "Fully specified greenfield part tasks may commit with zero extra questions.",
+      "Physical CAD tasks default to REAL/BUILDABLE/FUNCTIONAL; only commit a mockup brief after the user explicitly downgraded maturity.",
     ],
     parameters: Type.Object({
       goal: Type.String(),
@@ -224,14 +359,6 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       preferences: Type.Array(Type.String(), { default: [] }),
       assumptions: Type.Array(Type.String(), { default: [] }),
       openUnknowns: Type.Array(Type.String(), { default: [] }),
-      maturity: Type.Enum({
-        review: "review",
-        concept: "concept",
-        prototype: "prototype",
-        engineering: "engineering",
-        manufacturing: "manufacturing",
-        release: "release",
-      }),
       inputs: Type.Optional(Type.Array(Type.String())),
       evidenceObligations: Type.Optional(EvidenceObligationsSchema),
     }),
@@ -248,7 +375,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const baselineInput = await baselineArtifactCandidate(record, ctx.cwd, store);
       if (spec?.requiresBaselineInput && !baselineInput) {
         return errTool(
-          `${next.workflow} workflow requires requirements.inputs[] to reference an existing .step/.stp baseline artifact.`,
+          `${next.route ? routeKey(next.route) : "route"} requires requirements.inputs[] to reference an existing .step/.stp baseline artifact.`,
         );
       }
       if (baselineInput) {
@@ -281,7 +408,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       "Commit plan/design intent, or record release workstream statuses. The harness checks schema and transition only.",
     promptSnippet: "Commit protected interfaces, planned changes, datums, review plan, or release workstream status",
     promptGuidelines: [
-      "Use in plan/intent/transform_plan to enter the source phase.",
+      "Use in part_design/plan/transform_plan to enter the source phase.",
       "Use in release audit/gap_closure/package to record workstream statuses.",
     ],
     parameters: Type.Object({
@@ -325,14 +452,66 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
   });
 
   pi.registerTool({
+    name: "cad_commit_assembly_design",
+    label: "Pi-CAD Commit Assembly Design",
+    description:
+      "Commit the assembly design record (modules, datums, sequence, envelopes) and move from assembly_design to interface_design. This record is an obligation of assembly routes; there is no transition that skips it.",
+    promptSnippet: "Commit the assembly architecture record",
+    promptGuidelines: [
+      "Answer all four architecture questions before committing: modules, datums, assembly sequence, envelopes.",
+      "The record is the design's skeleton — later interface contracts and parts are checked against it.",
+    ],
+    parameters: AssemblyDesignRecordSchema,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await guardState(store);
+      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
+      const result = commitPhaseRecord(state, "assembly_design", params);
+      if (!result.ok) return errTool(result.reason);
+      await store.writeRecord("assembly_design", params);
+      await deps.persist(pi, store, result.state, result.events);
+      return okTool(
+        `Assembly design committed (${result.state.phaseRecords?.length ?? 0} phase records). Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
+        { state: result.state },
+      );
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_commit_interface_contracts",
+    label: "Pi-CAD Commit Interface Contracts",
+    description:
+      "Commit the A↔B interface contracts (locating, DOF, fasteners, fits, direction, tool access) and move from interface_design to part_design. Obligatory for assembly routes at engineering maturity and above.",
+    promptSnippet: "Commit the interface contract records",
+    promptGuidelines: [
+      "One contract per interface pair, with locating scheme and constrained DOF stated explicitly.",
+      "Interfaces must name the assembly datum each side locates against.",
+    ],
+    parameters: InterfaceContractsRecordSchema,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await guardState(store);
+      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
+      const result = commitPhaseRecord(state, "interface_contracts", params);
+      if (!result.ok) return errTool(result.reason);
+      await store.writeRecord("interface_contracts", params);
+      await deps.persist(pi, store, result.state, result.events);
+      return okTool(
+        `Interface contracts committed (${params.contracts.length} pairs). Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
+        { state: result.state },
+      );
+    },
+  });
+
+  pi.registerTool({
     name: "cad_commit_candidate",
     label: "Pi-CAD Commit Candidate",
     description:
-      "Commit authored build123d sources, or a STEP conversion in convert workflow. The harness runs build/visual/geometry/compare automatically.",
+      "Commit authored build123d sources, or a STEP conversion in convert routes. The harness runs build/visual/geometry/assembly/compare automatically.",
     promptSnippet: "Commit model source or conversion; harness observes and binds evidence automatically",
     promptGuidelines: [
-      "Call only when the current workflow phase exposes cad_commit_candidate as an active tool.",
-      "In convert workflow with STEP/STP source, provide format and optional output.",
+      "Call only when the current phase exposes cad_commit_candidate as an active tool.",
+      "In convert routes with STEP/STP source, provide format and optional output.",
       "In release gap_closure, commit the revised engineering source; the harness compares against the project head automatically.",
     ],
     parameters: Type.Object({
@@ -352,7 +531,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         [".step", ".stp"].includes(sourceExt)
       ) {
         if (!params.format) {
-          return errTool("convert workflow with a STEP/STP source requires format (step, stl, glb, brep) and optional output");
+          return errTool("convert route with a STEP/STP source requires format (step, stl, glb, brep) and optional output");
         }
         const output =
           params.output ??
@@ -504,7 +683,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const verification = await verifyCurrentArtifacts(ctx.cwd, state);
       if (verification) return errTool(`cad_finish blocked: ${verification}`);
       const spec = workflowSpec(state);
-      if (state.workflow === "analyze" && state.baselineArtifactHash) {
+      if (state.route?.objective === "analyze" && state.baselineArtifactHash) {
         const analyzeKinds: EvidenceRef["kind"][] =
           state.evidenceObligations?.simulation?.disposition === "required"
             ? ["visual", "geometry", "simulation"]
@@ -539,7 +718,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       await deps.persist(pi, store, result.state, result.events);
       await store.setCurrentRun(null);
       return okTool(
-        `Workflow run ${result.state.runId} (${result.state.workflow}) finished. Project head is unchanged unless this run accepted a new candidate.`,
+        `Run ${result.state.runId} (${result.state.route ? routeKey(result.state.route) : "unset"}) finished. Project head is unchanged unless this run accepted a new candidate.`,
         { state: result.state },
       );
     },

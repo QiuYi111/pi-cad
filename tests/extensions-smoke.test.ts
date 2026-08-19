@@ -71,6 +71,8 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_route",
     "cad_commit_requirements",
     "cad_commit_plan",
+    "cad_commit_assembly_design",
+    "cad_commit_interface_contracts",
     "cad_commit_candidate",
     "cad_transition",
     "cad_wait_for_user",

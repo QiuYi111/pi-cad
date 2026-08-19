@@ -1,7 +1,6 @@
 import type {
   CadPhase,
   CadRunState,
-  CadWorkflow,
   EvidenceRef,
   MutationPolicy,
 } from "../shared/protocol.ts";
@@ -9,7 +8,6 @@ import type {
 export type EvidenceKindsResolver = (state: CadRunState) => EvidenceRef["kind"][];
 
 export interface WorkflowSpec {
-  name: CadWorkflow;
   /** Phase entered when requirements are committed. */
   nextAfterRequirements: CadPhase;
   /** Phases from which cad_commit_candidate is accepted. */
@@ -35,7 +33,7 @@ export interface WorkflowSpec {
   /** Mutation policy overrides (defaults are derived from phase type). */
   mutationPolicies?: Partial<Record<CadPhase, MutationPolicy>>;
   /**
-   * Optional workflow-specific completion guard. The generic engine calls it
+   * Optional process-specific completion guard. The generic engine calls it
    * on accepted/finish and only understands a non-null error string.
    */
   completionGuard?: (state: CadRunState) => string | null;

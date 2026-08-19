@@ -129,22 +129,30 @@ export function toolsForPhase(phase: CadPhase): string[] {
       ];
     case "review":
     case "compare":
+    case "integration_review":
       return [...REVIEW_TOOLS, "cad_wait_for_user", "cad_commit_plan"];
     case "plan":
-    case "intent":
+    case "part_design":
     case "transform_plan":
       return [...COGNITIVE_TOOLS, "cad_commit_plan", "cad_wait_for_user"];
+    case "assembly_design":
+      return [...COGNITIVE_TOOLS, "cad_commit_assembly_design", "cad_wait_for_user"];
+    case "interface_design":
+      return [...COGNITIVE_TOOLS, "cad_commit_interface_contracts", "cad_wait_for_user"];
     case "baseline":
     case "source_baseline":
     case "investigate":
     case "explain":
     case "concept":
+    case "system_concept":
     case "domain_analysis":
       return [...COGNITIVE_TOOLS, ...SIMULATION_EVIDENCE_TOOLS, "cad_wait_for_user"];
     case "audit":
       return [
         ...COGNITIVE_TOOLS,
         ...CAPABILITY_TOOLS.filter((name) => name !== "cad_optimize"),
+        "cad_commit_assembly_design",
+        "cad_commit_interface_contracts",
         "cad_commit_plan",
         "cad_wait_for_user",
       ];

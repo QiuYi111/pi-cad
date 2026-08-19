@@ -6,6 +6,7 @@ import { test } from "node:test";
 
 import {
   acceptCandidate,
+  commitPlan as commitPlanRaw,
   commitRequirements,
   createIntakeState,
   finish as finishQuick,
@@ -13,9 +14,33 @@ import {
   route as routeQuick,
   transition as transitionQuick,
 } from "../src/core/state-machine.ts";
+
+function commitPlanIfAbsent(state: ReturnType<typeof createIntakeState>) {
+  const plan = commitPlanRaw(state, {
+    summary: "plate plan",
+    protected: [],
+    plannedChanges: [],
+    interfaces: [],
+    datums: [],
+    reviewPlan: [],
+  });
+  assert.equal(plan.ok, true);
+  if (!plan.ok) throw new Error("unreachable");
+  return plan.state;
+}
 import { recordToolEvidence } from "../src/core/evidence.ts";
 import { ProjectStateStore } from "../src/shared/store.ts";
-import { CAD_STATE_SCHEMA_VERSION, type CadRequirements } from "../src/shared/protocol.ts";
+import { CAD_STATE_SCHEMA_VERSION, type CadRequirements, type Route } from "../src/shared/protocol.ts";
+
+// The 0.7 "quick plate" maps onto the fast path: greenfield part at
+// prototype maturity — but the compiled process still runs
+// requirements -> part_design -> build -> review.
+const quickPlateRoute: Route = {
+  objective: "design",
+  lineage: "greenfield",
+  structure: "part",
+  maturity: "prototype",
+};
 
 const record: CadRequirements = {
   goal: "100 x 80 x 5 mm plate with four 6 mm through holes, centers 10 mm from edges.",
@@ -24,11 +49,10 @@ const record: CadRequirements = {
   preferences: [],
   assumptions: ["sharp edges acceptable"],
   openUnknowns: [],
-  maturity: "prototype",
 };
 
 function stateInPhase(phase: "requirements" | "build" | "review" | "ready") {
-  const routed = routeQuick(null, "quick", "fully specified plate");
+  const routed = routeQuick(null, quickPlateRoute, "fully specified plate");
   assert.equal(routed.ok, true);
   if (!routed.ok) throw new Error("unreachable");
   let state = routed.state;
@@ -37,6 +61,9 @@ function stateInPhase(phase: "requirements" | "build" | "review" | "ready") {
   assert.equal(req.ok, true);
   if (!req.ok) throw new Error("unreachable");
   state = req.state;
+  assert.equal(state.phase, "part_design");
+  const plan = commitPlanIfAbsent(state);
+  state = plan;
   if (phase === "build") return state;
   const candidate = acceptCandidate(
     state,
@@ -78,25 +105,31 @@ function stateInPhase(phase: "requirements" | "build" | "review" | "ready") {
   return accepted.state;
 }
 
-test("cad_route creates intake -> requirements and rejects unknown workflow", () => {
-  const result = routeQuick(null, "quick", "fully specified part");
+test("cad_route creates intake -> requirements and rejects invalid routes", () => {
+  const result = routeQuick(null, quickPlateRoute, "fully specified part");
   assert.equal(result.ok, true);
   if (result.ok) {
     assert.equal(result.state.schemaVersion, CAD_STATE_SCHEMA_VERSION);
     assert.equal(result.state.phase, "requirements");
     assert.equal(result.state.mutationPolicy, "read_only");
+    assert.deepEqual(result.state.route, quickPlateRoute);
   }
-  const bad = routeQuick(null, "not-a-workflow" as never, "invalid");
-  assert.equal(bad.ok, false);
+  // Fail closed: design without the full tuple.
+  const badTuple = routeQuick(null, { objective: "design" } as never, "incomplete");
+  assert.equal(badTuple.ok, false);
+  // Fail closed: analyze carrying design keys.
+  const polluted = routeQuick(null, { objective: "analyze", maturity: "release" } as never, "polluted");
+  assert.equal(polluted.ok, false);
 });
 
-test("commit requirements requires requirements phase and moves to source_only build", () => {
+test("commit requirements requires requirements phase and moves through part_design to source_only build", () => {
   const state = stateInPhase("requirements");
   const result = commitRequirements(state, record);
   assert.equal(result.ok, true);
   if (result.ok) {
-    assert.equal(result.state.phase, "build");
-    assert.equal(result.state.mutationPolicy, "source_only");
+    // Fast path: greenfield part enters part_design (cognitive), not build.
+    assert.equal(result.state.phase, "part_design");
+    assert.equal(result.state.mutationPolicy, "read_only");
     assert.ok(result.state.requirementsVersion);
   }
   const bad = commitRequirements(createIntakeState(), record);
@@ -194,7 +227,7 @@ test("ProjectStateStore persists and reloads state", async () => {
 
 test("routeQuick only from null or intake", () => {
   const routed = stateInPhase("requirements");
-  const again = routeQuick(routed, "quick", "re-route");
+  const again = routeQuick(routed, quickPlateRoute, "re-route");
   assert.equal(again.ok, false);
 });
 

@@ -1,30 +1,25 @@
-import { analyzeWorkflow } from "./analyze.ts";
-import { convertWorkflow } from "./convert.ts";
-import { greenfieldWorkflow } from "./greenfield.ts";
-import { hybridWorkflow } from "./hybrid.ts";
-import { modifyWorkflow } from "./modify.ts";
-import { quickWorkflow } from "./quick.ts";
-import { releaseWorkflow } from "./release.ts";
-import type { WorkflowSpec } from "./types.ts";
-import type { CadWorkflow } from "../shared/protocol.ts";
+import { compileWorkflow, releaseCompletionGuard } from "./compiler.ts";
+import type { CompiledProcess } from "./compiler.ts";
+import { routeKey, type Route } from "../shared/route.ts";
 
-export const WORKFLOW_SPECS: Record<CadWorkflow, WorkflowSpec> = {
-  quick: quickWorkflow,
-  analyze: analyzeWorkflow,
-  modify: modifyWorkflow,
-  greenfield: greenfieldWorkflow,
-  hybrid: hybridWorkflow,
-  convert: convertWorkflow,
-  release: releaseWorkflow,
-};
+export { compileWorkflow, releaseCompletionGuard };
+export type { CompiledProcess };
 
-export type { WorkflowSpec };
-export {
-  analyzeWorkflow,
-  convertWorkflow,
-  greenfieldWorkflow,
-  hybridWorkflow,
-  modifyWorkflow,
-  quickWorkflow,
-  releaseWorkflow,
-};
+/**
+ * Compiled process cache keyed by routeKey. Processes are pure functions of
+ * the route, so memoizing is safe and keeps hot paths (every guard call)
+ * allocation-free.
+ */
+const cache = new Map<string, CompiledProcess>();
+
+export function compiledSpec(route: Route): CompiledProcess {
+  const cacheKey = routeKey(route);
+  let compiled = cache.get(cacheKey);
+  if (!compiled) {
+    compiled = compileWorkflow(route);
+    cache.set(cacheKey, compiled);
+  }
+  return compiled;
+}
+
+export type { WorkflowSpec } from "./types.ts";

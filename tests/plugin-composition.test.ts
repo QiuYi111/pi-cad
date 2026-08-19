@@ -32,6 +32,13 @@ function hostPi(options: { registered?: string[]; initialActive?: string[] } = {
   return pi;
 }
 
+const quickRoute = {
+  objective: "design",
+  lineage: "greenfield",
+  structure: "part",
+  maturity: "prototype",
+} as const;
+
 const EXTERNAL_TOOLS = ["goal_complete", "goal_blocked", "goal_wait", "some_other_plugin_tool"];
 
 const record: CadRequirements = {
@@ -41,11 +48,10 @@ const record: CadRequirements = {
   preferences: [],
   assumptions: [],
   openUnknowns: [],
-  maturity: "prototype",
 };
 
 function quickRunState(phase: CadRunState["phase"], runId: string): CadRunState {
-  const routed = routeQuick(null, "quick", "test");
+  const routed = routeQuick(null, quickRoute, "test");
   assert.ok(routed.ok);
   const built = commitRequirements(routed.state, record);
   assert.ok(built.ok);

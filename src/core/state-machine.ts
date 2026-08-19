@@ -1,35 +1,60 @@
 import {
-  ALL_WORKFLOWS,
   type CadPhase,
   type CadPlan,
-  type CadRunState,
   type CadRequirements,
-  type CadWorkflow,
+  type CadRunState,
   type EvidenceInputArtifact,
   type EvidenceRef,
   type MutationPolicy,
+  type Route,
+  isRoute,
+  obligationsOf,
+  recordObligations,
 } from "../shared/protocol.ts";
 import { hashRecord, makeEvidenceId, nowIso } from "../shared/store.ts";
 import { caseObligationFailure } from "./evidence-cases.ts";
-import { WORKFLOW_SPECS } from "../workflows/index.ts";
-import type { WorkflowSpec } from "../workflows/types.ts";
+import { compiledSpec } from "../workflows/index.ts";
+import type { CompiledProcess } from "../workflows/index.ts";
 
-export const WORKFLOWS: Record<CadWorkflow, WorkflowSpec> = WORKFLOW_SPECS;
+const SOURCE_PHASES = new Set<CadPhase>([
+  "build",
+  "modify",
+  "convert",
+  "gap_closure",
+]);
 
-const SOURCE_PHASES = new Set<CadPhase>(["build", "modify", "convert"]);
-export function workflowSpec(state: CadRunState): WorkflowSpec | null {
-  return state.workflow ? WORKFLOWS[state.workflow] : null;
+export function workflowSpec(state: CadRunState): CompiledProcess | null {
+  return state.route ? compiledSpec(state.route) : null;
 }
+
+/** Historical alias: processes are compiled from routes now. */
+export const processSpec = workflowSpec;
 
 export function mutationPolicyForPhase(
   phase: CadPhase,
-  workflow?: CadWorkflow,
+  route?: Route | null,
 ): MutationPolicy {
-  const spec = workflow ? WORKFLOWS[workflow] : undefined;
+  const spec = route ? compiledSpec(route) : undefined;
   const override = spec?.mutationPolicies?.[phase];
   if (override) return override;
   if (SOURCE_PHASES.has(phase)) return "source_only";
   return "read_only";
+}
+
+/**
+ * Route-record obligations not yet satisfied by committed phase records.
+ * Used wherever progress would otherwise outrun the record trail: entering
+ * a source phase, and committing a candidate.
+ */
+export function missingRecordObligations(
+  state: CadRunState,
+): string[] {
+  if (!state.route) return [];
+  const committed = new Set(state.phaseRecords ?? []);
+  return recordObligations(state.route).filter((key) => {
+    const type = key.slice("record:".length);
+    return !committed.has(type);
+  });
 }
 
 export interface CreateIntakeOptions {
@@ -40,16 +65,15 @@ export interface CreateIntakeOptions {
 export function createIntakeState(options: CreateIntakeOptions = {}): CadRunState {
   const createdAt = nowIso();
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     runId:
       options.runId ??
       `run-${createdAt.slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8)}`,
     projectId: options.projectId ?? "project",
     createdAt,
-    workflow: null,
+    route: null,
     phase: "intake",
     status: "active",
-    maturity: "prototype",
     mutationPolicy: "read_only",
     evidence: [],
     staleEvidence: [],
@@ -62,22 +86,28 @@ export type ActionResult<T = CadRunState> =
   | { ok: true; state: T; events: Array<{ type: string; data?: unknown }> }
   | { ok: false; reason: string };
 
+/**
+ * Route the task. The Agent supplies the hierarchical description
+ * (objective → lineage → structure → maturity in one turn); the harness
+ * validates structure and compiles the process. It never judges whether
+ * the route is the *right* one for the physics — that is the Agent's call.
+ */
 export function route(
   state: CadRunState | null,
-  workflow: CadWorkflow,
+  nextRoute: Route,
   reason: string,
 ): ActionResult {
   if (state && state.phase !== "intake") {
     return { ok: false, reason: `cad_route is only valid from intake; current phase is ${state.phase}` };
   }
-  if (!ALL_WORKFLOWS.includes(workflow)) {
-    return { ok: false, reason: `unsupported workflow: ${workflow}` };
+  if (!isRoute(nextRoute)) {
+    return { ok: false, reason: "route must be analyze, convert, or the full design tuple (lineage/structure/maturity)" };
   }
   if (!reason.trim()) return { ok: false, reason: "cad_route requires a routing reason" };
   const base = state ?? createIntakeState();
   const next: CadRunState = {
     ...base,
-    workflow,
+    route: nextRoute,
     phase: "requirements",
     status: "active",
     mutationPolicy: "read_only",
@@ -88,7 +118,7 @@ export function route(
     state: next,
     events: [
       ...(state ? [] : [{ type: "CadStarted", data: { runId: next.runId } }]),
-      { type: "WorkflowRouted", data: { workflow, reason } },
+      { type: "RouteSelected", data: { route: nextRoute, reason } },
     ],
   };
 }
@@ -101,7 +131,7 @@ export function commitRequirements(
     return { ok: false, reason: `cad_commit_requirements is only valid in requirements; current phase is ${state.phase}` };
   }
   const spec = workflowSpec(state);
-  if (!spec) return { ok: false, reason: "workflow is not routed" };
+  if (!spec) return { ok: false, reason: "route is not selected" };
   if (!record.goal.trim()) return { ok: false, reason: "requirements.goal is required" };
   if (!Array.isArray(record.deliverables) || record.deliverables.length === 0) {
     return { ok: false, reason: "requirements.deliverables must contain at least one deliverable" };
@@ -111,9 +141,8 @@ export function commitRequirements(
     ...state,
     phase: nextPhase,
     status: "active",
-    mutationPolicy: mutationPolicyForPhase(nextPhase, state.workflow ?? undefined),
+    mutationPolicy: mutationPolicyForPhase(nextPhase, state.route),
     requirementsVersion: hashRecord(record),
-    maturity: record.maturity,
     evidenceObligations: record.evidenceObligations ?? state.evidenceObligations,
     updatedAt: nowIso(),
   };
@@ -126,7 +155,7 @@ export function commitRequirements(
 
 export function commitPlan(state: CadRunState, record: CadPlan): ActionResult {
   const spec = workflowSpec(state);
-  if (!spec) return { ok: false, reason: "workflow is not routed" };
+  if (!spec) return { ok: false, reason: "route is not selected" };
   const moveTo = spec.planNext[state.phase];
   const canStay = spec.planStayPhases.includes(state.phase);
   if (!moveTo && !canStay) {
@@ -134,10 +163,16 @@ export function commitPlan(state: CadRunState, record: CadPlan): ActionResult {
   }
   if (!record.summary.trim()) return { ok: false, reason: "plan.summary is required" };
   const nextPhase = moveTo ?? state.phase;
+  if (SOURCE_PHASES.has(nextPhase)) {
+    const missing = missingRecordObligations(state);
+    if (missing.length) {
+      return { ok: false, reason: `cannot enter ${nextPhase}: phase records missing (${missing.join(", ")})` };
+    }
+  }
   const next: CadRunState = {
     ...state,
     phase: nextPhase,
-    mutationPolicy: mutationPolicyForPhase(nextPhase, state.workflow ?? undefined),
+    mutationPolicy: mutationPolicyForPhase(nextPhase, state.route),
     planVersion: hashRecord(record),
     evidenceObligations: record.evidenceObligations ?? state.evidenceObligations,
     workstreamStatuses: record.workstreams?.length
@@ -155,6 +190,62 @@ export function commitPlan(state: CadRunState, record: CadPlan): ActionResult {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Phase records (assembly structure fragment)
+// ---------------------------------------------------------------------------
+
+const RECORD_EVENTS: Record<string, string> = {
+  assembly_design: "assembly_design_committed",
+  interface_contracts: "interface_contracts_committed",
+};
+
+const RECORD_EVENT_TO_TYPE: Record<string, string> = Object.fromEntries(
+  Object.entries(RECORD_EVENTS).map(([type, event]) => [event, type]),
+);
+
+/**
+ * Commit a phase record (assembly design / interface contracts). The record
+ * commit IS the transition wherever the compiled process declares one for
+ * the record event (assembly chain); in release audit the record is
+ * committed without moving. There is no cad_transition escape that skips
+ * the record trail.
+ */
+export function commitPhaseRecord(
+  state: CadRunState,
+  recordType: string,
+  record: unknown,
+): ActionResult {
+  const spec = workflowSpec(state);
+  if (!spec) return { ok: false, reason: "route is not selected" };
+  const event = RECORD_EVENTS[recordType];
+  if (!event) return { ok: false, reason: `unknown phase record type: ${recordType}` };
+  const owed = spec.phaseRecords[state.phase] ?? [];
+  if (!owed.includes(recordType)) {
+    return { ok: false, reason: `phase ${state.phase} owes no ${recordType} record for this route (owed: ${owed.join(", ") || "none"})` };
+  }
+  // No declared transition for this record event means "commit and stay".
+  const target = spec.transitions[state.phase]?.[event] ?? state.phase;
+  const next: CadRunState = {
+    ...state,
+    ...(target !== state.phase
+      ? {
+          phase: target,
+          status: "active" as const,
+          mutationPolicy: mutationPolicyForPhase(target, state.route),
+        }
+      : {}),
+    phaseRecords: [...new Set([...(state.phaseRecords ?? []), recordType])],
+    updatedAt: nowIso(),
+  };
+  return {
+    ok: true,
+    state: next,
+    events: [
+      { type: "PhaseRecordCommitted", data: { recordType, record, phase: target } },
+    ],
+  };
+}
+
 export interface CandidateReceipt {
   label: string;
   sources: string[];
@@ -169,12 +260,16 @@ export function acceptCandidate(
   artifactHash: string,
 ): ActionResult {
   const spec = workflowSpec(state);
-  if (!spec) return { ok: false, reason: "workflow is not routed" };
+  if (!spec) return { ok: false, reason: "route is not selected" };
   if (!spec.sourcePhases.includes(state.phase)) {
     return { ok: false, reason: `cad_commit_candidate is only valid in ${spec.sourcePhases.join("/")}; current phase is ${state.phase}` };
   }
   if (!receipt.label.trim() || receipt.sources.length === 0) {
     return { ok: false, reason: "candidate label and at least one source are required" };
+  }
+  const missing = missingRecordObligations(state);
+  if (missing.length) {
+    return { ok: false, reason: `cannot commit candidate: phase records missing (${missing.join(", ")})` };
   }
   const next: CadRunState = {
     ...state,
@@ -303,7 +398,14 @@ export function transition(
     return { ok: false, reason: `transition ${event} is not valid in phase ${state.phase}` };
   }
   const spec = workflowSpec(state);
-  if (!spec) return { ok: false, reason: "workflow is not routed" };
+  if (!spec) return { ok: false, reason: "route is not selected" };
+
+  // Record events may only be re-fired by cad_transition when the record
+  // already exists — otherwise the transition would bypass the record trail.
+  const recordType = RECORD_EVENT_TO_TYPE[event];
+  if (recordType && !(state.phaseRecords ?? []).includes(recordType)) {
+    return { ok: false, reason: `transition ${event} requires the ${recordType} record to be committed first` };
+  }
 
   if (event === "accepted" && spec.acceptedPhases.includes(state.phase)) {
     if (!state.currentArtifactHash) {
@@ -347,28 +449,35 @@ export function transition(
     }
   }
 
+  const isAnalyze = state.route?.objective === "analyze";
   if (
     event === "findings_delivered" &&
-    state.workflow === "analyze" &&
+    isAnalyze &&
     state.evidenceObligations?.simulation?.disposition === "required" &&
     state.baselineArtifactHash &&
     !hasEvidenceForArtifact(state, state.baselineArtifactHash, "simulation")
   ) {
     return { ok: false, reason: "cannot complete analyze: required simulation evidence is missing for the baseline artifact" };
   }
-  if (event === "findings_delivered" && state.workflow === "analyze" && state.baselineArtifactHash) {
+  if (event === "findings_delivered" && isAnalyze && state.baselineArtifactHash) {
     const caseFailure = caseObligationFailure(state, state.baselineArtifactHash, "cannot complete analyze");
     if (caseFailure) return { ok: false, reason: caseFailure };
   }
   const target = transitionTarget(state, event);
   if (!target) {
-    return { ok: false, reason: `transition ${event} is not valid in phase ${state.phase} for workflow ${state.workflow ?? "unset"}` };
+    return { ok: false, reason: `transition ${event} is not valid in phase ${state.phase} for route ${state.route?.objective ?? "unset"}` };
+  }
+  if (SOURCE_PHASES.has(target)) {
+    const missing = missingRecordObligations(state);
+    if (missing.length) {
+      return { ok: false, reason: `cannot enter ${target}: phase records missing (${missing.join(", ")})` };
+    }
   }
   const next: CadRunState = {
     ...state,
     phase: target,
     status: "active",
-    mutationPolicy: mutationPolicyForPhase(target, state.workflow ?? undefined),
+    mutationPolicy: mutationPolicyForPhase(target, state.route),
     updatedAt: nowIso(),
   };
   return { ok: true, state: next, events: [{ type: "TransitionRequested", data: { event, note, to: target } }] };
@@ -395,10 +504,10 @@ export function finish(state: CadRunState): ActionResult {
     return { ok: false, reason: `cad_finish is only valid in ready; current phase is ${state.phase}` };
   }
   const spec = workflowSpec(state);
-  if (!spec) return { ok: false, reason: "workflow is not routed" };
-  if (state.workflow === "analyze") {
+  if (!spec) return { ok: false, reason: "route is not selected" };
+  if (state.route?.objective === "analyze") {
     if (!state.baselineArtifactHash) {
-      return { ok: false, reason: "cad_finish requires a bound baseline artifact for analyze workflow" };
+      return { ok: false, reason: "cad_finish requires a bound baseline artifact for analyze routes" };
     }
     if (
       state.evidenceObligations?.simulation?.disposition === "required" &&
@@ -439,4 +548,16 @@ export function finish(state: CadRunState): ActionResult {
     state: next,
     events: [{ type: "Finished", data: { runId: state.runId } }],
   };
+}
+
+/**
+ * Obligation monotonicity for reroute (0.8 M3): a reroute is autonomous
+ * exactly when the old obligation set is a subset of the new one.
+ */
+export function rerouteIsAutonomous(from: Route, to: Route): boolean {
+  const newKeys = obligationsOf(to);
+  for (const key of obligationsOf(from)) {
+    if (!newKeys.has(key)) return false;
+  }
+  return true;
 }

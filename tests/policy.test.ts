@@ -5,11 +5,18 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { ProjectStateStore } from "../src/shared/store.ts";
-import { commitRequirements, route as routeQuick } from "../src/core/state-machine.ts";
+import { commitPlan, commitRequirements, route as routeQuick } from "../src/core/state-machine.ts";
 import type { CadRequirements } from "../src/shared/protocol.ts";
 
 test("tool_call policy blocks writes outside source_only and mutating bash in read_only", async () => {
-  const pi = {
+  const quickRoute = {
+  objective: "design",
+  lineage: "greenfield",
+  structure: "part",
+  maturity: "prototype",
+} as const;
+
+const pi = {
     handlers: new Map<string, Function[]>(),
     on(event: string, handler: Function) {
       const list = pi.handlers.get(event) ?? [];
@@ -30,7 +37,7 @@ test("tool_call policy blocks writes outside source_only and mutating bash in re
   try {
     const store = new ProjectStateStore(cwd);
     await store.createRun({ runId: "policy-run" });
-    const routed = routeQuick(null, "quick", "test");
+    const routed = routeQuick(null, quickRoute, "test");
     assert.ok(routed.ok);
     if (!routed.ok) return;
     const record: CadRequirements = {
@@ -40,8 +47,7 @@ test("tool_call policy blocks writes outside source_only and mutating bash in re
       preferences: [],
       assumptions: [],
       openUnknowns: [],
-      maturity: "prototype",
-    };
+        };
     const built = commitRequirements(routed.state, record);
     assert.ok(built.ok);
     if (!built.ok) return;
@@ -55,7 +61,18 @@ test("tool_call policy blocks writes outside source_only and mutating bash in re
     assert.equal(readOnlyBlock.block, true);
 
     // source_only build phase allows model source writes but not harness-owned files.
-    await store.save({ ...built.state, runId: "policy-run" });
+    // (Fast path: requirements -> part_design -> build; the plan commit enters build.)
+    const planned = commitPlan(built.state, {
+      summary: "plan",
+      protected: [],
+      plannedChanges: [],
+      interfaces: [],
+      datums: [],
+      reviewPlan: [],
+    });
+    assert.ok(planned.ok);
+    if (!planned.ok) return;
+    await store.save({ ...planned.state, runId: "policy-run" });
     const allowed = (await toolCall(
       { toolName: "write", input: { path: "models/plate.py" } },
       { cwd },

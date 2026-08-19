@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import type { CadProjectState, CadRunState } from "../shared/protocol.ts";
+import { routeKey } from "../shared/protocol.ts";
 
 const PROMPT_DIR = new URL("../prompts/", import.meta.url);
 const promptCache = new Map<string, string>();
@@ -23,9 +24,8 @@ export async function loadPrompt(name: string): Promise<string> {
 
 export function stateSummary(state: CadRunState): string {
   const lines = [
-    `workflow=${state.workflow ?? "unset"} phase=${state.phase} status=${state.status}`,
+    `route=${state.route ? routeKey(state.route) : "unset"} phase=${state.phase} status=${state.status}`,
     `mutationPolicy=${state.mutationPolicy}`,
-    `maturity=${state.maturity}`,
   ];
   if (state.candidateLabel) lines.push(`candidate=${state.candidateLabel}`);
   if (state.currentSourceHash) lines.push(`currentSourceHash=${state.currentSourceHash.slice(0, 12)}`);
@@ -33,7 +33,8 @@ export function stateSummary(state: CadRunState): string {
   if (state.baselineArtifactHash) lines.push(`baselineArtifactHash=${state.baselineArtifactHash.slice(0, 12)}`);
   lines.push(`currentEvidence=${state.evidence.map((e) => e.kind).join(",") || "none"}`);
   if (state.staleEvidence.length) lines.push(`staleEvidence=${state.staleEvidence.length}`);
-  if (state.workflow === "release") {
+  if (state.phaseRecords?.length) lines.push(`phaseRecords=${state.phaseRecords.join(",")}`);
+  if (state.route?.objective === "design" && state.route.maturity === "release") {
     lines.push(
       `workstreams=${Object.entries(state.workstreamStatuses ?? {})
         .map(([k, v]) => `${k}:${v}`)

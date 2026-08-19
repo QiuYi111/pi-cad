@@ -26,7 +26,7 @@ export interface CadJournalEvent {
 
 export interface CadRunRef {
   runId: string;
-  workflow: CadRunState["workflow"];
+  route: CadRunState["route"];
   phase: CadRunState["phase"];
   status: CadRunState["status"];
   createdAt: string;
@@ -144,7 +144,7 @@ export class CadRunStore {
     if (!state) return null;
     return {
       runId: state.runId,
-      workflow: state.workflow,
+      route: state.route ?? null,
       phase: state.phase,
       status: state.status,
       createdAt: state.createdAt,
@@ -326,6 +326,81 @@ export class CadProjectStore {
       ? absolutePath.slice(this.cwd.length).replace(/^[/\\]/, "")
       : absolutePath;
     return rel || ".";
+  }
+
+  /**
+   * Schema v3 → v4 (0.8 route ontology). v4 replaces `workflow` with the
+   * hierarchical `route`; mapping a 0.7 workflow enum onto a route would be
+   * lossy (quick has no route equivalent, maturity lived in requirements),
+   * so migration is deliberately conservative:
+   *
+   *   - project.json: bump the version, keep the design head untouched;
+   *   - active v3 runs (active/waiting_user/ready): abort with an explicit
+   *     migration event — the user re-routes from intake with cad_route;
+   *   - finished v3 runs: bump only, they are terminal history.
+   */
+  async migrateV3ToV4(): Promise<boolean> {
+    await this.ensure();
+    let migrated = false;
+
+    // project.json
+    try {
+      const raw = JSON.parse(await readFile(this.projectPath, "utf-8")) as CadProjectState;
+      if (raw.schemaVersion === 3) {
+        raw.schemaVersion = CAD_STATE_SCHEMA_VERSION;
+        raw.updatedAt = nowIso();
+        await this.saveProject(raw);
+        migrated = true;
+      }
+    } catch {
+      // no project file yet — ensureProject will create it at v4
+    }
+
+    // runs
+    let names: string[] = [];
+    try {
+      names = await readdir(this.runsDir);
+    } catch {
+      names = [];
+    }
+    for (const name of names) {
+      const statePath = join(this.runsDir, name, "state.json");
+      let state: Record<string, unknown>;
+      try {
+        state = JSON.parse(await readFile(statePath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (state.schemaVersion !== 3) continue;
+      const wasActive =
+        state.status === "active" || state.status === "waiting_user" || state.status === "ready";
+      delete state.workflow;
+      delete state.maturity;
+      state.schemaVersion = CAD_STATE_SCHEMA_VERSION;
+      state.route = null;
+      state.updatedAt = nowIso();
+      if (wasActive) state.status = "aborted";
+      await atomicWrite(statePath, `${JSON.stringify(state, null, 2)}\n`);
+      if (wasActive) {
+        const run = new CadRunStore(this.cwd, name);
+        await run
+          .appendEvent("RunAbortedBySchemaMigration", {
+            from: 3,
+            to: CAD_STATE_SCHEMA_VERSION,
+            note: "0.8 route ontology: re-route from intake with cad_route; project head is unchanged",
+          })
+          .catch(() => {});
+      }
+      migrated = true;
+    }
+    return migrated;
+  }
+
+  /** All migrations: legacy layouts, then schema version steps. */
+  async migrate(): Promise<boolean> {
+    const legacy = await this.migrateLegacyProject();
+    const version = await this.migrateV3ToV4();
+    return legacy || version;
   }
 
   /** Migrate V0 single-state and V0.4 task layouts into project + runs. */

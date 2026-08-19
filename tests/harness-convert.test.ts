@@ -63,7 +63,7 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
   const candidate = pi.tools.get("cad_commit_candidate");
   const finish = pi.tools.get("cad_finish");
 
-  const r1 = await route.execute("1", { workflow: "convert", reason: "format conversion to STL" }, undefined, undefined, ctx);
+  const r1 = await route.execute("1", { objective: "convert", reason: "format conversion to STL" }, undefined, undefined, ctx);
   assert.match(r1.content[0].text, /REQUIREMENTS/);
   const r2 = await req.execute("2", {
     goal: "convert plate.step to STL",
@@ -72,7 +72,6 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
     preferences: [],
     assumptions: ["STL intentionally has no hierarchy"],
     openUnknowns: [],
-    maturity: "prototype",
     inputs: ["plate.step"],
   }, undefined, undefined, ctx);
   assert.match(r2.content[0].text, /SOURCE_BASELINE/);

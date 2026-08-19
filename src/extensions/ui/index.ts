@@ -1,12 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import type { CadRunState } from "../../shared/protocol.ts";
+import { routeKey } from "../../shared/protocol.ts";
 import { CadProjectStore } from "../../shared/store.ts";
+
+const routeName = (state: { route?: CadRunState["route"] }) =>
+  state.route ? routeKey(state.route) : "intake";
 
 export default function cadUiExtension(pi: ExtensionAPI) {
   pi.events.on("pi-cad:state-changed", (state: CadRunState) => {
     const text = [
-      `Pi-CAD · ${state.workflow ?? "intake"}`,
+      `Pi-CAD · ${routeName(state)}`,
       `phase=${state.phase}`,
       `status=${state.status}`,
       state.candidateLabel ? `candidate=${state.candidateLabel}` : "",
@@ -29,15 +33,14 @@ export default function cadUiExtension(pi: ExtensionAPI) {
       }
       const runs = await store.listRuns();
       const lines = [
-        `Pi-CAD · ${state.workflow ?? "intake"}`,
+        `Pi-CAD · ${routeName(state)}`,
         `run=${state.runId}`,
         `phase=${state.phase} status=${state.status} policy=${state.mutationPolicy}`,
-        `maturity=${state.maturity}`,
         state.baselineArtifactHash ? `baseline=${state.baselineArtifactHash.slice(0, 12)}` : "",
         state.currentArtifactHash ? `artifact=${state.currentArtifactHash.slice(0, 12)}` : "",
         `evidence=${state.evidence.map((e) => e.kind).join(",") || "none"}`,
         `runs=${runs
-          .map((r) => `${r.runId}:${r.workflow ?? "intake"}/${r.status}`)
+          .map((r) => `${r.runId}:${r.route ? routeKey(r.route) : "intake"}/${r.status}`)
           .join(", ")}`,
       ].filter(Boolean);
       if (ctx.mode === "tui") {

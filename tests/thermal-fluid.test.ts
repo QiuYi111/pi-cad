@@ -49,11 +49,18 @@ function mockPi(): MockPi {
   return pi;
 }
 
+const GREENFIELD_ROUTE = {
+  objective: "design",
+  lineage: "greenfield",
+  structure: "part",
+  maturity: "prototype",
+} as const;
+
 function greenfieldReadyState(
   simulationObligation?: { disposition: "required"; cases?: Array<{ id: string; tool: string }> },
 ): CadRunState {
   let state = createIntakeState();
-  const routed = route(state, "greenfield", "thermal-fluid walking skeleton");
+  const routed = route(state, GREENFIELD_ROUTE, "thermal-fluid walking skeleton");
   if (!routed.ok) throw new Error(routed.reason);
   state = routed.state;
   const committed = commitRequirements(state, {
@@ -63,15 +70,14 @@ function greenfieldReadyState(
     preferences: [],
     assumptions: [],
     openUnknowns: [],
-    maturity: "prototype",
     ...(simulationObligation
       ? { evidenceObligations: { simulation: simulationObligation } }
       : {}),
   });
   if (!committed.ok) throw new Error(committed.reason);
   state = committed.state;
-  // concept -> intent -> build (greenfield transition table)
-  for (const event of ["direction_selected", "plan_committed"]) {
+  // part_design -> build (fast path: plan commit enters build)
+  for (const event of ["plan_committed"]) {
     const next = transition(state, event, "test");
     if (!next.ok) throw new Error(next.reason);
     state = next.state;
