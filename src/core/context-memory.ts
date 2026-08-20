@@ -10,7 +10,11 @@
  *     `state.json` and is re-projected by `composeSystemPrompt()` every turn.
  *   - Working context (the current "brain": understanding / intent /
  *     attempts / open questions) lives in `context/working.md` and is
- *     re-injected on every `before_agent_start`.
+ *     re-injected on every `before_agent_start`. When a refresh fails or
+ *     comes back truncated, the file is marked stale in
+ *     `context/working.meta.json` and NOT injected until the next
+ *     successful rebuild — a stale intent must not outrank the fresher
+ *     default compaction summary in the conversation.
  *   - Reference archive keeps the pre-compaction trajectory in
  *     `context/archive/ctx-NNN.json` with inline base64 images extracted to
  *     `context/archive/assets/` (referenced by path + sha256), indexed by
@@ -29,6 +33,7 @@
  * threshold trigger, overflow recovery), not just self-triggered ones.
  */
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -47,8 +52,13 @@ const DEFAULT_SUMMARIZER_BUDGET_CHARS = 240_000;
 const WORKING_CONTEXT_MAX_CHARS = 16_000;
 /** How many archived checkpoints to list in the system prompt index. */
 const ARCHIVE_INDEX_LIMIT = 5;
-/** maxTokens for the fresh working-context update call. */
-const UPDATE_MAX_TOKENS = 4096;
+/**
+ * Output budget for the fresh working-context call. On the OpenAI
+ * Responses API `max_output_tokens` covers hidden reasoning AND the visible
+ * working.md text, so this must leave room for medium-effort reasoning on
+ * top of a ~3000-word document — 4096 would truncate mid-document.
+ */
+const UPDATE_MAX_TOKENS = 8192;
 
 /**
  * Accept both `55` and `0.55` spellings. Pi computes
@@ -81,6 +91,32 @@ function contextDirOf(run: CadRunStore): string {
 
 function workingPath(run: CadRunStore): string {
   return join(contextDirOf(run), "working.md");
+}
+
+interface WorkingMeta {
+  status: "active" | "stale";
+  updatedAt: string;
+  reason?: string;
+}
+
+function workingMetaPath(run: CadRunStore): string {
+  return join(contextDirOf(run), "working.meta.json");
+}
+
+/** Missing/unreadable meta means active: runs predating the marker inject fine. */
+async function readWorkingMeta(run: CadRunStore): Promise<WorkingMeta> {
+  const meta = await readJson<WorkingMeta>(workingMetaPath(run));
+  return meta?.status === "stale" ? meta : { status: "active", updatedAt: "" };
+}
+
+/** Meta bookkeeping must never fail a refresh that already succeeded. */
+async function tryWriteWorkingMeta(run: CadRunStore, meta: WorkingMeta): Promise<void> {
+  try {
+    await mkdir(contextDirOf(run), { recursive: true });
+    await writeFile(workingMetaPath(run), `${JSON.stringify(meta, null, 2)}\n`, "utf-8");
+  } catch {
+    // Non-fatal: default-active read keeps the just-written working.md in play.
+  }
 }
 
 async function readText(path: string): Promise<string> {
@@ -289,6 +325,33 @@ async function archiveTrajectory(
   return { ref };
 }
 
+/**
+ * A failed refresh must not leave a stale "current brain" competing with
+ * the fresher default compaction summary in the conversation: mark the
+ * existing working.md stale (skipped at injection until the next
+ * successful rebuild) and journal the failure for experiment telemetry.
+ */
+async function noteUpdateFailure(
+  run: CadRunStore,
+  info: { stopReason?: string; checkpointId?: string },
+): Promise<void> {
+  try {
+    if (existsSync(workingPath(run))) {
+      await tryWriteWorkingMeta(run, {
+        status: "stale",
+        updatedAt: nowIso(),
+        reason: info.stopReason ? `refresh stopped: ${info.stopReason}` : "refresh failed",
+      });
+    }
+    await run.appendEvent("ContextMemoryUpdateFailed", {
+      stopReason: info.stopReason ?? null,
+      checkpointId: info.checkpointId ?? null,
+    });
+  } catch {
+    // Telemetry and staleness are best-effort; compaction proceeds regardless.
+  }
+}
+
 const WORKING_CONTEXT_PROMPT = `You maintain Pi-CAD's working context for a long-running engineering task.
 
 Do NOT summarize the whole conversation.
@@ -350,6 +413,8 @@ export interface WorkingContextUpdate {
   updated: boolean;
   /** Provider usage of the fresh call, for CompactionEntry accounting. */
   usage?: unknown;
+  /** Stop reason when the call resolved but did not finish cleanly. */
+  stopReason?: string;
 }
 
 /**
@@ -371,7 +436,7 @@ async function updateWorkingContext(
       model: unknown,
       request: { messages: Array<Record<string, unknown>> },
       options: Record<string, unknown>,
-    ) => Promise<{ content?: Array<{ type?: string; text?: string }>; usage?: unknown }>;
+    ) => Promise<{ content?: Array<{ type?: string; text?: string }>; usage?: unknown; stopReason?: string }>;
   };
   if (!registry.complete) return { updated: false };
 
@@ -408,9 +473,17 @@ async function updateWorkingContext(
       .map((block) => block.text!)
       .join("\n")
       .trim();
+    // A truncated refresh is worse than none: half a document would become
+    // the next phase's "current brain" with no indication it is incomplete.
+    // complete() only resolves for non-error stops (aborted/error throw in
+    // the adapter), so anything but "stop" here means cut off mid-output.
+    if (response.stopReason !== "stop") {
+      return { updated: false, stopReason: response.stopReason };
+    }
     if (!text) return { updated: false };
     await mkdir(contextDirOf(run), { recursive: true });
     await writeFile(workingPath(run), `${text}\n`, "utf-8");
+    await tryWriteWorkingMeta(run, { status: "active", updatedAt: nowIso() });
     return { updated: true, usage: response.usage };
   } catch {
     return { updated: false };
@@ -458,7 +531,11 @@ export async function renderTaskContext(cwd: string, state: CadRunState): Promis
   const requirements = await readJson<CadRequirements>(join(run.recordsDir, "requirements.json"));
   if (requirements?.goal) sections.push(renderMission(requirements));
 
-  const working = (await readText(workingPath(run))).trim();
+  // A stale working.md (refresh failed mid-compaction) is deliberately NOT
+  // injected: its "Current intent" would outrank the fresher default
+  // compaction summary now carrying the run in the conversation.
+  const meta = await readWorkingMeta(run);
+  const working = meta.status === "stale" ? "" : (await readText(workingPath(run))).trim();
   if (working) sections.push(`## Working Context\n\n${clip(working, WORKING_CONTEXT_MAX_CHARS)}`);
 
   const refs = await readRefs(run);
@@ -564,10 +641,11 @@ export function registerContextCompaction(pi: ExtensionAPI): void {
     }
 
     // 2. Fresh LLM refresh of working.md over a budgeted copy.
-    const { updated, usage } = await updateWorkingContext(ctx, run, messages, event.signal);
+    const { updated, usage, stopReason } = await updateWorkingContext(ctx, run, messages, event.signal);
     if (!updated) {
       // Fall back to Pi's default compaction summary; archive + refs above
       // are already durable when they could be written.
+      await noteUpdateFailure(run, { stopReason, checkpointId: archived?.ref.id });
       return undefined;
     }
 

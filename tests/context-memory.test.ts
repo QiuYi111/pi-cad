@@ -97,7 +97,12 @@ function compactionEvent(messages: unknown[]) {
 }
 
 /** Fake ExtensionContext whose modelRegistry.complete captures its options. */
-function fakeCtx(cwd: string, completeImpl?: (options: Record<string, unknown>) => { content: Array<{ type: string; text: string }>; usage?: unknown }) {
+function fakeCtx(
+  cwd: string,
+  completeImpl?: (
+    options: Record<string, unknown>,
+  ) => { content: Array<{ type: string; text: string }>; usage?: unknown; stopReason?: string },
+) {
   const calls: Array<{ options: Record<string, unknown> }> = [];
   const ctx = {
     cwd,
@@ -115,6 +120,7 @@ function fakeCtx(cwd: string, completeImpl?: (options: Record<string, unknown>) 
                 },
               ],
               usage: { inputTokens: 1234, outputTokens: 567 },
+              stopReason: "stop",
             };
         return out;
       },
@@ -245,8 +251,11 @@ test("session_before_compact: archives trajectory + image assets, passes usage/f
     assert.deepEqual(result.compaction!.details, FILE_OPS);
 
     // The fresh call reasoned explicitly (absent reasoningEffort maps to
-    // off/none in Pi's OpenAI Responses adapter, not to a default level).
+    // off/none in Pi's OpenAI Responses adapter, not to a default level),
+    // with an output budget that survives medium reasoning + the document
+    // (max_output_tokens covers both on the Responses API).
     assert.equal(calls[0]!.options.reasoningEffort, "medium");
+    assert.equal(calls[0]!.options.maxTokens, 8192);
     assert.equal(calls[0]!.options.cacheRetention, "none");
 
     // Persistence: working.md + refs.jsonl + archive/ctx-001.json.
@@ -406,6 +415,79 @@ test("session_before_compact: broken archive storage fails open — compaction s
     assert.ok(result.compaction!.summary.includes("could not be written"), "summary warns about the missing archive");
     assert.ok(existsSync(join(contextDir, "working.md")), "working.md is still refreshed");
     assert.equal(existsSync(join(contextDir, "refs.jsonl")), false);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("session_before_compact: length-truncated refresh is rejected, working.md marked stale and not injected until recovery", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-truncated-"));
+  try {
+    await seedRun(cwd, "truncated-run");
+    const run = new CadRunStore(cwd, "truncated-run");
+    const contextDir = join(run.runDir, "context");
+    mkdirSync(contextDir, { recursive: true });
+    const oldBrain = "## Current intent\n\nOLD-BRAIN: sew the optimized shell directly.\n";
+    writeFileSync(join(contextDir, "working.md"), oldBrain);
+
+    const { pi, handlers } = fakePi();
+    registerContextCompaction(pi);
+    const handler = compactHandler(handlers);
+
+    // Reasoning ate the output budget: the visible document is cut mid-way.
+    const { ctx } = fakeCtx(cwd, () => ({
+      content: [{ type: "text", text: "## Current understanding\n\nOCC sewing fail" }],
+      usage: { inputTokens: 9000, outputTokens: 8192 },
+      stopReason: "length",
+    }));
+    const result = await handler(
+      compactionEvent([
+        { role: "user", content: [{ type: "text", text: "Second reconstruction attempt on the density field." }], timestamp: 1 },
+      ]),
+      ctx,
+    );
+    assert.equal(result, undefined, "truncated refresh must fall back to default compaction");
+
+    // The half-written document never became the brain...
+    assert.equal(readFileSync(join(contextDir, "working.md"), "utf-8"), oldBrain);
+    // ...the archive is still durable (written before the refresh)...
+    assert.ok(existsSync(join(contextDir, "archive", "ctx-001.json")));
+    // ...and the failure is observable for experiment telemetry.
+    const meta = JSON.parse(readFileSync(join(contextDir, "working.meta.json"), "utf-8")) as { status: string; reason: string };
+    assert.equal(meta.status, "stale");
+    assert.ok(meta.reason.includes("length"));
+    const events = readFileSync(run.eventsPath, "utf-8").trim().split("\n").map((line) => JSON.parse(line) as { type: string; data?: { stopReason?: string } });
+    const failure = events.find((event) => event.type === "ContextMemoryUpdateFailed");
+    assert.ok(failure, "journal must record the failed refresh");
+    assert.equal(failure.data?.stopReason, "length");
+
+    // Stale brain is not injected while the default summary carries the run.
+    const state = await new CadProjectStore(cwd).load();
+    assert.ok(state);
+    const staleRendered = await renderTaskContext(cwd, state);
+    assert.ok(staleRendered.includes("## Mission"));
+    assert.ok(!staleRendered.includes("## Working Context"), "stale working.md must not be injected");
+    assert.ok(!staleRendered.includes("OLD-BRAIN"));
+
+    // Recovery: the next successful rebuild reactivates injection.
+    const { ctx: goodCtx } = fakeCtx(cwd, () => ({
+      content: [{ type: "text", text: "## Current understanding\n\nShell reconstruction abandoned; rib layout confirmed.\n" }],
+      usage: { inputTokens: 8000, outputTokens: 2000 },
+      stopReason: "stop",
+    }));
+    const recovered = await handler(
+      compactionEvent([
+        { role: "user", content: [{ type: "text", text: "Third attempt." }], timestamp: 1 },
+      ]),
+      goodCtx,
+    );
+    assert.ok(recovered, "successful refresh returns the custom compaction");
+    const activeMeta = JSON.parse(readFileSync(join(contextDir, "working.meta.json"), "utf-8")) as { status: string };
+    assert.equal(activeMeta.status, "active");
+    const recoveredRendered = await renderTaskContext(cwd, state);
+    assert.ok(recoveredRendered.includes("## Working Context"));
+    assert.ok(recoveredRendered.includes("rib layout confirmed"));
+    assert.ok(!recoveredRendered.includes("OLD-BRAIN"));
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
