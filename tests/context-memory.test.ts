@@ -103,13 +103,13 @@ function fakeCtx(
     options: Record<string, unknown>,
   ) => { content: Array<{ type: string; text: string }>; usage?: unknown; stopReason?: string },
 ) {
-  const calls: Array<{ options: Record<string, unknown> }> = [];
+  const calls: Array<{ request: unknown; options: Record<string, unknown> }> = [];
   const ctx = {
     cwd,
     model: { id: "fake-luna" },
     modelRegistry: {
-      complete: async (_model: unknown, _request: unknown, options: Record<string, unknown>) => {
-        calls.push({ options });
+      complete: async (_model: unknown, request: unknown, options: Record<string, unknown>) => {
+        calls.push({ request, options });
         const out = completeImpl
           ? completeImpl(options)
           : {
@@ -145,6 +145,12 @@ function compactHandler(handlers: Map<string, Array<() => Promise<unknown>>>) {
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** The user prompt text of the captured fresh working-context call. */
+function capturedPrompt(call: { request: unknown }): string {
+  const request = call.request as { messages: Array<{ content: Array<{ text?: string }> }> };
+  return request.messages[0]!.content.map((block) => block.text ?? "").join("\n");
+}
 
 test("maybeRebuildContext: threshold gating, pending guard, and forced continuation after a consumed nudge key", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-trigger-"));
@@ -469,8 +475,9 @@ test("session_before_compact: length-truncated refresh is rejected, working.md m
     assert.ok(!staleRendered.includes("## Working Context"), "stale working.md must not be injected");
     assert.ok(!staleRendered.includes("OLD-BRAIN"));
 
-    // Recovery: the next successful rebuild reactivates injection.
-    const { ctx: goodCtx } = fakeCtx(cwd, () => ({
+    // Recovery: the next successful rebuild reactivates injection — and its
+    // compactor prompt must not have received the stale OLD-BRAIN either.
+    const { ctx: goodCtx, calls: goodCalls } = fakeCtx(cwd, () => ({
       content: [{ type: "text", text: "## Current understanding\n\nShell reconstruction abandoned; rib layout confirmed.\n" }],
       usage: { inputTokens: 8000, outputTokens: 2000 },
       stopReason: "stop",
@@ -482,12 +489,59 @@ test("session_before_compact: length-truncated refresh is rejected, working.md m
       goodCtx,
     );
     assert.ok(recovered, "successful refresh returns the custom compaction");
+    assert.ok(!capturedPrompt(goodCalls[0]!).includes("OLD-BRAIN"), "stale brain stays quarantined from the recovery call");
     const activeMeta = JSON.parse(readFileSync(join(contextDir, "working.meta.json"), "utf-8")) as { status: string };
     assert.equal(activeMeta.status, "active");
     const recoveredRendered = await renderTaskContext(cwd, state);
     assert.ok(recoveredRendered.includes("## Working Context"));
     assert.ok(recoveredRendered.includes("rib layout confirmed"));
     assert.ok(!recoveredRendered.includes("OLD-BRAIN"));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("session_before_compact: stale working.md is quarantined from the compactor input too", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-quarantine-"));
+  try {
+    await seedRun(cwd, "quarantine-run");
+    const run = new CadRunStore(cwd, "quarantine-run");
+    const contextDir = join(run.runDir, "context");
+    mkdirSync(contextDir, { recursive: true });
+    // A brain left stale by a failed refresh must not leak into the next
+    // compactor either — only the main agent was quarantined before.
+    writeFileSync(join(contextDir, "working.md"), "## Current intent\n\nOLD-BRAIN: sew the shell directly with OCC.\n");
+    writeFileSync(
+      join(contextDir, "working.meta.json"),
+      JSON.stringify({ status: "stale", updatedAt: "2025-01-01T00:00:00Z", reason: "refresh stopped: length" }),
+    );
+
+    const { pi, handlers } = fakePi();
+    registerContextCompaction(pi);
+    const handler = compactHandler(handlers);
+    const { ctx, calls } = fakeCtx(cwd);
+
+    const result = await handler(
+      compactionEvent([
+        { role: "user", content: [{ type: "text", text: "Retry reconstruction via rib layout." }], timestamp: 1 },
+      ]),
+      ctx,
+    );
+    assert.ok(result, "successful refresh returns the custom compaction");
+    const prompt = capturedPrompt(calls[0]!);
+    assert.ok(!prompt.includes("OLD-BRAIN"), "stale brain must not enter the compactor prompt");
+    assert.ok(!prompt.includes("sew the shell directly"), "stale intent text must not leak");
+    assert.ok(
+      prompt.includes("quarantined as stale"),
+      "the placeholder must say the previous context was quarantined, not that this is the first rebuild",
+    );
+    // Successful refresh clears the quarantine.
+    const meta = JSON.parse(readFileSync(join(contextDir, "working.meta.json"), "utf-8")) as { status: string };
+    assert.equal(meta.status, "active");
+    const state = await new CadProjectStore(cwd).load();
+    assert.ok(state);
+    const rendered = await renderTaskContext(cwd, state);
+    assert.ok(rendered.includes("## Working Context"), "recovered brain is injected again");
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

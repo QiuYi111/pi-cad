@@ -441,12 +441,21 @@ async function updateWorkingContext(
   if (!registry.complete) return { updated: false };
 
   try {
-    const previous = await readText(workingPath(run));
+    // The stale quarantine must cover the compactor too: feeding the OLD
+    // brain back here would summarize the abandoned intent right into the
+    // refreshed one. Stale working context is not passed at all.
+    const meta = await readWorkingMeta(run);
+    const previous = meta.status === "active" ? (await readText(workingPath(run))).trim() : "";
+    const previousNote =
+      previous ||
+      (meta.status === "stale"
+        ? "(previous working context was quarantined as stale after a failed refresh — regenerate from the trajectory alone, do not resurrect it)"
+        : "(none yet — this is the first rebuild)");
     const conversation = budgetClip(serializeConversation(convertToLlm(messages as never)));
     const prompt = [
       WORKING_CONTEXT_PROMPT,
       "<previous working context>",
-      previous.trim() || "(none yet — this is the first rebuild)",
+      previousNote,
       "</previous working context>",
       "<trajectory since previous checkpoint>",
       conversation,
