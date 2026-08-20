@@ -13,6 +13,7 @@ import { CadProjectStore, nowIso } from "../shared/store.ts";
 import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
 import { currentDoctorReport, type DoctorReport, packageRoot } from "../shared/capability.ts";
 import { composeSystemPrompt } from "./context.ts";
+import { maybeRebuildContext, registerContextCompaction, renderTaskContext } from "./context-memory.ts";
 import { maybeAutoContinue } from "./continuation.ts";
 import { registerControlTools, type ControllerDeps } from "./controller.ts";
 import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
@@ -262,6 +263,7 @@ export default function cadCore(pi: ExtensionAPI) {
   });
 
   registerControlTools(pi, deps);
+  registerContextCompaction(pi);
 
   pi.on("before_agent_start", async (event, ctx) => {
     const store = new CadProjectStore(ctx.cwd);
@@ -283,8 +285,14 @@ export default function cadCore(pi: ExtensionAPI) {
     // plugin's active tools.
     applyCadToolOverlay(pi, active ? state : null);
     const missing = await unavailableCapabilities(pi, ctx.cwd);
+    // Mission + Working Context + reference index, appended after the
+    // canonical state projection. Empty on fresh runs until the first
+    // context rebuild writes working.md.
+    const taskContext = active ? await renderTaskContext(store.cwd, state) : "";
+    const base = await composeSystemPrompt("", active ? state : null, missing, project);
+    const suffix = taskContext ? `\n\n${taskContext}` : "";
     return {
-      systemPrompt: `${event.systemPrompt}\n\n${await composeSystemPrompt("", active ? state : null, missing, project)}`,
+      systemPrompt: `${event.systemPrompt}\n\n${base}${suffix}`,
     };
   });
 
@@ -340,6 +348,10 @@ export default function cadCore(pi: ExtensionAPI) {
     const store = new CadProjectStore(ctx.cwd);
     const state = await guardState(store);
     if (!state) return;
+    // Rebuild the brain before deciding to continue: when a context rebuild
+    // was triggered, continuation resumes from the compaction's
+    // onComplete/onError with freshly loaded state.
+    if (maybeRebuildContext(pi, store, state, ctx)) return;
     await maybeAutoContinue(pi, store, state, ctx);
   });
 }
