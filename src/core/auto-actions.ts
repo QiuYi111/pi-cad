@@ -38,12 +38,34 @@ import {
   markEvidenceStale,
 } from "./state-machine.ts";
 
+/**
+ * Compact deterministic-facts digest of the auto geometry inspection.
+ * The full payload already lives in evidence; this surfaces the headline
+ * numbers in the candidate observation so the agent can reason about them
+ * without a extra tool call. Facts only — interpretation stays with the agent.
+ */
+function geometryDigest(envelope: Parameters<typeof geometryPayload>[0]): string {
+  const p = geometryPayload(envelope);
+  const bbox = p.bbox ? `${p.bbox.x}×${p.bbox.y}×${p.bbox.z} ${p.units ?? ""}`.trim() : "?";
+  const radii = (p.cylinders ?? [])
+    .map((c) => (typeof c.radius === "number" ? `r=${c.radius}` : null))
+    .filter((s): s is string => s !== null)
+    .slice(0, 8);
+  const parts = [
+    `bbox=${bbox}`,
+    `volume=${p.volume ?? "?"}`,
+    `surfaceArea=${p.surfaceArea ?? "?"}`,
+    `solids=${p.solidCount ?? "?"}`,
+    `cylinders=${p.cylinders?.length ?? 0}${radii.length ? ` [${radii.join(", ")}]` : ""}`,
+  ];
+  return parts.join("; ");
+}
+
 export type PersistFn = (
   pi: ExtensionAPI,
   store: CadProjectStore,
   state: CadRunState,
-  events: Array<{ type: string; data?: unknown }>,
-) => Promise<void>;
+  events: Array<{ type: string; data?: unknown }>,) => Promise<void>;
 
 /**
  * Whether candidate commits auto-record compare evidence against the
@@ -282,6 +304,7 @@ export async function runCandidateAuto(
     `- ${buildEnvelope.ok ? "build: ok" : "build: failed"}`,
     `- ${visualEnvelope.ok ? "visual: ok" : "visual: failed"}`,
     `- ${geometryEnvelope.ok ? "geometry: ok" : "geometry: failed"}`,
+    ...(geometryEnvelope.ok ? [`- facts: ${geometryDigest(geometryEnvelope)}`] : []),
     `artifactHash=${artifactHash.slice(0, 12)}`,
     `sourceHash=${sourceHash.slice(0, 12)}`,
     ...(warnings.length ? [`warnings: ${warnings.join("; ")}`] : []),

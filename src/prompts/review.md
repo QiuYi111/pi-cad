@@ -15,3 +15,10 @@ Inspect every returned view yourself. Tool output contains facts, not design mea
 - If the issue is local geometry, call cad_transition(event="revise") to return to build, edit the source, and commit another candidate.
 - If the candidate satisfies your engineering judgment at the requested maturity, call cad_transition(event="accepted") with a note describing the checks you performed.
 - Never claim an inspection happened unless the harness attached it for the current artifact hash.
+
+## Requirement closure
+
+- Before `accepted`, reconcile the candidate against every item in Mission `Must`. Do not accept while a Must item is unchecked or unresolved.
+- Verify semantic consequences, not only dimensions. For bores, holes, pockets, slots, cuts, and shells, verify depth, throughness, and the affected side with geometry, measurement, or section evidence — never infer these properties from rendered appearance alone.
+- Verify explicit final orientation, alignment, centering, or positioning instructions before acceptance.
+- When current evidence contradicts a provisional assumption, reopen it instead of accepting around it.

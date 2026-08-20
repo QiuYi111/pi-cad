@@ -27,6 +27,13 @@ brief.
 - For routes that start from supplied STEP/CAD (analyze, legacy, hybrid, convert), put every supplied artifact path in inputs[].
 - Do not debate the artifact's coordinate orientation here — the harness binds and auto-inspects the baseline right after this commit, and the BASELINE phase confirms the frame mapping with the user using those views.
 
+## Requirement closure
+
+- Put every explicit acceptance constraint or requested deliverable-changing instruction into `must[]` as a separate item. Keep soft preferences in `preferences[]`.
+- Record interpretation decisions in `assumptions[]`, including unit normalization, which geometric entity a dimension refers to, and any ambiguity you resolved: state the chosen reading and the reason.
+- Treat explicit final-state instructions such as rotate, align, orient, center, and position as separate `must[]` items — they are acceptance conditions, not style.
+- When requirements conflict and the choice is engineering judgment rather than a user-owned scope/cost/risk/authority decision, choose the most defensible reading (explicit constraints first, explicit dimensions over inferred relations), record the conflict and the rejected reading in `assumptions[]`, and continue.
+
 ## Engineering simulation obligation
 
 - Identify whether the route maturity and explicit physics constraints require engineering simulation evidence.
