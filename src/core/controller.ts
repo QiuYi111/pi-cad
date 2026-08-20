@@ -289,6 +289,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       "objective=convert: STEP/GLB/mesh/format or hierarchy conversion.",
       "objective=design: lineage greenfield (nothing exists yet) / legacy (change a complete existing design) / hybrid (retained legacy interfaces plus free new modules).",
       "structure=assembly whenever the deliverable is more than one part; maturity is the reality floor (prototype is still REAL/BUILDABLE/FUNCTIONAL).",
+      "Maturity adds closure obligations you must satisfy before the run can finish (manufacturing owes drawing evidence, release owes presentation evidence). Route to the maturity the request actually implies — over-routing blocks closure.",
     ],
     parameters: RouteParamsSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -820,9 +821,14 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     name: "cad_wait_for_user",
     label: "Pi-CAD Wait for User",
     description:
-      "Pause the workflow for a user decision. The next user turn restores the same phase.",
+      "Pause the workflow for a user decision that is theirs to make, not yours. The next user turn restores the same phase.",
     promptSnippet: "Pause the workflow for a required user decision",
-    promptGuidelines: ["Ask one decision per pause and give your recommended answer."],
+    promptGuidelines: [
+      "Ask one decision per pause and give your recommended answer.",
+      "Use this only for decisions the user must make: scope, cost, risk, or authority the harness structurally requires (e.g. a maturity downgrade).",
+      "Do not pause for engineering judgment you own — requirement interpretation, nominal values, coordinate conventions, or which evidence to generate. Decide, act, and state the assumption in your note; a paused workflow in a headless run waits forever.",
+      "Before pausing over missing evidence, check whether you can produce it yourself (e.g. drawing evidence via cadctl drawing through bash) or reroute to the maturity the request actually implies.",
+    ],
     parameters: Type.Object({ reason: Type.String() }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
