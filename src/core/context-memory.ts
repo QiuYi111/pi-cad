@@ -11,8 +11,9 @@
  *   - Working context (the current "brain": understanding / intent /
  *     attempts / open questions) lives in `context/working.md` and is
  *     re-injected on every `before_agent_start`.
- *   - Reference archive keeps the FULL pre-compaction trajectory (raw
- *     messages) in `context/archive/ctx-NNN.json`, indexed by
+ *   - Reference archive keeps the pre-compaction trajectory in
+ *     `context/archive/ctx-NNN.json` with inline base64 images extracted to
+ *     `context/archive/assets/` (referenced by path + sha256), indexed by
  *     `context/refs.jsonl`. It never enters the model context on its own;
  *     only a short index of checkpoints is rendered.
  *
@@ -27,7 +28,8 @@
  * The handler serves every compaction path (manual /compact, Pi's own
  * threshold trigger, overflow recovery), not just self-triggered ones.
  */
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
@@ -132,46 +134,127 @@ function budgetClip(text: string): string {
 }
 
 /**
- * Replace inline base64 images with placeholders. Pi-CAD persists visual
- * evidence under evidence/, so nothing is lost — but raw message JSON with
- * embedded renders would bloat every archive file by megabytes.
+ * Extract inline base64 images from the trajectory into archive asset files
+ * and replace the payload with a path + sha256 reference. User-supplied
+ * reference images (e.g. "modify this mechanical structure") live ONLY in
+ * the session trajectory — Pi-CAD's evidence/ never saw them — so dropping
+ * the bytes would lose them irrecoverably. Asset files keep the JSON
+ * archive readable while every image stays byte-exact on disk.
  */
-function stripInlineImages(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripInlineImages);
-  if (value && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    if (record.type === "image" && typeof record.data === "string") {
-      return {
-        ...record,
-        data: `[stripped by context-memory: ${record.data.length} chars; visual evidence persists under .pi-cad/runs/<runId>/evidence/]`,
-      };
+async function extractImageAssets(
+  run: CadRunStore,
+  id: string,
+  messages: unknown[],
+): Promise<{ messages: unknown[]; assets: Array<{ path: string; sha256: string; bytes: number }> }> {
+  const assetsDir = join(contextDirOf(run), "archive", "assets");
+  const assets: Array<{ path: string; sha256: string; bytes: number }> = [];
+  let seq = 0;
+
+  const extract = async (block: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    if (block.type !== "image" || typeof block.data !== "string" || !block.data) return block;
+    seq += 1;
+    const ext = imageAssetExt(block.mimeType);
+    const bytes = Buffer.from(block.data, "base64");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const name = `${id}-${String(seq).padStart(3, "0")}.${ext}`;
+    const relative = `.pi-cad/runs/${run.runId}/context/archive/assets/${name}`;
+    await writeFile(join(assetsDir, name), bytes);
+    assets.push({ path: relative, sha256, bytes: bytes.byteLength });
+    return {
+      ...block,
+      data: `[archived image asset: ${relative} (sha256=${sha256.slice(0, 16)}…, ${bytes.byteLength} bytes)]`,
+      archiveAsset: { path: relative, sha256, bytes: bytes.byteLength },
+    };
+  };
+
+  const walk = async (value: unknown): Promise<unknown> => {
+    if (Array.isArray(value)) {
+      const out: unknown[] = [];
+      for (const item of value) out.push(await walk(item));
+      return out;
     }
-    const out: Record<string, unknown> = {};
-    for (const [key, item] of Object.entries(record)) out[key] = stripInlineImages(item);
-    return out;
-  }
-  return value;
+    if (value && typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      if (record.type === "image" && typeof record.data === "string") return await extract(record);
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(record)) out[key] = await walk(item);
+      return out;
+    }
+    return value;
+  };
+
+  return { messages: await walk(messages), assets };
 }
 
-/** Deterministic one-line label for the reference index (no extra LLM call). */
+function imageAssetExt(mimeType: unknown): string {
+  switch (mimeType) {
+    case "image/png":
+      return "png";
+    case "image/jpeg":
+      return "jpg";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    default:
+      return "bin";
+  }
+}
+
+/** User-role texts that are harness-injected nudges, not human input. */
+const HARNESS_NUDGE_PREFIXES = ["Pi-CAD workflow is still in"];
+
+/**
+ * Deterministic one-line label for the reference index (no extra LLM call).
+ * Prefers the most recent human user message, skipping Pi-CAD's own
+ * auto-continue nudges — otherwise every checkpoint would be labelled
+ * "workflow is still in BUILD" and the index would carry no information.
+ */
 function indexSummary(messages: unknown[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i] as { role?: string; content?: Array<{ type?: string; text?: string }> } | undefined;
-    if (message?.role !== "user" || !Array.isArray(message.content)) continue;
-    const text = message.content
+  const userTexts: string[] = [];
+  for (const message of messages) {
+    const record = message as { role?: string; content?: Array<{ type?: string; text?: string }> } | undefined;
+    if (record?.role !== "user" || !Array.isArray(record.content)) continue;
+    const text = record.content
       .filter((block) => block.type === "text" && block.text)
       .map((block) => block.text!)
       .join(" ")
       .replace(/\s+/g, " ")
       .trim();
-    if (text) return text.length > 90 ? `${text.slice(0, 90)}…` : text;
+    if (text) userTexts.push(text);
   }
-  return `${messages.length} messages`;
+  const meaningful = userTexts.filter(
+    (text) => !HARNESS_NUDGE_PREFIXES.some((prefix) => text.startsWith(prefix)),
+  );
+  const chosen = meaningful[meaningful.length - 1] ?? userTexts[0];
+  if (!chosen) return `${messages.length} messages`;
+  return chosen.length > 90 ? `${chosen.slice(0, 90)}…` : chosen;
+}
+
+/**
+ * Allocate the next checkpoint id from BOTH the archive directory and
+ * refs.jsonl. Counting refs alone regresses (and would overwrite an
+ * existing checkpoint) whenever a torn final JSONL line drops an entry.
+ */
+async function nextArchiveId(run: CadRunStore): Promise<string> {
+  let max = 0;
+  try {
+    for (const name of await readdir(join(contextDirOf(run), "archive"))) {
+      const match = /^ctx-(\d+)\.json$/.exec(name);
+      if (match) max = Math.max(max, Number.parseInt(match[1]!, 10));
+    }
+  } catch {
+    // No archive directory yet.
+  }
+  for (const ref of await readRefs(run)) {
+    const match = /^ctx-(\d+)$/.exec(ref.id);
+    if (match) max = Math.max(max, Number.parseInt(match[1]!, 10));
+  }
+  return `ctx-${String(max + 1).padStart(3, "0")}`;
 }
 
 interface ArchivedTrajectory {
   ref: ContextRef;
-  absolutePath: string;
 }
 
 async function archiveTrajectory(
@@ -179,11 +262,10 @@ async function archiveTrajectory(
   messages: unknown[],
   meta: { reason: string; tokensBefore: number; firstKeptEntryId: string },
 ): Promise<ArchivedTrajectory> {
-  const archiveDir = join(contextDirOf(run), "archive");
-  await mkdir(archiveDir, { recursive: true });
-  const seq = (await readRefs(run)).length + 1;
-  const id = `ctx-${String(seq).padStart(3, "0")}`;
-  const absolutePath = join(archiveDir, `${id}.json`);
+  await mkdir(join(contextDirOf(run), "archive", "assets"), { recursive: true });
+  const id = await nextArchiveId(run);
+  const { messages: archivedMessages, assets } = await extractImageAssets(run, id, messages);
+  const absolutePath = join(contextDirOf(run), "archive", `${id}.json`);
   const payload = {
     id,
     createdAt: nowIso(),
@@ -191,7 +273,8 @@ async function archiveTrajectory(
     tokensBefore: meta.tokensBefore,
     firstKeptEntryId: meta.firstKeptEntryId,
     messageCount: messages.length,
-    messages: messages.map(stripInlineImages),
+    assets,
+    messages: archivedMessages,
   };
   // Plain write is fine: the archive is append-only per checkpoint id, and a
   // torn write only loses this checkpoint file, never canonical state.
@@ -203,7 +286,7 @@ async function archiveTrajectory(
     summary: indexSummary(messages),
   };
   await appendFile(join(contextDirOf(run), "refs.jsonl"), `${JSON.stringify(ref)}\n`, "utf-8");
-  return { ref, absolutePath };
+  return { ref };
 }
 
 const WORKING_CONTEXT_PROMPT = `You maintain Pi-CAD's working context for a long-running engineering task.
@@ -250,27 +333,47 @@ function resolveUpdateModel(ctx: ExtensionContext): unknown | undefined {
 }
 
 /**
+ * Reasoning effort for the fresh working-context call. Pi's OpenAI
+ * Responses adapter maps an ABSENT reasoningEffort to `off`/`none` — not
+ * provider default, not medium — so an explicit value is required for the
+ * summarizer to actually reason. `PI_CAD_CONTEXT_MEMORY_REASONING` may set
+ * low/medium/high/... or "off"/"none" to disable reasoning deliberately.
+ */
+function reasoningEffort(): string | undefined {
+  const raw = process.env.PI_CAD_CONTEXT_MEMORY_REASONING?.trim().toLowerCase();
+  if (!raw) return "medium";
+  if (raw === "off" || raw === "none" || raw === "disabled") return undefined;
+  return raw;
+}
+
+export interface WorkingContextUpdate {
+  updated: boolean;
+  /** Provider usage of the fresh call, for CompactionEntry accounting. */
+  usage?: unknown;
+}
+
+/**
  * Refresh working.md with one fresh LLM call over a budgeted copy of the
- * trajectory. Returns false when no model is available or the call fails —
- * callers must then fall back to Pi's default compaction summary (the
- * archive is still written; only the custom summary is skipped).
+ * trajectory. Returns updated=false when no model is available or the call
+ * fails — callers must then fall back to Pi's default compaction summary
+ * (the archive is still written; only the custom summary is skipped).
  */
 async function updateWorkingContext(
   ctx: ExtensionContext,
   run: CadRunStore,
   messages: unknown[],
   signal: AbortSignal,
-): Promise<boolean> {
+): Promise<WorkingContextUpdate> {
   const model = resolveUpdateModel(ctx);
-  if (!model) return false;
+  if (!model) return { updated: false };
   const registry = ctx.modelRegistry as unknown as {
     complete?: (
       model: unknown,
       request: { messages: Array<Record<string, unknown>> },
       options: Record<string, unknown>,
-    ) => Promise<{ content?: Array<{ type?: string; text?: string }> }>;
+    ) => Promise<{ content?: Array<{ type?: string; text?: string }>; usage?: unknown }>;
   };
-  if (!registry.complete) return false;
+  if (!registry.complete) return { updated: false };
 
   try {
     const previous = await readText(workingPath(run));
@@ -285,6 +388,7 @@ async function updateWorkingContext(
       "</trajectory>",
     ].join("\n\n");
 
+    const effort = reasoningEffort();
     const response = await registry.complete(
       model,
       {
@@ -292,30 +396,51 @@ async function updateWorkingContext(
           { role: "user", content: [{ type: "text", text: prompt }], timestamp: Date.now() },
         ],
       },
-      { maxTokens: UPDATE_MAX_TOKENS, signal, cacheRetention: "none" },
+      {
+        maxTokens: UPDATE_MAX_TOKENS,
+        signal,
+        cacheRetention: "none",
+        ...(effort ? { reasoningEffort: effort } : {}),
+      },
     );
     const text = (response.content ?? [])
       .filter((block) => block.type === "text" && block.text)
       .map((block) => block.text!)
       .join("\n")
       .trim();
-    if (!text) return false;
+    if (!text) return { updated: false };
     await mkdir(contextDirOf(run), { recursive: true });
     await writeFile(workingPath(run), `${text}\n`, "utf-8");
-    return true;
+    return { updated: true, usage: response.usage };
   } catch {
-    return false;
+    return { updated: false };
   }
 }
 
+/**
+ * Render the committed brief. Assumptions and openUnknowns are rendered
+ * deliberately, labelled as provisional: the topology-optimization failure
+ * mode was a tentative volume-fraction assumption hardening into a
+ * "constraint" over a long run — the mission must keep saying which claims
+ * were never user-verified. Empty sections are omitted.
+ */
 function renderMission(requirements: CadRequirements): string {
+  const sections: Array<[string, string[]]> = [
+    ["Must:", requirements.must],
+    ["Deliverables:", requirements.deliverables],
+    ["Preferences (soft — trade away only with a stated reason):", requirements.preferences],
+    ["Assumptions (provisional — NOT user-verified constraints):", requirements.assumptions],
+    ["Open Unknowns (unresolved questions):", requirements.openUnknowns],
+  ];
   const lines = ["## Mission", "", `Goal: ${requirements.goal}`];
-  if (requirements.must?.length) {
-    lines.push("", "Must:", ...requirements.must.map((item) => `- ${item}`));
+  for (const [label, items] of sections) {
+    if (!items?.length) continue;
+    lines.push("", label, ...items.map((item) => `- ${item}`));
   }
-  if (requirements.deliverables?.length) {
-    lines.push("", "Deliverables:", ...requirements.deliverables.map((item) => `- ${item}`));
-  }
+  lines.push(
+    "",
+    "Treat Must as hard constraints and Assumptions as revisable; do not silently promote an assumption into a constraint.",
+  );
   return lines.join("\n");
 }
 
@@ -394,7 +519,11 @@ export function maybeRebuildContext(
       // resume from a stale pre-compaction snapshot.
       const latest = await store.load();
       if (!latest) return;
-      await maybeAutoContinue(pi, store, latest, ctx);
+      // force: the rebuild typically fires on the second+ autonomous
+      // continuation of the same phase+artifact version, whose nudge key
+      // maybeAutoContinue already consumed — without force this resume is
+      // deduped away and the run stalls.
+      await maybeAutoContinue(pi, store, latest, ctx, { force: true });
     })();
   };
   ctx.compact({ onComplete: resume, onError: resume });
@@ -418,19 +547,27 @@ export function registerContextCompaction(pi: ExtensionAPI): void {
     if (!messages.length) return undefined;
     const run = new CadRunStore(ctx.cwd, state.runId);
 
-    // 1. Archive the full raw trajectory first: pure file I/O, independent
-    //    of the LLM below, so a failed update never loses history.
-    const { ref, absolutePath: _absolutePath } = await archiveTrajectory(run, messages, {
-      reason: event.reason,
-      tokensBefore: event.preparation.tokensBefore,
-      firstKeptEntryId: event.preparation.firstKeptEntryId,
-    });
+    // 1. Archive the trajectory first: pure file I/O, independent of the
+    //    LLM below, so a failed update never loses history. Fail-open: a
+    //    broken archive must not break compaction itself — falling back to
+    //    Pi's default summary would discard the trajectory just the same,
+    //    while a stale working.md is still the better continuation.
+    let archived: ArchivedTrajectory | null = null;
+    try {
+      archived = await archiveTrajectory(run, messages, {
+        reason: event.reason,
+        tokensBefore: event.preparation.tokensBefore,
+        firstKeptEntryId: event.preparation.firstKeptEntryId,
+      });
+    } catch {
+      archived = null;
+    }
 
     // 2. Fresh LLM refresh of working.md over a budgeted copy.
-    const updated = await updateWorkingContext(ctx, run, messages, event.signal);
+    const { updated, usage } = await updateWorkingContext(ctx, run, messages, event.signal);
     if (!updated) {
       // Fall back to Pi's default compaction summary; archive + refs above
-      // are already durable.
+      // are already durable when they could be written.
       return undefined;
     }
 
@@ -439,12 +576,18 @@ export function registerContextCompaction(pi: ExtensionAPI): void {
     return {
       compaction: {
         summary: [
-          `Pi-CAD context rebuild (${ref.id}).`,
-          `Full trajectory archived at ${ref.path}; working context updated at context/working.md.`,
+          `Pi-CAD context rebuild${archived ? ` (${archived.ref.id})` : ""}.`,
+          archived
+            ? `Full trajectory archived at ${archived.ref.path}; working context updated at context/working.md.`
+            : "WARNING: trajectory archive could not be written; working context updated at context/working.md.",
           "Mission, canonical state, and working context are re-injected in the system prompt — do not re-derive them from this history.",
         ].join(" "),
         firstKeptEntryId: event.preparation.firstKeptEntryId,
         tokensBefore: event.preparation.tokensBefore,
+        ...(usage ? { usage } : {}),
+        // Preserve Pi's cumulative file tracking so later compactions and
+        // session tooling keep a coherent read/modified file history.
+        details: event.preparation.fileOps,
       },
     };
   });

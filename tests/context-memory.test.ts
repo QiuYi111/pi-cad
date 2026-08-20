@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +10,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { CadProjectStore, CadRunStore } from "../src/shared/store.ts";
 import { commitPlan, commitRequirements, route as routeQuick } from "../src/core/state-machine.ts";
+import { maybeAutoContinue } from "../src/core/continuation.ts";
 import type { CadRequirements, CadRunState } from "../src/shared/protocol.ts";
 import {
   maybeRebuildContext,
@@ -33,9 +35,9 @@ async function seedRun(cwd: string, runId: string): Promise<CadRunState> {
     goal: "Topology-optimized bracket with 30% mass reduction",
     deliverables: ["STEP artifact"],
     must: ["Preserve mounting bolt pattern"],
-    preferences: [],
-    assumptions: [],
-    openUnknowns: [],
+    preferences: ["Prefer printable orientations"],
+    assumptions: ["30% volume fraction is a working assumption, not a user constraint"],
+    openUnknowns: ["Load case magnitude for the mounting interface"],
   };
   const built = commitRequirements(routed.state, record);
   assert.ok(built.ok, "requirements failed");
@@ -73,6 +75,8 @@ function fakePi() {
   return { pi: pi as unknown as ExtensionAPI, handlers, sent };
 }
 
+const FILE_OPS = { readFiles: ["models/bracket.py"], modifiedFiles: ["models/bracket.py"] };
+
 function compactionEvent(messages: unknown[]) {
   return {
     preparation: {
@@ -81,7 +85,7 @@ function compactionEvent(messages: unknown[]) {
       isSplitTurn: false,
       tokensBefore: 12345,
       previousSummary: undefined,
-      fileOps: { readFiles: [], modifiedFiles: [] },
+      fileOps: FILE_OPS,
       settings: { enabled: true, reserveTokens: 16384, keepRecentTokens: 8000 },
       firstKeptEntryId: "entry-7",
     },
@@ -92,7 +96,51 @@ function compactionEvent(messages: unknown[]) {
   };
 }
 
-test("maybeRebuildContext: below threshold / null percent no-op; at threshold compacts once and resumes from onComplete/onError", async () => {
+/** Fake ExtensionContext whose modelRegistry.complete captures its options. */
+function fakeCtx(cwd: string, completeImpl?: (options: Record<string, unknown>) => { content: Array<{ type: string; text: string }>; usage?: unknown }) {
+  const calls: Array<{ options: Record<string, unknown> }> = [];
+  const ctx = {
+    cwd,
+    model: { id: "fake-luna" },
+    modelRegistry: {
+      complete: async (_model: unknown, _request: unknown, options: Record<string, unknown>) => {
+        calls.push({ options });
+        const out = completeImpl
+          ? completeImpl(options)
+          : {
+              content: [
+                {
+                  type: "text",
+                  text: "## Current understanding\n\nOCC sewing failed; reason: non-manifold geometry; do not retry unchanged.",
+                },
+              ],
+              usage: { inputTokens: 1234, outputTokens: 567 },
+            };
+        return out;
+      },
+    },
+  } as unknown as ExtensionContext;
+  return { ctx, calls };
+}
+
+function compactHandler(handlers: Map<string, Array<() => Promise<unknown>>>) {
+  return handlers.get("session_before_compact")![0] as (
+    event: ReturnType<typeof compactionEvent>,
+    ctx: ExtensionContext,
+  ) => Promise<{
+    compaction?: {
+      summary: string;
+      firstKeptEntryId: string;
+      tokensBefore: number;
+      usage?: unknown;
+      details?: unknown;
+    };
+  } | undefined>;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("maybeRebuildContext: threshold gating, pending guard, and forced continuation after a consumed nudge key", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-trigger-"));
   try {
     const state = await seedRun(cwd, "trigger-run");
@@ -119,7 +167,16 @@ test("maybeRebuildContext: below threshold / null percent no-op; at threshold co
     assert.equal(maybeRebuildContext(pi, store, state, ctx), false);
     assert.equal(compactCalls, 0);
 
-    // At 60%: compact, and the caller skips its own auto-continue.
+    // P0 regression: the rebuild fires on the SECOND+ autonomous
+    // continuation of the same phase+artifact version. Consume the nudge
+    // key first, exactly like a real run would at 40%...
+    percent = 40;
+    await maybeAutoContinue(pi, store, state, ctx);
+    assert.equal(sent.length, 1);
+    await maybeAutoContinue(pi, store, state, ctx);
+    assert.equal(sent.length, 1, "ordinary settles stay deduped per state version");
+
+    // ...then cross the threshold and rebuild.
     percent = 60;
     assert.equal(maybeRebuildContext(pi, store, state, ctx), true);
     assert.equal(compactCalls, 1);
@@ -128,40 +185,37 @@ test("maybeRebuildContext: below threshold / null percent no-op; at threshold co
     assert.equal(maybeRebuildContext(pi, store, state, ctx), false);
     assert.equal(compactCalls, 1);
 
-    // Fire-and-forget resume: onComplete reloads state and nudges exactly once.
-    assert.equal(sent.length, 0);
+    // Fire-and-forget resume: onComplete reloads state and FORCES the
+    // continuation past the already-consumed nudge key.
     lastOptions!.onComplete!();
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    assert.equal(sent.length, 1);
-    assert.ok(sent[0].includes("BUILD"), `nudge should mention the phase: ${sent[0]}`);
+    await sleep(25);
+    assert.equal(sent.length, 2, "post-rebuild continuation must bypass nudgedVersions");
+    assert.ok(sent[1]!.includes("BUILD"), `nudge should mention the phase: ${sent[1]}`);
 
     // Guard cleared after completion.
     assert.equal(maybeRebuildContext(pi, store, state, ctx), true);
     assert.equal(compactCalls, 2);
 
-    // A failed compaction must also clear the guard. The continuation nudge
-    // itself is deduped per state version by maybeAutoContinue (one nudge per
-    // runId:phase:hashes), so the count stays at 1 — the run still continues.
+    // A failed compaction also clears the guard and still continues the run
+    // (one forced nudge per rebuild outcome).
     lastOptions!.onError!(new Error("provider down"));
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    assert.equal(sent.length, 1);
+    await sleep(25);
+    assert.equal(sent.length, 3);
     assert.equal(maybeRebuildContext(pi, store, state, ctx), true);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
 
-test("session_before_compact: archives full trajectory, refreshes working.md, returns a minimal summary", async () => {
+test("session_before_compact: archives trajectory + image assets, passes usage/fileOps, uses medium reasoning", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-compact-"));
   try {
     await seedRun(cwd, "compact-run");
     const { pi, handlers } = fakePi();
     registerContextCompaction(pi);
-    const handler = handlers.get("session_before_compact")![0] as (
-      event: ReturnType<typeof compactionEvent>,
-      ctx: ExtensionContext,
-    ) => Promise<{ compaction?: { summary: string; firstKeptEntryId: string; tokensBefore: number } } | undefined>;
+    const handler = compactHandler(handlers);
 
+    const imageBytes = Buffer.alloc(4096, 7);
     const messages = [
       { role: "user", content: [{ type: "text", text: "Reconstruct the density field into CAD." }], timestamp: 1 },
       { role: "assistant", content: [{ type: "text", text: "Trying OCC sewing on the optimized shell." }], timestamp: 2 },
@@ -169,27 +223,13 @@ test("session_before_compact: archives full trajectory, refreshes working.md, re
         role: "user",
         content: [
           { type: "text", text: "OCC sewing failed because of non-manifold geometry." },
-          { type: "image", data: "A".repeat(50_000), mimeType: "image/png" },
+          { type: "image", data: imageBytes.toString("base64"), mimeType: "image/png" },
         ],
         timestamp: 3,
       },
     ];
 
-    const ctx = {
-      cwd,
-      model: { id: "fake-luna" },
-      modelRegistry: {
-        complete: async () => ({
-          content: [
-            {
-              type: "text",
-              text: "## Current understanding\n\nOCC sewing failed; reason: non-manifold geometry; do not retry unchanged.",
-            },
-          ],
-        }),
-      },
-    } as unknown as ExtensionContext;
-
+    const { ctx, calls } = fakeCtx(cwd);
     const result = await handler(compactionEvent(messages), ctx);
     assert.ok(result, "handler should return a custom compaction");
     const run = new CadRunStore(cwd, "compact-run");
@@ -200,6 +240,15 @@ test("session_before_compact: archives full trajectory, refreshes working.md, re
     assert.equal(result.compaction!.firstKeptEntryId, "entry-7");
     assert.equal(result.compaction!.tokensBefore, 12345);
 
+    // Usage accounting + Pi's cumulative file tracking preserved.
+    assert.deepEqual(result.compaction!.usage, { inputTokens: 1234, outputTokens: 567 });
+    assert.deepEqual(result.compaction!.details, FILE_OPS);
+
+    // The fresh call reasoned explicitly (absent reasoningEffort maps to
+    // off/none in Pi's OpenAI Responses adapter, not to a default level).
+    assert.equal(calls[0]!.options.reasoningEffort, "medium");
+    assert.equal(calls[0]!.options.cacheRetention, "none");
+
     // Persistence: working.md + refs.jsonl + archive/ctx-001.json.
     const working = readFileSync(join(run.runDir, "context", "working.md"), "utf-8");
     assert.ok(working.includes("non-manifold geometry"), "dead ends must survive the rebuild");
@@ -208,21 +257,32 @@ test("session_before_compact: archives full trajectory, refreshes working.md, re
     const ref = JSON.parse(refs[0]) as { id: string; path: string; summary: string };
     assert.equal(ref.id, "ctx-001");
     assert.ok(ref.path.includes("archive/ctx-001.json"));
-    assert.ok(ref.summary.includes("non-manifold"));
+    assert.ok(ref.summary.includes("non-manifold"), "index label comes from the real user message");
 
-    // Archive keeps the RAW messages (not the serialized/truncated text)…
+    // Archive keeps the message structure...
     const archived = JSON.parse(
       readFileSync(join(run.runDir, "context", "archive", "ctx-001.json"), "utf-8"),
     ) as {
       messageCount: number;
+      assets: Array<{ path: string; sha256: string; bytes: number }>;
       messages: Array<{ role: string; content: Array<Record<string, unknown>> }>;
     };
     assert.equal(archived.messageCount, 3);
     assert.equal(archived.messages[0].content[0].text, "Reconstruct the density field into CAD.");
-    // …with inline images stripped to placeholders (visuals persist under evidence/).
+
+    // ...with inline images extracted byte-exactly into archive assets.
+    assert.equal(archived.assets.length, 1);
+    const asset = archived.assets[0];
+    assert.ok(asset.path.endsWith("assets/ctx-001-001.png"));
+    assert.equal(asset.bytes, imageBytes.byteLength);
+    assert.equal(asset.sha256, createHash("sha256").update(imageBytes).digest("hex"));
+    const assetPath = join(run.runDir, "context", "archive", "assets", "ctx-001-001.png");
+    assert.ok(existsSync(assetPath), "image asset file must exist");
+    assert.deepEqual(readFileSync(assetPath), imageBytes, "asset bytes must round-trip exactly");
     const imageBlock = archived.messages[2].content[1] as { type: string; data: string };
     assert.equal(imageBlock.type, "image");
-    assert.ok(imageBlock.data.startsWith("[stripped by context-memory:"));
+    assert.ok(imageBlock.data.includes("assets/ctx-001-001.png"), "placeholder points at the asset");
+    // JSON stays small: the base64 payload lives in the asset file, not the JSON.
     assert.ok(statSync(join(run.runDir, "context", "archive", "ctx-001.json")).size < 20_000);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -235,20 +295,11 @@ test("session_before_compact: LLM failure falls back to default compaction but t
     await seedRun(cwd, "fallback-run");
     const { pi, handlers } = fakePi();
     registerContextCompaction(pi);
-    const handler = handlers.get("session_before_compact")![0] as (
-      event: ReturnType<typeof compactionEvent>,
-      ctx: ExtensionContext,
-    ) => Promise<unknown>;
+    const handler = compactHandler(handlers);
 
-    const ctx = {
-      cwd,
-      model: { id: "fake-luna" },
-      modelRegistry: {
-        complete: async () => {
-          throw new Error("provider down");
-        },
-      },
-    } as unknown as ExtensionContext;
+    const { ctx } = fakeCtx(cwd, () => {
+      throw new Error("provider down");
+    });
 
     const result = await handler(
       compactionEvent([
@@ -266,7 +317,101 @@ test("session_before_compact: LLM failure falls back to default compaction but t
   }
 });
 
-test("renderTaskContext: Mission + Working Context + bounded reference index, never the archive body", async () => {
+test("session_before_compact: archive id never regresses when refs.jsonl loses entries, and archive I/O fails open", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-ids-"));
+  try {
+    await seedRun(cwd, "ids-run");
+    const run = new CadRunStore(cwd, "ids-run");
+    const contextDir = join(run.runDir, "context");
+    mkdirSync(join(contextDir, "archive"), { recursive: true });
+    // Two checkpoints on disk but a torn/lost refs.jsonl: a length-based id
+    // would allocate ctx-001 again and overwrite history.
+    writeFileSync(join(contextDir, "archive", "ctx-001.json"), "PRESERVE-1");
+    writeFileSync(join(contextDir, "archive", "ctx-002.json"), "PRESERVE-2");
+
+    const { pi, handlers } = fakePi();
+    registerContextCompaction(pi);
+    const handler = compactHandler(handlers);
+    const { ctx } = fakeCtx(cwd);
+
+    const result = await handler(
+      compactionEvent([
+        { role: "user", content: [{ type: "text", text: "Continue the density reconstruction." }], timestamp: 1 },
+      ]),
+      ctx,
+    );
+    assert.ok(result);
+    assert.ok(result.compaction!.summary.includes("ctx-003"), "id continues after the on-disk maximum");
+    assert.equal(readFileSync(join(contextDir, "archive", "ctx-001.json"), "utf-8"), "PRESERVE-1");
+    assert.equal(readFileSync(join(contextDir, "archive", "ctx-002.json"), "utf-8"), "PRESERVE-2");
+    const refLine = JSON.parse(readFileSync(join(contextDir, "refs.jsonl"), "utf-8").trim()) as { id: string };
+    assert.equal(refLine.id, "ctx-003");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("session_before_compact: reference index skips harness-injected nudges", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-summary-"));
+  try {
+    await seedRun(cwd, "summary-run");
+    const { pi, handlers } = fakePi();
+    registerContextCompaction(pi);
+    const handler = compactHandler(handlers);
+    const { ctx } = fakeCtx(cwd);
+
+    await handler(
+      compactionEvent([
+        { role: "user", content: [{ type: "text", text: "Sewing failed; switching to a shell-based reconstruction." }], timestamp: 1 },
+        { role: "assistant", content: [{ type: "text", text: "Understood, rebuilding as a shelled solid." }], timestamp: 2 },
+        {
+          role: "user",
+          content: [{ type: "text", text: "Pi-CAD workflow is still in BUILD (route=... phase=build). Continue with the next explicit cad_* action." }],
+          timestamp: 3,
+        },
+      ]),
+      ctx,
+    );
+    const run = new CadRunStore(cwd, "summary-run");
+    const ref = JSON.parse(readFileSync(join(run.runDir, "context", "refs.jsonl"), "utf-8").trim()) as { summary: string };
+    assert.ok(ref.summary.startsWith("Sewing failed"), `label must come from the human message: ${ref.summary}`);
+    assert.ok(!ref.summary.includes("Pi-CAD workflow is still in"));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("session_before_compact: broken archive storage fails open — compaction still proceeds", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-failopen-"));
+  try {
+    await seedRun(cwd, "failopen-run");
+    const run = new CadRunStore(cwd, "failopen-run");
+    const contextDir = join(run.runDir, "context");
+    mkdirSync(contextDir, { recursive: true });
+    // A regular file where the archive directory should be: mkdir fails.
+    writeFileSync(join(contextDir, "archive"), "not a directory");
+
+    const { pi, handlers } = fakePi();
+    registerContextCompaction(pi);
+    const handler = compactHandler(handlers);
+    const { ctx } = fakeCtx(cwd);
+
+    const result = await handler(
+      compactionEvent([
+        { role: "user", content: [{ type: "text", text: "Keep iterating on the rib layout." }], timestamp: 1 },
+      ]),
+      ctx,
+    );
+    assert.ok(result, "archive failure must not break compaction");
+    assert.ok(result.compaction!.summary.includes("could not be written"), "summary warns about the missing archive");
+    assert.ok(existsSync(join(contextDir, "working.md")), "working.md is still refreshed");
+    assert.equal(existsSync(join(contextDir, "refs.jsonl")), false);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("renderTaskContext: full Mission (assumptions/openUnknowns labelled provisional) + Working Context + bounded index", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-render-"));
   try {
     const state = await seedRun(cwd, "render-run");
@@ -291,10 +436,15 @@ test("renderTaskContext: Mission + Working Context + bounded reference index, ne
 
     const rendered = await renderTaskContext(cwd, state);
 
-    // Mission from records/requirements.json.
+    // Mission: every committed section, with anti-drift labels.
     assert.ok(rendered.includes("## Mission"));
     assert.ok(rendered.includes("Topology-optimized bracket with 30% mass reduction"));
     assert.ok(rendered.includes("- Preserve mounting bolt pattern"));
+    assert.ok(rendered.includes("Assumptions (provisional"));
+    assert.ok(rendered.includes("30% volume fraction is a working assumption"));
+    assert.ok(rendered.includes("Open Unknowns"));
+    assert.ok(rendered.includes("Load case magnitude"));
+    assert.ok(rendered.includes("do not silently promote an assumption into a constraint"));
     // Working context.
     assert.ok(rendered.includes("## Working Context"));
     assert.ok(rendered.includes("Density field reconstructed"));
@@ -309,6 +459,25 @@ test("renderTaskContext: Mission + Working Context + bounded reference index, ne
     // Section order: mission before working context before references.
     assert.ok(rendered.indexOf("## Mission") < rendered.indexOf("## Working Context"));
     assert.ok(rendered.indexOf("## Working Context") < rendered.indexOf("## Available References"));
+
+    // Empty requirement sections are omitted entirely.
+    const store = new CadProjectStore(cwd);
+    await store.createRun({ runId: "minimal-run" });
+    const minimal = { ...state, runId: "minimal-run" };
+    await new CadRunStore(cwd, "minimal-run").writeRecord("requirements", {
+      goal: "Minimal bracket",
+      deliverables: ["STEP artifact"],
+      must: [],
+      preferences: [],
+      assumptions: [],
+      openUnknowns: [],
+    } satisfies CadRequirements);
+    const minimalRendered = await renderTaskContext(cwd, minimal);
+    assert.ok(minimalRendered.includes("Goal: Minimal bracket"));
+    assert.ok(minimalRendered.includes("Deliverables:"));
+    for (const header of ["Must:", "Preferences (soft", "Assumptions (provisional", "Open Unknowns (unresolved"]) {
+      assert.ok(!minimalRendered.includes(header), `empty section must be omitted: ${header}`);
+    }
 
     // Fresh run without working.md/refs still renders the mission alone.
     const fresh = await seedRun(cwd, "fresh-run");
