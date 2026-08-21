@@ -1,16 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { resolve } from "node:path";
 import { Type } from "typebox";
 
-import {
-  currentVisualEvidenceDir,
-  DEFAULT_VIEWS,
-  hashOrEmpty,
-  inspectVisual,
-  visualPayload,
-} from "../../shared/capability.ts";
-import { bundleToRecord } from "../../observations/bundle.ts";
-import { observeContent } from "../../observations/renderer.ts";
+import { DEFAULT_VIEWS } from "../../shared/capability.ts";
+import { ensureProbePresets, probePreset, renderProbeResult } from "../../modules/probe/index.ts";
 
 const VIEW_NAMES = DEFAULT_VIEWS;
 
@@ -44,44 +36,26 @@ export default function cadVisualExtension(pi: ExtensionAPI) {
       height: Type.Optional(Type.Integer({ minimum: 120, maximum: 1200, default: 480 })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const views = params.views?.length ? params.views : VIEW_NAMES;
-      const outDir = await currentVisualEvidenceDir(ctx.cwd, params.artifact);
-      const envelope = await inspectVisual(ctx.cwd, params.artifact, outDir, {
-        views,
-        width: params.width ?? 640,
-        height: params.height ?? 480,
-        display: params.display ?? "solid",
-        labels: params.labels ?? true,
-      });
-      const payload = visualPayload(envelope);
-      if (!envelope.ok || !payload.views?.length) {
+      // Phase 2: thin wrapper over the probe registry.
+      ensureProbePresets();
+      const preset = probePreset("visual");
+      if (!preset) {
         return {
-          content: [
-            {
-              type: "text",
-              text: `cad_inspect_visual failed: ${payload.error ?? "no views returned"}`,
-            },
-          ],
-          details: { envelope },
+          content: [{ type: "text", text: "cad_inspect_visual failed: preset visual not registered" }],
         };
       }
-
-      // Phase 1: all agent-facing output flows through the observation
-      // layer (visual-first: images, then headline/facts/provenance).
-      const { content, bundle } = await observeContent(
-        envelope,
-        { headline: `cad_inspect_visual: ${payload.views.length} views of ${params.artifact}` },
-        { includeEnvelope: null },
-      );
-      return {
-        content,
-        details: {
-          envelope,
-          observation: bundleToRecord(bundle),
-          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "visual" as const,
+      const result = await preset.run(
+        {
+          artifact: params.artifact,
+          views: params.views?.length ? params.views : [...VIEW_NAMES],
+          width: params.width ?? 640,
+          height: params.height ?? 480,
+          labels: params.labels ?? true,
+          display: params.display ?? "solid",
         },
-      };
+        { cwd: ctx.cwd },
+      );
+      return renderProbeResult(result, "cad_inspect_visual");
     },
   });
 }

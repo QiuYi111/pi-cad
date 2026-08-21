@@ -16,7 +16,7 @@ import {
 function envelope(overrides: Partial<CadEventEnvelope> = {}): CadEventEnvelope {
   return {
     ok: true,
-    tool: "render",
+    tool: "cad_inspect_visual",
     toolVersion: "0.8.0",
     backendVersion: "build123d 0.7",
     inputHashes: { artifact: "abc123" },
@@ -76,14 +76,14 @@ test("profiles: render/measure/interference projections", () => {
   assert.ok(visual.facts.some((f) => f.key === "solids" && f.value === "1"));
 
   const measured = profileProjection(
-    envelope({ tool: "measure", payload: { metric: "distance", value: 32.5, units: "mm" } }),
+    envelope({ tool: "cad_measure", payload: { metric: "distance", value: 32.5, units: "mm" } }),
   );
   assert.match(measured.headline, /32\.500000/);
   assert.ok(measured.facts.some((f) => f.key === "metric"));
 
   const interference = profileProjection(
     envelope({
-      tool: "inspect-interference",
+      tool: "cad_inspect_interference",
       payload: {
         pairs: [
           { a: "part1", b: "part2", classification: "penetration", intersectionVolume: 4000 },
@@ -124,9 +124,9 @@ test("renderer: visual-first ordering, envelope appendix, artifact lines", () =>
   assert.ok(rendered.text.startsWith("render ok"));
   assert.ok(rendered.text.includes("facts:"));
   assert.ok(rendered.text.includes("  bbox: 0,0,0"));
-  assert.ok(rendered.text.includes("provenance: tool=render"));
+  assert.ok(rendered.text.includes("provenance: tool=cad_inspect_visual"));
   assert.ok(rendered.text.includes("sha256:deadbeefcafe"));
-  assert.ok(rendered.text.includes('"tool": "render"'));
+  assert.ok(rendered.text.includes('"tool": "cad_inspect_visual"'));
 
   const bare = renderBundle(bundle);
   assert.ok(!bare.text.includes('"tool"'));

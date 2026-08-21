@@ -1,31 +1,17 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { Type } from "typebox";
 
 import {
-  artifactPathForKind,
-  assemblyTree,
-  inspectInterference,
-  scanSections,
   buildPayload,
   buildStep,
-  compareGeometry,
-  currentGeometryEvidencePath,
-  currentRunEvidenceRoot,
   defaultBuildOutput,
   envelopeArtifactHash,
   exportArtifact,
   hashOrEmpty,
-  inspectGeometry,
-  inspectSection,
-  inspectSurfaces,
-  measure,
-  measurePayload,
   probePython,
 } from "../../shared/capability.ts";
-import type { CadEventEnvelope } from "../../shared/protocol.ts";
-import { bundleToRecord } from "../../observations/bundle.ts";
-import { observeContent } from "../../observations/renderer.ts";
+import { ensureProbePresets, probePreset, renderProbeResult } from "../../modules/probe/index.ts";
 
 const artifactParam = Type.String({
   description: "Path to the STEP/STP artifact to inspect, relative to the project root",
@@ -37,32 +23,22 @@ const outputParam = Type.String({
   description: "Output STEP path. Defaults to build/<source-stem>.step",
 });
 
-/** Phase 1: observation-layer rendering shared by every tool below. */
-async function observed(
-  envelope: CadEventEnvelope,
-  headline: string,
-  extra: {
-    artifactHash?: string;
-    kind?: string;
-    details?: Record<string, unknown>;
-    includeEnvelope?: boolean;
-  } = {},
+/** Phase 2: legacy tools are thin wrappers over the probe registry. */
+async function runProbePreset(
+  presetName: string,
+  args: unknown,
+  cwd: string,
+  label: string,
 ) {
-  const { content, bundle } = await observeContent(
-    envelope,
-    { headline },
-    { includeEnvelope: extra.includeEnvelope === false ? null : envelope },
-  );
-  return {
-    content,
-    details: {
-      envelope,
-      observation: bundleToRecord(bundle),
-      ...(extra.artifactHash !== undefined ? { artifactHash: extra.artifactHash } : {}),
-      ...(extra.kind ? { kind: extra.kind } : {}),
-      ...(extra.details ?? {}),
-    },
-  };
+  ensureProbePresets();
+  const preset = probePreset(presetName);
+  if (!preset) {
+    return {
+      content: [{ type: "text", text: `${label} failed: preset ${presetName} not registered` }],
+    };
+  }
+  const result = await preset.run(args as never, { cwd });
+  return renderProbeResult(result, label);
 }
 
 export default function cadGeometryExtension(pi: ExtensionAPI) {
@@ -91,16 +67,25 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       });
       if (!envelope.ok) {
         return {
-          content: [{ type: "text", text: `cad_build_step failed: ${buildPayload(envelope).error ?? "unknown error"}` }],
+          content: [
+            { type: "text", text: `cad_build_step failed: ${buildPayload(envelope).error ?? "unknown error"}` },
+          ],
           details: { envelope, sourceHash },
         };
       }
-      return observed(envelope, `cad_build_step: ${params.source} → ${output}`, {
-        details: {
-          artifactHash: envelope.ok ? envelopeArtifactHash(envelope, "step") : undefined,
-          sourceHash,
+      const { content, details } = await renderProbeResult(
+        {
+          envelope,
+          headline: `cad_build_step: ${params.source} → ${output}`,
+          artifactHashFrom: "source",
+          extraDetails: {
+            artifactHash: envelopeArtifactHash(envelope, "step"),
+            sourceHash,
+          },
         },
-      });
+        "cad_build_step",
+      );
+      return { content, details };
     },
   });
 
@@ -119,19 +104,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String({ description: "Optional JSON evidence output path" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const output = params.output ?? (await currentGeometryEvidencePath(ctx.cwd, params.artifact));
-      const envelope = await inspectGeometry(ctx.cwd, params.artifact, output);
-      if (!envelope.ok) {
-        const error = (envelope.payload as { error?: string }).error;
-        return {
-          content: [{ type: "text", text: `cad_inspect_geometry failed: ${error ?? "unknown error"}` }],
-          details: { envelope },
-        };
-      }
-      return observed(envelope, `cad_inspect_geometry: ${params.artifact}`, {
-        artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-        kind: "geometry",
-      });
+      return runProbePreset("geometry", params, ctx.cwd, "cad_inspect_geometry");
     },
   });
 
@@ -152,52 +125,16 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       views: Type.Optional(Type.Array(Type.Enum({ iso: "iso", front: "front", right: "right", top: "top" }), { description: "Labeled view subset (default iso, front, right, top)" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentRunEvidenceRoot(ctx.cwd);
-      const outDir = root
-        ? join(root, "surfaces", basename(params.artifact).replace(/\.[^.]+$/, ""))
-        : resolve(ctx.cwd, ".pi-cad", "evidence", "surfaces", basename(params.artifact).replace(/\.[^.]+$/, ""));
-      const output = join(outDir, "surfaces.json");
-      const envelope = await inspectSurfaces(ctx.cwd, params.artifact, {
-        output,
-        labels: params.labels ?? true,
-        outDir,
-        views: params.views,
-      });
-      const payload = envelope.payload as {
-        error?: string;
-        surfaces?: Array<{ id: string; type: string; area: number; centroid: number[] }>;
-        views?: Array<{ path: string; name: string }>;
-      };
-      if (!envelope.ok) {
-        return {
-          content: [{ type: "text", text: `cad_inspect_surfaces failed: ${payload.error ?? "unknown error"}` }],
-          details: { envelope },
-        };
-      }
-      const surfaceFacts = (payload.surfaces ?? []).map((s) => ({
-        key: s.id,
-        value: `${s.type} area=${s.area} centroid=[${s.centroid.map((v) => v.toFixed(3)).join(", ")}]`,
-      }));
-      const surfaceVisuals = (payload.views ?? [])
-        .map((view) => ({ name: view.name, path: view.path }));
-      const { content, bundle } = await observeContent(
-        envelope,
+      return runProbePreset(
+        "surfaces",
         {
-          headline: `cad_inspect_surfaces: ${payload.surfaces?.length ?? 0} boundary surfaces (selectors, not semantics). Surface IDs are valid for this artifact hash only; classify their meaning yourself.`,
-          facts: surfaceFacts,
-          visuals: surfaceVisuals,
+          artifact: params.artifact,
+          labels: params.labels ?? true,
+          views: params.views?.length ? params.views : undefined,
         },
-        { includeEnvelope: null },
+        ctx.cwd,
+        "cad_inspect_surfaces",
       );
-      return {
-        content,
-        details: {
-          envelope,
-          observation: bundleToRecord(bundle),
-          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "surfaces" as const,
-        },
-      };
     },
   });
 
@@ -229,23 +166,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       b: Type.Optional(Type.String({ description: "Second selector for two-selector metrics" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const envelope = await measure(ctx.cwd, params.artifact, {
-        metric: params.metric,
-        a: params.a,
-        b: params.b,
-      });
-      const payload = measurePayload(envelope);
-      if (!envelope.ok) {
-        return {
-          content: [{ type: "text", text: `cad_measure failed: ${payload.error ?? "unknown error"}` }],
-          details: { envelope, artifactHash: envelope.inputHashes.artifact, kind: "measure" as const },
-        };
-      }
-      return observed(
-        envelope,
-        `cad_measure ${payload.metric}(${payload.a}${payload.b ? `, ${payload.b}` : ""}) = ${JSON.stringify(payload.value)} ${payload.units ?? "mm"}`,
-        { artifactHash: envelope.inputHashes.artifact, kind: "measure", includeEnvelope: false },
-      );
+      return runProbePreset("measure", params, ctx.cwd, "cad_measure");
     },
   });
 
@@ -269,28 +190,19 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       labels: Type.Optional(Type.Boolean()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentRunEvidenceRoot(ctx.cwd);
-      const outDir = root ? join(root, "section") : resolve(ctx.cwd, ".pi-cad", "evidence", "section");
-      const envelope = await inspectSection(ctx.cwd, params.artifact, outDir, {
-        origin: params.origin as [number, number, number],
-        normal: params.normal as [number, number, number],
-        display: params.display ?? "solid",
-        width: params.width ?? 640,
-        height: params.height ?? 480,
-        labels: params.labels ?? true,
-      });
-      const payload = envelope.payload as { views?: Array<{ path: string; name: string }>; error?: string; intersectionCurves?: number; sectionFaceCount?: number };
-      if (!envelope.ok || !payload.views?.length) {
-        return { content: [{ type: "text", text: `cad_inspect_section failed: ${payload.error ?? "no section returned"}` }], details: { envelope } };
-      }
-      return observed(
-        envelope,
-        `cad_inspect_section: intersectionCurves=${payload.intersectionCurves ?? "?"} sectionFaces=${payload.sectionFaceCount ?? "?"}`,
+      return runProbePreset(
+        "section",
         {
-          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "section",
-          includeEnvelope: false,
+          artifact: params.artifact,
+          origin: params.origin as [number, number, number],
+          normal: params.normal as [number, number, number],
+          display: params.display ?? "solid",
+          width: params.width ?? 640,
+          height: params.height ?? 480,
+          labels: params.labels ?? true,
         },
+        ctx.cwd,
+        "cad_inspect_section",
       );
     },
   });
@@ -314,30 +226,23 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentRunEvidenceRoot(ctx.cwd);
-      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "compare", `${Date.now().toString(36)}.json`);
       let transformBefore: number[][] | undefined;
       let transformAfter: number[][] | undefined;
       if (params.transformBefore) transformBefore = JSON.parse(params.transformBefore) as number[][];
       if (params.transformAfter) transformAfter = JSON.parse(params.transformAfter) as number[][];
-      const envelope = await compareGeometry(ctx.cwd, params.before, params.after, output, {
-        metrics: params.metrics ?? undefined,
-        transformBefore,
-        transformAfter,
-      });
-      const payload = envelope.payload as { error?: string; delta?: unknown };
-      if (!envelope.ok) {
-        return {
-          content: [{ type: "text", text: `cad_compare_geometry failed: ${payload.error ?? "unknown error"}` }],
-          details: { envelope, kind: "compare" as const },
-        };
-      }
-      return observed(envelope, `cad_compare_geometry: ${params.before} → ${params.after}`, {
-        artifactHash: envelope.inputHashes.after ?? (await hashOrEmpty(resolve(ctx.cwd, params.after))),
-        kind: "compare",
-        includeEnvelope: false,
-        details: { delta: payload.delta ?? {} },
-      });
+      return runProbePreset(
+        "compare",
+        {
+          before: params.before,
+          after: params.after,
+          metrics: params.metrics ?? undefined,
+          transformBefore,
+          transformAfter,
+          output: params.output,
+        },
+        ctx.cwd,
+        "cad_compare_geometry",
+      );
     },
   });
 
@@ -356,25 +261,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentRunEvidenceRoot(ctx.cwd);
-      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "assembly", `${Date.now().toString(36)}.json`);
-      const envelope = await assemblyTree(ctx.cwd, params.artifact, output);
-      const payload = envelope.payload as { error?: string; leafCount?: number; occurrences?: unknown[] };
-      if (!envelope.ok) {
-        return {
-          content: [{ type: "text", text: `cad_assembly_tree failed: ${payload.error ?? "unknown error"}` }],
-          details: { envelope },
-        };
-      }
-      return observed(
-        envelope,
-        `cad_assembly_tree: leafCount=${payload.leafCount ?? "?"} occurrences=${(payload.occurrences ?? []).length}`,
-        {
-          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "assembly",
-          includeEnvelope: false,
-        },
-      );
+      return runProbePreset("assembly", params, ctx.cwd, "cad_assembly_tree");
     },
   });
 
@@ -394,29 +281,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const root = await currentRunEvidenceRoot(ctx.cwd);
-      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "interference", `${Date.now().toString(36)}.json`);
-      const envelope = await inspectInterference(ctx.cwd, params.artifact, output);
-      const payload = envelope.payload as {
-        error?: string;
-        partCount?: number;
-        pairCount?: number;
-        summary?: Record<string, number>;
-      };
-      if (!envelope.ok) {
-        return {
-          content: [{ type: "text", text: `cad_inspect_interference failed: ${payload.error ?? "unknown error"}` }],
-          details: { envelope },
-        };
-      }
-      return observed(
-        envelope,
-        `cad_inspect_interference: ${payload.partCount ?? "?"} parts, ${payload.pairCount ?? "?"} pairs. Facts only: interpret penetration vs intentional contact yourself.`,
-        {
-          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "interference",
-        },
-      );
+      return runProbePreset("interference", params, ctx.cwd, "cad_inspect_interference");
     },
   });
 
@@ -447,29 +312,16 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
           content: [{ type: "text", text: "cad_scan_sections failed: provide exactly one of count or step" }],
         };
       }
-      const root = await currentRunEvidenceRoot(ctx.cwd);
-      const output = params.output ?? join(root ?? resolve(ctx.cwd, ".pi-cad", "evidence"), "sections", `${Date.now().toString(36)}.json`);
-      const envelope = await scanSections(ctx.cwd, params.artifact, {
-        axis: params.axis,
-        count: params.count,
-        step: params.step,
-        output,
-      });
-      const payload = envelope.payload as { error?: string; positionCount?: number; areaRange?: number[] };
-      if (!envelope.ok) {
-        return {
-          content: [{ type: "text", text: `cad_scan_sections failed: ${payload.error ?? "unknown error"}` }],
-          details: { envelope },
-        };
-      }
-      return observed(
-        envelope,
-        `cad_scan_sections: ${payload.positionCount ?? "?"} sections along ${params.axis.toUpperCase()} — area range ${JSON.stringify(payload.areaRange ?? [])}. Facts only; the critical section is your judgment.`,
+      return runProbePreset(
+        "sections-scan",
         {
-          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "sections",
-          includeEnvelope: false,
+          artifact: params.artifact,
+          axis: params.axis,
+          count: params.count,
+          step: params.step,
         },
+        ctx.cwd,
+        "cad_scan_sections",
       );
     },
   });
@@ -491,18 +343,27 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const envelope = await exportArtifact(ctx.cwd, { source: params.source, output: params.output, format: params.format });
-      const payload = envelope.payload as { error?: string; output?: string };
       if (!envelope.ok) {
+        const error = (envelope.payload as { error?: string }).error;
         return {
-          content: [{ type: "text", text: `cad_export failed: ${payload.error ?? "unknown error"}` }],
+          content: [{ type: "text", text: `cad_export failed: ${error ?? "unknown error"}` }],
           details: { envelope },
         };
       }
-      return observed(envelope, `cad_export succeeded: ${payload.output ?? params.output}`, {
-        artifactHash: envelope.artifacts[0]?.sha256 ?? envelope.inputHashes.source,
-        kind: "export",
-        includeEnvelope: false,
-      });
+      const payload = envelope.payload as { output?: string };
+      return renderProbeResult(
+        {
+          envelope,
+          headline: `cad_export succeeded: ${payload.output ?? params.output}`,
+          includeEnvelope: false,
+          artifactHashFrom: "source",
+          extraDetails: {
+            artifactHash: envelope.artifacts[0]?.sha256 ?? envelope.inputHashes.source,
+            kind: "export",
+          },
+        },
+        "cad_export",
+      );
     },
   });
 
@@ -544,28 +405,20 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
         };
       }
       const envelope = await probePython(ctx.cwd, rel, params.code);
-      const payload = envelope.payload as { result?: unknown; probeSeconds?: number; error?: string };
-      if (!envelope.ok) {
-        return {
-          content: [{ type: "text", text: `cad_probe_python failed: ${payload.error ?? "unknown error"}` }],
-          details: {
-            envelope,
-            subjectArtifactHash: envelope.inputHashes.artifact,
-            scriptHash: envelope.inputHashes.script,
-          },
-        };
-      }
-      return observed(
-        envelope,
-        `cad_probe_python (${params.subject}, ${params.purpose})`,
+      const payload = envelope.payload as { result?: unknown; error?: string };
+      return renderProbeResult(
         {
+          envelope,
+          headline: `cad_probe_python (${params.subject}, ${params.purpose}) = ${JSON.stringify(payload.result ?? null, null, 2)}`,
           includeEnvelope: false,
-          details: {
+          // Deliberately no kind: probe results are observations, not
+          // canonical evidence — they must not enter state.evidence.
+          extraDetails: {
             subjectArtifactHash: envelope.inputHashes.artifact,
             scriptHash: envelope.inputHashes.script,
-            probeResult: payload.result,
           },
         },
+        "cad_probe_python",
       );
     },
   });

@@ -55,7 +55,7 @@ function bboxFact(payload: Record<string, unknown>): string {
 }
 
 const PROFILES: Record<string, ObservationProfile> = {
-  render: {
+  cad_inspect_visual: {
     headline: (p) =>
       p.error
         ? `visual render failed: ${p.error}`
@@ -71,7 +71,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     ],
   },
 
-  inspect: {
+  cad_inspect_geometry: {
     headline: (p) =>
       p.error ? `geometry inspection failed: ${p.error}` : "geometry inspection succeeded",
     facts: (p) => [
@@ -91,7 +91,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     ],
   },
 
-  measure: {
+  cad_measure: {
     headline: (p) =>
       p.error ? `measurement failed: ${p.error}` : `measurement: ${num(p.value, 6)}`,
     facts: (p) => [
@@ -103,7 +103,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     ],
   },
 
-  compare: {
+  cad_compare_geometry: {
     headline: (p) =>
       p.error ? `geometry comparison failed: ${p.error}` : "geometry comparison succeeded",
     facts: (p) => {
@@ -123,7 +123,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     },
   },
 
-  section: {
+  cad_inspect_section: {
     headline: (p) =>
       p.error ? `section failed: ${p.error}` : "section succeeded",
     visuals: viewVisuals,
@@ -137,7 +137,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     ],
   },
 
-  "scan-sections": {
+  cad_scan_sections: {
     headline: (p) =>
       p.error ? `section scan failed: ${p.error}` : "section scan succeeded",
     facts: (p) => [
@@ -150,7 +150,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     ],
   },
 
-  "assembly-tree": {
+  cad_assembly_tree: {
     headline: (p) =>
       p.error ? `assembly tree failed: ${p.error}` : "assembly tree succeeded",
     facts: (p) => [
@@ -161,7 +161,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     ],
   },
 
-  "inspect-interference": {
+  cad_inspect_interference: {
     headline: (p) => {
       if (p.error) return `interference inspection failed: ${p.error}`;
       const pairs = Array.isArray(p.pairs) ? (p.pairs as unknown[]).length : undefined;
@@ -190,7 +190,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     },
   },
 
-  build: {
+  cad_build_step: {
     headline: (p) =>
       p.error ? `build failed: ${p.error}` : "build succeeded",
     facts: (p) => [
@@ -200,7 +200,7 @@ const PROFILES: Record<string, ObservationProfile> = {
     ],
   },
 
-  probe: {
+  cad_probe_python: {
     headline: (p) =>
       p.error ? `probe failed: ${p.error}` : "programmable probe succeeded",
     facts: (p) => [
