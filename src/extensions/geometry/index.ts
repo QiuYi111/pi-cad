@@ -4,14 +4,13 @@ import { Type } from "typebox";
 
 import {
   buildPayload,
-  buildStep,
   defaultBuildOutput,
   envelopeArtifactHash,
-  exportArtifact,
   hashOrEmpty,
   probePython,
 } from "../../shared/capability.ts";
 import { ensureProbePresets, probePreset, renderProbeResult } from "../../modules/probe/index.ts";
+import { modelBackend } from "../../modules/model/index.ts";
 
 const artifactParam = Type.String({
   description: "Path to the STEP/STP artifact to inspect, relative to the project root",
@@ -60,7 +59,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const output = params.output ?? defaultBuildOutput(ctx.cwd, params.source);
       const sourceHash = await hashOrEmpty(resolve(ctx.cwd, params.source));
-      const envelope = await buildStep(ctx.cwd, {
+      const envelope = await modelBackend().build(ctx.cwd, {
         source: params.source,
         output,
         force: params.force ?? true,
@@ -342,7 +341,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       format: Type.Enum({ step: "step", stl: "stl", glb: "glb", brep: "brep" }),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const envelope = await exportArtifact(ctx.cwd, { source: params.source, output: params.output, format: params.format });
+      const envelope = await modelBackend().export(ctx.cwd, { source: params.source, output: params.output, format: params.format });
       if (!envelope.ok) {
         const error = (envelope.payload as { error?: string }).error;
         return {

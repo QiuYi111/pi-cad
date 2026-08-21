@@ -22,11 +22,9 @@ import {
   artifactPathForKind,
   assemblyTree,
   buildPayload,
-  buildStep,
   compareGeometry,
   defaultBuildOutput,
   envelopeArtifactHash,
-  exportArtifact,
   geometryPayload,
   inspectGeometry,
   inspectInterference,
@@ -54,6 +52,7 @@ import {
   markEvidenceStale,
 } from "../../core/state-machine.ts";
 import type { PersistFn } from "../../core/auto-actions.ts";
+import { modelBackend, type ModelBackend } from "./backend.ts";
 
 /** The MODEL→control-plane handoff object: what was produced, hashed. */
 export interface CandidateProposal {
@@ -83,12 +82,13 @@ export async function buildProposal(
   cwd: string,
   source: string,
   label: string,
+  backend: ModelBackend = modelBackend(),
 ): Promise<ProposalResult> {
   const sourceAbs = resolve(cwd, source);
   if (!existsSync(sourceAbs)) return { ok: false, text: `candidate source does not exist: ${source}` };
   const sourceHash = await sha256File(sourceAbs);
   const output = defaultBuildOutput(cwd, source);
-  const envelope = await buildStep(cwd, { source, output, force: true });
+  const envelope = await backend.build(cwd, { source, output, force: true });
   if (!envelope.ok) {
     return {
       ok: false,
@@ -120,12 +120,13 @@ export async function convertProposal(
   label: string,
   format: string,
   output: string,
+  backend: ModelBackend = modelBackend(),
 ): Promise<ProposalResult> {
   const sourceAbs = resolve(cwd, source);
   if (!existsSync(sourceAbs)) return { ok: false, text: `candidate source does not exist: ${source}` };
   const sourceHash = await sha256File(sourceAbs);
   const outputAbs = resolve(cwd, output);
-  const envelope = await exportArtifact(cwd, { source, output, format });
+  const envelope = await backend.export(cwd, { source, output, format });
   if (!envelope.ok) {
     return {
       ok: false,
