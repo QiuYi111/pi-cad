@@ -1,0 +1,141 @@
+{
+  "partition": "detailed",
+  "frozen": true,
+  "selection": "stratified over 6 cadtest categories (\u22644 each) + difficulty fill; bridge-flip samples excluded",
+  "excluded_bridge_noisy": [
+    "00033093",
+    "00520675",
+    "00521025",
+    "00671938",
+    "00672355",
+    "00681547",
+    "00980412",
+    "00984234",
+    "00995733",
+    "00995759"
+  ],
+  "sample_ids": [
+    "00000007",
+    "00000960",
+    "00001411",
+    "00001490",
+    "00003219",
+    "00003763",
+    "00004495",
+    "00005161",
+    "00006013",
+    "00008835",
+    "00009307",
+    "00009998",
+    "00033624",
+    "00034256",
+    "00521000",
+    "00521217",
+    "00670106",
+    "00980651",
+    "00996457",
+    "00997065"
+  ],
+  "samples": [
+    {
+      "sample_id": "00000007",
+      "slot": "topology_checks",
+      "rationale": "covers cadtest category 'topology_checks'; cadtests=12"
+    },
+    {
+      "sample_id": "00000960",
+      "slot": "geometry_types",
+      "rationale": "covers cadtest category 'geometry_types'; cadtests=16"
+    },
+    {
+      "sample_id": "00001411",
+      "slot": "topology_checks",
+      "rationale": "covers cadtest category 'topology_checks'; cadtests=12"
+    },
+    {
+      "sample_id": "00001490",
+      "slot": "spatial_arrangement",
+      "rationale": "covers cadtest category 'spatial_arrangement'; cadtests=14"
+    },
+    {
+      "sample_id": "00003219",
+      "slot": "topology_checks",
+      "rationale": "covers cadtest category 'topology_checks'; cadtests=13"
+    },
+    {
+      "sample_id": "00003763",
+      "slot": "solid_shell_validity",
+      "rationale": "covers cadtest category 'solid_shell_validity'; cadtests=15"
+    },
+    {
+      "sample_id": "00004495",
+      "slot": "solid_shell_validity",
+      "rationale": "covers cadtest category 'solid_shell_validity'; cadtests=15"
+    },
+    {
+      "sample_id": "00005161",
+      "slot": "solid_shell_validity",
+      "rationale": "covers cadtest category 'solid_shell_validity'; cadtests=14"
+    },
+    {
+      "sample_id": "00006013",
+      "slot": "solid_shell_validity",
+      "rationale": "covers cadtest category 'solid_shell_validity'; cadtests=12"
+    },
+    {
+      "sample_id": "00008835",
+      "slot": "dimensions_ratios",
+      "rationale": "covers cadtest category 'dimensions_ratios'; cadtests=11"
+    },
+    {
+      "sample_id": "00009307",
+      "slot": "dimensions_ratios",
+      "rationale": "covers cadtest category 'dimensions_ratios'; cadtests=15"
+    },
+    {
+      "sample_id": "00009998",
+      "slot": "dimensions_ratios",
+      "rationale": "covers cadtest category 'dimensions_ratios'; cadtests=9"
+    },
+    {
+      "sample_id": "00033624",
+      "slot": "dimensions_ratios",
+      "rationale": "covers cadtest category 'dimensions_ratios'; cadtests=12"
+    },
+    {
+      "sample_id": "00034256",
+      "slot": "volumetric_checks",
+      "rationale": "covers cadtest category 'volumetric_checks'; cadtests=16"
+    },
+    {
+      "sample_id": "00521000",
+      "slot": "volumetric_checks",
+      "rationale": "covers cadtest category 'volumetric_checks'; cadtests=16"
+    },
+    {
+      "sample_id": "00521217",
+      "slot": "volumetric_checks",
+      "rationale": "covers cadtest category 'volumetric_checks'; cadtests=10"
+    },
+    {
+      "sample_id": "00670106",
+      "slot": "volumetric_checks",
+      "rationale": "covers cadtest category 'volumetric_checks'; cadtests=12"
+    },
+    {
+      "sample_id": "00980651",
+      "slot": "geometry_types",
+      "rationale": "covers cadtest category 'geometry_types'; cadtests=9"
+    },
+    {
+      "sample_id": "00996457",
+      "slot": "geometry_types",
+      "rationale": "covers cadtest category 'geometry_types'; cadtests=14"
+    },
+    {
+      "sample_id": "00997065",
+      "slot": "topology_checks",
+      "rationale": "covers cadtest category 'topology_checks'; cadtests=10"
+    }
+  ]
+}

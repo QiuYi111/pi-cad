@@ -1,0 +1,25 @@
+{
+  "partition": "detailed",
+  "frozen": true,
+  "selection": "probe-v1 mini-regression: pre-registered from LOSS-ANALYSIS \u2014 8 near-miss true-capability + 4 multi-feature-bookkeeping failures + 4 passing controls; baseline = detailed200-final",
+  "purpose": "attribution of cad_probe_python (commit 69225e8): observe discover->revise->fix chains",
+  "baseline_run": "results/detailed200-final",
+  "sample_ids": [
+    "00670231",
+    "00670266",
+    "00672355",
+    "00996473",
+    "00998074",
+    "00998843",
+    "00999126",
+    "00034100",
+    "00996329",
+    "00997040",
+    "00672359",
+    "00670259",
+    "00001411",
+    "00003219",
+    "00003763",
+    "00004495"
+  ]
+}

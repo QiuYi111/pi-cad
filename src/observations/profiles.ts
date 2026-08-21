@@ -164,7 +164,10 @@ const PROFILES: Record<string, ObservationProfile> = {
   "inspect-interference": {
     headline: (p) => {
       if (p.error) return `interference inspection failed: ${p.error}`;
-      return `interference facts: ${p.partCount ?? "?"} parts, ${p.pairCount ?? "?"} pairs`;
+      const pairs = Array.isArray(p.pairs) ? (p.pairs as unknown[]).length : undefined;
+      const partCount = p.partCount ?? p.parts ?? "?";
+      const pairCount = p.pairCount ?? pairs ?? "?";
+      return `interference facts: ${partCount} parts, ${pairCount} pairs`;
     },
     facts: (p) => {
       const facts: ObservationFact[] = [];

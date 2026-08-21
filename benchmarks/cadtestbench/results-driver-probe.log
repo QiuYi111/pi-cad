@@ -12,3 +12,59 @@
 [00672359] exit=0 phase=done cadtests=10/16 exact=false audit=clean tokens=607648 wall=203s
 [00670259] exit=0 phase=done cadtests=10/15 exact=false audit=clean tokens=551065 wall=196s
 [00001411] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=103068 wall=91s
+[00003219] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=237489 wall=136s
+[00003763] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=400250 wall=191s
+[00004495] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=198815 wall=158s
+preserved 16 archived sample(s) in results/.recovered/
+restored data
+restored sets
+restored external/CADTestBench/baselines
+restored .hf-cache
+restored README.md
+restored results/.recovered
+restored results/2026-08-20T16-24-41-508Z_iso-final2
+restored results/2026-08-20T23-30-42-177Z_detailed200-clean-resume
+restored results/detailed200-final
+restored results/loss-analysis.txt
+vault cache removed
+[iso] vault restored — ground truth back on disk
+{
+  "runRoot": "/home/jingyi/pi-cad/benchmarks/cadtestbench/results/2026-08-21T06-31-56-069Z_probe-regression",
+  "runName": "2026-08-21T06-31-56-069Z_probe-regression",
+  "harness": {
+    "piCadCommit": "69225e82afc56f79cc1a52d9b4f70155d2ea33c4",
+    "branch": "harness/probe-v1",
+    "piAgentVersion": "0.84.2",
+    "extensions": [
+      "core",
+      "geometry",
+      "visual",
+      "ui"
+    ],
+    "isolation": "L1 vault + L2 per-sample staging + L3 per-session audit gate"
+  },
+  "integrity": {
+    "audited": 16,
+    "clean_or_toolchain": 16,
+    "flagged": []
+  },
+  "observed": {
+    "exact": 5,
+    "samples": 16,
+    "cadtests_passed": 226,
+    "cadtests_total": 258,
+    "done": 16,
+    "cost_usd": 0.7337
+  },
+  "clean": {
+    "exact": 5,
+    "samples": 16,
+    "cadtests_passed": 226,
+    "cadtests_total": 258,
+    "rs_groups_passed": 130,
+    "rs_groups_total": 152,
+    "done": 16,
+    "cost_usd": 0.7337,
+    "tokens": 6476654
+  }
+}

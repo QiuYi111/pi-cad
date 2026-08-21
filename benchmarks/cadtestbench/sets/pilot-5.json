@@ -1,0 +1,51 @@
+{
+  "partition": "detailed",
+  "frozen": true,
+  "selection": "plan \u00a714 Phase 4 coverage slots; bridge-flip samples excluded",
+  "excluded_bridge_noisy": [
+    "00033093",
+    "00520675",
+    "00521025",
+    "00671938",
+    "00672355",
+    "00681547",
+    "00980412",
+    "00984234",
+    "00995733",
+    "00995759"
+  ],
+  "sample_ids": [
+    "00000007",
+    "00000633",
+    "00001817",
+    "00000960",
+    "00004154"
+  ],
+  "samples": [
+    {
+      "sample_id": "00000007",
+      "slot": "simple_primitive",
+      "rationale": "prompt matches slot 'simple_primitive'; cadtests=12; categories=dimensions_ratios,solid_shell_validity,topology_checks,volumetric_checks"
+    },
+    {
+      "sample_id": "00000633",
+      "slot": "hole_boolean",
+      "rationale": "prompt matches slot 'hole_boolean'; cadtests=13; categories=dimensions_ratios,geometry_types,solid_shell_validity,spatial_arrangement,topology_checks,volumetric_checks"
+    },
+    {
+      "sample_id": "00001817",
+      "slot": "repeated_features",
+      "rationale": "prompt matches slot 'repeated_features'; cadtests=17; categories=dimensions_ratios,solid_shell_validity,spatial_arrangement,topology_checks,volumetric_checks"
+    },
+    {
+      "sample_id": "00000960",
+      "slot": "spatial_relationship",
+      "rationale": "prompt matches slot 'spatial_relationship'; cadtests=16; categories=dimensions_ratios,geometry_types,solid_shell_validity,topology_checks,volumetric_checks"
+    },
+    {
+      "sample_id": "00004154",
+      "slot": "topology_sensitive",
+      "rationale": "prompt matches slot 'topology_sensitive'; cadtests=14; categories=dimensions_ratios,solid_shell_validity,spatial_arrangement,topology_checks,volumetric_checks"
+    }
+  ]
+}
