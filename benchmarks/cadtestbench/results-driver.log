@@ -1,0 +1,147 @@
+[iso] run=2026-08-20T16-26-16-882Z_detailed200-clean commit=6c9c89a3 samples=200 vaulted=6 paths
+[00000007] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=103226 wall=94s
+[00000633] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=136746 wall=111s
+[00000960] exit=0 phase=done cadtests=11/16 exact=false audit=toolchain tokens=482113 wall=215s
+[00001411] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=86241 wall=78s
+[00001490] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=174516 wall=144s
+[00001615] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=153706 wall=149s
+[00001817] exit=0 phase=done cadtests=16/17 exact=false audit=toolchain tokens=764196 wall=366s
+[00001977] exit=0 phase=done cadtests=12/12 exact=true audit=toolchain tokens=287308 wall=180s
+[00002221] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=106857 wall=130s
+[00002298] exit=0 phase=done cadtests=15/15 exact=true audit=toolchain tokens=311709 wall=222s
+[00003219] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=96835 wall=75s
+[00003247] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=82764 wall=75s
+[00003558] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=83225 wall=78s
+[00003763] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=137015 wall=135s
+[00003801] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=107644 wall=97s
+[00004154] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=138228 wall=115s
+[00004495] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=113420 wall=95s
+[00004596] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=153007 wall=131s
+[00004935] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=146257 wall=137s
+[00005161] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=122814 wall=103s
+[00005358] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=113384 wall=104s
+[00005721] exit=0 phase=done cadtests=13/14 exact=false audit=clean tokens=148046 wall=147s
+[00006013] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=77784 wall=75s
+[00006136] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=106082 wall=94s
+[00006578] exit=0 phase=done cadtests=19/20 exact=false audit=clean tokens=118754 wall=123s
+[00006863] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=89569 wall=75s
+[00006892] exit=0 phase=done cadtests=9/14 exact=false audit=toolchain tokens=870317 wall=485s
+[00007258] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=90099 wall=78s
+[00007362] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=89108 wall=72s
+[00008138] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=116422 wall=97s
+[00008315] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=86705 wall=72s
+[00008597] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=104523 wall=96s
+[00008835] exit=0 phase=done cadtests=11/11 exact=true audit=clean tokens=92224 wall=81s
+[00009044] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=116410 wall=101s
+[00009307] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=2190355 wall=469s
+[00009529] exit=0 phase=done cadtests=13/15 exact=false audit=clean tokens=191630 wall=182s
+[00009823] exit=0 phase=done cadtests=10/14 exact=false audit=clean tokens=118276 wall=108s
+[00009843] exit=0 phase=done cadtests=12/19 exact=false audit=toolchain tokens=897635 wall=440s
+[00009863] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=82564 wall=74s
+[00009998] exit=0 phase=done cadtests=9/9 exact=true audit=clean tokens=186968 wall=193s
+[00017291] exit=0 phase=done cadtests=6/20 exact=false audit=toolchain tokens=393099 wall=311s
+[00019015] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=107932 wall=122s
+[00019066] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=168860 wall=173s
+[00031181] exit=0 phase=done cadtests=10/14 exact=false audit=clean tokens=103817 wall=84s
+[00031303] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=169480 wall=161s
+[00031637] exit=0 phase=done cadtests=13/16 exact=false audit=clean tokens=162729 wall=144s
+[00032961] exit=0 phase=done cadtests=15/17 exact=false audit=clean tokens=166122 wall=140s
+[00033093] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=162083 wall=157s
+[00033624] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=155309 wall=144s
+[00034100] exit=0 phase=done cadtests=17/18 exact=false audit=clean tokens=181077 wall=178s
+[00034239] exit=0 phase=done cadtests=20/20 exact=true audit=clean tokens=132481 wall=131s
+[00034243] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=259831 wall=188s
+[00034256] exit=0 phase=done cadtests=7/16 exact=false audit=clean tokens=142373 wall=190s
+[00036518] exit=0 phase=done cadtests=13/13 exact=true audit=toolchain tokens=759589 wall=1401s
+[00037135] exit=0 phase=done cadtests=14/18 exact=false audit=sibling tokens=853286 wall=316s
+[00037161] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=108949 wall=99s
+[00037276] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=369966 wall=266s
+[00037494] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=158323 wall=163s
+[00038438] exit=0 phase=done cadtests=14/14 exact=true audit=toolchain tokens=579617 wall=181s
+[00038614] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=151250 wall=135s
+[00039012] exit=0 phase=done cadtests=13/17 exact=false audit=hard tokens=878672 wall=406s
+[00039227] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=141801 wall=120s
+[00039365] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=181244 wall=151s
+[00039681] exit=0 phase=done cadtests=21/21 exact=true audit=clean tokens=193654 wall=155s
+[00039777] exit=0 phase=done cadtests=15/15 exact=true audit=toolchain tokens=225594 wall=155s
+[00300037] exit=0 phase=done cadtests=12/17 exact=false audit=toolchain tokens=272067 wall=189s
+[00520130] exit=0 phase=done cadtests=8/16 exact=false audit=clean tokens=140616 wall=138s
+[00520150] exit=0 phase=done cadtests=12/14 exact=false audit=clean tokens=124838 wall=110s
+[00520321] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=147687 wall=164s
+[00520402] exit=0 phase=done cadtests=17/17 exact=true audit=clean tokens=179515 wall=201s
+[00520453] exit=0 phase=done cadtests=17/18 exact=false audit=toolchain tokens=186115 wall=130s
+[00520570] exit=0 phase=done cadtests=10/14 exact=false audit=toolchain tokens=1334305 wall=371s
+[00520638] exit=0 phase=ready cadtests=13/15 exact=false audit=clean tokens=207376 wall=292s
+[00520671] exit=0 phase=done cadtests=17/17 exact=true audit=clean tokens=263713 wall=214s
+[00520675] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=127118 wall=111s
+[00520699] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=171179 wall=184s
+[00520726] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=262247 wall=251s
+[00520776] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=119959 wall=106s
+[00520974] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=74794 wall=68s
+[00520976] exit=0 phase=done cadtests=14/16 exact=false audit=clean tokens=163878 wall=129s
+[00521000] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=158154 wall=162s
+[00521025] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=187227 wall=179s
+[00521217] exit=0 phase=done cadtests=10/10 exact=true audit=clean tokens=127880 wall=111s
+[00521230] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=303894 wall=227s
+[00521437] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=291881 wall=266s
+[00521895] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=120256 wall=104s
+[00521969] exit=0 phase=done cadtests=12/13 exact=false audit=clean tokens=136859 wall=103s
+[00522355] exit=0 phase=done cadtests=17/17 exact=true audit=sibling tokens=386864 wall=242s
+[00522404] exit=0 phase=done cadtests=17/17 exact=true audit=clean tokens=183928 wall=183s
+[00522865] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=251271 wall=243s
+[00523882] exit=0 phase=ready cadtests=15/15 exact=true audit=clean tokens=321253 wall=281s
+[00524912] exit=0 phase=done cadtests=10/19 exact=false audit=clean tokens=252399 wall=222s
+[00670105] exit=0 phase=done cadtests=13/14 exact=false audit=toolchain tokens=831452 wall=288s
+[00670106] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=89234 wall=73s
+[00670231] exit=0 phase=done cadtests=17/18 exact=false audit=clean tokens=132164 wall=115s
+[00670256] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=159370 wall=136s
+[00670259] exit=0 phase=done cadtests=10/15 exact=false audit=clean tokens=104670 wall=128s
+[00670266] exit=0 phase=done cadtests=16/17 exact=false audit=clean tokens=218840 wall=200s
+[00670268] exit=0 phase=done cadtests=21/22 exact=false audit=clean tokens=189067 wall=170s
+[00670274] exit=0 phase=done cadtests=12/14 exact=false audit=clean tokens=180907 wall=133s
+[00670279] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=117251 wall=111s
+[00670334] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=139755 wall=116s
+[00670441] exit=0 phase=done cadtests=11/15 exact=false audit=toolchain tokens=240824 wall=169s
+[00670454] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=149540 wall=146s
+[00670457] exit=0 phase=done cadtests=11/11 exact=true audit=toolchain tokens=292512 wall=776s
+[00670466] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=147739 wall=125s
+[00670817] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=101436 wall=91s
+[00670960] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=198465 wall=171s
+[00671873] exit=0 phase=done cadtests=11/14 exact=false audit=clean tokens=203324 wall=168s
+[00671898] exit=0 phase=done cadtests=13/15 exact=false audit=toolchain tokens=2763342 wall=628s
+[00671938] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=147012 wall=130s
+[00672098] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=181852 wall=143s
+[00672272] exit=0 phase=done cadtests=10/14 exact=false audit=clean tokens=221079 wall=194s
+[00672291] exit=0 phase=done cadtests=18/18 exact=true audit=toolchain tokens=514405 wall=265s
+[00672309] exit=0 phase=done cadtests=15/20 exact=false audit=toolchain tokens=351150 wall=319s
+[00672352] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=127684 wall=114s
+[00672355] exit=0 phase=done cadtests=15/16 exact=false audit=clean tokens=190688 wall=217s
+[00672359] exit=0 phase=done cadtests=10/16 exact=false audit=toolchain tokens=300347 wall=173s
+[00672804] exit=0 phase=done cadtests=15/15 exact=true audit=clean tokens=134858 wall=125s
+[00673733] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=808432 wall=214s
+[00673788] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=159502 wall=141s
+[00675092] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=116057 wall=110s
+[00675498] exit=0 phase=done cadtests=13/18 exact=false audit=clean tokens=299572 wall=196s
+[00675952] exit=0 phase=done cadtests=13/13 exact=true audit=clean tokens=146170 wall=126s
+[00676218] exit=0 phase=done cadtests=14/14 exact=true audit=clean tokens=136993 wall=111s
+[00680715] exit=0 phase=done cadtests=14/14 exact=true audit=toolchain tokens=232103 wall=165s
+[00681053] exit=0 phase=done cadtests=12/18 exact=false audit=clean tokens=239077 wall=298s
+[00681399] exit=0 phase=done cadtests=15/21 exact=false audit=clean tokens=181469 wall=184s
+[00681463] exit=0 phase=done cadtests=11/13 exact=false audit=toolchain tokens=969086 wall=533s
+[00681547] exit=0 phase=done cadtests=17/17 exact=true audit=hard tokens=674518 wall=410s
+[00681589] exit=0 phase=done cadtests=15/15 exact=true audit=toolchain tokens=229462 wall=209s
+file:///home/jingyi/pi-cad/benchmarks/cadtestbench/run.mjs:69
+  if (r.status !== 0) throw new Error(`${cmd.join(" ")} failed: ${r.stderr ?? r.status}`);
+                            ^
+
+Error: tar xzf /home/jingyi/pi-cad/benchmarks/cadtestbench/results/.cache/orig-0.tar.gz -C /home/jingyi/pi-cad/benchmarks/cadtestbench/results/.cache/tmp/data failed: tar (child): /home/jingyi/pi-cad/benchmarks/cadtestbench/results/.cache/orig-0.tar.gz: Cannot open: No such file or directory
+tar (child): Error is not recoverable: exiting now
+tar: Child returned status 2
+tar: Error is not recoverable: exiting now
+
+    at sh (file:///home/jingyi/pi-cad/benchmarks/cadtestbench/run.mjs:69:29)
+    at tarExtract (file:///home/jingyi/pi-cad/benchmarks/cadtestbench/run.mjs:78:3)
+    at file:///home/jingyi/pi-cad/benchmarks/cadtestbench/run.mjs:467:20
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+
+Node.js v24.19.0

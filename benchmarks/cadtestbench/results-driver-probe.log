@@ -1,0 +1,9 @@
+[iso] run=2026-08-21T06-31-56-069Z_probe-regression commit=69225e82 samples=16 vaulted=10 paths
+[00670231] exit=0 phase=done cadtests=17/18 exact=false audit=clean tokens=299958 wall=170s
+[00670266] exit=0 phase=done cadtests=16/17 exact=false audit=clean tokens=473291 wall=217s
+[00672355] exit=0 phase=done cadtests=15/16 exact=false audit=clean tokens=497754 wall=196s
+[00996473] exit=0 phase=done cadtests=15/16 exact=false audit=clean tokens=344868 wall=346s
+[00998074] exit=0 phase=done cadtests=16/16 exact=true audit=clean tokens=365650 wall=338s
+[00998843] exit=0 phase=done cadtests=18/19 exact=false audit=clean tokens=1246658 wall=373s
+[00999126] exit=0 phase=done cadtests=16/17 exact=false audit=clean tokens=177215 wall=211s
+[00034100] exit=0 phase=done cadtests=17/18 exact=false audit=clean tokens=562120 wall=242s

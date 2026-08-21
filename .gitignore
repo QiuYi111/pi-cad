@@ -15,6 +15,12 @@ node_modules/
 # Read-only reference material (separate upstream clones)
 ref/
 *.tgz
+
+# CADTestBench benchmark: upstream clone, frozen dataset snapshot, caches
+benchmarks/cadtestbench/external/
+benchmarks/cadtestbench/data/
+benchmarks/cadtestbench/.hf-cache/
+benchmarks/cadtestbench/results/
 benchmarks/results/*
 !benchmarks/results/.gitkeep
 .pi-cad-runtime.json
