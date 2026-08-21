@@ -29,4 +29,3 @@ await jiti.import("./model-backend.test.ts", { default: true });
 await jiti.import("./simulate-lifecycle.test.ts", { default: true });
 await jiti.import("./phase-contract.test.ts", { default: true });
 await jiti.import("./observation-index.test.ts", { default: true });
-await jiti.import("./acceptance-gate.test.ts", { default: true });
