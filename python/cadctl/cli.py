@@ -20,6 +20,7 @@ from .drawing import generate_drawing, validate_drawing_spec
 from .export import export_artifact
 from .geometry import inspect_geometry, measure
 from .model import run_source
+from .probe import ProbeError, run_probe
 from .presentation import run_presentation
 from .provenance import FrozenInputs, spec_input_paths
 from .render import VIEW_NAMES, render_views
@@ -138,6 +139,45 @@ def _cmd_render(args: argparse.Namespace) -> int:
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0
+
+
+def _cmd_probe(args: argparse.Namespace) -> int:
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    try:
+        code = Path(args.code_file).read_text(encoding="utf-8")
+    except OSError as exc:
+        emit_error(
+            "cad_probe_python",
+            f"cannot read probe code: {exc}",
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 1
+    try:
+        payload = run_probe(artifact, code)
+        emit(
+            "cad_probe_python",
+            payload,
+            input_hashes={
+                "artifact": sha256_file(artifact),
+                "script": sha256_file(Path(args.code_file)),
+            },
+            input_artifacts=[{"path": str(artifact), "role": "subject"}],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except ProbeError as exc:
+        emit_error(
+            "cad_probe_python",
+            str(exc),
+            input_hashes={
+                "artifact": sha256_file(artifact) if artifact.exists() else "",
+                "script": sha256_file(Path(args.code_file)),
+            },
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 1
 
 
 def _cmd_measure(args: argparse.Namespace) -> int:
@@ -758,6 +798,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--a", required=True)
     p.add_argument("--b", default=None)
     p.set_defaults(func=_cmd_measure)
+
+    p = sub.add_parser(
+        "probe",
+        help="Run a read-only programmable B-Rep probe: arbitrary Python computation over the subject STEP, JSON result only",
+    )
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--code-file", required=True, help="Path to the probe script (harness-managed temporary file)")
+    p.set_defaults(func=_cmd_probe)
 
     p = sub.add_parser("section", help="Render a deterministic section view")
     p.add_argument("--artifact", required=True)

@@ -84,6 +84,7 @@ const REVIEW_TOOLS = [
   "cad_assembly_tree",
   "cad_inspect_interference",
   "cad_scan_sections",
+  "cad_probe_python",
   "cad_simulate",
   "cad_simulate_flow",
   "cad_simulate_thermal",

@@ -89,6 +89,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_assembly_tree",
     "cad_inspect_interference",
     "cad_scan_sections",
+    "cad_probe_python",
     "cad_export",
     "cad_generate_drawing",
     "cad_simulate",

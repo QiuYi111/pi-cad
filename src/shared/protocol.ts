@@ -72,6 +72,13 @@ export const SIMULATION_TOOLS = [
   "cad_simulate_thermal",
 ] as const;
 
+/**
+ * Programmable read-only observation tool. Never part of the source-phase
+ * capability set (source phases have bash+write already) and never produces
+ * canonical evidence — review-family phases only.
+ */
+export const PROBE_TOOLS = ["cad_probe_python"] as const;
+
 /** Tools whose evidence obligations are case-scoped (opaque simulation cases). */
 export const SIMULATION_CASE_TOOLS = SIMULATION_TOOLS;
 

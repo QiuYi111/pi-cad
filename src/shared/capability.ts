@@ -1,9 +1,11 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { randomUUID } from "node:crypto";
 
 import type {
   BuildPayload,
@@ -281,6 +283,33 @@ export async function scanSections(
   if (options.step !== undefined) args.push("--step", String(options.step));
   if (options.output) args.push("--output", resolve(cwd, options.output));
   return runCadctl(args, { cwd, timeoutMs });
+}
+
+/**
+ * Programmable read-only B-Rep probe. The code is written to a
+ * harness-owned temporary file (the probe CLI takes no inline code), the
+ * subject artifact path is already resolved by the caller from run state —
+ * never from agent input — and the temporary file is removed afterwards.
+ * Envelope inputHashes bind both the artifact and the script.
+ */
+export async function probePython(
+  cwd: string,
+  artifact: string,
+  code: string,
+  timeoutMs = 30_000,
+): Promise<CadEventEnvelope> {
+  const tmpDir = join(cwd, ".pi-cad", "tmp");
+  mkdirSync(tmpDir, { recursive: true });
+  const codeFile = join(tmpDir, `probe-${randomUUID().slice(0, 8)}.py`);
+  writeFileSync(codeFile, code, "utf-8");
+  try {
+    return await runCadctl(
+      ["probe", "--artifact", resolve(cwd, artifact), "--code-file", codeFile],
+      { cwd, timeoutMs },
+    );
+  } finally {
+    rmSync(codeFile, { force: true });
+  }
 }
 
 /**

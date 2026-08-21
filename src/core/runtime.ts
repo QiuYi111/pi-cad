@@ -17,7 +17,7 @@ import { maybeRebuildContext, registerContextCompaction, renderTaskContext } fro
 import { maybeAutoContinue } from "./continuation.ts";
 import { registerControlTools, type ControllerDeps } from "./controller.ts";
 import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
-import { applyCadToolOverlay, isMutatingBash, PI_CAD_OWNED_TOOLS, toolsForPhase, writePathAllowed } from "./policies.ts";
+import { applyCadToolOverlay, PI_CAD_OWNED_TOOLS, toolsForPhase, writePathAllowed } from "./policies.ts";
 import { resumeFromUser } from "./state-machine.ts";
 
 const OPTIONAL_TOOL_NAMES = [
@@ -322,11 +322,15 @@ export default function cadCore(pi: ExtensionAPI) {
       }
     }
     if (event.toolName === "bash") {
-      const input = event.input as { command?: string };
-      if (state.mutationPolicy === "read_only" && input.command && isMutatingBash(input.command)) {
+      if (state.mutationPolicy === "read_only") {
+        // Shell mutation detection by pattern is fundamentally incomplete
+        // (e.g. `python -c "open(...).write(...)"` matches no redirect rule).
+        // Read-only phases get no raw shell at all: read/grep/find/ls and
+        // cad_probe_python cover legitimate read-only computation.
         return {
           block: true,
-          reason: `Pi-CAD read_only: mutating bash command blocked (${input.command.slice(0, 80)})`,
+          reason:
+            "Pi-CAD read_only: raw shell execution is disabled; use read/grep/find/ls or cad_probe_python for computation",
         };
       }
     }

@@ -22,6 +22,7 @@ import {
   inspectSurfaces,
   measure,
   measurePayload,
+  probePython,
   readImageContents,
 } from "../../shared/capability.ts";
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
@@ -461,6 +462,61 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
           envelope,
           artifactHash: envelope.artifacts[0]?.sha256 ?? envelope.inputHashes.source,
           kind: "export" as const,
+        },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "cad_probe_python",
+    label: "CAD Probe Python",
+    description:
+      "Run a read-only programmable B-Rep probe: arbitrary Python computation over the current (or baseline) design, returning a JSON result. Pure observability — no filesystem, import, subprocess, or network inside the probe; the subject is resolved from run state, never from a path you supply.",
+    promptSnippet: "Compute any derived geometric quantity with Python (read-only)",
+    promptGuidelines: [
+      "Use when the typed inspection tools cannot express the quantity you need: derived ratios, fill/shape factors, symmetry checks, hole spacing patterns, mass-property relations, custom topology statistics.",
+      "The scope preloads shape (the imported STEP), bd (build123d), np, math, statistics. Assign a JSON-serializable dict to result.",
+      "subject=current|baseline is resolved by the harness from run state; you cannot pass an artifact path.",
+      "This is observation, not evidence: results are hash-bound and auditable but do not create canonical evidence obligations.",
+    ],
+    parameters: Type.Object(
+      {
+        subject: Type.Enum({ current: "current", baseline: "baseline" }),
+        purpose: Type.String({ description: "What engineering question this probe answers" }),
+        code: Type.String({ description: "Python probe body; must set 'result' to a JSON-serializable value" }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { CadProjectStore } = await import("../../shared/store.ts");
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await store.load();
+      if (!state) {
+        return { content: [{ type: "text", text: "cad_probe_python failed: no active Pi-CAD workflow" }] };
+      }
+      const rel =
+        params.subject === "current" ? state.currentArtifactPath : state.baselineArtifactPath;
+      if (!rel) {
+        return {
+          content: [{
+            type: "text",
+            text: `cad_probe_python failed: no ${params.subject} artifact bound in run state`,
+          }],
+        };
+      }
+      const envelope = await probePython(ctx.cwd, rel, params.code);
+      const payload = envelope.payload as { result?: unknown; probeSeconds?: number; error?: string };
+      const text = envelope.ok
+        ? `cad_probe_python (${params.subject}, ${params.purpose}) = ${JSON.stringify(payload.result, null, 2)}`
+        : `cad_probe_python failed: ${payload.error ?? "unknown error"}`;
+      // Deliberately no details.kind: probe results are observations, not
+      // canonical evidence — they must not enter state.evidence.
+      return {
+        content: [{ type: "text", text }],
+        details: {
+          envelope,
+          subjectArtifactHash: envelope.inputHashes.artifact,
+          scriptHash: envelope.inputHashes.script,
         },
       };
     },
