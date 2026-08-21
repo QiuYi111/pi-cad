@@ -1,5 +1,11 @@
 # Pi-CAD Refactoring Engineering Design Document v2
 
+> Implementation status (branch `refactor/runtime-v2`): Phases 0–8 are
+> implemented. Phase 3's old-tool retirement remains gated on a fuller
+> agent-level benchmark campaign; legacy inspection tools stay as
+> deprecated wrappers until then. See `refactor/review-and-plan.md` for
+> the review that produced this plan.
+
 ## Title
 
 Deep Module Architecture Migration Plan

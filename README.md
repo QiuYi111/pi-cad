@@ -28,7 +28,10 @@ It is built on one simple split of responsibility:
   stored per run, hashed, and re-verified at every acceptance. Tampered or
   stale evidence is rejected, never silently reused.
 
-> The original design rationale lives in [`pi-cad-whitepaper.md`](pi-cad-whitepaper.md).
+> The original design rationale lives in the refactor docs:
+> [`refactor/pi-cad-refactoring-whitepaper.md`](refactor/pi-cad-refactoring-whitepaper.md)
+> (vision) and [`refactor/pi-cad-engineering-design-v2.md`](refactor/pi-cad-engineering-design-v2.md)
+> (implementation plan).
 
 ---
 
@@ -336,8 +339,11 @@ layouts are migrated automatically.
 
 | Area | Path |
 | --- | --- |
-| Harness core (state machine, policies, evidence) | `src/core/` |
-| Tool extensions (geometry, visual, drawing, simulation, presentation, UI) | `src/extensions/` |
+| Harness core (state machine, policies, evidence, context memory) | `src/core/` |
+| Control plane (phase contracts: phase → capability grants) | `src/control/` |
+| Observation layer (ObservationBundle/Renderer/Profiles) | `src/observations/` |
+| Capability modules (MODEL / PROBE / SIMULATE) | `src/modules/` |
+| Tool extensions (probe, geometry, visual, drawing, simulation, presentation, UI) | `src/extensions/` |
 | Route ontology + workflow compiler | `src/shared/route.ts`, `src/workflows/compiler.ts` |
 | Layered prompts | `src/prompts/` |
 | Deterministic Python backend | `python/cadctl/` |
@@ -346,6 +352,22 @@ layouts are migrated automatically.
 | Blender presentation interpreter | `python/cadctl/presentation.py`, `presentation_driver.py` |
 | Skills (thermal-fluid analysis, assembly design) | `skills/` |
 | Spec templates | `assets/templates/` |
+| Refactor plan + review (runtime-v2 architecture) | `refactor/` |
+
+### Runtime architecture (v2)
+
+Control Plane (`src/control` phase contracts + `src/core` state machine)
+decides what is allowed and required. Capability modules decide how
+engineering computation runs: MODEL (`src/modules/model` — ModelBackend
+adapters, candidate finalizer), PROBE (`src/modules/probe` — preset
+registry behind the unified `cad_probe` tool), SIMULATE
+(`src/modules/simulate` — shared spec-freeze → solve → observe
+lifecycle). The Observation Layer (`src/observations`) normalizes every
+backend envelope into visual-first agent observations, and the context
+runtime (`src/core/observation-index.ts`) indexes them so post-compaction
+recall (`cad_recall_observation`) can rehydrate engineering visuals.
+Adding a CAD backend means implementing `ModelBackend`; adding an
+observation means adding a probe preset — neither touches workflow code.
 
 ## Validation performed
 

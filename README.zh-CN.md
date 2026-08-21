@@ -25,7 +25,7 @@ Pi-CAD 是为
 - **证据与哈希绑定。** Spec、结果、场数据、渲染视图都按 run 归档、计算哈希,
   并在每次验收时重新校验。被篡改或过期的证据会被拒绝,绝不静默复用。
 
-> 原始设计理念见 [`pi-cad-whitepaper.md`](pi-cad-whitepaper.md)(英文)。
+> 原始设计理念见重构文档:[`refactor/pi-cad-refactoring-whitepaper.md`](refactor/pi-cad-refactoring-whitepaper.md)(愿景)与 [`refactor/pi-cad-engineering-design-v2.md`](refactor/pi-cad-engineering-design-v2.md)(实施计划,英文)。
 
 ---
 
