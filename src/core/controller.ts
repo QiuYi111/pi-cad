@@ -28,6 +28,7 @@ import {
 import { loadPrompt } from "./context.ts";
 import { verifyCurrentArtifacts, verifyEvidenceFilesForHash, verifyPresentationDeliverables } from "./evidence.ts";
 import type { PersistFn } from "./auto-actions.ts";
+import { runAcceptanceGate } from "../control/acceptance-gate.ts";
 
 export interface ControllerDeps {
   pi: ExtensionAPI;
@@ -723,18 +724,31 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptSnippet: "Move the current workflow with an explicit transition event",
     promptGuidelines: [
       "accepted requires you have personally interpreted current evidence.",
+      "accepted requires checks[]: one entry per Mission Must item, citing the measured value from current evidence — claimed numbers are cross-checked against the evidence digest, contradictions block.",
       "baseline_understood requires bound baseline visual and geometry evidence.",
       "release accepted requires all workstream statuses to be complete/not_applicable/blocked_external.",
     ],
     parameters: Type.Object({
       event: Type.String(),
       note: Type.String(),
+      checks: Type.Optional(
+        Type.Array(
+          Type.Object({
+            mustRef: Type.String({ description: "The Mission Must item this check closes (verbatim or a clear reference)" }),
+            claimedValue: Type.Optional(Type.Number({ description: "Measured value from CURRENT evidence satisfying this Must (will be cross-checked against the evidence digest)" })),
+            unit: Type.Optional(Type.String()),
+            basis: Type.String({ description: "Where the value comes from: evidence kind + path or digest field" }),
+          }),
+          { minItems: 1, description: "Acceptance checks: one per Mission Must item" },
+        ),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
 
+      let acceptedDissent: import("../control/acceptance-gate.ts").ReviewerObjection[] | undefined;
       const spec = workflowSpec(state);
       if (params.event === "accepted" && spec?.acceptedPhases.includes(state.phase)) {
         // The transition table is authoritative for where acceptance
@@ -772,6 +786,19 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           const guard = spec.completionGuard?.(state);
           if (guard) return errTool(`cannot accept: ${guard}`);
         }
+        // Acceptance gate: deterministic claim reconciliation (T1),
+        // one-check-per-Must coverage (T2), adversarial reviewer (T3,
+        // env-gated). The reviewer never issues the verdict — its
+        // structured assertions get the same deterministic cross-check.
+        const gate = await runAcceptanceGate({
+          cwd: ctx.cwd,
+          state,
+          checks: params.checks,
+          note: params.note,
+          ctx,
+        });
+        if (!gate.ok) return errTool(`cannot accept: ${gate.reason}`);
+        acceptedDissent = gate.dissent;
       }
       if (
         params.event === "baseline_understood" &&
@@ -789,6 +816,15 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
 
       const result = transition(state, params.event, params.note);
       if (!result.ok) return errTool(result.reason);
+      if (acceptedDissent?.length) {
+        result.events.push({
+          type: "AcceptanceDissentRecorded",
+          data: {
+            objections: acceptedDissent,
+            note: "acceptance proceeded after the reviewer block budget; objections on record",
+          },
+        });
+      }
       // Head commits only when acceptance CLOSES the run (phase becomes
       // ready). A design-review accepted that hands into a release suffix
       // must not move the head: if the audit/gap_closure then fails or the

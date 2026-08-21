@@ -168,7 +168,14 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
 
     const accepted = await transition.execute(
       "t7",
-      { event: "accepted", note: "reviewed all seven views and measured hole facts" },
+      {
+        event: "accepted",
+        note: "reviewed all seven views and measured hole facts",
+        checks: [
+          { mustRef: "100 x 80 x 5", basis: "geometry evidence bbox for the current candidate" },
+          { mustRef: "4 x 6 mm through holes", basis: "geometry evidence cylinder count for the current candidate" },
+        ],
+      },
       undefined,
       undefined,
       ctx,

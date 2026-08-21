@@ -14,7 +14,7 @@ Inspect every returned view yourself. Tool output contains facts, not design mea
 - Verify every user-specified critical dimension and relationship with cad_probe (preset=geometry yields #pN/#cN selectors, preset=measure verifies a number, preset=section resolves internal geometry).
 - When the typed presets cannot express a check — derived ratios, fill/shape factors, symmetry, hole-spacing patterns, mass-property relations — compute it yourself with cad_probe preset=python (read-only, JSON result) instead of accepting an unverified inference.
 - If the issue is local geometry, call cad_transition(event="revise") to return to build, edit the source, and commit another candidate.
-- If the candidate satisfies your engineering judgment at the requested maturity, call cad_transition(event="accepted") with a note describing the checks you performed.
+- If the candidate satisfies your engineering judgment at the requested maturity, call cad_transition(event="accepted") with a note describing the checks you performed AND checks[]: one entry per Mission Must item citing the measured value from current evidence (claimed numbers are cross-checked against the evidence digest; a claim that contradicts the measurements blocks the acceptance).
 - Never claim an inspection happened unless the harness attached it for the current artifact hash.
 
 ## Requirement closure
