@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import type { CadProjectState, CadRunState } from "../shared/protocol.ts";
 import { routeKey } from "../shared/protocol.ts";
+import { interactionModeOf, isHeadless } from "./interaction-mode.ts";
 
 const PROMPT_DIR = new URL("../prompts/", import.meta.url);
 const promptCache = new Map<string, string>();
@@ -25,16 +26,32 @@ export async function loadPrompt(name: string): Promise<string> {
 export function stateSummary(state: CadRunState): string {
   const lines = [
     `route=${state.route ? routeKey(state.route) : "unset"} phase=${state.phase} status=${state.status}`,
+    `interactionMode=${interactionModeOf(state)}`,
     `mutationPolicy=${state.mutationPolicy}`,
   ];
   if (state.candidateLabel) lines.push(`candidate=${state.candidateLabel}`);
   if (state.currentSourceHash) lines.push(`currentSourceHash=${state.currentSourceHash.slice(0, 12)}`);
   if (state.currentArtifactHash) lines.push(`currentArtifactHash=${state.currentArtifactHash.slice(0, 12)}`);
   if (state.baselineArtifactHash) lines.push(`baselineArtifactHash=${state.baselineArtifactHash.slice(0, 12)}`);
+  if (state.finalReview) {
+    const current = state.finalReview.artifactHash === state.currentArtifactHash &&
+      state.finalReview.requirementsHash === state.requirementsVersion &&
+      state.finalReview.assertionsHash === state.assertionsVersion;
+    lines.push(`finalReview=${state.finalReview.verdict}${current ? " (current)" : " (stale)"}`);
+  }
   lines.push(`currentEvidence=${state.evidence.map((e) => e.kind).join(",") || "none"}`);
   if (state.staleEvidence.length) lines.push(`staleEvidence=${state.staleEvidence.length}`);
   if (state.phaseRecords?.length) lines.push(`phaseRecords=${state.phaseRecords.join(",")}`);
   if (state.pendingReroute) lines.push(`pendingReroute=${routeKey(state.pendingReroute.route)}`);
+  if (state.pendingRequirementsRevision) {
+    lines.push(`pendingRequirementsRevision=${state.pendingRequirementsRevision.hash}`);
+  }
+  if (state.requirementsAuthorityToken) {
+    lines.push(
+      `requirementsAuthorityToken=${state.requirementsAuthorityToken} (one-time, bound to ${state.requirementsAuthorityHash ?? "unknown"})`,
+    );
+  }
+  if (state.blocker) lines.push(`blocker=${state.blocker.type}: ${state.blocker.needed}`);
   if (state.rerouteAuthorityToken) {
     lines.push(
       `rerouteAuthorityToken=${state.rerouteAuthorityToken} (one-time, bound to ${state.rerouteAuthorityRoute ?? "unknown"})`,
@@ -65,6 +82,19 @@ export async function composeSystemPrompt(
     return `${base}\n\n${invariants}${unavailable}`;
   }
   const phasePrompt = await loadPrompt(state.phase);
+  const interactionPolicy = isHeadless(state)
+    ? [
+        "## Interaction mode: HEADLESS (authoritative)",
+        "This workflow has no user turn available. Never request, await, or claim a user response.",
+        "For an engineering interpretation ambiguity, call cad_defer_clarification with alternatives and an explicit fallback, then continue.",
+        "The committed requirements contract is immutable. Never attempt to revise it: no user exists to issue the required hash-bound one-time authority token.",
+        "If the missing decision belongs exclusively to the user (authority/scope/cost/risk), call cad_declare_blocker instead of inventing consent.",
+        "Continue until the workflow is DONE, structurally BLOCKED, ABORTED, or the host budget ends. waiting_user is illegal in this mode.",
+      ].join("\n")
+    : [
+        "## Interaction mode: INTERACTIVE",
+        "Use cad_wait_for_user only for a material decision that genuinely belongs to the user.",
+      ].join("\n");
   const statusNote =
     state.status === "waiting_user"
       ? "\n\n## Waiting for user\nA cad_wait_for_user decision is outstanding. The new user turn resolves it; do not re-ask the same question if it was just answered."
@@ -86,6 +116,7 @@ export async function composeSystemPrompt(
   return [
     base,
     invariants,
+    interactionPolicy,
     phasePrompt,
     "## Current canonical state (authoritative)",
     stateSummary(state),

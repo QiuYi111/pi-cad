@@ -35,6 +35,7 @@ const req: CadRequirements = {
   goal: "full workflow test",
   deliverables: ["STEP", "source"],
   must: [],
+  assertions: [],
   preferences: [],
   assumptions: [],
   openUnknowns: [],
@@ -744,7 +745,7 @@ test("release design-review accepted enters audit without closure deliverables o
     );
     await reqTool.execute(
       "c2",
-      { goal: "g", deliverables: ["STEP"], must: [], preferences: [], assumptions: [], openUnknowns: [] },
+      { goal: "g", deliverables: ["STEP"], must: [], assertions: [], preferences: [], assumptions: [], openUnknowns: [] },
       undefined, undefined, ctx,
     );
     await transitionTool.execute("c3", { event: "direction_selected", note: "two boxes" }, undefined, undefined, ctx);

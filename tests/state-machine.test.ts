@@ -9,10 +9,13 @@ import {
   commitPlan as commitPlanRaw,
   commitRequirements,
   createIntakeState,
+  declareHeadlessBlocker,
+  deferClarification,
   finish as finishQuick,
   markEvidenceStale,
   route as routeQuick,
   transition as transitionQuick,
+  waitForUser,
 } from "../src/core/state-machine.ts";
 
 function commitPlanIfAbsent(state: ReturnType<typeof createIntakeState>) {
@@ -46,10 +49,82 @@ const record: CadRequirements = {
   goal: "100 x 80 x 5 mm plate with four 6 mm through holes, centers 10 mm from edges.",
   deliverables: ["STEP", "source"],
   must: ["100 x 80 x 5 mm", "four 6 mm through holes", "hole centers 10 mm from edges"],
+  assertions: [
+    { id: "A-size", mustRef: "M1", statement: "Overall body is 100 x 80 x 5 mm", binding: { subject: "final body", quantity: "overall dimensions" }, expectation: { kind: "relation", description: "bbox dimensions are 100 x 80 x 5 mm" } },
+    { id: "A-holes", mustRef: "M2", statement: "Body has four 6 mm through holes", binding: { subject: "mounting holes", quantity: "count, diameter, and through condition" }, expectation: { kind: "relation", description: "four through holes of diameter 6 mm" } },
+    { id: "A-offset", mustRef: "M3", statement: "Hole centers are 10 mm from edges", binding: { subject: "mounting hole centers", quantity: "edge offset", reference: "body edges" }, expectation: { kind: "exact", value: 10, unit: "mm", tolerance: 0.01 } },
+  ],
   preferences: [],
   assumptions: ["sharp edges acceptable"],
   openUnknowns: [],
 };
+
+test("headless clarification debt is validated and emitted as an event", () => {
+  const routed = routeQuick(null, quickPlateRoute, "ambiguous prompt");
+  assert.equal(routed.ok, true);
+  if (!routed.ok) throw new Error("unreachable");
+  const fallback = "Treat inset as distance to the hole center.";
+  const committed = commitRequirements(routed.state, {
+    ...record,
+    assumptions: [...record.assumptions, fallback],
+    deferredClarifications: [{
+      question: "Does inset refer to the hole center or edge?",
+      reason: "Both interpretations are geometrically valid.",
+      alternatives: ["Distance to hole center", "Distance to hole edge"],
+      fallback,
+      impact: "Changes every hole center location.",
+    }],
+  });
+  assert.equal(committed.ok, true);
+  if (!committed.ok) throw new Error("unreachable");
+  assert.equal(committed.events.some((event) => event.type === "HeadlessClarificationDeferred"), true);
+});
+
+test("headless mode forbids waiting, journals cross-phase debt, and has explicit blocker terminals", () => {
+  const intake = createIntakeState({ interactionMode: "headless" });
+  const routed = routeQuick(intake, quickPlateRoute, "headless test");
+  assert.equal(routed.ok, true);
+  if (!routed.ok) throw new Error("unreachable");
+
+  const waiting = waitForUser(routed.state, "ask for a diameter");
+  assert.equal(waiting.ok, false);
+  if (!waiting.ok) assert.match(waiting.reason, /headless workflows cannot enter waiting_user/);
+
+  const deferred = deferClarification(routed.state, {
+    question: "Does inset bind to the edge or center?",
+    reason: "Both readings are feasible.",
+    alternatives: ["edge", "center"],
+    fallback: "Use the center interpretation.",
+    impact: "Changes feature placement.",
+    affectsContract: false,
+  });
+  assert.equal(deferred.ok, true);
+  if (!deferred.ok) throw new Error("unreachable");
+  assert.equal(deferred.state.status, "active");
+  assert.equal(deferred.state.phase, "requirements");
+  assert.equal(deferred.state.deferredClarifications?.length, 1);
+
+  const frozen = deferClarification({ ...deferred.state, requirementsVersion: "frozen" }, {
+    question: "Should acceptance change?",
+    reason: "Candidate exposed a conflict.",
+    alternatives: ["change contract", "repair candidate"],
+    fallback: "change contract",
+    impact: "Would rewrite acceptance.",
+    affectsContract: true,
+  });
+  assert.equal(frozen.ok, false);
+  if (!frozen.ok) assert.match(frozen.reason, /immutable/);
+
+  const blocked = declareHeadlessBlocker(deferred.state, {
+    type: "user_authority",
+    reason: "Requested reroute drops a release obligation.",
+    needed: "Explicit user approval.",
+  });
+  assert.equal(blocked.ok, true);
+  if (!blocked.ok) throw new Error("unreachable");
+  assert.equal(blocked.state.status, "blocked_user");
+  assert.equal(blocked.state.blocker?.type, "user_authority");
+});
 
 function stateInPhase(phase: "requirements" | "build" | "review" | "ready") {
   const routed = routeQuick(null, quickPlateRoute, "fully specified plate");

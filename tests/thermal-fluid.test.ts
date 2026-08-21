@@ -67,6 +67,7 @@ function greenfieldReadyState(
     goal: "nozzle with supersonic outlet and controlled hot-section temperature",
     deliverables: ["nozzle.step"],
     must: ["outlet Mach > 1 at declared operating point"],
+    assertions: [{ id: "A-mach", mustRef: "M1", statement: "Outlet Mach exceeds 1 at the declared operating point", binding: { subject: "outlet flow", quantity: "Mach number", reference: "declared operating point" }, expectation: { kind: "range", min: 1 } }],
     preferences: [],
     assumptions: [],
     openUnknowns: [],

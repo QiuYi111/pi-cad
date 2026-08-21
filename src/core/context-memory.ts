@@ -521,6 +521,24 @@ function renderMission(requirements: CadRequirements): string {
     if (!items?.length) continue;
     lines.push("", label, ...items.map((item) => `- ${item}`));
   }
+  if (requirements.assertions?.length) {
+    lines.push(
+      "",
+      "Pre-registered Acceptance Assertions:",
+      ...requirements.assertions.map((assertion) =>
+        `- ${assertion.id} (${assertion.mustRef}): ${assertion.statement}`,
+      ),
+    );
+  }
+  if (requirements.deferredClarifications?.length) {
+    lines.push(
+      "",
+      "Headless Clarification Debt (fallbacks are provisional, not user answers):",
+      ...requirements.deferredClarifications.map((item) =>
+        `- ${item.question} | fallback: ${item.fallback} | impact: ${item.impact}`,
+      ),
+    );
+  }
   lines.push(
     "",
     "Treat Must as hard constraints and Assumptions as revisable; do not silently promote an assumption into a constraint.",
@@ -542,12 +560,50 @@ export async function renderTaskContext(cwd: string, state: CadRunState): Promis
   const requirements = await readJson<CadRequirements>(join(run.recordsDir, "requirements.json"));
   if (requirements?.goal) sections.push(renderMission(requirements));
 
+  const lateClarifications = (state.deferredClarifications ?? []).filter(
+    (item) => item.phase !== "requirements",
+  );
+  if (lateClarifications.length) {
+    sections.push([
+      "## Run-wide Headless Clarification Debt",
+      "",
+      "These fallbacks are provisional engineering decisions, not user answers:",
+      ...lateClarifications.map((item) =>
+        `- [${item.phase}] ${item.question} | fallback: ${item.fallback} | impact: ${item.impact}`,
+      ),
+    ].join("\n"));
+  }
+
   // A stale working.md (refresh failed mid-compaction) is deliberately NOT
   // injected: its "Current intent" would outrank the fresher default
   // compaction summary now carrying the run in the conversation.
   const meta = await readWorkingMeta(run);
   const working = meta.status === "stale" ? "" : (await readText(workingPath(run))).trim();
   if (working) sections.push(`## Working Context\n\n${clip(working, WORKING_CONTEXT_MAX_CHARS)}`);
+
+  const review = state.finalReview;
+  if (
+    review &&
+    review.verdict !== "pass" &&
+    review.artifactHash === state.currentArtifactHash &&
+    review.requirementsHash === state.requirementsVersion &&
+    review.assertionsHash === state.assertionsVersion
+  ) {
+    const report = await readJson<{
+      result?: { summary?: string; assertionChecks?: Array<{ assertionId: string; verdict: string; finding: string }> };
+    }>(join(cwd, review.path));
+    const checks = report?.result?.assertionChecks ?? [];
+    sections.push([
+      "## Latest independent review",
+      "",
+      `status: ${review.verdict.toUpperCase()}`,
+      `report: ${review.path}`,
+      report?.result?.summary ? `summary: ${report.result.summary}` : "",
+      ...checks.filter((check) => check.verdict !== "pass").map((check) =>
+        `- ${check.assertionId} ${check.verdict.toUpperCase()}: ${check.finding}`,
+      ),
+    ].filter(Boolean).join("\n"));
+  }
 
   const refs = await readRefs(run);
   if (refs.length) {

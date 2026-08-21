@@ -89,6 +89,7 @@ test("assembly candidate auto-records interference evidence and gates integratio
         goal: "assembly with one deliberate overlap",
         deliverables: ["STEP"],
         must: [],
+        assertions: [],
         preferences: [],
         assumptions: [],
         openUnknowns: [],

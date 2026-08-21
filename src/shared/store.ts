@@ -43,7 +43,16 @@ export async function sha256File(path: string): Promise<string> {
 }
 
 export function hashRecord(record: unknown): string {
-  return sha256(JSON.stringify(record, Object.keys(record as object).sort(), 2));
+  return sha256(canonicalJson(record));
+}
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) =>
+    `${JSON.stringify(key)}:${canonicalJson(record[key])}`,
+  ).join(",")}}`;
 }
 
 export function stableJson(value: unknown): string {
@@ -82,6 +91,7 @@ export class CadRunStore {
   readonly recordsDir: string;
   readonly evidenceDir: string;
   readonly artifactsDir: string;
+  readonly reviewsDir: string;
 
   constructor(cwd: string, runId: string) {
     this.cwd = resolve(cwd);
@@ -92,6 +102,7 @@ export class CadRunStore {
     this.recordsDir = join(this.runDir, "records");
     this.evidenceDir = join(this.runDir, "evidence");
     this.artifactsDir = join(this.runDir, "artifacts");
+    this.reviewsDir = join(this.runDir, "reviews");
   }
 
   async ensureDirs(): Promise<void> {
@@ -101,6 +112,7 @@ export class CadRunStore {
     await mkdir(join(this.evidenceDir, "compare"), { recursive: true });
     await mkdir(join(this.evidenceDir, "section"), { recursive: true });
     await mkdir(join(this.artifactsDir), { recursive: true });
+    await mkdir(join(this.reviewsDir), { recursive: true });
   }
 
   async load(): Promise<CadRunState | null> {
@@ -137,6 +149,36 @@ export class CadRunStore {
     const path = join(this.artifactsDir, "manifest.json");
     await atomicWrite(path, `${JSON.stringify(data, null, 2)}\n`);
     return path;
+  }
+
+  async writeReview(data: unknown): Promise<string> {
+    await this.ensureDirs();
+    const existing = (await readdir(this.reviewsDir).catch(() => []))
+      .filter((name) => /^review-\d+\.json$/.test(name));
+    const next = existing.reduce((max, name) => {
+      const value = Number(name.match(/\d+/)?.[0] ?? 0);
+      return Math.max(max, value);
+    }, 0) + 1;
+    const path = join(this.reviewsDir, `review-${String(next).padStart(3, "0")}.json`);
+    await atomicWrite(path, `${JSON.stringify(data, null, 2)}\n`);
+    return path;
+  }
+
+  async listReviewsNewestFirst<T = unknown>(): Promise<Array<{ path: string; data: T }>> {
+    await this.ensureDirs();
+    const names = (await readdir(this.reviewsDir).catch(() => []))
+      .filter((name) => /^review-\d+\.json$/.test(name))
+      .sort((a, b) => Number(b.match(/\d+/)?.[0] ?? 0) - Number(a.match(/\d+/)?.[0] ?? 0));
+    const reviews: Array<{ path: string; data: T }> = [];
+    for (const name of names) {
+      const path = join(this.reviewsDir, name);
+      try {
+        reviews.push({ path, data: JSON.parse(await readFile(path, "utf-8")) as T });
+      } catch {
+        // A partial or legacy-unreadable report is not a valid vote.
+      }
+    }
+    return reviews;
   }
 
   async runRef(): Promise<CadRunRef | null> {
@@ -315,6 +357,17 @@ export class CadProjectStore {
     const run = await this.currentRun();
     if (!run) throw new Error("no active workflow run");
     return run.writeManifest(data);
+  }
+
+  async writeReview(data: unknown): Promise<string> {
+    const run = await this.currentRun();
+    if (!run) throw new Error("no active workflow run");
+    return run.writeReview(data);
+  }
+
+  async listReviewsNewestFirst<T = unknown>(): Promise<Array<{ path: string; data: T }>> {
+    const run = await this.currentRun();
+    return run ? run.listReviewsNewestFirst<T>() : [];
   }
 
   resolve(relativePath: string): string {

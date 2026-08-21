@@ -21,25 +21,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { probePython, readImageContents } from "../../shared/capability.ts";
-import {
-  ensureProbePresets,
-  probePreset,
-  renderProbeResult,
-} from "../../modules/probe/index.ts";
-
-const PRESET_NAMES = {
-  visual: "visual",
-  geometry: "geometry",
-  surfaces: "surfaces",
-  measure: "measure",
-  section: "section",
-  sections_scan: "sections-scan",
-  compare: "compare",
-  assembly: "assembly",
-  interference: "interference",
-  python: "python",
-} as const;
+import { readImageContents } from "../../shared/capability.ts";
+import { CadProbeParametersSchema, executeCadProbe } from "../../modules/probe/tool.ts";
 
 export default function cadProbeExtension(pi: ExtensionAPI) {
   pi.registerTool({
@@ -54,62 +37,9 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
       "preset=python needs subject=current|baseline, purpose, and code assigning a JSON-serializable `result`; scope preloads shape, bd, np, math, statistics.",
       "Observations bind evidence only through the control plane (commit/review); probing never mutates the canonical design.",
     ],
-    parameters: Type.Object(
-      {
-        preset: Type.Enum(PRESET_NAMES),
-        args: Type.Optional(
-          Type.Record(Type.String(), Type.Unknown(), {
-            description: "Preset arguments, e.g. {artifact, metric, a, b} for measure",
-          }),
-        ),
-        subject: Type.Optional(
-          Type.Enum({ current: "current", baseline: "baseline" }, {
-            description: "python mode: which run-state artifact to probe (default current)",
-          }),
-        ),
-        purpose: Type.Optional(
-          Type.String({ description: "python mode: the engineering question this probe answers" }),
-        ),
-        code: Type.Optional(
-          Type.String({ description: "python mode: probe body; must assign `result`" }),
-        ),
-      },
-      { additionalProperties: false },
-    ),
+    parameters: CadProbeParametersSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      ensureProbePresets();
-
-      if (params.preset === "python") {
-        return runPythonProbe(ctx.cwd, {
-          subject: params.subject ?? "current",
-          purpose: params.purpose ?? "",
-          code: params.code ?? "",
-        });
-      }
-      const registryName = PRESET_NAMES[params.preset];
-      const preset = probePreset(registryName);
-      if (!preset) {
-        return {
-          content: [{ type: "text", text: `cad_probe failed: preset ${registryName} not registered` }],
-        };
-      }
-
-      const args = { ...(params.args ?? {}) } as Record<string, unknown>;
-      if (!args.artifact && (params.subject === "current" || params.subject === "baseline" || params.preset !== "compare")) {
-        const resolved = await resolveSubjectArtifact(ctx.cwd, params.subject);
-        if (resolved) args.artifact = resolved;
-      }
-      if (!args.artifact && !args.before) {
-        return {
-          content: [{
-            type: "text",
-            text: "cad_probe failed: no artifact in args and no active run artifact to resolve — pass args.artifact (or run inside a Pi-CAD workflow)",
-          }],
-        };
-      }
-
-      const result = await preset.run(args as never, { cwd: ctx.cwd });
-      return renderProbeResult(result, `cad_probe/${registryName}`);
+      return executeCadProbe(ctx.cwd, params);
     },
   });
 
@@ -177,56 +107,4 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
       };
     },
   });
-}
-
-async function resolveSubjectArtifact(
-  cwd: string,
-  subject: "current" | "baseline" | undefined,
-): Promise<string | null> {
-  const { CadProjectStore } = await import("../../shared/store.ts");
-  const state = await new CadProjectStore(cwd).load();
-  if (!state) return null;
-  const which = subject ?? "current";
-  return which === "current" ? state.currentArtifactPath : state.baselineArtifactPath;
-}
-
-async function runPythonProbe(
-  cwd: string,
-  params: { subject: "current" | "baseline"; purpose: string; code: string },
-) {
-  const { CadProjectStore } = await import("../../shared/store.ts");
-  const state = await new CadProjectStore(cwd).load();
-  if (!state) {
-    return { content: [{ type: "text", text: "cad_probe failed: no active Pi-CAD workflow" }] };
-  }
-  const rel =
-    params.subject === "current" ? state.currentArtifactPath : state.baselineArtifactPath;
-  if (!rel) {
-    return {
-      content: [{
-        type: "text",
-        text: `cad_probe failed: no ${params.subject} artifact bound in run state`,
-      }],
-    };
-  }
-  if (!params.code.trim()) {
-    return {
-      content: [{ type: "text", text: "cad_probe failed: preset=python requires code" }],
-    };
-  }
-  const envelope = await probePython(cwd, rel, params.code);
-  const payload = envelope.payload as { result?: unknown };
-  return renderProbeResult(
-    {
-      envelope,
-      headline: `cad_probe/python (${params.subject}${params.purpose ? `, ${params.purpose}` : ""}) = ${JSON.stringify(payload.result ?? null, null, 2)}`,
-      includeEnvelope: false,
-      // No kind: programmable probes are observations, never evidence.
-      extraDetails: {
-        subjectArtifactHash: envelope.inputHashes.artifact,
-        scriptHash: envelope.inputHashes.script,
-      },
-    },
-    "cad_probe/python",
-  );
 }

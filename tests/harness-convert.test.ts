@@ -34,6 +34,8 @@ function mockPi(): MockPi {
 }
 
 test("convert workflow accepts a STEP source and produces an STL sidecar", async () => {
+  const previousHeadless = process.env.PI_CAD_HEADLESS;
+  process.env.PI_CAD_HEADLESS = "1";
   const pi = mockPi();
   const core = (await import("../src/extensions/core/index.ts")).default;
   core(pi);
@@ -70,6 +72,7 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
     goal: "convert plate.step to STL",
     deliverables: ["STL"],
     must: [],
+    assertions: [],
     preferences: [],
     assumptions: ["STL intentionally has no hierarchy"],
     openUnknowns: [],
@@ -80,12 +83,14 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
   const blocked = await transition.execute("2b", { event: "baseline_understood", note: "skipped frame check" }, undefined, undefined, ctx);
   assert.match(blocked.content[0].text, /frame_context/);
   const r2c = await frameContext.execute("2c", {
+    disposition: "assumed_headless",
     axes: [
       { axis: "x", mapsTo: "long edge direction" },
       { axis: "y", mapsTo: "short edge direction" },
       { axis: "z", mapsTo: "plate normal, up" },
     ],
-    howConfirmed: "user confirmed the long edge runs along X in their fixture",
+    howConfirmed: "visual and geometry evidence show the long and short plate edges and its normal",
+    notes: "Directional meaning is provisional until user context is available.",
   }, undefined, undefined, ctx);
   assert.match(r2c.content[0].text, /SOURCE_BASELINE/);
   const r3 = await transition.execute("3", { event: "baseline_understood", note: "reviewed baseline; frame confirmed" }, undefined, undefined, ctx);
@@ -97,12 +102,16 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
   assert.ok(existsSync(join(cwd, "plate.stl")));
   const state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", "convert-run", "state.json"), "utf-8"));
   assert.equal(state.phase, "compare");
+  assert.equal(state.interactionMode, "headless");
+  assert.equal(state.deferredClarifications.some((item: { phase: string }) => item.phase === "source_baseline"), true);
   assert.ok(state.evidence.some((e: { kind: string }) => e.kind === "convert"));
   const r6 = await transition.execute("6", { event: "accepted", note: "STL sidecar exported; hierarchy intentionally baked" }, undefined, undefined, ctx);
   assert.match(r6.content[0].text, /READY/);
   const r7 = await finish.execute("7", {}, undefined, undefined, ctx);
   assert.match(r7.content[0].text, /finished/);
-} finally {
-  rmSync(cwd, { recursive: true, force: true });
-}
+  } finally {
+    if (previousHeadless === undefined) delete process.env.PI_CAD_HEADLESS;
+    else process.env.PI_CAD_HEADLESS = previousHeadless;
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });

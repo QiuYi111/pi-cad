@@ -9,6 +9,8 @@ import {
   type CadRunState,
 } from "../shared/protocol.ts";
 import { contractTools, phaseContract } from "../control/phase-contract.ts";
+import { compiledSpec } from "../workflows/index.ts";
+import { isHeadless, isTerminalStatus } from "./interaction-mode.ts";
 
 export const BUILTIN_READONLY = ["read", "grep", "find", "ls"];
 
@@ -25,7 +27,7 @@ export const PI_CAD_OWNED_TOOLS: ReadonlySet<string> = new Set<string>([
 ]);
 
 function effectivePhase(state: CadRunState | null): CadPhase {
-  if (!state || state.status === "done" || state.status === "aborted") {
+  if (!state || isTerminalStatus(state.status)) {
     return "intake";
   }
   return state.phase;
@@ -46,7 +48,8 @@ function effectivePhase(state: CadRunState | null): CadPhase {
  */
 export function applyCadToolOverlay(pi: ExtensionAPI, state: CadRunState | null): void {
   const phase = effectivePhase(state);
-  const phaseAllowed = new Set(toolsForPhase(phase));
+  const activeState = state && !isTerminalStatus(state.status) ? state : null;
+  const phaseAllowed = new Set(activeState ? toolsForState(activeState) : toolsForPhase(phase));
 
   // Current global active set. The host API guarantees getActiveTools(); the
   // optional chaining keeps minimal test doubles working (they track state
@@ -80,6 +83,35 @@ export function toolsForPhase(phase: CadPhase): string[] {
   const tools = contractTools(phaseContract(phase));
   if (!NO_REROUTE_PHASES.has(phase)) return [...tools, "cad_reroute"];
   return tools;
+}
+
+export function finalReviewerEnabled(): boolean {
+  const value = process.env.PI_CAD_FINAL_REVIEWER?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "on";
+}
+
+/** The transition table, not a hardcoded phase list, defines final closure. */
+export function finalSubmissionAllowed(state: CadRunState): boolean {
+  if (!finalReviewerEnabled() || !state.route) return false;
+  const spec = compiledSpec(state.route);
+  return spec.transitions[state.phase]?.accepted === "ready";
+}
+
+export function toolsForState(state: CadRunState): string[] {
+  let tools = toolsForPhase(state.phase);
+  // Once committed, requirements are immutable. Expose the commit tool in
+  // every active phase only so an Agent can submit an exact revision request;
+  // the controller requires a user-issued, hash-bound one-time token to apply it.
+  if (state.requirementsVersion && !tools.includes("cad_commit_requirements")) {
+    tools = [...tools, "cad_commit_requirements"];
+  }
+  if (isHeadless(state)) {
+    tools = tools.filter((tool) => tool !== "cad_wait_for_user");
+    if (!isTerminalStatus(state.status) && state.phase !== "ready" && state.phase !== "done") {
+      tools = [...tools, "cad_defer_clarification", "cad_declare_blocker"];
+    }
+  }
+  return finalSubmissionAllowed(state) ? [...tools, "cad_submit_for_review"] : tools;
 }
 
 export function isMutatingBash(command: string): boolean {

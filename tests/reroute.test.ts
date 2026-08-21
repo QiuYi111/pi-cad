@@ -17,6 +17,7 @@ const req = {
   goal: "reroute test",
   deliverables: ["STEP"],
   must: [],
+  assertions: [],
   preferences: [],
   assumptions: [],
   openUnknowns: [],
@@ -205,7 +206,7 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
     );
     await reqTool.execute(
       "f2",
-      { goal: "g", deliverables: ["STEP"], must: [], preferences: [], assumptions: [], openUnknowns: [] },
+      { goal: "g", deliverables: ["STEP"], must: [], assertions: [], preferences: [], assumptions: [], openUnknowns: [] },
       undefined,
       undefined,
       ctx,
@@ -347,6 +348,44 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
     assert.match(again.content[0].text as string, /reroute target equals the current route/);
     state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
     assert.ok(!state.rerouteAuthorityToken);
+
+    // 6. Requirements use the same authority model, but the token is bound
+    // to the exact proposed record hash rather than a route key.
+    const revisedRequirements = {
+      goal: "g revised by the user",
+      deliverables: ["STEP"],
+      must: [],
+      assertions: [],
+      preferences: [],
+      assumptions: [],
+      openUnknowns: [],
+    };
+    const revisionRejected = await reqTool.execute(
+      "f7", revisedRequirements, undefined, undefined, ctx,
+    );
+    assert.match(revisionRejected.content[0].text as string, /requirements contract is immutable/);
+    state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
+    assert.ok(state.pendingRequirementsRevision?.hash);
+
+    const approveRequirements = pi.commands.get("cad-approve-requirements-revision");
+    assert.ok(approveRequirements, "requirements revision approval command is registered");
+    await approveRequirements.handler("", { cwd, hasUI: false });
+    state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
+    const requirementsToken = state.requirementsAuthorityToken;
+    assert.ok(requirementsToken);
+    assert.equal(state.requirementsAuthorityHash, state.pendingRequirementsRevision.hash);
+
+    const revisionApplied = await reqTool.execute(
+      "f8",
+      { ...revisedRequirements, authorityToken: requirementsToken },
+      undefined,
+      undefined,
+      ctx,
+    );
+    assert.match(revisionApplied.content[0].text as string, /Requirements committed/);
+    state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));
+    assert.equal(state.requirementsAuthorityToken, null);
+    assert.equal(state.pendingRequirementsRevision, null);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

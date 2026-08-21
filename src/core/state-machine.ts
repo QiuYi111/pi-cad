@@ -1,10 +1,13 @@
 import {
+  type AcceptanceAssertion,
   type CadPhase,
   type CadPlan,
   type CadRequirements,
   type CadRunState,
   type EvidenceInputArtifact,
   type EvidenceRef,
+  type DeferredClarification,
+  type InteractionMode,
   type MutationPolicy,
   type Route,
   isRoute,
@@ -62,6 +65,7 @@ export function missingRecordObligations(
 export interface CreateIntakeOptions {
   runId?: string;
   projectId?: string;
+  interactionMode?: InteractionMode;
 }
 
 export function createIntakeState(options: CreateIntakeOptions = {}): CadRunState {
@@ -73,6 +77,7 @@ export function createIntakeState(options: CreateIntakeOptions = {}): CadRunStat
       `run-${createdAt.slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8)}`,
     projectId: options.projectId ?? "project",
     createdAt,
+    interactionMode: options.interactionMode ?? "interactive",
     route: null,
     phase: "intake",
     status: "active",
@@ -138,6 +143,19 @@ export function commitRequirements(
   if (!Array.isArray(record.deliverables) || record.deliverables.length === 0) {
     return { ok: false, reason: "requirements.deliverables must contain at least one deliverable" };
   }
+  for (const [index, item] of (record.deferredClarifications ?? []).entries()) {
+    if (!item.question?.trim() || !item.reason?.trim() || !item.fallback?.trim() || !item.impact?.trim()) {
+      return { ok: false, reason: `deferredClarifications[${index}] requires question, reason, fallback, and impact` };
+    }
+    if (!Array.isArray(item.alternatives) || item.alternatives.filter((value) => value.trim()).length < 2) {
+      return { ok: false, reason: `deferredClarifications[${index}] requires at least two alternatives` };
+    }
+    if (!record.assumptions.some((assumption) => assumption.includes(item.fallback))) {
+      return { ok: false, reason: `deferredClarifications[${index}] fallback must also be recorded verbatim in assumptions[]` };
+    }
+  }
+  const assertionFailure = validateAcceptanceAssertions(record.must, record.assertions);
+  if (assertionFailure) return { ok: false, reason: assertionFailure };
   const nextPhase = spec.nextAfterRequirements;
   const next: CadRunState = {
     ...state,
@@ -145,14 +163,104 @@ export function commitRequirements(
     status: "active",
     mutationPolicy: mutationPolicyForPhase(nextPhase, state.route),
     requirementsVersion: hashRecord(record),
+    assertionsVersion: hashRecord(record.assertions),
+    finalReview: undefined,
+    deferredClarifications: [
+      ...(state.deferredClarifications ?? []).filter((item) => item.phase !== "requirements"),
+      ...(record.deferredClarifications ?? []).map((item) => ({
+        phase: "requirements" as const,
+        ...item,
+        affectsContract: true,
+        createdAt: nowIso(),
+      })),
+    ],
     evidenceObligations: record.evidenceObligations ?? state.evidenceObligations,
     updatedAt: nowIso(),
   };
   return {
     ok: true,
     state: next,
-    events: [{ type: "RequirementsCommitted", data: { record, phase: nextPhase } }],
+    events: [
+      { type: "RequirementsCommitted", data: { record, phase: nextPhase } },
+      ...(record.deferredClarifications ?? []).map((clarification) => ({
+        type: "HeadlessClarificationDeferred",
+        data: { phase: state.phase, ...clarification },
+      })),
+    ],
   };
+}
+
+/**
+ * Assertions are a pre-registered contract, not an author-written review
+ * note. Every Must must be represented before implementation begins, while
+ * multiple assertions may legitimately decompose one compound Must.
+ */
+export function validateAcceptanceAssertions(
+  must: string[],
+  assertions: AcceptanceAssertion[] | undefined,
+): string | null {
+  if (!Array.isArray(assertions)) {
+    return "requirements.assertions is required and must be committed before implementation";
+  }
+  if (must.length > 0 && assertions.length === 0) {
+    return "requirements.assertions must cover every Must before implementation";
+  }
+  const expectedRefs = new Set(must.map((_, index) => `M${index + 1}`));
+  const covered = new Set<string>();
+  const ids = new Set<string>();
+  for (const assertion of assertions) {
+    if (!assertion.id?.trim()) return "every assertion requires a stable id";
+    if (ids.has(assertion.id)) return `duplicate assertion id: ${assertion.id}`;
+    ids.add(assertion.id);
+    if (!expectedRefs.has(assertion.mustRef)) {
+      return `assertion ${assertion.id} has unknown mustRef ${assertion.mustRef}; expected M1..M${must.length}`;
+    }
+    covered.add(assertion.mustRef);
+    if (!assertion.statement?.trim()) return `assertion ${assertion.id} requires a statement`;
+    if (!assertion.binding?.subject?.trim() || !assertion.binding?.quantity?.trim()) {
+      return `assertion ${assertion.id} requires binding.subject and binding.quantity`;
+    }
+    if (assertion.expectation?.kind === "range") {
+      const { min, max } = assertion.expectation;
+      if (min === undefined && max === undefined) {
+        return `assertion ${assertion.id} range requires min and/or max`;
+      }
+      if (min !== undefined && max !== undefined && min > max) {
+        return `assertion ${assertion.id} range min cannot exceed max`;
+      }
+    }
+    if (assertion.expectation?.kind === "relation" && !assertion.expectation.description.trim()) {
+      return `assertion ${assertion.id} relation requires a description`;
+    }
+    const direction = assertion.binding.direction?.trim().toLowerCase();
+    const normalizedDirection = direction
+      ?.replace(/\bglobal\b/g, "")
+      .replace(/\baxis\b/g, "")
+      .replace(/\s+/g, "");
+    const directionalField = normalizedDirection === "x" || normalizedDirection === "+x" || normalizedDirection === "-x"
+      ? "bbox.x"
+      : normalizedDirection === "y" || normalizedDirection === "+y" || normalizedDirection === "-y"
+        ? "bbox.y"
+        : normalizedDirection === "z" || normalizedDirection === "+z" || normalizedDirection === "-z"
+          ? "bbox.z"
+          : null;
+    if (
+      directionalField &&
+      (assertion.expectation?.kind === "exact" || assertion.expectation?.kind === "range") &&
+      !assertion.canonicalCheck
+    ) {
+      return `assertion ${assertion.id} explicitly binds global ${directionalField.slice(-1).toUpperCase()} but omits canonicalCheck ${directionalField}`;
+    }
+    if (
+      directionalField &&
+      assertion.canonicalCheck?.field.startsWith("bbox.") &&
+      assertion.canonicalCheck.field !== directionalField
+    ) {
+      return `assertion ${assertion.id} binds global ${directionalField.slice(-1).toUpperCase()} but canonicalCheck uses ${assertion.canonicalCheck.field}`;
+    }
+  }
+  const missing = [...expectedRefs].filter((ref) => !covered.has(ref));
+  return missing.length > 0 ? `requirements.assertions missing Must coverage: ${missing.join(", ")}` : null;
 }
 
 export function commitPlan(state: CadRunState, record: CadPlan): ActionResult {
@@ -296,6 +404,7 @@ export function acceptCandidate(
     currentSourceHash: receipt.sourceHashes[receipt.sources[0]],
     currentArtifactPath: receipt.artifactPath,
     currentArtifactHash: artifactHash,
+    finalReview: undefined,
     updatedAt: nowIso(),
   };
   return {
@@ -310,6 +419,7 @@ export function markEvidenceStale(state: CadRunState): CadRunState {
     ...state,
     staleEvidence: [...state.staleEvidence, ...state.evidence],
     evidence: [],
+    finalReview: undefined,
     updatedAt: nowIso(),
   };
 }
@@ -318,7 +428,7 @@ export function addEvidence(
   state: CadRunState,
   evidence: EvidenceRef,
 ): CadRunState {
-  return { ...state, evidence: [...state.evidence, evidence], updatedAt: nowIso() };
+  return { ...state, evidence: [...state.evidence, evidence], finalReview: undefined, updatedAt: nowIso() };
 }
 
 export function evidenceForArtifact(
@@ -540,11 +650,87 @@ export function transition(
 export function waitForUser(state: CadRunState, reason: string): ActionResult {
   if (state.phase === "done") return { ok: false, reason: "workflow is already done" };
   if (!reason.trim()) return { ok: false, reason: "cad_wait_for_user requires a reason" };
+  if (state.interactionMode === "headless") {
+    return {
+      ok: false,
+      reason:
+        "headless workflows cannot enter waiting_user; record an engineering fallback with cad_defer_clarification or declare a user-owned blocker",
+    };
+  }
   const next: CadRunState = { ...state, status: "waiting_user", updatedAt: nowIso() };
   return {
     ok: true,
     state: next,
     events: [{ type: "UserInputRequested", data: { phase: state.phase, reason } }],
+  };
+}
+
+export function deferClarification(
+  state: CadRunState,
+  input: Omit<DeferredClarification, "phase" | "createdAt">,
+): ActionResult {
+  if (state.interactionMode !== "headless") {
+    return { ok: false, reason: "cad_defer_clarification is only valid in headless mode" };
+  }
+  if (!input.question.trim() || !input.reason.trim() || !input.fallback.trim() || !input.impact.trim()) {
+    return { ok: false, reason: "clarification requires question, reason, fallback, and impact" };
+  }
+  if (input.alternatives.filter((item) => item.trim()).length < 2) {
+    return { ok: false, reason: "clarification requires at least two alternatives" };
+  }
+  if (input.affectsContract && state.requirementsVersion) {
+    return {
+      ok: false,
+      reason:
+        "the committed requirements contract is immutable; a different contract requires an exact user-issued revision authority token, which headless mode cannot issue",
+    };
+  }
+  const clarification: DeferredClarification = {
+    phase: state.phase,
+    ...input,
+    createdAt: nowIso(),
+  };
+  const nextPhase = input.affectsContract ? "requirements" : state.phase;
+  const next: CadRunState = {
+    ...state,
+    phase: nextPhase,
+    status: "active",
+    mutationPolicy: input.affectsContract
+      ? "read_only"
+      : state.mutationPolicy,
+    finalReview: input.affectsContract ? undefined : state.finalReview,
+    deferredClarifications: [...(state.deferredClarifications ?? []), clarification],
+    updatedAt: nowIso(),
+  };
+  return {
+    ok: true,
+    state: next,
+    events: [
+      { type: "HeadlessClarificationDeferred", data: clarification },
+      ...(input.affectsContract
+        ? [{ type: "RequirementsRevisionRequired", data: { from: state.phase, reason: input.reason } }]
+        : []),
+    ],
+  };
+}
+
+export function declareHeadlessBlocker(
+  state: CadRunState,
+  input: { type: "user_authority" | "external_input"; reason: string; needed: string },
+): ActionResult {
+  if (state.interactionMode !== "headless") {
+    return { ok: false, reason: "cad_declare_blocker is only valid in headless mode" };
+  }
+  if (!input.reason.trim() || !input.needed.trim()) {
+    return { ok: false, reason: "headless blocker requires reason and needed" };
+  }
+  const createdAt = nowIso();
+  const status = input.type === "user_authority" ? "blocked_user" : "blocked_external";
+  const blocker = { ...input, createdAt };
+  return {
+    ok: true,
+    state: { ...state, status, blocker, updatedAt: createdAt },
+    events: [{ type: "HeadlessWorkflowBlocked", data: blocker }],
   };
 }
 

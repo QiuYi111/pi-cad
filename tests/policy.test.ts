@@ -44,6 +44,7 @@ const pi = {
       goal: "test",
       deliverables: ["STEP"],
       must: [],
+      assertions: [],
       preferences: [],
       assumptions: [],
       openUnknowns: [],

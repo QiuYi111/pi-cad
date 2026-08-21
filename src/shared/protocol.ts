@@ -36,8 +36,11 @@ export const CONTROL_TOOLS = [
   "cad_commit_assembly_design",
   "cad_commit_interface_contracts",
   "cad_commit_candidate",
+  "cad_submit_for_review",
   "cad_transition",
   "cad_wait_for_user",
+  "cad_defer_clarification",
+  "cad_declare_blocker",
   "cad_finish",
 ] as const;
 export const CAPABILITY_TOOLS = [
@@ -142,8 +145,28 @@ export const CAD_PHASES: readonly CadPhase[] = [
   "part_design",
   "integration_review",
 ] as const;
-export type CadStatus = "active" | "waiting_user" | "ready" | "done" | "aborted";
+export type InteractionMode = "interactive" | "headless";
+export type CadStatus =
+  | "active"
+  | "waiting_user"
+  | "ready"
+  | "done"
+  | "aborted"
+  | "blocked_user"
+  | "blocked_external"
+  | "budget_exhausted";
 export type MutationPolicy = "read_only" | "source_only" | "allowed";
+
+export interface DeferredClarification {
+  phase: CadPhase;
+  question: string;
+  reason: string;
+  alternatives: string[];
+  fallback: string;
+  impact: string;
+  affectsContract: boolean;
+  createdAt: string;
+}
 
 export interface EvidenceInputArtifact {
   path: string;
@@ -200,11 +223,105 @@ export interface CadRequirements {
   evidenceObligations?: EvidenceObligations;
   deliverables: string[];
   must: string[];
+  /**
+   * Pre-registered verification intent. Assertions are committed before the
+   * candidate exists and must cover every Must exactly once (M1, M2, ...).
+   * They describe what to establish, never candidate-specific selectors or
+   * probe programs.
+   */
+  assertions: AcceptanceAssertion[];
   preferences: string[];
   assumptions: string[];
   openUnknowns: string[];
+  /**
+   * High-impact questions that would have been asked interactively, but were
+   * resolved with an explicit fallback so a headless run could continue.
+   */
+  deferredClarifications?: Array<{
+    question: string;
+    reason: string;
+    alternatives: string[];
+    fallback: string;
+    impact: string;
+  }>;
   /** Artifacts supplied by the user and bound by the baseline auto-action. */
   inputs?: string[];
+}
+
+export type CanonicalAssertionField =
+  | "bbox.x"
+  | "bbox.y"
+  | "bbox.z"
+  | "volume"
+  | "surfaceArea"
+  | "solidCount"
+  | "occurrenceCount"
+  | "cylinderCount";
+
+export type AssertionExpectation =
+  | { kind: "exact"; value: number; unit?: string; tolerance?: number }
+  | { kind: "range"; min?: number; max?: number; unit?: string }
+  | { kind: "boolean"; expected: boolean }
+  | { kind: "relation"; description: string };
+
+export interface AcceptanceAssertion {
+  id: string;
+  /** Stable 1-based reference into CadRequirements.must, e.g. M1. */
+  mustRef: string;
+  statement: string;
+  binding: {
+    subject: string;
+    quantity: string;
+    reference?: string;
+    direction?: string;
+  };
+  expectation: AssertionExpectation;
+  /** Opt-in only: the harness never infers this mapping from prose. */
+  canonicalCheck?: { field: CanonicalAssertionField };
+}
+
+export interface AcceptanceContract {
+  requirementsHash: string;
+  assertionsHash: string;
+  assertions: AcceptanceAssertion[];
+}
+
+export type FinalReviewVerdict = "pass" | "fail" | "unresolved";
+export type AssertionReviewVerdict = FinalReviewVerdict | "binding_suspect";
+
+export interface FinalReviewResult {
+  verdict: FinalReviewVerdict;
+  assertionChecks: Array<{
+    assertionId: string;
+    verdict: AssertionReviewVerdict;
+    finding: string;
+    evidenceRefs: string[];
+  }>;
+  semanticObjections: Array<{
+    mustRef: string;
+    type: "contradiction" | "missing_evidence" | "binding_suspect" | "semantic_gap";
+    finding: string;
+    evidenceRefs: string[];
+    suggestedProbe?: string;
+  }>;
+  summary: string;
+}
+
+export interface FinalReviewRef {
+  path: string;
+  sha256: string;
+  /** Source identity used to group naturally repeated independent reviews. */
+  sourceHash?: string;
+  artifactHash: string;
+  requirementsHash: string;
+  assertionsHash: string;
+  evidenceSnapshotHash: string;
+  /** This report's independent vote before history aggregation. */
+  individualVerdict?: FinalReviewVerdict;
+  verdict: FinalReviewVerdict;
+  reviewerModel: string;
+  reviewerPromptVersion: string;
+  createdAt: string;
 }
 
 export type EvidenceDisposition =
@@ -254,6 +371,8 @@ export interface CadRunState {
   runId: string;
   projectId: string;
   createdAt: string;
+  /** Persisted execution semantics; environment variables only bootstrap this value. */
+  interactionMode?: InteractionMode;
   /** Route ontology: objective × lineage × structure × maturity (0.8). */
   route: Route | null;
   phase: CadPhase;
@@ -284,7 +403,19 @@ export interface CadRunState {
    */
   rerouteAuthorityRoute?: string | null;
 
+  /** Proposed immutable-contract replacement awaiting an explicit user-side approval. */
+  pendingRequirementsRevision?: {
+    hash: string;
+    record: CadRequirements;
+    requestedAt: string;
+  } | null;
+  /** One-time authority issued only by /cad-approve-requirements-revision. */
+  requirementsAuthorityToken?: string | null;
+  /** Exact proposed record hash to which the one-time token is bound. */
+  requirementsAuthorityHash?: string | null;
+
   requirementsVersion?: string;
+  assertionsVersion?: string;
   planVersion?: string;
   candidateLabel?: string;
   currentSourcePath?: string;
@@ -300,6 +431,16 @@ export interface CadRunState {
   staleEvidence: EvidenceRef[];
   activeWorkstreams: string[];
   evidenceObligations?: EvidenceObligations;
+  /** Run-wide clarification debt, including issues discovered after requirements. */
+  deferredClarifications?: DeferredClarification[];
+  blocker?: {
+    type: "user_authority" | "external_input";
+    reason: string;
+    needed: string;
+    createdAt: string;
+  };
+  /** Latest review transaction; validity is hash-bound and checked on use. */
+  finalReview?: FinalReviewRef;
   workstreamStatuses?: Record<
     string,
     "open" | "complete" | "not_applicable" | "blocked_external"

@@ -90,6 +90,10 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
         goal: "100 x 80 x 5 mm plate with four 6 mm holes 10 mm from edges",
         deliverables: ["STEP", "source"],
         must: ["100 x 80 x 5", "4 x 6 mm through holes"],
+        assertions: [
+          { id: "A-size", mustRef: "M1", statement: "Overall dimensions are 100 x 80 x 5 mm", binding: { subject: "plate", quantity: "overall dimensions" }, expectation: { kind: "relation", description: "bbox dimensions are 100 x 80 x 5 mm" } },
+          { id: "A-holes", mustRef: "M2", statement: "Plate has four 6 mm through holes", binding: { subject: "mounting holes", quantity: "count, diameter, and through condition" }, expectation: { kind: "relation", description: "four through holes of diameter 6 mm" } },
+        ],
         preferences: [],
         assumptions: [],
         openUnknowns: [],

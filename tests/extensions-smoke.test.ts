@@ -76,8 +76,11 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_commit_assembly_design",
     "cad_commit_interface_contracts",
     "cad_commit_candidate",
+    "cad_submit_for_review",
     "cad_transition",
     "cad_wait_for_user",
+    "cad_defer_clarification",
+    "cad_declare_blocker",
     "cad_finish",
     "cad_build_step",
     "cad_inspect_geometry",
@@ -100,7 +103,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_render_scene",
   ];
   assert.deepEqual(pi.tools.sort(), [...expectedTools].sort());
-  assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-reroute", "cad-status"]);
+  assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-requirements-revision", "cad-approve-reroute", "cad-status"]);
   for (const event of ["before_agent_start", "tool_call", "tool_result", "agent_settled"]) {
     assert.ok((pi.handlers.get(event) ?? []).length > 0, `missing ${event} handler`);
   }
@@ -112,12 +115,15 @@ test("control tools execute through pure workflow machine", async () => {
   assert.ok(true);
 });
 
-test("baseline phase prompts mandate coordinate-frame confirmation with the user", async () => {
+test("baseline prompts mandate frame handling without fabricating headless confirmation", async () => {
   const { loadPrompt } = await import("../src/core/context.ts");
   // loadPrompt falls back to generic text when a file is missing, so the
   // distinctive phrases double as file-presence guards.
   const baseline = await loadPrompt("baseline");
-  assert.match(baseline, /Confirm the coordinate frame with the user/i);
+  assert.match(baseline, /Establish the coordinate frame/i);
+  assert.match(baseline, /INTERACTIVE mode, confirm the mapping with the user/i);
+  assert.match(baseline, /HEADLESS mode no user turn exists/i);
+  assert.match(baseline, /assumed_headless/);
   assert.match(baseline, /mandatory/i);
   assert.match(baseline, /baseline_understood/);
   // The question must be grounded in visible evidence (views or features).
@@ -126,7 +132,8 @@ test("baseline phase prompts mandate coordinate-frame confirmation with the user
   assert.match(baseline, /never assume silently|silent assumption is never an exception/i);
 
   const sourceBaseline = await loadPrompt("source_baseline");
-  assert.match(sourceBaseline, /Confirm the coordinate frame with the user/i);
+  assert.match(sourceBaseline, /Establish the coordinate frame/i);
+  assert.match(sourceBaseline, /assumed_headless/);
   assert.match(sourceBaseline, /baseline_understood/);
 
   // The requirements prompt defers the frame question to the baseline

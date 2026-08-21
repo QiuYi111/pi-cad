@@ -35,6 +35,7 @@ async function seedRun(cwd: string, runId: string): Promise<CadRunState> {
     goal: "Topology-optimized bracket with 30% mass reduction",
     deliverables: ["STEP artifact"],
     must: ["Preserve mounting bolt pattern"],
+    assertions: [{ id: "A-bolts", mustRef: "M1", statement: "Mounting bolt pattern is preserved", binding: { subject: "mounting bolt pattern", quantity: "position and diameter" }, expectation: { kind: "boolean", expected: true } }],
     preferences: ["Prefer printable orientations"],
     assumptions: ["30% volume fraction is a working assumption, not a user constraint"],
     openUnknowns: ["Load case magnitude for the mounting interface"],
@@ -215,6 +216,32 @@ test("maybeRebuildContext: threshold gating, pending guard, and forced continuat
     assert.equal(sent.length, 3);
     assert.equal(maybeRebuildContext(pi, store, state, ctx), true);
   } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("headless continuation covers every active phase and terminates at its configured budget", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-headless-continuation-"));
+  const previous = process.env.PI_CAD_HEADLESS_MAX_CONTINUATIONS;
+  process.env.PI_CAD_HEADLESS_MAX_CONTINUATIONS = "2";
+  try {
+    const seeded = await seedRun(cwd, `headless-${Date.now()}`);
+    const state = { ...seeded, phase: "requirements" as const, interactionMode: "headless" as const };
+    const store = new CadProjectStore(cwd);
+    await store.save(state);
+    const { pi, sent } = fakePi();
+    const ctx = {} as ExtensionContext;
+
+    await maybeAutoContinue(pi, store, state, ctx);
+    await maybeAutoContinue(pi, store, state, ctx);
+    await maybeAutoContinue(pi, store, state, ctx);
+
+    assert.equal(sent.length, 2);
+    assert.match(sent[0]!, /HEADLESS continuation 1\/2/);
+    assert.equal((await store.load())?.status, "budget_exhausted");
+  } finally {
+    if (previous === undefined) delete process.env.PI_CAD_HEADLESS_MAX_CONTINUATIONS;
+    else process.env.PI_CAD_HEADLESS_MAX_CONTINUATIONS = previous;
     rmSync(cwd, { recursive: true, force: true });
   }
 });
@@ -604,6 +631,7 @@ test("renderTaskContext: full Mission (assumptions/openUnknowns labelled provisi
       goal: "Minimal bracket",
       deliverables: ["STEP artifact"],
       must: [],
+      assertions: [],
       preferences: [],
       assumptions: [],
       openUnknowns: [],

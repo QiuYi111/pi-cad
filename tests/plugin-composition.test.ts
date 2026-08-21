@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { ProjectStateStore } from "../src/shared/store.ts";
-import { applyCadToolOverlay, PI_CAD_OWNED_TOOLS, toolsForPhase } from "../src/core/policies.ts";
+import { applyCadToolOverlay, PI_CAD_OWNED_TOOLS, toolsForPhase, toolsForState } from "../src/core/policies.ts";
 import { CAPABILITY_TOOLS, CONTROL_TOOLS, type CadRequirements, type CadRunState } from "../src/shared/protocol.ts";
 import { commitRequirements, createIntakeState, route as routeQuick, transition as transitionQuick } from "../src/core/state-machine.ts";
 
@@ -45,6 +45,7 @@ const record: CadRequirements = {
   goal: "test",
   deliverables: ["STEP"],
   must: [],
+  assertions: [],
   preferences: [],
   assumptions: [],
   openUnknowns: [],
@@ -57,6 +58,17 @@ function quickRunState(phase: CadRunState["phase"], runId: string): CadRunState 
   assert.ok(built.ok);
   return { ...built.state, phase, runId };
 }
+
+test("headless policy hides wait and exposes structured clarification exits", () => {
+  const state = {
+    ...quickRunState("review", `headless-policy-${Date.now()}`),
+    interactionMode: "headless" as const,
+  };
+  const tools = toolsForState(state);
+  assert.equal(tools.includes("cad_wait_for_user"), false);
+  assert.equal(tools.includes("cad_defer_clarification"), true);
+  assert.equal(tools.includes("cad_declare_blocker"), true);
+});
 
 test("plugin composition: external tools survive every Pi-CAD phase transition", async () => {
   // Session where Goal and another plugin are installed and active.
@@ -83,7 +95,7 @@ test("plugin composition: external tools survive every Pi-CAD phase transition",
       }
 
       // 2. Pi-CAD's own tools follow the phase policy exactly.
-      const allowed = new Set(toolsForPhase(phase));
+      const allowed = new Set(toolsForState(state));
       for (const name of PI_CAD_OWNED_TOOLS) {
         const inPolicy = allowed.has(name);
         assert.equal(

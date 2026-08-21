@@ -209,7 +209,8 @@ function runPi(workdir, prompt, sessionId) {
       cwd: workdir,
       env: { ...process.env, PI_CODING_AGENT_DIR: AGENT_DIR,
              PI_CODING_AGENT_SESSION_DIR: join(workdir, ".sessions"),
-             PI_CAD_REPO: REPO },
+             PI_CAD_REPO: REPO,
+             PI_CAD_HEADLESS: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "", stderr = "";
@@ -272,6 +273,22 @@ function harnessState(workdir) {
   if (!run) return { terminal_phase: null, terminal_status: null };
   const s = run.state;
   return { terminal_phase: s.phase ?? null, terminal_status: s.status ?? null };
+}
+
+function clarificationDebt(workdir) {
+  const run = latestRun(workdir);
+  if (!run) return [];
+  try {
+    const path = join(workdir, ".pi-cad", "runs", run.runId, "records", "requirements.json");
+    const record = JSON.parse(readFileSync(path, "utf-8"));
+    const stateDebt = Array.isArray(run.state.deferredClarifications)
+      ? run.state.deferredClarifications
+      : [];
+    if (stateDebt.length) return stateDebt;
+    return Array.isArray(record.deferredClarifications) ? record.deferredClarifications : [];
+  } catch {
+    return [];
+  }
 }
 
 function resolveArtifact(workdir) {
@@ -499,6 +516,21 @@ for (const sampleId of idList) {
     exit_code: result.code, exit_signal: result.signal,
   };
   const hs = harnessState(staging);
+  manifest.workflow = {
+    outcome: hs.terminal_status === "done"
+      ? "done"
+      : hs.terminal_status === "blocked_user"
+        ? "blocked_user"
+        : hs.terminal_status === "blocked_external"
+        ? "blocked_external"
+          : hs.terminal_status === "budget_exhausted"
+            ? "budget_exhausted"
+          : hs.terminal_status === "waiting_user"
+            ? "invariant_violation"
+            : "incomplete",
+    interaction_mode: "headless",
+  };
+  manifest.requirements = { deferred_clarifications: clarificationDebt(staging) };
   manifest.harness.terminal_phase = hs.terminal_phase;
   manifest.harness.terminal_status = hs.terminal_status;
   writeFileSync(join(staging, "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -512,6 +544,7 @@ for (const sampleId of idList) {
   console.log(
     `[${sampleId}] exit=${result.code} phase=${hs.terminal_phase ?? "-"} ` +
     `cadtests=${ev.passed ?? "-"}/${ev.total ?? "-"} exact=${ev.exactPass ?? "-"} ` +
+    `clarifications=${manifest.requirements.deferred_clarifications.length} ` +
     `audit=${audit.tier} tokens=${metrics?.total ?? "-"} wall=${Math.round(wallMs / 1000)}s`,
   );
 }
