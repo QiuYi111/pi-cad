@@ -12,7 +12,7 @@ description: >
 Use the smallest physical model that can actually answer the engineering claim.
 
 Before assigning boundary conditions, inspect the relevant solid or
-fluid-domain surfaces with cad_inspect_surfaces. Surface IDs are geometric
+fluid-domain surfaces with cad_probe preset=surfaces. Surface IDs are geometric
 selectors, not semantic labels; decide inlet/outlet/wall meaning yourself.
 
 Do not invent operating conditions. Missing inlet total state, outlet

@@ -11,8 +11,8 @@ Inspect every returned view yourself. Tool output contains facts, not design mea
 - When simulation cases are declared, each case closes only with its declared tool and caseId against the current artifact version (cad_simulate, cad_simulate_flow, or cad_simulate_thermal).
 - For flow/thermal cases: inspect surfaces first, then run the case, then check convergence and mass/energy balance yourself before interpreting the numbers.
 - cad_optimize is optional and produces density/surface evidence only; it does not replace CAD or simulation.
-- Verify every user-specified critical dimension and relationship with cad_measure or cad_inspect_geometry.
-- When the typed tools cannot express a check — derived ratios, fill/shape factors, symmetry, hole-spacing patterns, mass-property relations — compute it yourself with cad_probe_python (read-only, JSON result) instead of accepting an unverified inference.
+- Verify every user-specified critical dimension and relationship with cad_probe (preset=geometry yields #pN/#cN selectors, preset=measure verifies a number, preset=section resolves internal geometry).
+- When the typed presets cannot express a check — derived ratios, fill/shape factors, symmetry, hole-spacing patterns, mass-property relations — compute it yourself with cad_probe preset=python (read-only, JSON result) instead of accepting an unverified inference.
 - If the issue is local geometry, call cad_transition(event="revise") to return to build, edit the source, and commit another candidate.
 - If the candidate satisfies your engineering judgment at the requested maturity, call cad_transition(event="accepted") with a note describing the checks you performed.
 - Never claim an inspection happened unless the harness attached it for the current artifact hash.

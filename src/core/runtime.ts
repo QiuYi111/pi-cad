@@ -326,11 +326,12 @@ export default function cadCore(pi: ExtensionAPI) {
         // Shell mutation detection by pattern is fundamentally incomplete
         // (e.g. `python -c "open(...).write(...)"` matches no redirect rule).
         // Read-only phases get no raw shell at all: read/grep/find/ls and
-        // cad_probe_python cover legitimate read-only computation.
+        // cad_probe (programmable presets) cover legitimate read-only
+        // computation.
         return {
           block: true,
           reason:
-            "Pi-CAD read_only: raw shell execution is disabled; use read/grep/find/ls or cad_probe_python for computation",
+            "Pi-CAD read_only: raw shell execution is disabled; use read/grep/find/ls or cad_probe for computation",
         };
       }
     }

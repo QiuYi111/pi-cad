@@ -11,7 +11,7 @@ export default function cadVisualExtension(pi: ExtensionAPI) {
     name: "cad_inspect_visual",
     label: "CAD Inspect Visual",
     description:
-      "Render fixed orthographic views of a STEP artifact and return the images plus camera facts. The tool never names features or judges the design; you interpret the images.",
+      "[Deprecated wrapper — call cad_probe with preset=visual instead; retires after the Phase 3 benchmark gate.] Render fixed orthographic views of a STEP artifact and return the images plus camera facts. The tool never names features or judges the design; you interpret the images.",
     promptSnippet: "Render current STEP artifact views (iso/front/back/left/right/top/bottom)",
     promptGuidelines: [
       "Inspect the returned images yourself before making geometric claims.",

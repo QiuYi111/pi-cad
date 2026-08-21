@@ -93,7 +93,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_inspect_geometry",
     label: "CAD Inspect Geometry",
     description:
-      "Return deterministic STEP/B-Rep facts: bbox, volume, surface area, solid count, occurrence count, and labels/planes/cylinders. Geometry classification is not engineering naming; a cylinder is only #cN.",
+      "[Deprecated wrapper — call cad_probe with preset=geometry instead; retires after the Phase 3 benchmark gate.] Return deterministic STEP/B-Rep facts: bbox, volume, surface area, solid count, occurrence count, and labels/planes/cylinders. Geometry classification is not engineering naming; a cylinder is only #cN.",
     promptSnippet: "Return deterministic geometry facts for a STEP artifact",
     promptGuidelines: [
       "Use #pN and #cN labels from the returned payload as selectors for cad_measure.",
@@ -112,7 +112,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_inspect_surfaces",
     label: "CAD Inspect Surfaces",
     description:
-      "Enumerate deterministic boundary-surface facts for a STEP artifact and return current-artifact-scoped surface IDs, geometry properties, and optional labeled views. Surface IDs are selectors only; this tool never decides which surface is an inlet, outlet, wall, thermal boundary, interface, or manufacturing feature.",
+      "[Deprecated wrapper — call cad_probe with preset=surfaces instead; retires after the Phase 3 benchmark gate.] Enumerate deterministic boundary-surface facts for a STEP artifact and return current-artifact-scoped surface IDs, geometry properties, and optional labeled views. Surface IDs are selectors only; this tool never decides which surface is an inlet, outlet, wall, thermal boundary, interface, or manufacturing feature.",
     promptSnippet: "Inspect deterministic STEP boundary surfaces and obtain surface selectors",
     promptGuidelines: [
       "Use cad_inspect_surfaces before assigning flow/thermal/structural boundary conditions.",
@@ -142,7 +142,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_measure",
     label: "CAD Measure",
     description:
-      "Return one deterministic numeric measurement for an explicit selector and metric. Cylindrical faces use #cN. distance between two cylindrical faces is axis-to-axis distance; use clearance for closest surface distance. Other selectors: #pN planar face, #fN any face.",
+      "[Deprecated wrapper — call cad_probe with preset=measure instead; retires after the Phase 3 benchmark gate.] Return one deterministic numeric measurement for an explicit selector and metric. Cylindrical faces use #cN. distance between two cylindrical faces is axis-to-axis distance; use clearance for closest surface distance. Other selectors: #pN planar face, #fN any face.",
     promptSnippet: "Measure one explicit metric between labeled STEP selectors",
     promptGuidelines: [
       "Selectors are #pN (planar), #cN (cylindrical), or #fN (any face) from cad_inspect_geometry.",
@@ -174,7 +174,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_inspect_section",
     label: "CAD Inspect Section",
     description:
-      "Render a deterministic section plane through a STEP artifact and return the image plus intersection facts. The tool does not name the section or explain it.",
+      "[Deprecated wrapper — call cad_probe with preset=section instead; retires after the Phase 3 benchmark gate.] Render a deterministic section plane through a STEP artifact and return the image plus intersection facts. The tool does not name the section or explain it.",
     promptSnippet: "Render an explicit plane section through a STEP artifact",
     promptGuidelines: [
       "Use sections through bores, cavities, shells, and mating interfaces.",
@@ -211,7 +211,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_compare_geometry",
     label: "CAD Compare Geometry",
     description:
-      "Return a deterministic before/after geometry diff: bbox, volume, surface area, entity counts, center delta, and common volume. No engineering interpretation.",
+      "[Deprecated wrapper — call cad_probe with preset=compare instead; retires after the Phase 3 benchmark gate.] Return a deterministic before/after geometry diff: bbox, volume, surface area, entity counts, center delta, and common volume. No engineering interpretation.",
     promptSnippet: "Return deterministic geometry diff between two STEP artifacts",
     promptGuidelines: [
       "Inspect each artifact in its native frame first.",
@@ -250,7 +250,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_assembly_tree",
     label: "CAD Assembly Tree",
     description:
-      "Return occurrence labels, parent/child paths, local transforms, world transforms, and leaf count for a STEP assembly. Labels are only those present in the file.",
+      "[Deprecated wrapper — call cad_probe with preset=assembly instead; retires after the Phase 3 benchmark gate.] Return occurrence labels, parent/child paths, local transforms, world transforms, and leaf count for a STEP assembly. Labels are only those present in the file.",
     promptSnippet: "Return assembly occurrence tree and transforms",
     promptGuidelines: [
       "Use for hierarchy-safe conversion and assembly diagnosis.",
@@ -269,7 +269,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_inspect_interference",
     label: "CAD Interference Facts",
     description:
-      "Pairwise solid interference facts for a STEP assembly: intersection volume, minimum distance, and a three-state classification (penetration/contact/clearance) per part pair. Raw facts only — the tool never says pass or fail.",
+      "[Deprecated wrapper — call cad_probe with preset=interference instead; retires after the Phase 3 benchmark gate.] Pairwise solid interference facts for a STEP assembly: intersection volume, minimum distance, and a three-state classification (penetration/contact/clearance) per part pair. Raw facts only — the tool never says pass or fail.",
     promptSnippet: "Report pairwise penetration/contact/clearance facts",
     promptGuidelines: [
       "Required evidence for assembly routes at integration review; re-observed automatically after every candidate commit.",
@@ -289,7 +289,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_scan_sections",
     label: "CAD Scan Sections",
     description:
-      "Scan deterministic cross-section facts along an axis: per-section area, centroid, in-plane second moments, principal moments, bbox, and loop count. Facts only — which section is critical is your engineering judgment.",
+      "[Deprecated wrapper — call cad_probe with preset=sections_scan instead; retires after the Phase 3 benchmark gate.] Scan deterministic cross-section facts along an axis: per-section area, centroid, in-plane second moments, principal moments, bbox, and loop count. Facts only — which section is critical is your engineering judgment.",
     promptSnippet: "Scan cross-section area/moments along an axis",
     promptGuidelines: [
       "Use for stiffness-critical parts (beams, spars, shafts) to see how area and moments vary along the axis.",
@@ -371,7 +371,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     name: "cad_probe_python",
     label: "CAD Probe Python",
     description:
-      "Run a read-only programmable B-Rep probe: arbitrary Python computation over the current (or baseline) design, returning a JSON result. Pure observability — no filesystem, import, subprocess, or network inside the probe; the subject is resolved from run state, never from a path you supply.",
+      "[Deprecated wrapper — call cad_probe with preset=python instead; retires after the Phase 3 benchmark gate.] Run a read-only programmable B-Rep probe: arbitrary Python computation over the current (or baseline) design, returning a JSON result. Pure observability — no filesystem, import, subprocess, or network inside the probe; the subject is resolved from run state, never from a path you supply.",
     promptSnippet: "Compute any derived geometric quantity with Python (read-only)",
     promptGuidelines: [
       "Use when the typed inspection tools cannot express the quantity you need: derived ratios, fill/shape factors, symmetry checks, hole spacing patterns, mass-property relations, custom topology statistics.",

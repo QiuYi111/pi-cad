@@ -75,6 +75,7 @@ export function applyCadToolOverlay(pi: ExtensionAPI, state: CadRunState | null)
 const REVIEW_TOOLS = [
   ...BUILTIN_READONLY,
   "bash",
+  "cad_probe",
   "cad_inspect_visual",
   "cad_inspect_geometry",
   "cad_inspect_surfaces",
@@ -102,6 +103,7 @@ const SOURCE_CAPABILITY_TOOLS = CAPABILITY_TOOLS.filter(
 const COGNITIVE_TOOLS = [
   ...BUILTIN_READONLY,
   "bash",
+  "cad_probe",
   "cad_inspect_visual",
   "cad_inspect_geometry",
   "cad_inspect_surfaces",
