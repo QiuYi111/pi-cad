@@ -3,10 +3,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
-import { readImageContents, thermalCommand } from "../../shared/capability.ts";
-import { writeRunSpec } from "../../shared/run-spec.ts";
 import { AnalysisModelSchema, verifyAnalysisModel } from "./analysis-model.ts";
-import { sha256File } from "../../shared/store.ts";
+import { runSimulationLifecycle, simulateAdapter } from "../../modules/simulate/index.ts";
 
 const SurfaceRef = Type.Array(Type.String({
   description: "Surface ID from cad_inspect_surfaces for this artifact version",
@@ -131,31 +129,24 @@ export default function cadThermalExtension(pi: ExtensionAPI) {
       });
       if (analysisCheck.error) throw new Error(analysisCheck.error);
       const spec = { ...params, geometryUnits: params.geometryUnits ?? "mm" };
-      const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "thermal", spec);
-      const envelope = await thermalCommand(ctx.cwd, "run", specPath, outputDir, 3_600_000);
-      let artifactHash = analysisCheck.subjectOverrideHash ?? null;
-      if (!artifactHash && envelope.inputHashes.artifact) {
-        artifactHash = envelope.inputHashes.artifact;
-      } else if (!artifactHash) {
-        try {
-          artifactHash = await sha256File(resolve(ctx.cwd, params.artifact));
-        } catch {
-          // Keep spec hash as provenance fallback.
-        }
-      }
-      if (!artifactHash) artifactHash = envelope.inputHashes.spec;
-      const images =
-        envelope.ok && (envelope.payload as any)?.status === "solved"
-          ? await readImageContents(
-              ((envelope.payload as any)?.visualization?.views ?? []).map((view: { path: string }) => view.path),
-            )
-          : [];
+      // Phase 6: shared lifecycle (freeze → execute → observe).
+      const lifecycle = await runSimulationLifecycle({
+        cwd: ctx.cwd,
+        adapter: simulateAdapter("thermal"),
+        spec: spec as Record<string, unknown>,
+        subject: {
+          artifactPath: params.artifact,
+          subjectOverrideHash: analysisCheck.subjectOverrideHash ?? null,
+        },
+        caseId: params.caseId,
+      });
+      const envelope = lifecycle.envelope;
       return {
-        content: [{ type: "text", text: shortThermalText(envelope) }, ...images],
+        content: [{ type: "text", text: shortThermalText(envelope) }, ...lifecycle.images],
         details: {
           envelope,
-          artifactHash,
-          specHash: envelope.inputHashes.spec,
+          artifactHash: lifecycle.artifactHash,
+          specHash: lifecycle.specHash,
           caseId: params.caseId,
           kind: "simulation" as const,
         },

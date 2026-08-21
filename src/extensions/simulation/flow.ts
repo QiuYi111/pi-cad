@@ -3,10 +3,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
-import { flowCommand, readImageContents } from "../../shared/capability.ts";
-import { writeRunSpec } from "../../shared/run-spec.ts";
 import { AnalysisModelSchema, verifyAnalysisModel } from "./analysis-model.ts";
-import { sha256File } from "../../shared/store.ts";
+import { runSimulationLifecycle, simulateAdapter } from "../../modules/simulate/index.ts";
 
 const SurfaceRef = Type.Array(Type.String({
   description: "Surface ID from cad_inspect_surfaces for this artifact version",
@@ -254,39 +252,28 @@ export default function cadFlowExtension(pi: ExtensionAPI) {
       });
       if (analysisCheck.error) throw new Error(analysisCheck.error);
       const spec = { ...params, geometryUnits: params.geometryUnits ?? "mm" };
-      const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "flow", spec);
-      const envelope = await flowCommand(ctx.cwd, "run", specPath, outputDir, 3_600_000);
-      // Evidence identity follows the authoritative design: the declared
-      // analysisModel source when the subject is derived, else the PART
-      // artifact when one is declared (that is what the harness tracks as
-      // the current candidate); the fluid-domain hash stays bound in the
-      // envelope's inputHashes either way, and both are re-hashed by the
-      // backend after the solve.
-      let artifactHash = analysisCheck.subjectOverrideHash ?? null;
-      if (!artifactHash && envelope.inputHashes.artifact) {
-        artifactHash = envelope.inputHashes.artifact;
-      } else if (!artifactHash && envelope.inputHashes.fluidDomain) {
-        artifactHash = envelope.inputHashes.fluidDomain;
-      } else if (!artifactHash && params.artifact) {
-        try {
-          artifactHash = await sha256File(resolve(ctx.cwd, params.artifact));
-        } catch {
-          // Keep spec hash as provenance fallback.
-        }
-      }
-      if (!artifactHash) artifactHash = envelope.inputHashes.spec;
-      const images =
-        envelope.ok && (envelope.payload as any)?.status === "solved"
-          ? await readImageContents(
-              ((envelope.payload as any)?.visualization?.views ?? []).map((view: { path: string }) => view.path),
-            )
-          : [];
+      // Phase 6: shared lifecycle. Evidence identity follows the
+      // authoritative design: the analysisModel source when derived, else
+      // the part artifact when declared, else the fluid domain; both stay
+      // hash-bound in the envelope and are re-hashed by the backend.
+      const lifecycle = await runSimulationLifecycle({
+        cwd: ctx.cwd,
+        adapter: simulateAdapter("flow"),
+        spec: spec as Record<string, unknown>,
+        subject: {
+          artifactPath: params.artifact,
+          subjectOverrideHash: analysisCheck.subjectOverrideHash ?? null,
+          fallbackInputKeys: ["artifact", "fluidDomain"],
+        },
+        caseId: params.caseId,
+      });
+      const envelope = lifecycle.envelope;
       return {
-        content: [{ type: "text", text: shortFlowText(envelope) }, ...images],
+        content: [{ type: "text", text: shortFlowText(envelope) }, ...lifecycle.images],
         details: {
           envelope,
-          artifactHash,
-          specHash: envelope.inputHashes.spec,
+          artifactHash: lifecycle.artifactHash,
+          specHash: lifecycle.specHash,
           caseId: params.caseId,
           kind: "simulation" as const,
         },

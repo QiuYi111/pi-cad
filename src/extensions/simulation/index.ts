@@ -4,14 +4,12 @@ import { resolve } from "node:path";
 import { Type } from "typebox";
 
 import {
+  deriveAnalysisModel,
   optimizationCommand,
-  readImageContents,
-  simulationCommand,
 } from "../../shared/capability.ts";
 import { writeRunSpec } from "../../shared/run-spec.ts";
-import { sha256File } from "../../shared/store.ts";
 import { AnalysisModelSchema, DeriveAnalysisModelSchema, verifyAnalysisModel } from "./analysis-model.ts";
-import { deriveAnalysisModel } from "../../shared/capability.ts";
+import { runSimulationLifecycle, simulateAdapter } from "../../modules/simulate/index.ts";
 
 import cadFlowExtension from "./flow.ts";
 import cadThermalExtension from "./thermal.ts";
@@ -157,38 +155,23 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
         backend: params.backend ?? "torch-fem",
         device: params.device ?? "auto",
       };
-      const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "simulation", spec);
-      const envelope = await simulationCommand(ctx.cwd, "run", specPath, outputDir);
-      // inputHashes.artifact is hashed by cadctl BEFORE the solve; binding
-      // evidence to it makes the provenance immune to concurrent artifact
-      // mutation. Re-hashing here would only be a weaker post-solve check.
-      let artifactHash = analysisCheck?.subjectOverrideHash ?? null;
-      if (!artifactHash && params.artifact) {
-        if (envelope.inputHashes.artifact) {
-          artifactHash = envelope.inputHashes.artifact;
-        } else {
-          try {
-            artifactHash = await sha256File(resolve(ctx.cwd, params.artifact));
-          } catch {
-            // Keep spec hash as provenance fallback.
-          }
-        }
-      }
-      if (!artifactHash) artifactHash = envelope.inputHashes.spec;
-      const images =
-        envelope.ok && (envelope.payload as any)?.status === "solved"
-          ? await readImageContents(
-              ((envelope.payload as any)?.visualization?.views ?? []).map(
-                (view: { path: string }) => view.path,
-              ),
-            )
-          : [];
+      // Phase 6: freeze → execute → observe via the shared lifecycle.
+      const lifecycle = await runSimulationLifecycle({
+        cwd: ctx.cwd,
+        adapter: simulateAdapter("structural"),
+        spec: spec as Record<string, unknown>,
+        subject: {
+          artifactPath: params.artifact,
+          subjectOverrideHash: analysisCheck?.subjectOverrideHash ?? null,
+        },
+      });
+      const envelope = lifecycle.envelope;
       return {
-        content: [{ type: "text", text: shortSimulationText(envelope) }, ...images],
+        content: [{ type: "text", text: shortSimulationText(envelope) }, ...lifecycle.images],
         details: {
           envelope,
-          artifactHash,
-          specHash: envelope.inputHashes.spec,
+          artifactHash: lifecycle.artifactHash,
+          specHash: lifecycle.specHash,
           kind: "simulation" as const,
         },
       };
