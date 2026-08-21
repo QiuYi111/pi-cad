@@ -7,3 +7,8 @@
 [00998843] exit=0 phase=done cadtests=18/19 exact=false audit=clean tokens=1246658 wall=373s
 [00999126] exit=0 phase=done cadtests=16/17 exact=false audit=clean tokens=177215 wall=211s
 [00034100] exit=0 phase=done cadtests=17/18 exact=false audit=clean tokens=562120 wall=242s
+[00996329] exit=0 phase=done cadtests=10/16 exact=false audit=clean tokens=203784 wall=227s
+[00997040] exit=0 phase=done cadtests=11/19 exact=false audit=clean tokens=207021 wall=220s
+[00672359] exit=0 phase=done cadtests=10/16 exact=false audit=clean tokens=607648 wall=203s
+[00670259] exit=0 phase=done cadtests=10/15 exact=false audit=clean tokens=551065 wall=196s
+[00001411] exit=0 phase=done cadtests=12/12 exact=true audit=clean tokens=103068 wall=91s

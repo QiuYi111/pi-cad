@@ -26,6 +26,8 @@ import {
   readImageContents,
 } from "../../shared/capability.ts";
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
+import { bundleToRecord } from "../../observations/bundle.ts";
+import { observeContent } from "../../observations/renderer.ts";
 
 const artifactParam = Type.String({
   description: "Path to the STEP/STP artifact to inspect, relative to the project root",
@@ -39,6 +41,34 @@ const outputParam = Type.String({
 
 function envelopeText(envelope: CadEventEnvelope): string {
   return JSON.stringify(envelope, null, 2);
+}
+
+/** Phase 1: observation-layer rendering shared by every tool below. */
+async function observed(
+  envelope: CadEventEnvelope,
+  headline: string,
+  extra: {
+    artifactHash?: string;
+    kind?: string;
+    details?: Record<string, unknown>;
+    includeEnvelope?: boolean;
+  } = {},
+) {
+  const { content, bundle } = await observeContent(
+    envelope,
+    { headline },
+    { includeEnvelope: extra.includeEnvelope === false ? null : envelope },
+  );
+  return {
+    content,
+    details: {
+      envelope,
+      observation: bundleToRecord(bundle),
+      ...(extra.artifactHash !== undefined ? { artifactHash: extra.artifactHash } : {}),
+      ...(extra.kind ? { kind: extra.kind } : {}),
+      ...(extra.details ?? {}),
+    },
+  };
 }
 
 export default function cadGeometryExtension(pi: ExtensionAPI) {
@@ -96,18 +126,17 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const output = params.output ?? (await currentGeometryEvidencePath(ctx.cwd, params.artifact));
       const envelope = await inspectGeometry(ctx.cwd, params.artifact, output);
-      const payload = geometryPayload(envelope);
-      const text = envelope.ok
-        ? `cad_inspect_geometry succeeded.\n${envelopeText(envelope)}`
-        : `cad_inspect_geometry failed: ${payload.error ?? "unknown error"}`;
-      return {
-        content: [{ type: "text", text }],
-        details: {
-          envelope,
-          artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "geometry" as const,
-        },
-      };
+      if (!envelope.ok) {
+        const error = (envelope.payload as { error?: string }).error;
+        return {
+          content: [{ type: "text", text: `cad_inspect_geometry failed: ${error ?? "unknown error"}` }],
+          details: { envelope },
+        };
+      }
+      return observed(envelope, `cad_inspect_geometry: ${params.artifact}`, {
+        artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
+        kind: "geometry",
+      });
     },
   });
 
@@ -205,17 +234,17 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
         b: params.b,
       });
       const payload = measurePayload(envelope);
-      const text = envelope.ok
-        ? `cad_measure ${payload.metric}(${payload.a}${payload.b ? `, ${payload.b}` : ""}) = ${JSON.stringify(payload.value)} ${payload.units ?? "mm"}`
-        : `cad_measure failed: ${payload.error ?? "unknown error"}`;
-      return {
-        content: [{ type: "text", text }],
-        details: {
-          envelope,
-          artifactHash: envelope.inputHashes.artifact,
-          kind: "measure" as const,
-        },
-      };
+      if (!envelope.ok) {
+        return {
+          content: [{ type: "text", text: `cad_measure failed: ${payload.error ?? "unknown error"}` }],
+          details: { envelope, artifactHash: envelope.inputHashes.artifact, kind: "measure" as const },
+        };
+      }
+      return observed(
+        envelope,
+        `cad_measure ${payload.metric}(${payload.a}${payload.b ? `, ${payload.b}` : ""}) = ${JSON.stringify(payload.value)} ${payload.units ?? "mm"}`,
+        { artifactHash: envelope.inputHashes.artifact, kind: "measure", includeEnvelope: false },
+      );
     },
   });
 
@@ -253,18 +282,15 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       if (!envelope.ok || !payload.views?.length) {
         return { content: [{ type: "text", text: `cad_inspect_section failed: ${payload.error ?? "no section returned"}` }], details: { envelope } };
       }
-      const images = await readImageContents(payload.views.map((view) => view.path));
-      return {
-        content: [
-          { type: "text", text: `cad_inspect_section succeeded. intersectionCurves=${payload.intersectionCurves ?? "?"} sectionFaces=${payload.sectionFaceCount ?? "?"}` },
-          ...images,
-        ],
-        details: {
-          envelope,
+      return observed(
+        envelope,
+        `cad_inspect_section: intersectionCurves=${payload.intersectionCurves ?? "?"} sectionFaces=${payload.sectionFaceCount ?? "?"}`,
+        {
           artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
-          kind: "section" as const,
+          kind: "section",
+          includeEnvelope: false,
         },
-      };
+      );
     },
   });
 

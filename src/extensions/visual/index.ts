@@ -7,9 +7,10 @@ import {
   DEFAULT_VIEWS,
   hashOrEmpty,
   inspectVisual,
-  readImageContents,
   visualPayload,
 } from "../../shared/capability.ts";
+import { bundleToRecord } from "../../observations/bundle.ts";
+import { observeContent } from "../../observations/renderer.ts";
 
 const VIEW_NAMES = DEFAULT_VIEWS;
 
@@ -65,18 +66,18 @@ export default function cadVisualExtension(pi: ExtensionAPI) {
         };
       }
 
-      const images = await readImageContents(payload.views.map((view) => view.path));
-      const text = [
-        "cad_inspect_visual succeeded.",
-        `artifact: ${params.artifact}`,
-        `bbox: ${JSON.stringify(payload.bbox)} mm`,
-        `views: ${payload.views.map((view) => view.name).join(", ")}`,
-        "Inspect every image yourself. The tool has not named any feature.",
-      ].join("\n");
+      // Phase 1: all agent-facing output flows through the observation
+      // layer (visual-first: images, then headline/facts/provenance).
+      const { content, bundle } = await observeContent(
+        envelope,
+        { headline: `cad_inspect_visual: ${payload.views.length} views of ${params.artifact}` },
+        { includeEnvelope: null },
+      );
       return {
-        content: [{ type: "text", text }, ...images],
+        content,
         details: {
           envelope,
+          observation: bundleToRecord(bundle),
           artifactHash: envelope.inputHashes.artifact ?? (await hashOrEmpty(resolve(ctx.cwd, params.artifact))),
           kind: "visual" as const,
         },

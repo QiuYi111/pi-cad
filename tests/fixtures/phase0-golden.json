@@ -1,0 +1,4398 @@
+{
+  "version": 1,
+  "workflows": {
+    "analyze": {
+      "route": "analyze",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [],
+      "candidateReviewPhase": "review",
+      "planNext": {},
+      "planStayPhases": [],
+      "transitions": {
+        "baseline": {
+          "baseline_understood": "investigate"
+        },
+        "investigate": {
+          "more_probe": "investigate",
+          "cause_understood": "explain"
+        },
+        "explain": {
+          "findings_delivered": "ready"
+        }
+      },
+      "acceptedPhases": [],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": false,
+      "mutationPolicies": null,
+      "obligations": [
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "convert": {
+      "route": "convert",
+      "nextAfterRequirements": "source_baseline",
+      "sourcePhases": [
+        "convert"
+      ],
+      "candidateReviewPhase": "compare",
+      "planNext": {
+        "transform_plan": "convert"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "source_baseline": {
+          "baseline_understood": "transform_plan"
+        },
+        "compare": {
+          "repair": "convert",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "compare"
+      ],
+      "acceptedEvidence": [
+        [
+          "convert"
+        ],
+        [
+          "convert"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "convert"
+        ],
+        [
+          "convert"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "convert"
+        ],
+        [
+          "convert"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "convert"
+        ],
+        [
+          "convert"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "source_baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/greenfield/part/prototype": {
+      "route": "design/greenfield/part/prototype",
+      "nextAfterRequirements": "part_design",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "part_design",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [],
+      "phaseRecords": {}
+    },
+    "design/greenfield/part/engineering": {
+      "route": "design/greenfield/part/engineering",
+      "nextAfterRequirements": "part_design",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "part_design",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [],
+      "phaseRecords": {}
+    },
+    "design/greenfield/part/manufacturing": {
+      "route": "design/greenfield/part/manufacturing",
+      "nextAfterRequirements": "part_design",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "part_design",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:drawing"
+      ],
+      "phaseRecords": {}
+    },
+    "design/greenfield/part/release": {
+      "route": "design/greenfield/part/release",
+      "nextAfterRequirements": "part_design",
+      "sourcePhases": [
+        "build",
+        "gap_closure"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "part_design",
+          "accepted": "audit"
+        },
+        "audit": {
+          "audit_complete": "gap_closure",
+          "workstreams_structurally_closed": "package"
+        },
+        "gap_closure": {
+          "workstreams_structurally_closed": "package"
+        },
+        "package": {
+          "package_prepared": "final_review"
+        },
+        "final_review": {
+          "artifact_issue": "package",
+          "engineering_issue": "gap_closure",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review",
+        "final_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": {
+        "gap_closure": "allowed",
+        "package": "allowed"
+      },
+      "obligations": [
+        "evidence:drawing",
+        "presentation:hero",
+        "presentation:turntable",
+        "workstream:assembly_service",
+        "workstream:bom",
+        "workstream:configuration",
+        "workstream:design_definition",
+        "workstream:engineering_analysis",
+        "workstream:inspection_acceptance",
+        "workstream:manufacturing_definition",
+        "workstream:presentation",
+        "workstream:risk_quality"
+      ],
+      "phaseRecords": {}
+    },
+    "design/greenfield/assembly/prototype": {
+      "route": "design/greenfield/assembly/prototype",
+      "nextAfterRequirements": "system_concept",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:interference",
+        "record:assembly_design",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/greenfield/assembly/engineering": {
+      "route": "design/greenfield/assembly/engineering",
+      "nextAfterRequirements": "system_concept",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:interference",
+        "record:assembly_design",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/greenfield/assembly/manufacturing": {
+      "route": "design/greenfield/assembly/manufacturing",
+      "nextAfterRequirements": "system_concept",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:drawing",
+        "evidence:interference",
+        "record:assembly_design",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/greenfield/assembly/release": {
+      "route": "design/greenfield/assembly/release",
+      "nextAfterRequirements": "system_concept",
+      "sourcePhases": [
+        "build",
+        "gap_closure"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "audit"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        },
+        "audit": {
+          "audit_complete": "gap_closure",
+          "workstreams_structurally_closed": "package"
+        },
+        "gap_closure": {
+          "workstreams_structurally_closed": "package"
+        },
+        "package": {
+          "package_prepared": "final_review"
+        },
+        "final_review": {
+          "artifact_issue": "package",
+          "engineering_issue": "gap_closure",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review",
+        "final_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ]
+      ],
+      "requiresBaselineInput": false,
+      "baselineEvidenceRequired": false,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": {
+        "gap_closure": "allowed",
+        "package": "allowed"
+      },
+      "obligations": [
+        "evidence:assembly",
+        "evidence:drawing",
+        "evidence:interference",
+        "presentation:assembly_animation",
+        "presentation:exploded",
+        "presentation:hero",
+        "presentation:turntable",
+        "record:assembly_design",
+        "record:interface_contracts",
+        "workstream:assembly_service",
+        "workstream:bom",
+        "workstream:configuration",
+        "workstream:design_definition",
+        "workstream:engineering_analysis",
+        "workstream:inspection_acceptance",
+        "workstream:manufacturing_definition",
+        "workstream:presentation",
+        "workstream:risk_quality"
+      ],
+      "phaseRecords": {
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/legacy/part/prototype": {
+      "route": "design/legacy/part/prototype",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "plan": "modify"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "baseline": {
+          "baseline_understood": "plan"
+        },
+        "review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "intent_issue": "plan",
+          "architecture_issue": "plan",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "lineage:baseline",
+        "lineage:continuity",
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/legacy/part/engineering": {
+      "route": "design/legacy/part/engineering",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "plan": "modify"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "baseline": {
+          "baseline_understood": "plan"
+        },
+        "review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "intent_issue": "plan",
+          "architecture_issue": "plan",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "lineage:baseline",
+        "lineage:continuity",
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/legacy/part/manufacturing": {
+      "route": "design/legacy/part/manufacturing",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "plan": "modify"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "baseline": {
+          "baseline_understood": "plan"
+        },
+        "review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "intent_issue": "plan",
+          "architecture_issue": "plan",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:drawing",
+        "lineage:baseline",
+        "lineage:continuity",
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/legacy/part/release": {
+      "route": "design/legacy/part/release",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify",
+        "gap_closure"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "plan": "modify"
+      },
+      "planStayPhases": [
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "transitions": {
+        "baseline": {
+          "baseline_understood": "plan"
+        },
+        "review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "intent_issue": "plan",
+          "architecture_issue": "plan",
+          "accepted": "audit"
+        },
+        "audit": {
+          "audit_complete": "gap_closure",
+          "workstreams_structurally_closed": "package"
+        },
+        "gap_closure": {
+          "workstreams_structurally_closed": "package"
+        },
+        "package": {
+          "package_prepared": "final_review"
+        },
+        "final_review": {
+          "artifact_issue": "package",
+          "engineering_issue": "gap_closure",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review",
+        "final_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "presentation"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": {
+        "gap_closure": "allowed",
+        "package": "allowed"
+      },
+      "obligations": [
+        "evidence:drawing",
+        "lineage:baseline",
+        "lineage:continuity",
+        "presentation:hero",
+        "presentation:turntable",
+        "record:frame_context",
+        "workstream:assembly_service",
+        "workstream:bom",
+        "workstream:configuration",
+        "workstream:design_definition",
+        "workstream:engineering_analysis",
+        "workstream:inspection_acceptance",
+        "workstream:manufacturing_definition",
+        "workstream:presentation",
+        "workstream:risk_quality"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/legacy/assembly/prototype": {
+      "route": "design/legacy/assembly/prototype",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "modify"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "modify"
+        },
+        "integration_review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "baseline": {
+          "baseline_understood": "assembly_design"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:continuity",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/legacy/assembly/engineering": {
+      "route": "design/legacy/assembly/engineering",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "modify"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "modify"
+        },
+        "integration_review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "baseline": {
+          "baseline_understood": "assembly_design"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:continuity",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/legacy/assembly/manufacturing": {
+      "route": "design/legacy/assembly/manufacturing",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "modify"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "modify"
+        },
+        "integration_review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "baseline": {
+          "baseline_understood": "assembly_design"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:drawing",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:continuity",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/legacy/assembly/release": {
+      "route": "design/legacy/assembly/release",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "modify",
+        "gap_closure"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "modify"
+      },
+      "planStayPhases": [
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "modify"
+        },
+        "integration_review": {
+          "revise": "modify",
+          "local_geometry_issue": "modify",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "audit"
+        },
+        "baseline": {
+          "baseline_understood": "assembly_design"
+        },
+        "audit": {
+          "audit_complete": "gap_closure",
+          "workstreams_structurally_closed": "package"
+        },
+        "gap_closure": {
+          "workstreams_structurally_closed": "package"
+        },
+        "package": {
+          "package_prepared": "final_review"
+        },
+        "final_review": {
+          "artifact_issue": "package",
+          "engineering_issue": "gap_closure",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review",
+        "final_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "compare",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": {
+        "gap_closure": "allowed",
+        "package": "allowed"
+      },
+      "obligations": [
+        "evidence:assembly",
+        "evidence:drawing",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:continuity",
+        "presentation:assembly_animation",
+        "presentation:exploded",
+        "presentation:hero",
+        "presentation:turntable",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts",
+        "workstream:assembly_service",
+        "workstream:bom",
+        "workstream:configuration",
+        "workstream:design_definition",
+        "workstream:engineering_analysis",
+        "workstream:inspection_acceptance",
+        "workstream:manufacturing_definition",
+        "workstream:presentation",
+        "workstream:risk_quality"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/hybrid/part/prototype": {
+      "route": "design/hybrid/part/prototype",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "concept",
+          "accepted": "ready"
+        },
+        "baseline": {
+          "baseline_understood": "concept"
+        },
+        "concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "concept",
+          "direction_selected": "part_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "concept"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/hybrid/part/engineering": {
+      "route": "design/hybrid/part/engineering",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "concept",
+          "accepted": "ready"
+        },
+        "baseline": {
+          "baseline_understood": "concept"
+        },
+        "concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "concept",
+          "direction_selected": "part_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "concept"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/hybrid/part/manufacturing": {
+      "route": "design/hybrid/part/manufacturing",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "concept",
+          "accepted": "ready"
+        },
+        "baseline": {
+          "baseline_understood": "concept"
+        },
+        "concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "concept",
+          "direction_selected": "part_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "concept"
+        }
+      },
+      "acceptedPhases": [
+        "review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:drawing",
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "record:frame_context"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/hybrid/part/release": {
+      "route": "design/hybrid/part/release",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build",
+        "gap_closure"
+      ],
+      "candidateReviewPhase": "review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "transitions": {
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "part_design",
+          "architecture_issue": "concept",
+          "accepted": "audit"
+        },
+        "baseline": {
+          "baseline_understood": "concept"
+        },
+        "concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "concept",
+          "direction_selected": "part_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "concept"
+        },
+        "audit": {
+          "audit_complete": "gap_closure",
+          "workstreams_structurally_closed": "package"
+        },
+        "gap_closure": {
+          "workstreams_structurally_closed": "package"
+        },
+        "package": {
+          "package_prepared": "final_review"
+        },
+        "final_review": {
+          "artifact_issue": "package",
+          "engineering_issue": "gap_closure",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "review",
+        "final_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "presentation"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": {
+        "gap_closure": "allowed",
+        "package": "allowed"
+      },
+      "obligations": [
+        "evidence:drawing",
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "presentation:hero",
+        "presentation:turntable",
+        "record:frame_context",
+        "workstream:assembly_service",
+        "workstream:bom",
+        "workstream:configuration",
+        "workstream:design_definition",
+        "workstream:engineering_analysis",
+        "workstream:inspection_acceptance",
+        "workstream:manufacturing_definition",
+        "workstream:presentation",
+        "workstream:risk_quality"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ]
+      }
+    },
+    "design/hybrid/assembly/prototype": {
+      "route": "design/hybrid/assembly/prototype",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        },
+        "baseline": {
+          "baseline_understood": "system_concept"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/hybrid/assembly/engineering": {
+      "route": "design/hybrid/assembly/engineering",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        },
+        "baseline": {
+          "baseline_understood": "system_concept"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/hybrid/assembly/manufacturing": {
+      "route": "design/hybrid/assembly/manufacturing",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "ready"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        },
+        "baseline": {
+          "baseline_understood": "system_concept"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": null,
+      "obligations": [
+        "evidence:assembly",
+        "evidence:drawing",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    },
+    "design/hybrid/assembly/release": {
+      "route": "design/hybrid/assembly/release",
+      "nextAfterRequirements": "baseline",
+      "sourcePhases": [
+        "build",
+        "gap_closure"
+      ],
+      "candidateReviewPhase": "integration_review",
+      "planNext": {
+        "part_design": "build"
+      },
+      "planStayPhases": [
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "transitions": {
+        "assembly_design": {
+          "assembly_design_committed": "interface_design"
+        },
+        "interface_design": {
+          "interface_contracts_committed": "part_design"
+        },
+        "part_design": {
+          "plan_committed": "build"
+        },
+        "integration_review": {
+          "revise": "build",
+          "local_geometry_issue": "build",
+          "interface_or_detail_issue": "interface_design",
+          "architecture_issue": "assembly_design",
+          "accepted": "audit"
+        },
+        "system_concept": {
+          "domain_work_needed": "domain_analysis",
+          "explore_more": "system_concept",
+          "direction_selected": "assembly_design"
+        },
+        "domain_analysis": {
+          "domain_question_answered": "system_concept"
+        },
+        "baseline": {
+          "baseline_understood": "system_concept"
+        },
+        "audit": {
+          "audit_complete": "gap_closure",
+          "workstreams_structurally_closed": "package"
+        },
+        "gap_closure": {
+          "workstreams_structurally_closed": "package"
+        },
+        "package": {
+          "package_prepared": "final_review"
+        },
+        "final_review": {
+          "artifact_issue": "package",
+          "engineering_issue": "gap_closure",
+          "accepted": "ready"
+        }
+      },
+      "acceptedPhases": [
+        "integration_review",
+        "final_review"
+      ],
+      "acceptedEvidence": [
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ],
+        [
+          "visual",
+          "geometry"
+        ]
+      ],
+      "finishEvidence": [
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ],
+        [
+          "visual",
+          "geometry",
+          "drawing",
+          "assembly",
+          "interference",
+          "presentation"
+        ]
+      ],
+      "requiresBaselineInput": true,
+      "baselineEvidenceRequired": true,
+      "updatesHeadOnAccept": true,
+      "mutationPolicies": {
+        "gap_closure": "allowed",
+        "package": "allowed"
+      },
+      "obligations": [
+        "evidence:assembly",
+        "evidence:drawing",
+        "evidence:interference",
+        "lineage:baseline",
+        "lineage:retained_interfaces",
+        "presentation:assembly_animation",
+        "presentation:exploded",
+        "presentation:hero",
+        "presentation:turntable",
+        "record:assembly_design",
+        "record:frame_context",
+        "record:interface_contracts",
+        "workstream:assembly_service",
+        "workstream:bom",
+        "workstream:configuration",
+        "workstream:design_definition",
+        "workstream:engineering_analysis",
+        "workstream:inspection_acceptance",
+        "workstream:manufacturing_definition",
+        "workstream:presentation",
+        "workstream:risk_quality"
+      ],
+      "phaseRecords": {
+        "baseline": [
+          "frame_context"
+        ],
+        "assembly_design": [
+          "assembly_design"
+        ],
+        "interface_design": [
+          "interface_contracts"
+        ]
+      }
+    }
+  },
+  "toolsForPhase": {
+    "intake": [
+      "cad_route",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "requirements": [
+      "bash",
+      "cad_commit_requirements",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "build": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_build_step",
+      "cad_commit_candidate",
+      "cad_compare_geometry",
+      "cad_export",
+      "cad_generate_drawing",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_render_scene",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "edit",
+      "find",
+      "grep",
+      "ls",
+      "read",
+      "write"
+    ],
+    "review": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_optimize",
+      "cad_probe_python",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "ready": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_build_step",
+      "cad_compare_geometry",
+      "cad_export",
+      "cad_finish",
+      "cad_generate_drawing",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_render_scene",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "done": [
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "baseline": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_frame_context",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "investigate": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "explain": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "plan": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "modify": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_build_step",
+      "cad_commit_candidate",
+      "cad_compare_geometry",
+      "cad_export",
+      "cad_generate_drawing",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_render_scene",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "edit",
+      "find",
+      "grep",
+      "ls",
+      "read",
+      "write"
+    ],
+    "concept": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "domain_analysis": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "source_baseline": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_frame_context",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "transform_plan": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "convert": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_build_step",
+      "cad_commit_candidate",
+      "cad_compare_geometry",
+      "cad_export",
+      "cad_generate_drawing",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_render_scene",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "edit",
+      "find",
+      "grep",
+      "ls",
+      "read",
+      "write"
+    ],
+    "compare": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_optimize",
+      "cad_probe_python",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "audit": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_assembly_tree",
+      "cad_build_step",
+      "cad_commit_assembly_design",
+      "cad_commit_interface_contracts",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_compare_geometry",
+      "cad_export",
+      "cad_generate_drawing",
+      "cad_inspect_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_measure",
+      "cad_render_scene",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "gap_closure": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_build_step",
+      "cad_commit_candidate",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_export",
+      "cad_generate_drawing",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_optimize",
+      "cad_render_scene",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "edit",
+      "find",
+      "grep",
+      "ls",
+      "read",
+      "write"
+    ],
+    "package": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_build_step",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_export",
+      "cad_generate_drawing",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_optimize",
+      "cad_render_scene",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "edit",
+      "find",
+      "grep",
+      "ls",
+      "read",
+      "write"
+    ],
+    "final_review": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "system_concept": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "assembly_design": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_assembly_design",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "interface_design": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_interface_contracts",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "part_design": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ],
+    "integration_review": [
+      "bash",
+      "cad_assembly_tree",
+      "cad_commit_plan",
+      "cad_compare_geometry",
+      "cad_inspect_geometry",
+      "cad_inspect_interference",
+      "cad_inspect_section",
+      "cad_inspect_surfaces",
+      "cad_inspect_visual",
+      "cad_measure",
+      "cad_optimize",
+      "cad_probe_python",
+      "cad_reroute",
+      "cad_scan_sections",
+      "cad_simulate",
+      "cad_simulate_flow",
+      "cad_simulate_thermal",
+      "cad_transition",
+      "cad_wait_for_user",
+      "find",
+      "grep",
+      "ls",
+      "read"
+    ]
+  },
+  "mutationPolicyForPhase": {
+    "analyze": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "convert": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/part/prototype": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/part/engineering": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/part/manufacturing": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/part/release": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "allowed",
+      "package": "allowed",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/assembly/prototype": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/assembly/engineering": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/assembly/manufacturing": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/greenfield/assembly/release": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "allowed",
+      "package": "allowed",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/part/prototype": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/part/engineering": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/part/manufacturing": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/part/release": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "allowed",
+      "package": "allowed",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/assembly/prototype": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/assembly/engineering": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/assembly/manufacturing": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/legacy/assembly/release": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "allowed",
+      "package": "allowed",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/part/prototype": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/part/engineering": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/part/manufacturing": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/part/release": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "allowed",
+      "package": "allowed",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/assembly/prototype": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/assembly/engineering": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/assembly/manufacturing": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "source_only",
+      "package": "read_only",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    },
+    "design/hybrid/assembly/release": {
+      "intake": "read_only",
+      "requirements": "read_only",
+      "build": "source_only",
+      "review": "read_only",
+      "ready": "read_only",
+      "done": "read_only",
+      "baseline": "read_only",
+      "investigate": "read_only",
+      "explain": "read_only",
+      "plan": "read_only",
+      "modify": "source_only",
+      "concept": "read_only",
+      "domain_analysis": "read_only",
+      "source_baseline": "read_only",
+      "transform_plan": "read_only",
+      "convert": "source_only",
+      "compare": "read_only",
+      "audit": "read_only",
+      "gap_closure": "allowed",
+      "package": "allowed",
+      "final_review": "read_only",
+      "system_concept": "read_only",
+      "assembly_design": "read_only",
+      "interface_design": "read_only",
+      "part_design": "read_only",
+      "integration_review": "read_only"
+    }
+  }
+}

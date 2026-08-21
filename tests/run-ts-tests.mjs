@@ -20,3 +20,5 @@ await jiti.import("./drawing-presentation-tool.test.ts", { default: true });
 await jiti.import("./task-lifecycle.test.ts", { default: true });
 await jiti.import("./commands-lifecycle.test.ts", { default: true });
 await jiti.import("./context-memory.test.ts", { default: true });
+await jiti.import("./golden-phase0.test.ts", { default: true });
+await jiti.import("./observations.test.ts", { default: true });
