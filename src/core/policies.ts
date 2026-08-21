@@ -5,15 +5,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   CAPABILITY_TOOLS,
   CONTROL_TOOLS,
-  SIMULATION_TOOLS,
   type CadPhase,
   type CadRunState,
 } from "../shared/protocol.ts";
+import { contractTools, phaseContract } from "../control/phase-contract.ts";
 
 export const BUILTIN_READONLY = ["read", "grep", "find", "ls"];
-export const BUILTIN_SOURCE = [...BUILTIN_READONLY, "bash", "edit", "write"];
-
-const SIMULATION_TOOL_SET = new Set<string>(SIMULATION_TOOLS);
 
 /**
  * Tools Pi-CAD is allowed to manage. Everything else in the host session —
@@ -72,131 +69,17 @@ export function applyCadToolOverlay(pi: ExtensionAPI, state: CadRunState | null)
   pi.setActiveTools([...next]);
 }
 
-const REVIEW_TOOLS = [
-  ...BUILTIN_READONLY,
-  "bash",
-  "cad_probe",
-  "cad_inspect_visual",
-  "cad_inspect_geometry",
-  "cad_inspect_surfaces",
-  "cad_inspect_section",
-  "cad_measure",
-  "cad_compare_geometry",
-  "cad_assembly_tree",
-  "cad_inspect_interference",
-  "cad_scan_sections",
-  "cad_probe_python",
-  "cad_simulate",
-  "cad_simulate_flow",
-  "cad_simulate_thermal",
-  "cad_optimize",
-  "cad_transition",
-];
-
-// Simulation tools never join the source-phase capability set: source phases
-// build geometry; simulation evidence is produced against a committed
-// candidate or baseline in review/cognitive phases.
-const SOURCE_CAPABILITY_TOOLS = CAPABILITY_TOOLS.filter(
-  (name) => !SIMULATION_TOOL_SET.has(name) && name !== "cad_optimize",
-);
-
-const COGNITIVE_TOOLS = [
-  ...BUILTIN_READONLY,
-  "bash",
-  "cad_probe",
-  "cad_inspect_visual",
-  "cad_inspect_geometry",
-  "cad_inspect_surfaces",
-  "cad_inspect_section",
-  "cad_scan_sections",
-  "cad_measure",
-  "cad_compare_geometry",
-  "cad_assembly_tree",
-  "cad_transition",
-];
-
-const SIMULATION_EVIDENCE_TOOLS = ["cad_simulate", "cad_simulate_flow", "cad_simulate_thermal"];
-
 const NO_REROUTE_PHASES = new Set<CadPhase>(["intake", "requirements", "ready", "done"]);
 
+/**
+ * Phase 7: tool lists are COMPILED from phase contracts (capability
+ * grants). The phase-0 golden matrix pins byte-for-byte equivalence
+ * with the pre-contract hardcoded lists.
+ */
 export function toolsForPhase(phase: CadPhase): string[] {
-  const base = toolsForPhaseBase(phase);
-  if (!NO_REROUTE_PHASES.has(phase)) return [...base, "cad_reroute"];
-  return base;
-}
-
-function toolsForPhaseBase(phase: CadPhase): string[] {
-  switch (phase) {
-    case "intake":
-      return [...BUILTIN_READONLY, "cad_route"];
-    case "requirements":
-      return [...BUILTIN_READONLY, "bash", "cad_commit_requirements", "cad_wait_for_user"];
-    case "build":
-    case "modify":
-    case "convert":
-      return [
-        ...BUILTIN_SOURCE,
-        ...SOURCE_CAPABILITY_TOOLS,
-        "cad_commit_candidate",
-        "cad_transition",
-        "cad_wait_for_user",
-      ];
-    case "review":
-    case "compare":
-    case "integration_review":
-      return [...REVIEW_TOOLS, "cad_wait_for_user", "cad_commit_plan"];
-    case "plan":
-    case "part_design":
-    case "transform_plan":
-      return [...COGNITIVE_TOOLS, "cad_commit_plan", "cad_wait_for_user"];
-    case "assembly_design":
-      return [...COGNITIVE_TOOLS, "cad_commit_assembly_design", "cad_wait_for_user"];
-    case "interface_design":
-      return [...COGNITIVE_TOOLS, "cad_commit_interface_contracts", "cad_wait_for_user"];
-    case "baseline":
-    case "source_baseline":
-      return [...COGNITIVE_TOOLS, ...SIMULATION_EVIDENCE_TOOLS, "cad_commit_frame_context", "cad_wait_for_user"];
-    case "investigate":
-    case "explain":
-    case "concept":
-    case "system_concept":
-    case "domain_analysis":
-      return [...COGNITIVE_TOOLS, ...SIMULATION_EVIDENCE_TOOLS, "cad_wait_for_user"];
-    case "audit":
-      return [
-        ...COGNITIVE_TOOLS,
-        ...CAPABILITY_TOOLS.filter((name) => name !== "cad_optimize"),
-        "cad_commit_assembly_design",
-        "cad_commit_interface_contracts",
-        "cad_commit_plan",
-        "cad_wait_for_user",
-      ];
-    case "gap_closure":
-      return [
-        ...BUILTIN_SOURCE,
-        ...CAPABILITY_TOOLS,
-        "cad_commit_candidate",
-        "cad_commit_plan",
-        "cad_transition",
-        "cad_wait_for_user",
-      ];
-    case "package":
-      return [...BUILTIN_READONLY, "bash", "edit", "write", ...CAPABILITY_TOOLS, "cad_commit_plan", "cad_transition", "cad_wait_for_user"];
-    case "final_review":
-      return [...COGNITIVE_TOOLS, ...SIMULATION_EVIDENCE_TOOLS, "cad_wait_for_user"];
-    case "ready":
-      return [
-        ...BUILTIN_READONLY,
-        "bash",
-        ...SOURCE_CAPABILITY_TOOLS,
-        "cad_simulate",
-        "cad_simulate_flow",
-        "cad_simulate_thermal",
-        "cad_finish",
-      ];
-    case "done":
-      return BUILTIN_READONLY;
-  }
+  const tools = contractTools(phaseContract(phase));
+  if (!NO_REROUTE_PHASES.has(phase)) return [...tools, "cad_reroute"];
+  return tools;
 }
 
 export function isMutatingBash(command: string): boolean {
