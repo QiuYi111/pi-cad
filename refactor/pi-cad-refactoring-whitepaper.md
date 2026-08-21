@@ -1,5 +1,9 @@
 # Pi-CAD 0.9 Architecture Refactoring White Paper
 
+> Status: vision document. Phase numbering and implementation details
+> follow `pi-cad-engineering-design-v2.md` (Phase 0-8). Where the two
+> documents disagree, the engineering design document wins.
+
 ## From CAD Agent Tool Collection to CAD Engineering Runtime
 
 ## 1. Motivation

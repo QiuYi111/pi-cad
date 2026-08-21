@@ -350,6 +350,24 @@ Contains:
 
 ------------------------------------------------------------------------
 
+## 5.4 Envelope vs Bundle Layering
+
+`CadEventEnvelope` (and its payload types) is the wire contract between
+the TypeScript runtime and `python -m cadctl`. It stays unchanged in
+shape and is NOT the agent-facing surface.
+
+`ObservationBundle` is the agent-facing rendering of an envelope (or of
+a composition of envelopes).
+
+The Observation Layer owns exactly this mapping:
+
+    envelope (wire) -> ObservationBundle (agent rendering)
+
+No tool should return an envelope directly to the agent after Phase 1.
+No module should speak bundles to the Python side.
+
+------------------------------------------------------------------------
+
 # 6. Migration Strategy
 
 ## Phase 0: Freeze Behavior
@@ -360,7 +378,19 @@ Before refactoring:
 -   record current workflow behavior;
 -   preserve state semantics.
 
-No user-visible change.
+Golden scope (must be pinned before any later phase merges):
+
+-   `compileWorkflow()` output for every Route (full CompiledProcess
+    snapshot);
+-   `toolsForPhase()` and `mutationPolicyForPhase()` matrix over every
+    phase and route;
+-   state machine transitions / acceptance / evidence semantics (regression
+    floor: existing tests plus new golden cases);
+-   one archived CADTestBench + internal stratified benchmark run as the
+    agent-level baseline.
+
+Snapshots are checked in. Any intentional drift in later phases requires
+an explicit review of the golden diff. No user-visible change.
 
 ------------------------------------------------------------------------
 
@@ -407,6 +437,16 @@ Support:
 -   programmable composition mode.
 
 Keep design artifacts immutable.
+
+Deliverables (frequently underestimated, must be planned):
+
+-   rewrite every phase prompt in `src/prompts/` that references an
+    inspection tool by name;
+-   old inspection tools become deprecated wrappers (marked in their
+    descriptions) until retirement;
+-   benchmark gate: run the stratified benchmark before and after;
+    success rate and token cost must not regress before old entry points
+    are retired.
 
 ------------------------------------------------------------------------
 
@@ -527,6 +567,42 @@ src/core/context-memory.ts
 Role:
 
 context lifecycle.
+
+------------------------------------------------------------------------
+
+## Existing files with a migration destination
+
+src/core/controller.ts (largest file in the repo)
+
+Gradually migrates into src/control/control-engine.ts during Phase 4
+(candidate finalizer split) and Phase 7 (phase contracts).
+
+------------------------------------------------------------------------
+
+src/core/policies.ts
+
+Becomes a PhaseContract data source in Phase 7. toolsForPhaseBase()
+switch is replaced by capability grants compiled from contracts.
+
+------------------------------------------------------------------------
+
+src/core/runtime.ts
+
+Tool gating moves to capability grants (Phase 7); the tool_call guard
+stays.
+
+------------------------------------------------------------------------
+
+src/prompts/ (28 phase prompt files)
+
+Rewritten in Phase 3 when cad_probe replaces the inspection tools.
+
+------------------------------------------------------------------------
+
+python/cadctl/
+
+Python side of the backend adapter boundary (Phase 5). The cadctl CLI
+subcommand contract becomes part of the ModelBackend protocol.
 
 ------------------------------------------------------------------------
 
