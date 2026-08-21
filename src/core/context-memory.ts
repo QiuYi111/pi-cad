@@ -38,6 +38,8 @@ import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promise
 import { join } from "node:path";
 
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
+
+import { renderObservationIndex } from "./observation-index.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import type { CadRequirements, CadRunState } from "../shared/protocol.ts";
@@ -566,6 +568,11 @@ export async function renderTaskContext(cwd: string, state: CadRunState): Promis
       ].join("\n"),
     );
   }
+
+  // Phase 8: bounded observation index — the agent's post-compaction map
+  // of what it saw (headline facts + where the visuals live).
+  const observationIndex = await renderObservationIndex(cwd, state.runId);
+  if (observationIndex) sections.push(observationIndex);
 
   return sections.join("\n\n");
 }

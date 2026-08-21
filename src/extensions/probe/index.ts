@@ -21,7 +21,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { probePython } from "../../shared/capability.ts";
+import { probePython, readImageContents } from "../../shared/capability.ts";
 import {
   ensureProbePresets,
   probePreset,
@@ -86,7 +86,6 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
           code: params.code ?? "",
         });
       }
-
       const registryName = PRESET_NAMES[params.preset];
       const preset = probePreset(registryName);
       if (!preset) {
@@ -111,6 +110,71 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
 
       const result = await preset.run(args as never, { cwd: ctx.cwd });
       return renderProbeResult(result, `cad_probe/${registryName}`);
+    },
+  });
+
+  // Phase 8: post-compaction rehydration over the per-run observation
+  // index. The index references evidence images by path; recall re-
+  // attaches them without re-running any backend.
+  pi.registerTool({
+    name: "cad_recall_observation",
+    label: "CAD Recall Observation",
+    description:
+      "Recover prior observations after context compaction: query the run's observation index by tool/evidence kind/artifact hash and re-attach the recorded engineering visuals (images are referenced from evidence storage, never re-rendered).",
+    promptSnippet: "Rehydrate prior observation visuals and facts from the run index",
+    promptGuidelines: [
+      "Use after compaction when the conversation lost the images/facts you reasoned about.",
+      "Narrow with tool/evidenceKind/artifactHash; limit defaults to 5 (newest first).",
+      "Recall is read-only memory: it creates no new evidence and never replaces a fresh probe when geometry changed.",
+    ],
+    parameters: Type.Object(
+      {
+        tool: Type.Optional(Type.String({ description: "Filter by agent tool name, e.g. cad_probe" })),
+        evidenceKind: Type.Optional(Type.String({ description: "Filter by evidence kind, e.g. visual, geometry" })),
+        artifactHash: Type.Optional(Type.String({ description: "Filter by artifact hash binding" })),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 5 })),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { CadProjectStore } = await import("../../shared/store.ts");
+      const { queryObservations } = await import("../../core/observation-index.ts");
+      const state = await new CadProjectStore(ctx.cwd).load();
+      if (!state) {
+        return { content: [{ type: "text", text: "cad_recall_observation failed: no active Pi-CAD workflow" }] };
+      }
+      const records = await queryObservations(ctx.cwd, state.runId, {
+        tool: params.tool,
+        evidenceKind: params.evidenceKind,
+        artifactHash: params.artifactHash,
+        limit: params.limit ?? 5,
+      });
+      if (records.length === 0) {
+        return {
+          content: [{
+            type: "text",
+            text: "cad_recall_observation: no matching observations in the run index.",
+          }],
+        };
+      }
+      const lines: string[] = [`cad_recall_observation: ${records.length} record(s), newest first.`];
+      const imagePaths: string[] = [];
+      for (const record of records) {
+        lines.push(
+          `#${record.id} [${record.phase}] ${record.tool}: ${record.headline}` +
+            (record.artifactHash ? ` (artifact ${record.artifactHash.slice(0, 12)})` : ""),
+        );
+        for (const fact of record.facts.slice(0, 12)) {
+          lines.push(`  ${fact.key}: ${fact.value}`);
+        }
+        imagePaths.push(...record.visuals.slice(0, 4).map((v) => v.path));
+      }
+      lines.push("Recalled images follow. They are historical observations — re-probe if the artifact changed since.");
+      const images = imagePaths.length > 0 ? await readImageContents(imagePaths) : [];
+      return {
+        content: [{ type: "text", text: lines.join("\n") }, ...images],
+        details: { recalled: records.map((r) => r.id) },
+      };
     },
   });
 }

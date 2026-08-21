@@ -42,6 +42,7 @@ export const CONTROL_TOOLS = [
 ] as const;
 export const CAPABILITY_TOOLS = [
   "cad_probe",
+  "cad_recall_observation",
   "cad_build_step",
   "cad_inspect_visual",
   "cad_inspect_geometry",

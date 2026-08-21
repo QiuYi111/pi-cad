@@ -52,6 +52,7 @@ test("contracts: compiled tool sets equal the golden sets for every phase", () =
 test("contracts: capability grants map to the expected tool families", () => {
   assert.deepEqual(capabilityTools("observe"), [
     "cad_probe",
+    "cad_recall_observation",
     "cad_inspect_visual",
     "cad_inspect_geometry",
     "cad_inspect_surfaces",

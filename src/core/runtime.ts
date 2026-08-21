@@ -11,6 +11,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CadProjectStore, nowIso } from "../shared/store.ts";
 import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
+import { recordObservation } from "./observation-index.ts";
 import { currentDoctorReport, type DoctorReport, packageRoot } from "../shared/capability.ts";
 import { composeSystemPrompt } from "./context.ts";
 import { maybeRebuildContext, registerContextCompaction, renderTaskContext } from "./context-memory.ts";
@@ -77,6 +78,13 @@ function customToolDetails(event: ToolResultEvent) {
         artifactHash?: string;
         specHash?: string;
         caseId?: string;
+        observation?: {
+          ok?: boolean;
+          tool?: string;
+          headline?: string;
+          facts?: Array<{ key: string; value: string }>;
+          visuals?: Array<{ name: string; path: string }>;
+        };
       }
     | undefined;
 }
@@ -89,6 +97,33 @@ async function handleToolResult(
   const state = await guardState(store);
   if (!state) return;
   const info = customToolDetails(event);
+  // Phase 8: every observation bundle the agent saw enters the per-run
+  // observation index (bounded; powers post-compaction rehydration).
+  if (info?.observation) {
+    await recordObservation({
+      cwd: store.cwd,
+      runId: state.runId,
+      phase: state.phase,
+      tool: event.toolName,
+      bundle: {
+        ok: info.observation.ok ?? true,
+        tool: info.observation.tool ?? "unknown",
+        headline: info.observation.headline ?? "",
+        facts: info.observation.facts ?? [],
+        visuals: info.observation.visuals ?? [],
+        diagnostics: [],
+        provenance: {
+          tool: info.observation.tool ?? "unknown",
+          durationMs: 0,
+          inputHashes: {},
+          outputHashes: {},
+        },
+        artifacts: [],
+      },
+      ...(info.artifactHash ? { artifactHash: info.artifactHash } : {}),
+      ...(info.kind ? { evidenceKind: info.kind } : {}),
+    });
+  }
   if (!info?.envelope || !info.kind) return;
   const kind = info.kind as EvidenceRef["kind"];
   if (!EVIDENCE_KINDS.includes(kind)) return;

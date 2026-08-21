@@ -54,6 +54,7 @@ const GRANTS: Record<PhaseGrant, readonly string[]> = {
   // observation
   observe: [
     "cad_probe",
+    "cad_recall_observation",
     "cad_inspect_visual",
     "cad_inspect_geometry",
     "cad_inspect_surfaces",
