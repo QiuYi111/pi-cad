@@ -246,6 +246,34 @@ test("headless continuation covers every active phase and terminates at its conf
   }
 });
 
+test("maybeRebuildContext contains a stale extension race instead of crashing the host", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-stale-"));
+  try {
+    const state = await seedRun(cwd, "stale-resume-run");
+    const store = new CadProjectStore(cwd);
+    let complete: (() => void) | undefined;
+    const stalePi = {
+      sendUserMessage() {
+        throw new Error("This extension ctx is stale after session replacement or reload");
+      },
+    } as unknown as ExtensionAPI;
+    const ctx = {
+      getContextUsage: () => ({ tokens: 6000, contextWindow: 10000, percent: 60 }),
+      compact: (options?: { onComplete?: () => void }) => { complete = options?.onComplete; },
+    } as unknown as ExtensionContext;
+
+    assert.equal(maybeRebuildContext(stalePi, store, state, ctx), true);
+    complete!();
+    await sleep(25);
+
+    const events = readFileSync(store.run(state.runId).eventsPath, "utf-8");
+    assert.match(events, /ContextContinuationDeferred/);
+    assert.equal((await store.load())?.status, "active");
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("session_before_compact: archives trajectory + image assets, passes usage/fileOps, uses medium reasoning", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-ctxmem-compact-"));
   try {

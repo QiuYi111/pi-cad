@@ -103,8 +103,18 @@ test("cad_commit_requirements uses exact one-shot authority and headless cannot 
       runCandidateAuto: async () => { throw new Error("unused"); },
       runConvertCandidateAuto: async () => { throw new Error("unused"); },
     });
-    const revision = requirements(11);
     const ctx = { cwd } as ExtensionContext;
+    const beforeInvalid = await store.load();
+    const invalid = await tools.get("cad_commit_requirements").execute(
+      "r0", { ...requirements(11), goal: "" }, undefined, undefined, ctx,
+    );
+    assert.match(invalid.content[0].text, /invalid requirements record/);
+    const afterInvalid = await store.load();
+    assert.equal(afterInvalid?.status, beforeInvalid?.status);
+    assert.equal(afterInvalid?.phase, beforeInvalid?.phase);
+    assert.equal(afterInvalid?.pendingRequirementsRevision, undefined);
+
+    const revision = requirements(11);
     const requested = await tools.get("cad_commit_requirements").execute(
       "r1", revision, undefined, undefined, ctx,
     );

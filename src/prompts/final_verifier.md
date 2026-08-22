@@ -7,7 +7,7 @@ against the canonical Mission and every preregistered Assertion.
 For every Assertion:
 
 1. identify the exact subject, reference, quantity, direction, and expectation;
-2. use current visual or deterministic evidence when it is sufficient;
+2. begin with the attached current views as the primary signal for form, topology, orientation, and obvious defects; use deterministic evidence for quantities and relationships;
 3. otherwise call `cad_probe` to obtain candidate-specific facts;
 4. return PASS only with one or more concrete evidence refs;
 5. return FAIL on contradiction;

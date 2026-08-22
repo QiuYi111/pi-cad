@@ -27,6 +27,7 @@ import {
   reroute,
   route,
   transition,
+  validateRequirementsRecord,
   waitForUser,
 } from "./state-machine.ts";
 import { loadPrompt } from "./context.ts";
@@ -606,6 +607,13 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const { authorityToken, ...recordParams } = params;
       const record = recordParams as unknown as CadRequirements;
+      const validationFailure = validateRequirementsRecord(
+        { ...state, phase: "requirements", mutationPolicy: "read_only" },
+        record,
+      );
+      if (validationFailure) {
+        return errTool(`invalid requirements record: ${validationFailure}. The frozen contract and workflow state are unchanged.`);
+      }
       const previous = await loadCurrentRequirements(store, state);
       const revisionHash = hashRecord(record);
       const isRevision = Boolean(previous && hashRecord(previous) !== revisionHash);

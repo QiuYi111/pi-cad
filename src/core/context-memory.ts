@@ -672,8 +672,22 @@ export function maybeRebuildContext(
       // continuation of the same phase+artifact version, whose nudge key
       // maybeAutoContinue already consumed — without force this resume is
       // deduped away and the run stalls.
-      await maybeAutoContinue(pi, store, latest, ctx, { force: true });
-    })();
+      try {
+        await maybeAutoContinue(pi, store, latest, ctx, { force: true });
+      } catch (error) {
+        // A reload/session replacement can invalidate the extension instance
+        // while compact() is still finishing. Never let that expected race
+        // become an unhandled rejection that kills the host process. The new
+        // runtime's agent_settled hook owns any subsequent continuation.
+        await store.appendEvent("ContextContinuationDeferred", {
+          phase: latest.phase,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    })().catch(() => {
+      // Canonical workflow state is already on disk. Compaction continuation
+      // is best-effort and must not crash Pi even if diagnostic I/O also fails.
+    });
   };
   ctx.compact({ onComplete: resume, onError: resume });
   return true;

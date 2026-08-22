@@ -36,7 +36,7 @@ export interface ObservationRecord {
   ok: boolean;
   headline: string;
   facts: Array<{ key: string; value: string }>;
-  visuals: Array<{ name: string; path: string }>;
+  visuals: Array<{ name: string; path: string; sha256?: string }>;
   artifactHash?: string;
   evidenceKind?: string;
 }
@@ -105,7 +105,11 @@ export async function recordObservation(input: RecordObservationInput): Promise<
       ok: input.bundle.ok,
       headline: input.bundle.headline,
       facts: input.bundle.facts.slice(0, 40),
-      visuals: input.bundle.visuals.map((v) => ({ name: v.name, path: v.path })),
+      visuals: input.bundle.visuals.map((v) => {
+        const artifact = input.bundle.artifacts.find((item) => item.path === v.path);
+        const sha256 = artifact?.sha256 ?? input.bundle.provenance.outputHashes[v.path];
+        return { name: v.name, path: v.path, ...(sha256 ? { sha256 } : {}) };
+      }),
       ...(input.artifactHash ? { artifactHash: input.artifactHash } : {}),
       ...(input.evidenceKind ? { evidenceKind: input.evidenceKind } : {}),
     };

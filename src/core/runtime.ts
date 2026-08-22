@@ -85,6 +85,16 @@ function customToolDetails(event: ToolResultEvent) {
           headline?: string;
           facts?: Array<{ key: string; value: string }>;
           visuals?: Array<{ name: string; path: string }>;
+          diagnostics?: Array<{ level: "info" | "warning" | "error"; message: string }>;
+          provenance?: {
+            tool: string;
+            toolVersion?: string;
+            backendVersion?: string;
+            durationMs: number;
+            inputHashes: Record<string, string>;
+            outputHashes: Record<string, string>;
+          };
+          artifacts?: Array<{ path: string; kind: string; sha256: string; role?: string }>;
         };
       }
     | undefined;
@@ -112,14 +122,14 @@ async function handleToolResult(
         headline: info.observation.headline ?? "",
         facts: info.observation.facts ?? [],
         visuals: info.observation.visuals ?? [],
-        diagnostics: [],
-        provenance: {
+        diagnostics: info.observation.diagnostics ?? [],
+        provenance: info.observation.provenance ?? {
           tool: info.observation.tool ?? "unknown",
           durationMs: 0,
           inputHashes: {},
           outputHashes: {},
         },
-        artifacts: [],
+        artifacts: info.observation.artifacts ?? [],
       },
       ...(info.artifactHash ? { artifactHash: info.artifactHash } : {}),
       ...(info.kind ? { evidenceKind: info.kind } : {}),

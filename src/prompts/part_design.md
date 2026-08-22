@@ -23,6 +23,12 @@ A build plan for the part(s) you will author next:
   a part that violates it.
 - Greenfield parts without an assembly context: this is the plan phase.
   State the critical dimensions and protected interfaces, then commit.
+- Preserve dimensional semantics when mapping intent to constructors. Convert
+  side length, across-flats, radius, and diameter deliberately; never pass one
+  as another merely because a library constructor happens to accept it.
+- Model operations in the requested stage. “Round the 2D profile, then
+  extrude” means modify profile corners before extrusion; it is distinct from
+  filleting every eligible edge of the finished solid.
 
 ## Exit
 

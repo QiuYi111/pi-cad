@@ -137,25 +137,9 @@ export function commitRequirements(
   if (state.phase !== "requirements") {
     return { ok: false, reason: `cad_commit_requirements is only valid in requirements; current phase is ${state.phase}` };
   }
-  const spec = workflowSpec(state);
-  if (!spec) return { ok: false, reason: "route is not selected" };
-  if (!record.goal.trim()) return { ok: false, reason: "requirements.goal is required" };
-  if (!Array.isArray(record.deliverables) || record.deliverables.length === 0) {
-    return { ok: false, reason: "requirements.deliverables must contain at least one deliverable" };
-  }
-  for (const [index, item] of (record.deferredClarifications ?? []).entries()) {
-    if (!item.question?.trim() || !item.reason?.trim() || !item.fallback?.trim() || !item.impact?.trim()) {
-      return { ok: false, reason: `deferredClarifications[${index}] requires question, reason, fallback, and impact` };
-    }
-    if (!Array.isArray(item.alternatives) || item.alternatives.filter((value) => value.trim()).length < 2) {
-      return { ok: false, reason: `deferredClarifications[${index}] requires at least two alternatives` };
-    }
-    if (!record.assumptions.some((assumption) => assumption.includes(item.fallback))) {
-      return { ok: false, reason: `deferredClarifications[${index}] fallback must also be recorded verbatim in assumptions[]` };
-    }
-  }
-  const assertionFailure = validateAcceptanceAssertions(record.must, record.assertions);
-  if (assertionFailure) return { ok: false, reason: assertionFailure };
+  const validationFailure = validateRequirementsRecord(state, record);
+  if (validationFailure) return { ok: false, reason: validationFailure };
+  const spec = workflowSpec(state)!;
   const nextPhase = spec.nextAfterRequirements;
   const next: CadRunState = {
     ...state,
@@ -188,6 +172,42 @@ export function commitRequirements(
       })),
     ],
   };
+}
+
+/**
+ * Pure validation used both for the first commit and before a later record is
+ * allowed to enter the immutable-contract authorization path. Invalid tool
+ * payloads must never become pending revisions or block a headless run.
+ */
+export function validateRequirementsRecord(
+  state: CadRunState,
+  record: CadRequirements,
+): string | null {
+  const spec = workflowSpec(state);
+  if (!spec) return "route is not selected";
+  if (!record.goal?.trim()) return "requirements.goal is required";
+  if (!Array.isArray(record.deliverables) || record.deliverables.length === 0) {
+    return "requirements.deliverables must contain at least one deliverable";
+  }
+  if (record.deliverables.some((item) => typeof item !== "string" || !item.trim())) {
+    return "requirements.deliverables may not contain empty entries";
+  }
+  for (const field of ["must", "assertions", "preferences", "assumptions", "openUnknowns"] as const) {
+    if (!Array.isArray(record[field])) return `requirements.${field} is required`;
+  }
+  for (const [index, item] of (record.deferredClarifications ?? []).entries()) {
+    if (!item.question?.trim() || !item.reason?.trim() || !item.fallback?.trim() || !item.impact?.trim()) {
+      return `deferredClarifications[${index}] requires question, reason, fallback, and impact`;
+    }
+    if (!Array.isArray(item.alternatives) || item.alternatives.filter((value) => value.trim()).length < 2) {
+      return `deferredClarifications[${index}] requires at least two alternatives`;
+    }
+    if (!Array.isArray(record.assumptions) || !record.assumptions.some((assumption) => assumption.includes(item.fallback))) {
+      return `deferredClarifications[${index}] fallback must also be recorded verbatim in assumptions[]`;
+    }
+  }
+  const assertionFailure = validateAcceptanceAssertions(record.must, record.assertions);
+  return assertionFailure ?? null;
 }
 
 /**

@@ -39,8 +39,10 @@ brief.
 - Assertions are frozen before implementation. If later review finds that an Assertion misbinds its Must, revise the requirements contract explicitly; do not weaken the test after seeing the candidate.
 - After the first commit, the entire requirements record is immutable. A different record requires `/cad-approve-requirements-revision`, which issues a one-time token bound to the exact proposed hash. An ordinary reply is not authority. HEADLESS has no user to issue the token, so it must repair against the frozen contract or terminate with a user-authority blocker.
 - Record interpretation decisions in `assumptions[]`, including unit normalization, which geometric entity a dimension refers to, and any ambiguity you resolved: state the chosen reading and the reason.
+- Preserve the named geometric referent of every dimension. A polygon side length is not its circumradius or diameter; a profile corner radius is not a solid-edge fillet radius. If a CAD API uses a different parameterization, derive the API input explicitly and verify the originally named quantity.
 - Treat explicit final-state instructions such as rotate, align, orient, center, and position as separate `must[]` items — they are acceptance conditions, not style.
 - When requirements conflict but the alternatives do not materially change topology, placement, interfaces, or final extents, choose the most defensible reading (explicit constraints first, explicit dimensions over inferred relations), record the conflict and rejected reading in `assumptions[]`, and continue.
+- Distinguish single-part connectivity from assembly occurrence structure. Features required to form one part must produce the requested connected solid; assembly members may remain separate occurrences. Do not infer fuse-versus-assembly from a loose adjective alone.
 
 ## Engineering simulation obligation
 

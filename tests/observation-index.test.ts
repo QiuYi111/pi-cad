@@ -50,6 +50,7 @@ try {
         tool: "cad_inspect_visual",
         headline: "visual render: 7 views",
         visuals: [{ name: "iso", path: "evidence/iso.png" }],
+        artifacts: [{ path: "evidence/iso.png", kind: "image", sha256: "c".repeat(64) }],
       }),
       artifactHash: "b".repeat(64),
       evidenceKind: "visual",
@@ -66,6 +67,7 @@ try {
     const visualsOnly = await queryObservations(cwd, runId, { withVisualsOnly: true });
     assert.equal(visualsOnly.length, 1);
     assert.equal(visualsOnly[0].evidenceKind, "visual");
+    assert.equal(visualsOnly[0].visuals[0]?.sha256, "c".repeat(64));
 
     const byArtifact = await queryObservations(cwd, runId, { artifactHash: "a".repeat(64) });
     assert.equal(byArtifact.length, 1);

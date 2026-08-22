@@ -56,7 +56,7 @@ export async function maybeAutoContinue(
     }
     headlessContinuationCounts.set(state.runId, used + 1);
     pi.sendUserMessage(
-      `Pi-CAD HEADLESS continuation ${used + 1}/${limit}: workflow is still in ${state.phase.toUpperCase()} (${stateSummary(state)}). Continue with the next explicit cad_* action; do not wait for a user.`,
+      `Pi-CAD HEADLESS continuation ${used + 1}/${limit}: workflow is still in ${state.phase.toUpperCase()} (${stateSummary(state)}). A prose answer or question is not completion. Continue with the next explicit cad_* action; never wait for a user. If information is unavailable, use the declared fallback/deferred-clarification path or an explicit fail-closed blocker.`,
       { deliverAs: "followUp" },
     );
     return;
