@@ -387,7 +387,10 @@ if (vaultActive) {
   const vm = JSON.parse(readFileSync(join(CACHE, "manifest.json"), "utf-8"));
   for (const key of ["data", "sets"]) {
     const e = vm.find((x) => x.dest === key || x.dest.endsWith(`/${key}`));
-    if (e) tarExtract(vaultTarPath(e.tar), join(preloadDir, key));
+    // Each vault tar already contains its top-level `data` or `sets`
+    // directory. Extracting into preloadDir/key would create
+    // tmp-preload/data/data and break interrupted-run resume.
+    if (e) tarExtract(vaultTarPath(e.tar), preloadDir);
   }
   baseDir = preloadDir;
 }
