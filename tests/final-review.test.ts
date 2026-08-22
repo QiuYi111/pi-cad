@@ -30,6 +30,14 @@ const quickRoute = {
   maturity: "prototype",
 } as const;
 
+test("CADTestBench headless runs enable the independent final reviewer", () => {
+  const runner = readFileSync(join(process.cwd(), "benchmarks", "cadtestbench", "run.mjs"), "utf-8");
+  assert.match(
+    runner,
+    /PI_CAD_HEADLESS:\s*"1"[\s\S]*?PI_CAD_FINAL_REVIEWER:\s*"1"/,
+  );
+});
+
 function requirements(expected = 10): CadRequirements {
   return {
     goal: "box with a controlled X extent",

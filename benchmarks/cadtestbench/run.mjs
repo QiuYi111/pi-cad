@@ -210,7 +210,12 @@ function runPi(workdir, prompt, sessionId) {
       env: { ...process.env, PI_CODING_AGENT_DIR: AGENT_DIR,
              PI_CODING_AGENT_SESSION_DIR: join(workdir, ".sessions"),
              PI_CAD_REPO: REPO,
-             PI_CAD_HEADLESS: "1" },
+             PI_CAD_HEADLESS: "1",
+             // Benchmarks must exercise the production closure path. Without
+             // this flag cad_submit_for_review is hidden and cad_transition
+             // can take the legacy direct-to-READY edge, making results depend
+             // on how each Agent reacts to the missing review tool.
+             PI_CAD_FINAL_REVIEWER: "1" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "", stderr = "";
