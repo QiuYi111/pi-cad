@@ -140,4 +140,12 @@ test("baseline prompts mandate frame handling without fabricating headless confi
   // phase instead of duplicating it.
   const requirements = await loadPrompt("requirements");
   assert.match(requirements, /coordinate orientation/i);
+  assert.match(requirements, /completed deliverable/i);
+  assert.match(requirements, /pre-cut\/pre-boolean profile/i);
+  assert.match(requirements, /without seeing the generating source or feature history/i);
+
+  const finalVerifier = await loadPrompt("final_verifier");
+  assert.match(finalVerifier, /final-state claims/i);
+  assert.match(finalVerifier, /hypothetical pre-feature profile/i);
+  assert.match(finalVerifier, /return `binding_suspect`/i);
 });

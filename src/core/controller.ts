@@ -257,12 +257,21 @@ const AcceptanceAssertionSchema = Type.Object(
   {
     id: Type.String({ minLength: 1 }),
     mustRef: Type.String({ pattern: "^M[1-9][0-9]*$" }),
-    statement: Type.String({ minLength: 1 }),
+    statement: Type.String({
+      minLength: 1,
+      description: "Observable acceptance claim about the completed deliverable; never describe feature history, pre-operation construction geometry, or removed geometry",
+    }),
     binding: Type.Object(
       {
-        subject: Type.String({ minLength: 1 }),
+        subject: Type.String({
+          minLength: 1,
+          description: "Entity observable in the completed deliverable",
+        }),
         quantity: Type.String({ minLength: 1 }),
-        reference: Type.Optional(Type.String({ minLength: 1 })),
+        reference: Type.Optional(Type.String({
+          minLength: 1,
+          description: "Reference observable or derivable from the completed deliverable, not an intermediate or removed entity",
+        })),
         direction: Type.Optional(Type.String({ minLength: 1 })),
       },
       { additionalProperties: false },
@@ -574,7 +583,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptSnippet: "Commit the working brief and enter the next process phase",
     promptGuidelines: [
       "Do not commit before shared understanding is reached.",
-      "Before any candidate exists, preregister one or more assertions for every Must using stable M1/M2/... references. Assertions state subject/reference/quantity/expectation, never probe selectors or code.",
+      "Before any candidate exists, preregister one or more assertions for every Must using stable M1/M2/... references. Geometry assertions state only facts observable on the completed deliverable, never modeling order, feature history, pre-cut construction geometry, or removed entities. Translate procedural instructions into final dimensions and relationships that an independent reviewer can establish from the final artifact without source history.",
       "Set canonicalCheck only when the Must truly maps to a global digest field; do not guess a bbox axis from prose. If binding.direction explicitly names global X/Y/Z for a numeric extent, the matching bbox canonicalCheck is mandatory.",
       "For legacy/hybrid lineages, analyze, and convert, list supplied STEP/STP files in inputs.",
       "Fully specified greenfield part tasks may commit with zero extra questions.",

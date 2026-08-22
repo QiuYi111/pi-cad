@@ -31,23 +31,38 @@ Pi-CAD 是为
 
 ## 快速开始
 
+Pi-CAD 是一个 Pi 包。在无显示器的 Debian/Ubuntu 环境中，先安装 gmsh
+依赖的 GLU 运行库，再让 Pi 克隆包、安装 Node 依赖，并通过包的
+`postinstall` 脚本构建 Python CAD 运行时：
+
+```bash
+sudo apt-get install -y libglu1-mesa
+pi install git:github.com/QiuYi111/pi-cad
+pi list
+```
+
+`package.json` 中的 `pi` manifest 会在下次启动 Pi 时自动加载全部八个扩展
+和随包 skills，无需传入任何 `-e` 参数。
+
+若要使用开发工作区，先在工作区安装依赖，再把该目录注册为用户级 Pi 包：
+
 ```bash
 git clone https://github.com/QiuYi111/pi-cad.git
 cd pi-cad
 npm install
+pi install .
+pi list
 ```
 
-`npm install` 会一并构建 Python CAD 运行时(包内 venv,含 build123d、gmsh、
-torch-fem 等)。无显示器的 Linux 服务器还需要 gmsh 依赖的 GLU 运行库:
+本地包安装会链接工作区而不是复制文件，因此源码修改会在下次启动 Pi 时直接
+生效；只有依赖或 Python 运行时 bootstrap 变化时才需要重新运行
+`npm install`。
 
-```bash
-sudo apt-get install -y libglu1-mesa
-```
-
-然后加载全部七个扩展启动 Pi:
+若只想临时启动而不安装包，也可以显式加载全部扩展：
 
 ```bash
 pi -e src/extensions/core/index.ts \
+   -e src/extensions/probe/index.ts \
    -e src/extensions/geometry/index.ts \
    -e src/extensions/visual/index.ts \
    -e src/extensions/drawing/index.ts \
@@ -55,9 +70,6 @@ pi -e src/extensions/core/index.ts \
    -e src/extensions/presentation/index.ts \
    -e src/extensions/ui/index.ts
 ```
-
-(若以 Pi 包形式安装,`package.json` 的 `pi` 键会自动加载全部七个扩展,
-无需任何参数。)
 
 ## 第一个零件
 

@@ -37,24 +37,41 @@ It is built on one simple split of responsibility:
 
 ## Quick start
 
+Pi-CAD is a Pi package. On headless Debian/Ubuntu systems, install the GLU
+runtime used by gmsh, then let Pi clone the package, install its Node
+dependencies, and run the package `postinstall` bootstrap for the Python CAD
+runtime:
+
+```bash
+sudo apt-get install -y libglu1-mesa
+pi install git:github.com/QiuYi111/pi-cad
+pi list
+```
+
+The `pi` manifest in `package.json` automatically loads all eight extensions
+and the bundled skills on the next Pi launch; no `-e` flags are needed.
+
+For a development checkout, install dependencies in the checkout and register
+that directory as a user package:
+
 ```bash
 git clone https://github.com/QiuYi111/pi-cad.git
 cd pi-cad
 npm install
+pi install .
+pi list
 ```
 
-`npm install` also builds the Python CAD runtime (a package-local venv with
-build123d, gmsh, torch-fem, and friends). On headless Linux you will
-additionally want the GLU runtime that gmsh links:
+Local-package installation links the checkout rather than copying it, so source
+changes are picked up on the next Pi launch. Re-run `npm install` only when
+dependencies or the Python runtime bootstrap change.
 
-```bash
-sudo apt-get install -y libglu1-mesa
-```
-
-Then launch Pi with the seven extensions:
+For a one-off launch without installing the package, load the extensions
+explicitly:
 
 ```bash
 pi -e src/extensions/core/index.ts \
+   -e src/extensions/probe/index.ts \
    -e src/extensions/geometry/index.ts \
    -e src/extensions/visual/index.ts \
    -e src/extensions/drawing/index.ts \
@@ -62,9 +79,6 @@ pi -e src/extensions/core/index.ts \
    -e src/extensions/presentation/index.ts \
    -e src/extensions/ui/index.ts
 ```
-
-(When Pi-CAD is installed as a Pi package, the `pi` key in `package.json`
-loads them automatically — no flags needed.)
 
 ## Your first part
 
