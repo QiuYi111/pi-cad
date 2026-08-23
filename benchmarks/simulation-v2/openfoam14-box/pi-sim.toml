@@ -1,6 +1,6 @@
 schema = 1
 entrypoint = "bash Allrun"
-observe = "uv run --offline --no-sync --project /opt/pi-cad-runtime/python python observe.py"
+observe = "uv run --offline --frozen --project /opt/pi-cad-runtime/python python observe.py"
 nonvisual = false
 inputs = ["domain.step"]
 observation_files = ["observe.py"]

@@ -1,0 +1,12 @@
+{
+  "units": "mm_N_MPa",
+  "backend": "torch-fem",
+  "device": "cuda",
+  "artifact": "../../build/model.step",
+  "physics": { "type": "linear_elasticity" },
+  "materials": [{ "name": "replace-with-authoritative-material", "E": 70000.0, "nu": 0.33, "density": 2.7e-9 }],
+  "mesh": { "element": "tet", "size": 2.0 },
+  "constraints": [{ "type": "fixed", "region": { "axis": "x", "side": "min" }, "dofs": [0, 1, 2] }],
+  "loads": [{ "type": "nodal_force", "region": { "axis": "x", "side": "max" }, "vector": [0.0, 0.0, -100.0], "distribute": "total" }],
+  "sensitivity": { "type": "compliance_by_youngs_modulus" }
+}

@@ -40,12 +40,19 @@ def run_cadctl(*args: str, cwd: Path) -> dict:
 
 
 class SimulationTests(unittest.TestCase):
-    def test_doctor_reports_torch_fem_and_optimization(self) -> None:
+    def test_doctor_reports_managed_runtime_catalog_and_cuda_optimizer(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             envelope = run_cadctl("doctor", "--json", cwd=Path(tmp))
             self.assertIn("simulation", envelope["capabilities"])
-            self.assertEqual(envelope["capabilities"]["simulation"]["backend"], "torch-fem")
-            self.assertEqual(envelope["capabilities"]["differentiableOptimization"]["status"], "ready")
+            managed = envelope["capabilities"]["simulation"]
+            self.assertEqual(managed["registrySchema"], 2)
+            identities = {(item["backend"], item["runtime"]) for item in managed["runtimes"]}
+            self.assertIn(("torch-fem", "torch-fem-0.9-cu126"), identities)
+            self.assertIn(("su2", "su2-8.5.0"), identities)
+            optimizer = envelope["capabilities"]["differentiableOptimization"]
+            self.assertEqual(optimizer["runtime"], "torch-fem-0.9-cu126")
+            self.assertEqual(optimizer["fallback"], "forbidden")
+            self.assertIn("hostDevelopmentPython", envelope)
 
     def test_beam_simulation_walking_skeleton(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -65,9 +72,9 @@ class SimulationTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            envelope = run_cadctl("simulate", "run", "--spec", str(spec), "--output-dir", str(root / "out"), cwd=root)
-            self.assertTrue(envelope["ok"], envelope)
-            payload = envelope["payload"]
+            from cadctl.simulation.api import run_simulation
+
+            payload = run_simulation(str(spec), str(root / "out"), stage="run")
             self.assertEqual(payload["backend"], "torch-fem")
             self.assertGreater(payload["displacement"]["maxMagnitude"], 0.0)
             self.assertGreater(payload["mesh"]["elementCount"], 0)
@@ -85,6 +92,7 @@ class SimulationTests(unittest.TestCase):
                 json.dumps(
                     {
                         "mode": "topology",
+                        "device": "cpu",
                         "designDomain": {"x": [0, 60], "y": [0, 20], "nx": 12, "ny": 4},
                         "material": {"E": 1.0, "nu": 0.3},
                         "objective": {"type": "compliance", "sense": "minimize"},
@@ -100,6 +108,30 @@ class SimulationTests(unittest.TestCase):
             self.assertGreater(payload["iterations"], 0)
             self.assertLess(abs(payload["finalVolumeFraction"] - 0.5), 0.03)
             self.assertTrue((root / "out" / "optimization-result.json").exists())
+
+    def test_cuda_optimization_fails_closed_without_cuda(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            spec = root / "cuda-required.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "mode": "topology",
+                        "device": "cuda",
+                        "designDomain": {"x": [0, 10], "y": [0, 4], "nx": 2, "ny": 1},
+                        "material": {"E": 1.0, "nu": 0.3},
+                        "objective": {"type": "compliance", "sense": "minimize"},
+                        "constraints": [{"type": "volume_fraction", "max": 0.5}],
+                        "optimizer": {"type": "mma", "maxIterations": 1},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            envelope = run_cadctl("optimize", "--spec", str(spec), "--output-dir", str(root / "out"), cwd=root)
+            if envelope["ok"]:
+                self.assertEqual(envelope["payload"]["actualDevice"], "cuda")
+            else:
+                self.assertIn("CPU fallback is forbidden", envelope["payload"]["error"])
 
 
     def test_gmsh_meshes_step_artifact(self) -> None:
@@ -188,61 +220,6 @@ def beam_spec(size: float, *, loads: list[dict], constraints: list[dict]) -> dic
 
 FACE_MIN = {"axis": "x", "side": "min"}
 FACE_MAX = {"axis": "x", "side": "max"}
-
-
-class SimulationProvenanceTests(unittest.TestCase):
-    def test_simulate_discards_result_when_artifact_changes_during_solve(self) -> None:
-        import argparse
-        import contextlib
-        import io
-
-        from cadctl import cli
-        from cadctl.model import run_source
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            step = root / "bracket.step"
-            result = run_source(str(ROOT / "tests" / "fixtures" / "plate.py"), step)
-            self.assertEqual(result.get("exitCode"), 0)
-            spec = root / "spec.json"
-            spec.write_text(
-                json.dumps(
-                    {
-                        "artifact": str(step),
-                        "physics": {"type": "linear_elasticity"},
-                        "mesh": {"element": "tet", "size": 10.0},
-                        "materials": [{"name": "steel", "E": 210000.0, "nu": 0.3}],
-                        "constraints": [{"type": "fixed", "region": FACE_MIN}],
-                        "loads": [{"type": "nodal_force", "region": FACE_MAX, "vector": [0, 0, -100.0]}],
-                    }
-                ),
-                encoding="utf-8",
-            )
-
-            original_run_simulation = cli.run_simulation
-
-            def mutating_run_simulation(spec_path, output_dir, stage="run"):
-                # Simulate an external writer touching the STEP while the
-                # solver is running: the mesh came from the old bytes.
-                with open(step, "ab") as handle:
-                    handle.write(b"\n")
-                return original_run_simulation(spec_path, output_dir, stage=stage)
-
-            cli.run_simulation = mutating_run_simulation
-            try:
-                captured = io.StringIO()
-                with contextlib.redirect_stdout(captured):
-                    exit_code = cli._cmd_simulate(
-                        argparse.Namespace(spec=str(spec), output_dir=str(root / "out"), stage="run")
-                    )
-            finally:
-                cli.run_simulation = original_run_simulation
-            self.assertEqual(exit_code, 0)
-            envelope = json.loads(captured.getvalue())
-            self.assertFalse(envelope["ok"])
-            self.assertIn("changed during simulation", envelope["payload"]["error"])
-            # The pre-solve hash is still recorded so the failure is auditable.
-            self.assertIn("artifact", envelope["inputHashes"])
 
 
 class SimulationSemanticsTests(unittest.TestCase):

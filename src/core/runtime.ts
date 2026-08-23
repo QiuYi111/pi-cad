@@ -7,12 +7,9 @@ import {
   type EvidenceRef,
 } from "../shared/protocol.ts";
 import { randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { CadProjectStore, nowIso } from "../shared/store.ts";
 import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
 import { recordObservation } from "./observation-index.ts";
-import { currentDoctorReport, type DoctorReport, packageRoot } from "../shared/capability.ts";
 import { composeSystemPrompt } from "./context.ts";
 import { maybeRebuildContext, registerContextCompaction, renderTaskContext } from "./context-memory.ts";
 import { maybeAutoContinue } from "./continuation.ts";
@@ -28,9 +25,6 @@ const OPTIONAL_TOOL_NAMES = [
   "cad_simulate",
   "cad_sim_observe",
   "cad_commit_simulation",
-  "cad_simulate_structural_legacy",
-  "cad_simulate_flow",
-  "cad_simulate_thermal",
   "cad_optimize",
   "cad_render_scene",
 ] as const;
@@ -143,12 +137,9 @@ async function handleToolResult(
   const kind = info.kind as EvidenceRef["kind"];
   if (!EVIDENCE_KINDS.includes(kind)) return;
   if (!envelopeOk(info.envelope)) return;
-  if (kind === "simulation") {
-    const payload = info.envelope.payload as { status?: string } | undefined;
-    if (payload?.status !== "solved" || (info.envelope.artifacts?.length ?? 0) === 0) {
-      return;
-    }
-  }
+  // Simulation V2 is explicit-commit only. A successful solver or observer
+  // tool result must never be promoted by the generic tool-result hook.
+  if (kind === "simulation") return;
   if (kind === "optimization" && (info.envelope.artifacts?.length ?? 0) === 0) return;
   const artifactHash =
     info.artifactHash ??
@@ -157,10 +148,10 @@ async function handleToolResult(
   if (!artifactHash) return;
   const specHash =
     info.specHash ??
-    (kind === "simulation" || kind === "optimization" ? info.envelope.inputHashes?.spec : undefined);
+    (kind === "optimization" ? info.envelope.inputHashes?.spec : undefined);
   const caseId =
     info.caseId ??
-    (kind === "simulation" ? (info.envelope.payload as { caseId?: string } | undefined)?.caseId : undefined);
+    undefined;
   const envelope = info.envelope as Parameters<typeof recordToolEvidence>[1];
   const next = recordToolEvidence(state, envelope, kind, artifactHash, specHash, caseId);
   await persist(pi, store, next, [
@@ -183,36 +174,14 @@ async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<
   const result = missing.filter((name) =>
     (OPTIONAL_TOOL_NAMES as readonly string[]).includes(name),
   );
-  // Runtime source of truth is a live `cadctl doctor` against the uv-managed
-  // Python project the harness actually uses, cached
-  // per session. The install-time .pi-cad-runtime.json is only a fallback
-  // diagnostic when the live probe itself cannot run.
-  let doctor: DoctorReport | null = await currentDoctorReport(cwd);
-  if (!doctor) {
+  // Optimization availability comes from the exact managed production
+  // runtime, never from the host CAD Python environment. This also prevents a
+  // CPU-only host doctor from advertising the CUDA optimizer as ready.
+  if (cwd && available.has("cad_optimize")) {
     try {
-      const raw = await readFile(join(packageRoot(), ".pi-cad-runtime.json"), "utf-8");
-      doctor = JSON.parse(raw) as DoctorReport;
+      await managedSimulationRunner.resolveRuntime(cwd, "torch-fem", "torch-fem-0.9-cu126");
     } catch {
-      // No doctor report installed and probe failed; fall back to the
-      // tool-registration check only.
-    }
-  }
-  if (doctor?.capabilities) {
-    if (available.has("cad_simulate_structural_legacy") && doctor.capabilities.simulation?.status !== "ready") {
-      result.push("cad_simulate_structural_legacy: doctor simulation backend not ready");
-    }
-    const thermalFluid = doctor.capabilities.thermalFluid as { status?: string } | undefined;
-    if (available.has("cad_simulate_flow") && thermalFluid?.status !== "ready") {
-      result.push("cad_simulate_flow: doctor thermalFluid backend not ready");
-    }
-    if (available.has("cad_simulate_thermal") && thermalFluid?.status !== "ready") {
-      result.push("cad_simulate_thermal: doctor thermalFluid backend not ready");
-    }
-    if (
-      available.has("cad_optimize") &&
-      doctor.capabilities.differentiableOptimization?.status !== "ready"
-    ) {
-      result.push("cad_optimize: doctor differentiableOptimization not ready");
+      result.push("cad_optimize: managed torch-fem-0.9-cu126 unavailable");
     }
   }
   return result;
@@ -223,6 +192,7 @@ async function simulationCapabilityContext(cwd: string, enabled: boolean): Promi
   const configured = await simulationRuntimeProjection().catch(() => []);
   const ready: Array<{ backend: string; runtime: string }> = [];
   for (const entry of configured) {
+    if (entry.developmentOnly && process.env.PI_CAD_ENABLE_DEV_RUNTIMES !== "1") continue;
     try {
       await managedSimulationRunner.resolveRuntime(cwd, entry.backend, entry.runtime);
       ready.push(entry);

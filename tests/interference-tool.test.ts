@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 type ToolDef = {
@@ -244,43 +243,20 @@ function assert_almost_equal(actual: number, expected: number, tol: number) {
   );
 }
 
-test("cad_scan_sections reports area/moment facts for a box", async () => {
-  const { execFileSync } = await import("node:child_process");
-  const venvPython = join(cwdRoot(), ".venv", "bin", "python");
-  let blenderless = true;
-  try {
-    execFileSync("blender", ["--version"], { encoding: "utf-8" });
-  } catch {
-    blenderless = false;
-  }
-  if (!existsSyncLocal(venvPython)) return;
+test("cad_probe sections_scan reports area/moment facts for a box", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-sections-"));
   try {
-    writeFileSync(
-      join(cwd, "box.py"),
-      [
-        "import build123d as bd",
-        "with bd.BuildPart() as p:",
-        "    bd.Box(40, 30, 12)",
-        "result = p.part",
-        "",
-      ].join("\n"),
-    );
-    execFileSync(venvPython, ["-m", "cadctl", "build", "--source", "box.py", "--output", "box.step", "--force"], {
-      cwd,
-      encoding: "utf-8",
-      env: { ...process.env, PYTHONPATH: join(cwdRoot(), "python") },
-    });
+    writeFileSync(join(cwd, "box.step"), readFileSync(new URL("./fixtures/section_box.step", import.meta.url)));
     const pi = mockPi();
-    const geometry = (await import("../src/extensions/geometry/index.ts")).default;
-    geometry(pi as never);
-    const tool = pi.tools.get("cad_scan_sections");
-    const bad = await tool.execute("s0", { artifact: "box.step", axis: "z" }, undefined, undefined, { cwd });
+    const probeExtension = (await import("../src/extensions/probe/index.ts")).default;
+    probeExtension(pi as never);
+    const tool = pi.tools.get("cad_probe");
+    const bad = await tool.execute("s0", { preset: "sections_scan", args: { artifact: "box.step", axis: "z" } }, undefined, undefined, { cwd });
     assert.match(bad.content[0].text as string, /exactly one of count or step/);
 
     const result = await tool.execute(
       "s1",
-      { artifact: "box.step", axis: "z", count: 3 },
+      { preset: "sections_scan", args: { artifact: "box.step", axis: "z", count: 3 } },
       undefined,
       undefined,
       { cwd },
@@ -297,11 +273,3 @@ test("cad_scan_sections reports area/moment facts for a box", async () => {
     rmSync(cwd, { recursive: true, force: true });
   }
 });
-
-function cwdRoot(): string {
-  return fileURLToPath(new URL("..", import.meta.url));
-}
-
-function existsSyncLocal(path: string): boolean {
-  return existsSync(path);
-}

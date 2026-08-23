@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { validateObservationFile } from "../src/modules/simulate-v2/observation.ts";
+import { renderSimulationObservation, validateObservationFile } from "../src/modules/simulate-v2/observation.ts";
 import { loadSimulationRecipe, parseSimulationManifest, selectSimulationOutputs } from "../src/modules/simulate-v2/protocol.ts";
 
 const manifest = (extra = "") => `schema = 1
@@ -146,6 +146,15 @@ format = "json"
     const result = await validateObservationFile({ manifest: parsed, observationFile, workspace: cwd, selectedNames: Object.keys(parsed.exports), plotDir: join(cwd, "plots"), computeSucceeded: true });
     assert.equal(result.validForCommit, true);
     assert.deepEqual(new Set(result.selected.map((item) => item.declaration.type)), new Set(["image", "scalar", "timeseries", "table", "field", "artifact"]));
+    const content = await renderSimulationObservation({
+      runId: "sim-001", observationId: "obs-001", backend: "torch-fem", runtime: "torch-fem-0.9-cu126", durationMs: 1000,
+      runtimeIdentity: { resolvedVersion: "torch-fem=0.9.0", digest: "d".repeat(64), accelerator: { requestedDevice: "cuda", actualDevice: "cuda", gpu: "TITAN Xp", cupy: "14.1.1" } },
+      observation: result,
+    });
+    assert.equal(content[0].type, "image", "primary image must be first");
+    assert.match(content[1].text!, /Quantitative scalars[\s\S]*fill_fraction/);
+    assert.equal(content[2].type, "image", "timeseries plot follows scalar context");
+    assert.match(content[3].text!, /Timeseries[\s\S]*history[\s\S]*Tables[\s\S]*row: a \| 1[\s\S]*Solver health[\s\S]*actual device: cuda[\s\S]*GPU: TITAN Xp[\s\S]*Diagnostics[\s\S]*Artifacts/);
     await writeFile(join(cwd, "table.json"), JSON.stringify({ columns: ["a"], rows: [[1, 2]] }));
     await assert.rejects(validateObservationFile({ manifest: parsed, observationFile, workspace: cwd, selectedNames: ["rows"], plotDir: join(cwd, "plots2"), computeSucceeded: true }), /row width mismatch/);
   } finally {

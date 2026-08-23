@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 
 from ._torchfem_import import import_torchfem
+from .base import SimulationBackendError
+from .torch_fem_backend import resolve_device
 
 
 def _device_torch():
@@ -26,6 +28,12 @@ def run_topology(spec: dict[str, Any], workdir: str | Path) -> dict[str, Any]:
     import torch
 
     torch.set_default_dtype(torch.float64)
+    device_info = resolve_device(str(spec.get("device", "cuda")))
+    if device_info.requested == "cuda" and device_info.actual != "cuda":
+        raise SimulationBackendError(
+            f"CUDA topology runtime is unavailable ({device_info.fallbackReason or 'unknown reason'}); "
+            "CPU fallback is forbidden — select the explicit CPU runtime instead"
+        )
     torchfem = import_torchfem()
     from torchfem.materials import IsotropicElasticityPlaneStress
     from torchfem.mesh import rect_tri
@@ -78,6 +86,7 @@ def run_topology(spec: dict[str, Any], workdir: str | Path) -> dict[str, Any]:
 
         u, *_ = model.solve(
             increments=torch.tensor([0.0, 1.0], dtype=torch.float64),
+            device=device_info.actual,
             differentiable_parameters=[xt],
         )
         compliance = (u * model.forces).sum()
@@ -124,6 +133,11 @@ def run_topology(spec: dict[str, Any], workdir: str | Path) -> dict[str, Any]:
     result = {
         "mode": "topology_2d_rect_v0",
         "backend": "torch-fem + nlopt MMA",
+        "requestedDevice": device_info.requested,
+        "actualDevice": device_info.actual,
+        "fallbackReason": device_info.fallbackReason,
+        "cudaAvailable": device_info.cudaAvailable,
+        "cupyAvailable": device_info.cupyAvailable,
         "optimizer": {"type": "mma", "maxIterations": max_iter},
         "objective": spec.get("objective", {"type": "compliance", "sense": "minimize"}),
         "constraints": spec.get("constraints"),

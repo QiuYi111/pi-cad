@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { ACTIVE_PUBLIC_TOOL_NAMES } from "../src/shared/public-tools.ts";
+
 interface MockPi {
   tools: string[];
   commands: string[];
@@ -50,63 +52,24 @@ function mockPi(): MockPi {
   return pi;
 }
 
-test("all three V0 extensions load and register the expected tools/events", async () => {
+test("all configured extensions load and register the expected tools/events", async () => {
   const pi = mockPi();
   const core = (await import("../src/extensions/core/index.ts")).default;
+  const probe = (await import("../src/extensions/probe/index.ts")).default;
   const geometry = (await import("../src/extensions/geometry/index.ts")).default;
-  const visual = (await import("../src/extensions/visual/index.ts")).default;
   const drawing = (await import("../src/extensions/drawing/index.ts")).default;
   const simulation = (await import("../src/extensions/simulation/index.ts")).default;
   const presentation = (await import("../src/extensions/presentation/index.ts")).default;
   const ui = (await import("../src/extensions/ui/index.ts")).default;
   core(pi);
+  probe(pi);
   geometry(pi);
-  visual(pi);
   drawing(pi);
   simulation(pi);
   presentation(pi);
   ui(pi);
 
-  const expectedTools = [
-    "cad_route",
-    "cad_reroute",
-    "cad_commit_requirements",
-    "cad_revise_requirements",
-    "cad_commit_frame_context",
-    "cad_commit_plan",
-    "cad_commit_assembly_design",
-    "cad_commit_interface_contracts",
-    "cad_commit_candidate",
-    "cad_submit_for_review",
-    "cad_transition",
-    "cad_wait_for_user",
-    "cad_defer_clarification",
-    "cad_declare_blocker",
-    "cad_finish",
-    "cad_commit_simulation",
-    "cad_build_step",
-    "cad_inspect_geometry",
-    "cad_inspect_surfaces",
-    "cad_measure",
-    "cad_inspect_visual",
-    "cad_inspect_section",
-    "cad_compare_geometry",
-    "cad_assembly_tree",
-    "cad_inspect_interference",
-    "cad_scan_sections",
-    "cad_probe_python",
-    "cad_export",
-    "cad_generate_drawing",
-    "cad_simulate",
-    "cad_sim_observe",
-    "cad_simulate_structural_legacy",
-    "cad_simulate_flow",
-    "cad_simulate_thermal",
-    "cad_derive_analysis_model",
-    "cad_optimize",
-    "cad_render_scene",
-  ];
-  assert.deepEqual(pi.tools.sort(), [...expectedTools].sort());
+  assert.deepEqual(pi.tools.sort(), [...ACTIVE_PUBLIC_TOOL_NAMES].sort());
   assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-reroute", "cad-status"]);
   for (const event of ["before_agent_start", "tool_call", "tool_result", "agent_settled"]) {
     assert.ok((pi.handlers.get(event) ?? []).length > 0, `missing ${event} handler`);

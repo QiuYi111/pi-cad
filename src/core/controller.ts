@@ -202,11 +202,7 @@ const RouteParamsSchema = Type.Object(
 const SimulationCaseSchema = Type.Object(
   {
     id: Type.String({ minLength: 1 }),
-    tool: Type.Enum({
-      cad_simulate: "cad_simulate",
-      cad_simulate_flow: "cad_simulate_flow",
-      cad_simulate_thermal: "cad_simulate_thermal",
-    }),
+    tool: Type.Literal("cad_simulate"),
   },
   { additionalProperties: false },
 );
@@ -227,7 +223,7 @@ const EvidenceObligationsSchema = Type.Object(
             Type.Array(SimulationCaseSchema, {
               minItems: 1,
               description:
-                "Opaque simulation cases: the harness only checks that each interpreter invocation produced current-version evidence; it never interprets what a case means",
+                "Opaque Recipe-native simulation cases: the harness checks current-version evidence from cad_simulate but never interprets what a case means",
             }),
           ),
         },

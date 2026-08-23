@@ -1,0 +1,36 @@
+schema = 1
+entrypoint = "bash Allrun"
+observe = "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python observe.py"
+nonvisual = false
+
+inputs = ["../../build/model.step"]
+observation_files = ["observe.py"]
+
+[exports.von_mises_view]
+type = "image"
+primary = true
+
+[exports.max_displacement]
+type = "scalar"
+primary = true
+unit = "mm"
+
+[exports.max_von_mises]
+type = "scalar"
+primary = true
+unit = "MPa"
+
+[exports.reaction_magnitude]
+type = "scalar"
+unit = "N"
+
+[exports.runtime_health]
+type = "table"
+
+[exports.fields]
+type = "field"
+format = "npz"
+
+[exports.sensitivity]
+type = "artifact"
+format = "json"

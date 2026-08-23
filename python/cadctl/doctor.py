@@ -4,6 +4,7 @@ import importlib
 import json
 import shutil
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -98,7 +99,34 @@ def _presentation_status() -> dict[str, Any]:
     return {"status": "unavailable", "missing": missing, "blender": source}
 
 
+def _managed_runtime_catalog() -> dict[str, Any]:
+    registry_path = Path(__file__).resolve().parents[2] / "assets" / "simulation-runtimes.json"
+    try:
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
+        if registry.get("schema") != 2 or not isinstance(registry.get("runtimes"), list):
+            raise ValueError("expected runtime registry schema 2")
+        runtimes = [
+            {
+                "backend": item["backend"],
+                "runtime": item["runtime"],
+                "kind": item["kind"],
+                "accelerator": item.get("accelerator", "none"),
+                "developmentOnly": bool(item.get("developmentOnly", False)),
+            }
+            for item in registry["runtimes"]
+        ]
+        return {
+            "status": "configured",
+            "registrySchema": 2,
+            "runtimes": runtimes,
+            "note": "availability is verified by the managed launcher against immutable /opt roots",
+        }
+    except Exception as exc:
+        return {"status": "error", "error": str(exc), "registry": str(registry_path)}
+
+
 def doctor() -> dict[str, Any]:
+    managed = _managed_runtime_catalog()
     return {
         "package": "pi-cad",
         "packageVersion": __version__,
@@ -113,12 +141,23 @@ def doctor() -> dict[str, Any]:
             "drawing": {
                 "status": "ready" if _module("ezdxf") else "unavailable",
             },
-            "simulation": _torch_fem_status(),
-            "thermalFluid": _thermal_fluid_status(),
-            "differentiableOptimization": _optimization_status(),
+            "simulation": managed,
+            "thermalFluid": managed,
+            "differentiableOptimization": {
+                "status": "managed",
+                "backend": "torch-fem",
+                "runtime": "torch-fem-0.9-cu126",
+                "fallback": "forbidden",
+            },
             "assembly": {"status": "ready"},
             "export": {"status": "ready"},
             "presentation": _presentation_status(),
+        },
+        "hostDevelopmentPython": {
+            "simulation": _torch_fem_status(),
+            "thermalFluid": _thermal_fluid_status(),
+            "optimization": _optimization_status(),
+            "note": "diagnostic only; public simulation and optimization never execute in this host environment",
         },
     }
 

@@ -1,4 +1,4 @@
-"""cad_simulate_flow backend: canonical FlowSpec -> SU2 -> canonical evidence.
+"""Recipe-owned SU2 flow compiler and result collector.
 
 Unit contract: CAD geometry per ``geometryUnits`` (mm default); every
 physical quantity SI with the unit in its name. The mesh handed to SU2 is

@@ -2,10 +2,9 @@
 
 Design:
 
-* SU2 is an optional native runtime, not a Python dependency. Resolution
-  order: ``PI_CAD_SU2_BIN`` -> package ``.runtime/su2/<version>/<platform>``
-  -> ``PATH``. Everything fails closed with an "unavailable" status so the
-  harness can report the missing capability instead of crashing.
+* SU2 is an explicit managed native runtime, not a Python dependency. The V2
+  launcher injects ``PI_CAD_SU2_BIN`` after verifying the immutable runtime
+  identity. Host PATH and repository-local runtime discovery are forbidden.
 * Both input artifacts are hashed BEFORE the solve and re-hashed after; any
   mid-solve mutation discards the result, mirroring the structural solve's
   provenance rules.
@@ -17,18 +16,13 @@ Design:
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
-import shutil
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 from .base import SimulationBackendError
-
-SU2_MANIFEST_PATH = Path(__file__).resolve().parents[3] / "scripts" / "su2-manifest.json"
 
 _VERSION_PATTERN = re.compile(r"SU2 v([0-9][0-9A-Za-z.\-]*)")
 
@@ -37,59 +31,21 @@ class Su2UnavailableError(SimulationBackendError):
     pass
 
 
-def _platform_key() -> str:
-    machine = os.uname().machine.lower() if hasattr(os, "uname") else ""
-    if sys.platform.startswith("linux"):
-        return "linux-x64" if "aarch64" not in machine else "linux-arm64"
-    if sys.platform == "darwin":
-        return "darwin-arm64" if "arm64" in machine else "darwin-x64"
-    if sys.platform.startswith("win"):
-        return "win32-x64"
-    return f"{sys.platform}-{machine}"
-
-
-def _manifest() -> dict[str, Any]:
-    try:
-        return json.loads(SU2_MANIFEST_PATH.read_text(encoding="utf-8"))
-    except Exception as exc:
-        raise Su2UnavailableError(f"SU2 manifest is missing or unreadable: {exc}") from exc
-
-
 def resolve_su2_binary() -> tuple[str, str]:
-    """Return (path, version) of the SU2_CFD executable, or raise."""
+    """Return the launcher-injected managed SU2 executable, or fail closed."""
     override = os.environ.get("PI_CAD_SU2_BIN")
-    if override:
-        candidate = Path(override).expanduser().resolve()
-        if not candidate.exists():
-            raise Su2UnavailableError(f"PI_CAD_SU2_BIN points to a missing file: {override}")
-        return str(candidate), _probe_version(str(candidate))
-
-    manifest = _manifest()
-    platform_key = _platform_key()
-    entry = manifest.get("platforms", {}).get(platform_key)
-    if entry:
-        binary_name = "SU2_CFD.exe" if platform_key.startswith("win32") else "SU2_CFD"
-        for base in _package_runtime_roots():
-            candidate = base / manifest.get("version", "") / platform_key / "bin" / binary_name
-            if candidate.exists():
-                return str(candidate), str(manifest.get("version", "unknown"))
-
-    found = shutil.which("SU2_CFD") or shutil.which("su2_cfd")
-    if found:
-        return found, _probe_version(found)
-
-    raise Su2UnavailableError(
-        "no SU2_CFD executable found (PI_CAD_SU2_BIN, package .runtime/su2, PATH); "
-        "flow/thermal simulation is unavailable on this host"
-    )
-
-
-def _package_runtime_roots() -> list[Path]:
-    roots = [Path(__file__).resolve().parents[3] / ".runtime" / "su2"]
-    env_root = os.environ.get("PI_CAD_SU2_RUNTIME")
-    if env_root:
-        roots.insert(0, Path(env_root))
-    return roots
+    if not override:
+        raise Su2UnavailableError("PI_CAD_SU2_BIN is not set by a verified managed SU2 runtime")
+    candidate = Path(override).resolve()
+    managed_root = Path("/opt/pi-cad-runtime/su2/8.5.0").resolve()
+    if managed_root not in candidate.parents:
+        raise Su2UnavailableError("PI_CAD_SU2_BIN must resolve inside the immutable managed SU2 runtime")
+    if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        raise Su2UnavailableError(f"managed SU2 executable is missing or not executable: {candidate}")
+    version = _probe_version(str(candidate))
+    if version != "8.5.0":
+        raise Su2UnavailableError(f"managed SU2 version mismatch: expected 8.5.0, got {version}")
+    return str(candidate), version
 
 
 def _probe_version(binary: str) -> str:

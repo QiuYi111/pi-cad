@@ -61,15 +61,8 @@ result = nozzle.part
 
 
 def su2_available() -> bool:
-    import os
-    import shutil
-
     from cadctl.simulation.su2_backend import resolve_su2_binary
 
-    if os.environ.get("PI_CAD_SU2_BIN") and Path(os.environ["PI_CAD_SU2_BIN"]).exists():
-        return True
-    if shutil.which("SU2_CFD"):
-        return True
     try:
         resolve_su2_binary()
         return True
@@ -151,11 +144,9 @@ def run_flow(root: Path, step: Path) -> dict:
     }
     spec_path = root / "spec.json"
     spec_path.write_text(json.dumps(spec), encoding="utf-8")
-    envelope = run_cadctl(
-        "simulate-flow", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
-    )
-    assert envelope["ok"], envelope
-    payload = envelope["payload"]
+    from cadctl.simulation.flow_api import run_flow as run_flow_case
+
+    payload = run_flow_case(str(spec_path), str(root / "out"), stage="run")
     assert payload["status"] == "solved", payload.get("reason")
     return payload["boundaries"][outlet]
 

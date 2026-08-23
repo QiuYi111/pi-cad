@@ -364,11 +364,9 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             }
             spec_path = root / "spec.json"
             spec_path.write_text(json.dumps(spec), encoding="utf-8")
-            envelope = run_cadctl(
-                "simulate-thermal", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
-            )
-            self.assertTrue(envelope["ok"], envelope)
-            payload = envelope["payload"]
+            from cadctl.simulation.thermal_api import run_thermal
+
+            payload = run_thermal(str(spec_path), str(root / "out"), stage="run")
             self.assertEqual(payload["status"], "solved")
             self.assertEqual(payload["backend"], "su2")
             self.assertEqual(payload["caseId"], "slab-axial")
@@ -379,12 +377,9 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             self.assertLess(abs(cold_rate - analytic) / analytic, 0.06, (cold_rate, analytic))
             self.assertGreater(payload["temperature"]["minK"], 295.0)
             self.assertLess(payload["temperature"]["maxK"], 1155.0)
-            # Provenance: artifact pre-hashed and hash-bound in the envelope.
-            self.assertIn("artifact", envelope["inputHashes"])
-            kinds = {a["kind"] for a in envelope["artifacts"]}
-            self.assertIn("simulation_result", kinds)
-            self.assertIn("simulation_fields", kinds)
-            self.assertIn("simulation_visual", kinds)
+            self.assertTrue(Path(payload["artifact"]).exists())
+            self.assertTrue(payload["fieldArtifacts"])
+            self.assertTrue(payload["visualization"]["views"])
 
     def test_unmet_residual_target_returns_not_converged_and_creates_no_evidence(self) -> None:
         """Regression: a run that misses its own declared residual standard must
@@ -412,17 +407,12 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             }
             spec_path = root / "spec.json"
             spec_path.write_text(json.dumps(spec), encoding="utf-8")
-            envelope = run_cadctl(
-                "simulate-thermal", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
-            )
-            payload = envelope["payload"]
+            from cadctl.simulation.thermal_api import run_thermal
+
+            payload = run_thermal(str(spec_path), str(root / "out"), stage="run")
             self.assertEqual(payload["status"], "not_converged")
             self.assertIn("did not reach", payload["reason"])
             self.assertEqual(payload["caseId"], "slab-impossible")
-            # The envelope itself is ok (the tool ran); the harness's
-            # simulation gate keys on status, so this creates no evidence.
-            self.assertTrue(envelope["ok"])
-            self.assertTrue(any("not_converged" in w for w in envelope["warnings"]))
             # Raw fields are still written for inspection.
             self.assertTrue((root / "out" / "thermal-result.json").exists())
 
@@ -447,10 +437,9 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             }
             spec_path = root / "spec.json"
             spec_path.write_text(json.dumps(spec), encoding="utf-8")
-            envelope = run_cadctl(
-                "simulate-thermal", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
-            )
-            payload = envelope["payload"]
+            from cadctl.simulation.thermal_api import run_thermal
+
+            payload = run_thermal(str(spec_path), str(root / "out"), stage="run")
             self.assertEqual(payload["status"], "not_converged")
             self.assertIn("no convergence.residualTarget", payload["reason"])
 
@@ -481,11 +470,9 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             }
             spec_path = root / "spec.json"
             spec_path.write_text(json.dumps(spec), encoding="utf-8")
-            envelope = run_cadctl(
-                "simulate-flow", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
-            )
-            self.assertTrue(envelope["ok"], envelope)
-            payload = envelope["payload"]
+            from cadctl.simulation.flow_api import run_flow
+
+            payload = run_flow(str(spec_path), str(root / "out"), stage="run")
             self.assertEqual(payload["status"], "solved")
             self.assertEqual(payload["caseId"], "nozzle-outlet")
             self.assertGreater(payload["mesh"]["nodeCount"], 500)
@@ -493,75 +480,6 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             outlet_mach = payload["boundaries"][outlet]["areaWeightedMean_Mach"]
             self.assertGreater(outlet_mach, 1.0, outlet_mach)
             self.assertLess(outlet_mach, 3.0, outlet_mach)
-            self.assertIn("fluidDomain", envelope["inputHashes"])
-
-    def test_mid_solve_spec_rewrite_discards_result(self) -> None:
-        """Regression: the canonical spec is part of the frozen invocation
-        inputs. Rewriting it while the solver runs must invalidate the run —
-        not silently redefine provenance from the rewritten file."""
-        import argparse
-        import contextlib
-        import io
-
-        from cadctl import cli
-        from cadctl.simulation import flow_api
-
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            step = make_nozzle(root)
-            surfaces = run_cadctl("inspect-surfaces", "--artifact", str(step), cwd=root)
-            facts = surfaces["payload"]["surfaces"]
-            inlet = next(s["id"] for s in facts if s["type"] == "plane" and abs(s["centroid"][0]) < 1e-9)
-            outlet = next(s["id"] for s in facts if s["type"] == "plane" and abs(s["centroid"][0] - 320.0) < 1e-6)
-            walls = [s["id"] for s in facts if s["type"] != "plane"]
-            spec = {
-                "caseId": "nozzle-outlet",
-                "fluidDomain": str(step),
-                "geometryUnits": "mm",
-                "physics": {"type": "compressible_euler"},
-                "fluid": {"model": "ideal_gas", "gamma": 1.4, "gasConstantJPerKgK": 287.05},
-                "initial": {"mach": 0.25, "temperatureK": 288.15, "pressurePa": 101325.0},
-                "boundaries": [
-                    {"type": "total_conditions_inlet", "surfaces": [inlet], "totalPressurePa": 420000.0, "totalTemperatureK": 1150.0, "flowDirection": [1, 0, 0]},
-                    {"type": "pressure_outlet", "surfaces": [outlet], "staticPressurePa": 101325.0},
-                    {"type": "wall", "surfaces": walls, "thermal": "adiabatic"},
-                ],
-                "mesh": {"maxSizeMm": 20.0},
-                "convergence": {"maxIterations": 50},
-            }
-            spec_path = root / "spec.json"
-            spec_path.write_text(json.dumps(spec), encoding="utf-8")
-
-            original_run_su2 = flow_api.run_su2
-
-            def spec_rewriting_run_su2(config_path, workdir, timeout_s=5400.0):
-                # The backend re-checks artifact/fluidDomain but not the spec;
-                # the CLI's frozen-input gate must catch this instead.
-                spec_path.write_text(
-                    json.dumps({**spec, "caseId": "tampered-case"}), encoding="utf-8"
-                )
-                return original_run_su2(config_path, workdir, timeout_s=timeout_s)
-
-            flow_api.run_su2 = spec_rewriting_run_su2
-            try:
-                captured = io.StringIO()
-                with contextlib.redirect_stdout(captured):
-                    exit_code = cli._cmd_simulate_flow(
-                        argparse.Namespace(spec=str(spec_path), output_dir=str(root / "out"), stage="run")
-                    )
-            finally:
-                flow_api.run_su2 = original_run_su2
-            self.assertEqual(exit_code, 0)
-            envelope = json.loads(captured.getvalue())
-            self.assertFalse(envelope["ok"])
-            self.assertIn("changed during simulation", envelope["payload"]["error"])
-            self.assertIn("spec", envelope["payload"]["error"])
-            # Reported provenance is still the pre-solve frozen hash, never
-            # the rewritten file's.
-            from cadctl.provenance import FrozenInputs
-
-            rewritten_hash = FrozenInputs.freeze([("spec", spec_path)]).hashes()["spec"]
-            self.assertNotEqual(envelope["inputHashes"]["spec"], rewritten_hash)
 
     def test_incompressible_ns_runs_with_declared_viscosity(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -593,11 +511,9 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             }
             spec_path = root / "spec.json"
             spec_path.write_text(json.dumps(spec), encoding="utf-8")
-            envelope = run_cadctl(
-                "simulate-flow", "run", "--spec", str(spec_path), "--output-dir", str(root / "out"), cwd=root,
-            )
-            self.assertTrue(envelope["ok"], envelope)
-            payload = envelope["payload"]
+            from cadctl.simulation.flow_api import run_flow
+
+            payload = run_flow(str(spec_path), str(root / "out"), stage="run")
             self.assertIn(payload["status"], {"solved", "not_converged"})
             # The declared viscosity is the one in the compiled cfg; nothing
             # defaulted to air anywhere in the pipeline.
@@ -608,12 +524,6 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
                 self.assertLess(payload["massBalance"]["relativeImbalance"], 0.05, payload["massBalance"])
 
     def test_mid_solve_artifact_mutation_discards_flow_result(self) -> None:
-        import argparse
-        import contextlib
-        import io
-
-        from cadctl import cli
-
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             step = make_nozzle(root)
@@ -652,17 +562,11 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
 
             flow_api.run_su2 = mutating_run_su2
             try:
-                captured = io.StringIO()
-                with contextlib.redirect_stdout(captured):
-                    exit_code = cli._cmd_simulate_flow(
-                        argparse.Namespace(spec=str(spec_path), output_dir=str(root / "out"), stage="run")
-                    )
+                payload = flow_api.run_flow(str(spec_path), str(root / "out"), stage="run")
             finally:
                 flow_api.run_su2 = original_run_su2
-            self.assertEqual(exit_code, 0)
-            envelope = json.loads(captured.getvalue())
-            self.assertFalse(envelope["ok"])
-            self.assertIn("changed during simulation", envelope["payload"]["error"])
+            self.assertEqual(payload["status"], "discarded")
+            self.assertIn("changed during simulation", payload["reason"])
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""cad_simulate_thermal backend: steady solid heat conduction via SU2.
+"""Recipe-owned SU2 solid-thermal compiler and result collector.
 
 V1 scope: constant thermal conductivity, fixed-temperature and fixed
 heat-flux boundaries, adiabatic remainder, steady state.

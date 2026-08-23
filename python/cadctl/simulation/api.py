@@ -9,10 +9,9 @@ from ..common import read_json, resolve_spec_path
 from .base import SimulationBackendError
 from .torch_fem_backend import TorchFemBackend
 
-# Key whitelists: the harness tool schema already rejects unknown keys
-# (additionalProperties: false), but a spec handed straight to
-# `cadctl simulate --spec` must fail closed the same way. A typo like
-# "distribut" or "dof" must never silently fall back to a default.
+# Key whitelists: the V2 manifest/harness rejects unknown keys, and the
+# Recipe-owned solver library must independently fail closed as well. A typo
+# like "distribut" or "dof" must never silently fall back to a default.
 _SPEC_KEYS = {
     "units",
     "backend",
@@ -24,6 +23,7 @@ _SPEC_KEYS = {
     "materials",
     "constraints",
     "loads",
+    "sensitivity",
 }
 _ANALYSIS_MODEL_KEYS = {"derivationRef"}
 _PHYSICS_KEYS = {"type"}
@@ -31,6 +31,7 @@ _MATERIAL_KEYS = {"name", "E", "nu", "density", "youngs_modulus", "poisson_ratio
 _MESH_KEYS = {"element", "size", "box"}
 _LOAD_KEYS = {"type", "region", "vector", "distribute"}
 _CONSTRAINT_KEYS = {"type", "region", "dofs"}
+_SENSITIVITY_KEYS = {"type"}
 
 
 def _reject_unknown_keys(obj: Any, allowed: set[str], where: str, errors: list[str]) -> None:
@@ -165,6 +166,12 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
             dofs = constraint.get("dofs", [0, 1, 2])
             if not isinstance(dofs, list) or not dofs or any(d not in (0, 1, 2) for d in dofs):
                 errors.append(f"{where}.dofs must be a non-empty subset of [0,1,2]")
+
+    sensitivity = spec.get("sensitivity")
+    if sensitivity is not None:
+        _reject_unknown_keys(sensitivity, _SENSITIVITY_KEYS, "sensitivity", errors)
+        if not isinstance(sensitivity, dict) or sensitivity.get("type") != "compliance_by_youngs_modulus":
+            errors.append("sensitivity.type must be compliance_by_youngs_modulus")
 
     return not errors, errors
 

@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-uv run --offline --no-sync --project /opt/pi-cad-runtime/python python orchestrate.py
+uv run --offline --frozen --project /opt/pi-cad-runtime/python python orchestrate.py

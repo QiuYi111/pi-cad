@@ -1,0 +1,27 @@
+schema = 1
+entrypoint = "./Allrun"
+observe = "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python observe.py"
+nonvisual = false
+
+inputs = ["../../build/thermal-solid.step"]
+observation_files = ["observe.py"]
+
+[exports.temperature_view]
+type = "image"
+primary = true
+
+[exports.max_temperature]
+type = "scalar"
+primary = true
+unit = "K"
+
+[exports.energy_imbalance]
+type = "scalar"
+unit = "1"
+
+[exports.convergence]
+type = "table"
+
+[exports.fields]
+type = "field"
+format = "npz"

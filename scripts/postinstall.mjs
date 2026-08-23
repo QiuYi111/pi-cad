@@ -4,7 +4,6 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { installSu2 } from "./install-su2.mjs";
 import { installBlender } from "./install-blender.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -40,7 +39,6 @@ uv(["sync", "--project", pythonProject, "--extra", "simulation"], { stdio: "inhe
 
 if (process.platform !== "win32") {
   const python = join(pythonProject, ".venv", "bin", "python");
-  await installSu2({ root, python, env: process.env });
   await installBlender({ root, python, env: process.env });
 }
 
@@ -52,3 +50,4 @@ const doctor = JSON.parse(doctorText.trim());
 writeFileSync(join(root, ".pi-cad-runtime.json"), JSON.stringify({ mode: process.platform === "win32" ? "wsl-uv" : "uv", ...doctor }, null, 2));
 console.log(`[pi-cad] Python runtime ready (${process.platform === "win32" ? `WSL ${distro}` : "native Linux"}): ${doctor.python}`);
 console.log("[pi-cad] OpenFOAM 14 managed runtime is bootstrapped separately with scripts/bootstrap-openfoam14.sh");
+console.log("[pi-cad] SU2 and torch-fem managed runtimes are bootstrapped explicitly; npm postinstall never downloads solvers");

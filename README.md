@@ -48,7 +48,7 @@ pi install git:github.com/QiuYi111/pi-cad
 pi list
 ```
 
-The `pi` manifest in `package.json` automatically loads all eight extensions
+The `pi` manifest in `package.json` automatically loads all seven extensions
 and the bundled skills on the next Pi launch; no `-e` flags are needed.
 
 For a development checkout, install dependencies in the checkout and register
@@ -73,7 +73,6 @@ explicitly:
 pi -e src/extensions/core/index.ts \
    -e src/extensions/probe/index.ts \
    -e src/extensions/geometry/index.ts \
-   -e src/extensions/visual/index.ts \
    -e src/extensions/drawing/index.ts \
    -e src/extensions/simulation/index.ts \
    -e src/extensions/presentation/index.ts \
@@ -162,15 +161,17 @@ mutation. Each version is immutable and hash-selected; a changed Route places
 the run under a state-level reassessment lock. Missing external baseline files
 may block execution, but cannot keep an obsolete requirements version canonical.
 
-**Geometry** — `cad_build_step`, `cad_inspect_visual`, `cad_inspect_geometry`,
-`cad_inspect_surfaces`, `cad_inspect_section`, `cad_scan_sections`,
-`cad_measure`, `cad_compare_geometry`, `cad_assembly_tree`,
-`cad_inspect_interference`, `cad_export`.
+**Model and probe** — `cad_build_step`, `cad_derive_analysis_model`, the
+single `cad_probe` entry point (`visual`, `geometry`, `surfaces`, `measure`,
+`section`, `sections_scan`, `compare`, `assembly`, `interference`, `python`),
+`cad_recall_observation`, and `cad_export`.
 
 **Engineering analysis** — Recipe-native `cad_simulate`,
 `cad_sim_observe`, `cad_commit_simulation`, plus `cad_optimize`,
-`cad_generate_drawing`, and `cad_render_scene`. The former typed structural,
-flow, and thermal tools remain deprecated compatibility wrappers.
+`cad_generate_drawing`, and `cad_render_scene`. Historical typed tool names
+are migration data only: they are neither registered, exposed by `cadctl`, nor
+valid for new cases. Solver compilers remain importable only as Recipe-owned
+implementation libraries.
 
 Simulation V2 takes only `backend`, `runtime`, a Recipe directory, and
 optional opaque output names. Physics, materials, boundaries, meshing, and
@@ -200,7 +201,10 @@ The harness snapshots only the Recipe and declared inputs, runs without
 network access in a pinned runtime, retains full logs and raw state outside
 model context, and returns images before bounded quantitative summaries.
 Changing observation files creates a new immutable snapshot without rerunning
-the solver. Changing compute files or inputs requires a new run.
+the solver. Every Observation stores the exact manifest/observer files it ran,
+their tree/file hashes, rendered plot hashes, and materialized exports, so an
+older exact snapshot remains independently auditable and committable after a
+later re-observation. Changing compute files or inputs requires a new run.
 Materialized file exports are interned under the run's `objects/sha256/`
 store; unchanged large fields are hard-linked to the same immutable object,
 with copy/reflink fallback when hard links are unavailable.
@@ -210,10 +214,30 @@ observation, runtime identity, declared inputs, current case obligation, and
 authoritative artifact (or verified derivation). Evidence records provenance;
 it does not assert that engineering requirements pass.
 
-The first managed runtime is `backend=openfoam`, `runtime=openfoam-14`, pinned
-to `openfoam14@20260724`. Bootstrap it inside Linux/WSL with
-`scripts/bootstrap-openfoam14.sh`. Unit CI uses a stub runtime; the real
-qualification Recipe is under `benchmarks/simulation-v2/openfoam14-box`.
+The schema-2 runtime registry declares four exact environments:
+
+| Backend | Runtime | Intended use |
+| --- | --- | --- |
+| `openfoam` | `openfoam-14` | pinned `openfoam14@20260724`; transient and multiphase finite-volume work |
+| `su2` | `su2-8.5.0` | SHA256-pinned official archive; steady flow and solid thermal work |
+| `torch-fem` | `torch-fem-0.9-cu126` | production CUDA structural solves and optimization |
+| `torch-fem` | `torch-fem-0.9-cpu` | explicit CI, debugging, and small cases only |
+
+Bootstrap them inside native Linux or WSL with
+`scripts/bootstrap-openfoam14.sh`, `scripts/bootstrap-su2-8.5.0.sh`, and
+`scripts/bootstrap-torch-fem-runtimes.sh`. A Windows Node host always launches
+Linux through WSL; it never runs Recipe Python on Windows. Entrypoints and
+observers use `uv run --offline --frozen` in the selected immutable runtime.
+
+Formal runs use bubblewrap, a user systemd scope, no network, read-only
+runtime mounts, bounded CPU/RAM/PIDs/wall time, and a workspace quota. Runtime
+identity covers installed files and versions. CUDA identity also includes the
+driver/runtime, GPU model, VRAM, compute capability, PyTorch, CuPy, and a real
+sparse-solve probe. UV runtime probes are declared by each registry entry, not
+hard-coded into the generic runner. Trusted Solver health always exposes the
+requested and actual accelerator in Observation context; Recipe health tables
+cannot override it. The OpenFOAM qualification Recipe is under
+`benchmarks/simulation-v2/openfoam14-box`.
 The repository-owned SPEC-04 template under
 `benchmarks/simulation-v2/spec04-template` includes its OpenFOAM case
 generator, three-stage solver runner, convergence/robustness aggregation and
@@ -221,33 +245,52 @@ Rev1 release gate. Manufacturing CAD, materials, surface mapping and Rev1
 criteria remain ignored authoritative inputs; if absent, it reports
 `blocked_external` and cannot emit `SIMULATION_RELEASE_PASS`.
 
-### Deprecated typed compatibility tools
+### Structural, thermal, and flow Recipes
 
-What V1 does well:
+There are no public typed physics wrappers. `cad_probe` is the only probe
+entry point, and every new simulation uses the Recipe-native lifecycle.
+Physics, units, materials, loads, constraints, boundary conditions, meshing,
+solver controls, and project metrics live in the Recipe.
 
-- **Linear elastic FEA** with torch-fem, gmsh tet meshing of STEP, or a
-  parametric box mesh. Units are pinned: mm / N / MPa.
-- **Boundary conditions you can reason about**: nodal force loads that
-  *add* when they overlap, fixed constraints that *union* when they overlap.
-  Regions select the axis-extreme node slab or explicit node indices.
-- **Readable results**: seven rendered views (displacement, von Mises,
-  deformed shape…), full fields in NPZ, and a result JSON with reaction
-  equilibrium, mesh provenance, and device fallback reasons.
-- **Multiple load cases coexist**: normal, peak, and shock load cases on the
-  same part are kept side by side, keyed by spec hash.
-- **Devices, honestly**: CPU is first-class; CUDA is used when a matching
-  CuPy is present; Metal reports an explicit CPU fallback. Nothing pretends.
+The `structural-analysis` skill ships a torch-fem linear-elastic Recipe that
+exports deformation/stress imagery, maximum displacement and von Mises,
+reaction balance, fields, mesh/solver/accelerator health, and optional
+differentiable sensitivity. The production runtime pins torch-fem 0.9.0,
+PyTorch 2.13.0+cu126, CuPy 14.1.1, and Python 3.12. It verifies PyTorch CUDA,
+CuPy device access, compute capability, and a real GPU sparse solve. Missing
+or incompatible CUDA returns `unavailable`; CPU is never selected implicitly.
+Production Evidence must report `actualDevice=cuda`.
 
-### Thermal & flow (SU2)
+The workflow state is currently schema 6. Simulation V2 introduced the clean
+v5 transition; the later immutable-requirements revision advanced the shared
+workflow schema to v6 without changing the Simulation Recipe or Observation
+wire protocols.
 
-`cad_simulate_flow` and `cad_simulate_thermal` compile canonical specs into
-SU2 runs and translate the results back into canonical evidence. The unit
-rule is frozen and explicit in the field names: CAD geometry is interpreted
-per `geometryUnits` (mm by default) and every physical quantity is SI
-(`totalPressurePa`, `temperatureK`, `maxSizeMm`, …) — no implicit mm→m ever
-reaches the solver.
+The `thermal-fluid-analysis` skill ships SU2 steady-flow and solid-thermal
+Recipe templates and explains when OpenFOAM is the better model. Templates
+reuse the deterministic config compiler, mesher, parser, and visualization,
+but require explicit surface mappings and physical inputs. SU2 is launched
+only from `/opt/pi-cad-runtime/su2/8.5.0`; host PATH and binary environment
+overrides are intentionally ignored.
 
-- `cad_simulate_flow` — steady single-zone CFD on an explicit watertight
+`cad_optimize` runs the differentiable 2D SIMP/MMA skeleton in the managed
+CUDA runtime by default. It produces optimization artifacts, not CAD and not
+Simulation Evidence. Selecting CPU is explicit and binds a different runtime
+identity.
+
+The skill layers are `pi-cad` for workflow and evidence, `pi-cad-tools` for
+the complete active tool catalog, and focused engineering skills for general
+mechanical design, parametric modeling, assemblies, manufacturing, structural
+analysis, and thermal-fluid analysis.
+
+#### SU2 model contracts retained in Recipes
+
+The two supplied SU2 Recipes compile explicit case data into solver configs
+and translate native results into generic Observation exports. Geometry units
+and every physical quantity remain explicit; no implicit mm→m conversion is
+allowed to reach the solver.
+
+- **Steady-flow Recipe** — single-zone CFD on an explicit watertight
   fluid-domain STEP: compressible Euler, compressible RANS (SA/SST),
   incompressible Navier–Stokes/RANS. Every boundary surface must be
   classified exactly once (total-conditions inlet, pressure outlet, walls);
@@ -262,33 +305,25 @@ reaches the solver.
   declare and meet its `residualTarget` returns `status=not_converged`:
   raw fields are still shown for diagnosis, but the run creates **no**
   simulation evidence and cannot close a required case.
-- `cad_simulate_thermal` — steady solid heat conduction: fixed-temperature
+- **Solid-thermal Recipe** — steady conduction with fixed-temperature
   and fixed-heat-flux boundaries, adiabatic remainder, constant
   conductivity. The 1D slab fixture is checked against `q = kAΔT/L` in CI.
   Boundary heat rates are labeled `reconstructedHeatRateW` because they are
   integrated from the solution's element gradients, not SU2's own
   conservative face fluxes.
-- `cad_inspect_surfaces` — deterministic boundary-surface facts (type, area,
+- `cad_probe preset=surfaces` — deterministic boundary-surface facts (type, area,
   centroid, bbox, normal/axis) plus labeled views. Surface IDs are geometric
   selectors valid for one artifact hash, never semantic labels: deciding
   which face is an inlet is the agent's job.
 
-SU2 ships as an optional pinned runtime (official 8.5.0 "Harrier"
-precompiled builds, SHA256-verified) under `.runtime/su2/`; the download
-fails soft and `cadctl doctor` reports the capability honestly. Set
-`PI_CAD_SU2_BIN` to use your own binary or `PI_CAD_SKIP_SU2=1` to opt out.
-A `thermal-fluid-analysis` skill describes how to formulate and interpret
-this evidence without pretending to teach the model CFD.
+SU2 uses the official 8.5.0 "Harrier" archive with a pinned SHA256 and is
+bootstrapped explicitly under `/opt/pi-cad-runtime`. Missing installation is
+reported as `unavailable`; production execution never searches host PATH.
 
-What V1 deliberately does not do: nonlinear materials, pressure/traction
-loads, multi-material structural parts, CHT/multi-zone, transient flow,
-combustion, or turbomachinery features. The tools return raw deterministic
-fields — they never say "safe", "passes", or "works"; that judgment belongs
-to the agent and to you.
-
-`cad_optimize` is a clearly-labeled walking skeleton: differentiable SIMP
-topology optimization (2D rectangular domain, MMA inner loop) whose output is
-density/surface evidence, never a CAD candidate.
+Solver support does not justify overclaiming model scope. Recipes and skills
+must state unsupported nonlinear, multi-material, conjugate, combustion, or
+turbomachinery assumptions when they matter. Tools return observations and
+provenance; engineering judgment remains outside Core.
 
 ## Why you can trust the output
 
@@ -298,20 +333,11 @@ density/surface evidence, never a CAD candidate.
 - **Evidence is tamper-evident.** Every evidence artifact is sha256-hashed,
   and the hashes are re-verified at `cad_transition(accepted)` and
   `cad_finish`. A rewritten result file fails verification.
-- **Simulation binds to the pre-solve artifact hash.** If the STEP file
-  changes while the solver is running, the result is discarded rather than
-  bound to the wrong version.
-- **Evidence inputs are re-verified too.** Flow/thermal evidence carries its
-  hash-bound inputs (canonical spec, product artifact, fluid domain) and
-  `cad_transition(accepted)` / `cad_finish` re-hash them; rewriting the
-  fluid-domain STEP after the solve invalidates the evidence just like
-  rewriting a result file.
-- **Unconverged runs are not evidence.** The interpreter decides execution
-  validity: runs that miss their declared residual target (or declare none)
-  return raw fields under `status=not_converged` and the harness records
-  nothing from them.
+- **Simulation is explicit-commit only.** Solve and observe never create
+  Evidence. Commit re-verifies the frozen Recipe, runtime identity, inputs,
+  Observation, and authoritative artifact or derivation.
 - **Declared simulation cases must actually run.** When requirements declare
-  case-scoped obligations (e.g. `nozzle-outlet` via `cad_simulate_flow`),
+  case-scoped obligations (e.g. `nozzle-outlet` via `cad_simulate`),
   acceptance and finish stay blocked until each case produced current-version
   evidence from the declared tool — a structural FEA run cannot close a flow
   case. The harness compares opaque identities only; it never interprets the
@@ -347,17 +373,14 @@ density/surface evidence, never a CAD candidate.
 | --- | --- |
 | `PI_CAD_UV` | Override the `uv` executable on native Linux |
 | `PI_CAD_WSL_DISTRO` | WSL distribution used by a Windows Node host (default `Ubuntu`) |
-| `PI_CAD_VENV` | Point installer and runtime at an existing virtualenv |
-| `PI_CAD_SKIP_CUPY` | Skip the best-effort CuPy install (`1` to opt out) |
-| `PI_CAD_SU2_BIN` | Use an external SU2_CFD binary for flow/thermal |
-| `PI_CAD_SKIP_SU2` | Skip the optional SU2 runtime download (`1` to opt out) |
-| `PI_CAD_SU2_RUNTIME` | Alternative root for the managed SU2 runtime |
+| `PI_CAD_ENABLE_DEV_RUNTIMES` | Advertise development-only runtimes such as explicit torch-fem CPU (`1`) |
+| `CUDA_VISIBLE_DEVICES` | Select the CUDA device exposed to the managed runtime |
 | `PI_CAD_BLENDER_BIN` | Use an external Blender binary for presentation |
 | `PI_CAD_SKIP_BLENDER` | Skip the optional Blender runtime download (`1` to opt out) |
 | `PI_CAD_BLENDER_RUNTIME` | Alternative root for the managed Blender runtime |
 
-Blender follows the same optional-pinned-runtime contract as SU2: a
-`blender` on PATH always wins, the manifest-pinned 4.5 LTS archive is
+Blender remains a separate optional presentation runtime: a `blender` on
+PATH wins, the manifest-pinned 4.5 LTS archive is
 SHA256-verified, the download fails soft, and `cadctl doctor` reports the
 capability honestly. When no Blender is available, `cad_render_scene`
 returns an explicit `unavailable` — an honest evidence state, never a
@@ -373,14 +396,12 @@ install-time snapshot.
 npm test          # or: bash scripts/test.sh
 ```
 
-TypeScript harness tests + Python backend tests, including a cantilever
-mesh-convergence check against beam theory, load/constraint overlap
-semantics, negative validation matrices, evidence tampering,
-artifact-mutation races, an SU2 1D-conduction slab against `q = kAΔT/L`,
-and a supersonic-nozzle flow smoke case (convergence, mass balance,
-isentropic-ballpark outlet Mach). SU2 cases skip themselves when the
-optional runtime is unavailable. CI runs the full suite on a fresh install
-(Linux CPU) on every push.
+TypeScript protocol/harness tests and WSL/Linux `uv run` Python tests cover
+strict manifests and paths, Observation materialization, explicit commit,
+runtime limits, CUDA fail-closed behavior, structural refinement/balance and
+sensitivity, SU2 analytic conduction and flow conservation, and OpenFOAM
+qualification. Ordinary CI uses stubs or the explicitly selected CPU runtime;
+production GPU qualification is never fabricated.
 
 ## What lives on disk
 
@@ -407,7 +428,8 @@ layouts are migrated automatically.
 | Control plane (phase contracts: phase → capability grants) | `src/control/` |
 | Observation layer (ObservationBundle/Renderer/Profiles) | `src/observations/` |
 | Capability modules (MODEL / PROBE / SIMULATE) | `src/modules/` |
-| Tool extensions (probe, geometry, visual, drawing, simulation, presentation, UI) | `src/extensions/` |
+| Tool extensions (probe, geometry, drawing, simulation, presentation, UI) | `src/extensions/` |
+| Skill routing, engineering references, and Recipe assets | `skills/` |
 | Route ontology + workflow compiler | `src/shared/route.ts`, `src/workflows/compiler.ts` |
 | Layered prompts | `src/prompts/` |
 | Deterministic Python backend | `python/cadctl/` |
@@ -425,8 +447,8 @@ decides what is allowed and required. Capability modules decide how
 engineering computation runs: MODEL (`src/modules/model` — ModelBackend
 adapters, candidate finalizer), PROBE (`src/modules/probe` — preset
 registry behind the unified `cad_probe` tool), SIMULATE
-(`src/modules/simulate` — shared spec-freeze → solve → observe
-lifecycle). The Observation Layer (`src/observations`) normalizes every
+(`src/modules/simulate-v2` — Recipe/input freeze → managed compute → immutable
+Observation snapshots → explicit Evidence commit). The Observation Layer (`src/observations`) normalizes every
 backend envelope into visual-first agent observations, and the context
 runtime (`src/core/observation-index.ts`) indexes them so post-compaction
 recall (`cad_recall_observation`) can rehydrate engineering visuals.

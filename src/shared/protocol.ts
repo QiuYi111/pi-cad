@@ -6,6 +6,12 @@
  */
 
 import type { Route } from "./route.ts";
+import {
+  ACTIVE_CAPABILITY_TOOLS,
+  ACTIVE_CONTROL_TOOLS,
+  ACTIVE_PROBE_TOOLS,
+  ACTIVE_SIMULATION_TOOLS,
+} from "./public-tools.ts";
 
 export type { Route } from "./route.ts";
 export {
@@ -27,47 +33,8 @@ export type {
 } from "./route.ts";
 
 export const CAD_STATE_SCHEMA_VERSION = 6;
-export const CONTROL_TOOLS = [
-  "cad_route",
-  "cad_reroute",
-  "cad_commit_requirements",
-  "cad_revise_requirements",
-  "cad_commit_frame_context",
-  "cad_commit_plan",
-  "cad_commit_assembly_design",
-  "cad_commit_interface_contracts",
-  "cad_commit_candidate",
-  "cad_submit_for_review",
-  "cad_transition",
-  "cad_wait_for_user",
-  "cad_defer_clarification",
-  "cad_declare_blocker",
-  "cad_finish",
-  "cad_commit_simulation",
-] as const;
-export const CAPABILITY_TOOLS = [
-  "cad_probe",
-  "cad_recall_observation",
-  "cad_build_step",
-  "cad_inspect_visual",
-  "cad_inspect_geometry",
-  "cad_inspect_surfaces",
-  "cad_inspect_section",
-  "cad_measure",
-  "cad_compare_geometry",
-  "cad_assembly_tree",
-  "cad_inspect_interference",
-  "cad_scan_sections",
-  "cad_export",
-  "cad_simulate",
-  "cad_sim_observe",
-  "cad_simulate_structural_legacy",
-  "cad_simulate_flow",
-  "cad_simulate_thermal",
-  "cad_optimize",
-  "cad_generate_drawing",
-  "cad_render_scene",
-] as const;
+export const CONTROL_TOOLS = ACTIVE_CONTROL_TOOLS;
+export const CAPABILITY_TOOLS = ACTIVE_CAPABILITY_TOOLS;
 
 /**
  * Spec-driven solver tools that produce simulation evidence. They are never
@@ -75,19 +42,14 @@ export const CAPABILITY_TOOLS = [
  * and simulations belong to review/cognitive phases against a committed
  * candidate or baseline.
  */
-export const SIMULATION_TOOLS = [
-  "cad_simulate",
-  "cad_simulate_structural_legacy",
-  "cad_simulate_flow",
-  "cad_simulate_thermal",
-] as const;
+export const SIMULATION_TOOLS = ACTIVE_SIMULATION_TOOLS;
 
 /**
- * Programmable read-only observation tool. Never part of the source-phase
- * capability set (source phases have bash+write already) and never produces
- * canonical evidence — review-family phases only.
+ * Canonical read-only observation tool. Individual presets decide whether an
+ * Observation is eligible to bind evidence; programmable probes remain
+ * observation-only.
  */
-export const PROBE_TOOLS = ["cad_probe_python"] as const;
+export const PROBE_TOOLS = ACTIVE_PROBE_TOOLS;
 
 /** Tools whose evidence obligations are case-scoped (opaque simulation cases). */
 export const SIMULATION_CASE_TOOLS = SIMULATION_TOOLS;
@@ -380,8 +342,8 @@ export type EvidenceDisposition =
 
 /**
  * Opaque simulation case: the harness only knows that this interpreter
- * invocation must exist for the current artifact version. It deliberately
- * knows nothing about Mach numbers, RANS, or heat conduction.
+ * invocation must exist for the current artifact version. Domain semantics
+ * remain opaque to the workflow core.
  */
 export interface SimulationCaseObligation {
   id: string;

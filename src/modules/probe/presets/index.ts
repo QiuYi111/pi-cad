@@ -1,6 +1,6 @@
 /**
  * PROBE presets: visual, geometry, surfaces, measure, section,
- * sections-scan, compare, assembly, interference.
+ * sections_scan, compare, assembly, interference.
  *
  * Each preset reproduces exactly the cadctl call + evidence-path policy
  * the corresponding legacy tool used (Phase 2 is a move, not a behavior
@@ -210,7 +210,7 @@ export interface SectionsScanProbeArgs {
 }
 
 const sectionsScanPreset: ProbePreset<SectionsScanProbeArgs> = {
-  name: "sections-scan",
+  name: "sections_scan",
   async run(args, ctx) {
     const root = await currentRunEvidenceRoot(ctx.cwd);
     const output = join(

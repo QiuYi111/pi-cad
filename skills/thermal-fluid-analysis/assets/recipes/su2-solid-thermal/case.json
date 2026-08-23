@@ -1,0 +1,12 @@
+{
+  "caseId": "replace-with-workflow-case-id",
+  "artifact": "../../build/thermal-solid.step",
+  "geometryUnits": "mm",
+  "material": { "conductivityWPerMK": 16.2 },
+  "boundaries": [
+    { "type": "temperature", "surfaces": ["replace-hot-surface-id"], "temperatureK": 373.15 },
+    { "type": "temperature", "surfaces": ["replace-cold-surface-id"], "temperatureK": 293.15 }
+  ],
+  "mesh": { "maxSizeMm": 5.0 },
+  "convergence": { "maxIterations": 500, "residualTarget": -8.0 }
+}

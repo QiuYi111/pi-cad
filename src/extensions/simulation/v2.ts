@@ -40,13 +40,22 @@ async function currentWorkflow(cwd: string): Promise<{ store: CadProjectStore; s
 async function observationContent(run: SimulationRunRecord, snapshot: ObservationSnapshotRecord, validated: Awaited<ReturnType<typeof createSimulationRun>>["validatedObservation"]): Promise<any[]> {
   if (!validated) {
     const diagnostics = [...(run.entrypoint?.diagnostics ?? []), ...(snapshot.observeResult.diagnostics ?? [])].slice(0, 40);
-    return [{ type: "text", text: [`Simulation ${run.runId} produced a partial failure observation ${snapshot.observationId}.`, `validForCommit=false`, ...diagnostics].join("\n").slice(0, 8192) }];
+    const accelerator = run.runtimeIdentity.accelerator;
+    return [{ type: "text", text: [
+      `Simulation ${run.runId} produced a partial failure observation ${snapshot.observationId}.`,
+      "validForCommit=false",
+      `runtime=${run.runtime} resolvedVersion=${run.runtimeIdentity.resolvedVersion}`,
+      ...(accelerator?.requestedDevice !== undefined ? [`requestedDevice=${String(accelerator.requestedDevice)}`] : []),
+      ...(accelerator?.actualDevice !== undefined ? [`actualDevice=${String(accelerator.actualDevice)}`] : []),
+      ...diagnostics,
+    ].join("\n").slice(0, 8192) }];
   }
   return renderSimulationObservation({
     runId: run.runId,
     observationId: snapshot.observationId,
     backend: run.backend,
     runtime: run.runtime,
+    runtimeIdentity: run.runtimeIdentity,
     durationMs: (run.entrypoint?.durationMs ?? 0) + snapshot.observeResult.durationMs,
     observation: validated,
     diagnostics: [...(run.entrypoint?.diagnostics ?? []), ...snapshot.observeResult.diagnostics],
@@ -109,7 +118,6 @@ export async function commitSimulation(cwd: string, runId: string, observationId
 
   const recipe = await loadSimulationRecipe(cwd, run.sourceRecipePath);
   if (recipe.computeRecipeHash !== run.computeRecipeHash) throw new Error("compute Recipe changed after simulation");
-  if (recipe.observationProgramHash !== snapshot.observationProgramHash) throw new Error("observation program changed after observation");
   const currentInputHashes = new Map(recipe.inputs.map((item) => [item.projectPath, item.sha256]));
   for (const input of run.inputs) if (currentInputHashes.get(input.projectPath) !== input.sha256) throw new Error(`declared input changed after simulation: ${input.projectPath}`);
   const currentRuntime = await runtimeRunner.resolveRuntime(cwd, run.backend, run.runtime);
@@ -129,6 +137,9 @@ export async function commitSimulation(cwd: string, runId: string, observationId
     rawProjectHash: run.rawProjectHash,
     computeRecipeHash: run.computeRecipeHash,
     observationProgramHash: snapshot.observationProgramHash,
+    observationProgramPath: snapshot.observationProgramPath,
+    observationProgramSnapshotHash: snapshot.observationProgramSnapshotHash,
+    observationProgramFiles: snapshot.observationProgramFiles,
     backend: run.backend,
     runtime: run.runtime,
     runtimeIdentity: run.runtimeIdentity,
@@ -139,7 +150,11 @@ export async function commitSimulation(cwd: string, runId: string, observationId
   await writeFile(provenancePath, `${JSON.stringify(provenance, null, 2)}\n`, "utf-8");
   const provenanceHash = await sha256File(provenancePath);
   const artifacts = [
-    ...snapshot.exports.filter((item) => item.path && item.sha256).map((item) => ({ path: rel(cwd, resolve(observationDirectory, item.path!)), sha256: item.sha256! })),
+    ...snapshot.observationProgramFiles.map((item) => ({ path: rel(cwd, resolve(observationDirectory, item.path)), sha256: item.sha256 })),
+    ...snapshot.exports.flatMap((item) => [
+      ...(item.path && item.sha256 ? [{ path: rel(cwd, resolve(observationDirectory, item.path)), sha256: item.sha256 }] : []),
+      ...(item.plotPath && item.plotSha256 ? [{ path: rel(cwd, resolve(observationDirectory, item.plotPath)), sha256: item.plotSha256 }] : []),
+    ]),
     { path: rel(cwd, provenancePath), sha256: provenanceHash },
   ];
   const evidence: EvidenceRef = {
@@ -190,7 +205,7 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
       await store.appendEvent("SimulationRunCreated", { runId: result.run.runId, computeIdentity: result.run.computeIdentity, status: result.run.status });
       if (result.observation) await store.appendEvent("ObservationSnapshotCreated", { runId: result.run.runId, observationId: result.observation.observationId, validForCommit: result.observation.validForCommit });
       const content = result.observation ? await observationContent(result.run, result.observation, result.validatedObservation) : [{ type: "text", text: `Simulation ${result.run.runId} failed before an observation was materialized.` }];
-      return { content, details: { simulationRunId: result.run.runId, observationId: result.observation?.observationId, computeIdentity: result.run.computeIdentity, validForCommit: result.observation?.validForCommit ?? false } };
+      return { content, details: { simulationRunId: result.run.runId, observationId: result.observation?.observationId, computeIdentity: result.run.computeIdentity, validForCommit: result.observation?.validForCommit ?? false, requestedDevice: result.run.runtimeIdentity.accelerator?.requestedDevice, actualDevice: result.run.runtimeIdentity.accelerator?.actualDevice } };
     },
   });
 
@@ -205,7 +220,7 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
       const { workflowRunId, store } = await currentWorkflow(ctx.cwd);
       const result = await createObservationSnapshot({ cwd: ctx.cwd, workflowRunId, runId: params.run, outputs: params.outputs, runner: managedSimulationRunner });
       await store.appendEvent("ObservationSnapshotCreated", { runId: result.run.runId, observationId: result.observation!.observationId, validForCommit: result.observation!.validForCommit });
-      return { content: await observationContent(result.run, result.observation!, result.validatedObservation), details: { simulationRunId: result.run.runId, observationId: result.observation!.observationId, computeIdentity: result.run.computeIdentity, validForCommit: result.observation!.validForCommit } };
+      return { content: await observationContent(result.run, result.observation!, result.validatedObservation), details: { simulationRunId: result.run.runId, observationId: result.observation!.observationId, computeIdentity: result.run.computeIdentity, validForCommit: result.observation!.validForCommit, requestedDevice: result.run.runtimeIdentity.accelerator?.requestedDevice, actualDevice: result.run.runtimeIdentity.accelerator?.actualDevice } };
     },
   });
 

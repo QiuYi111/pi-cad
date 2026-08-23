@@ -14,6 +14,7 @@ export interface RuntimeIdentity {
   resolvedVersion: string;
   digest: string;
   launcher: string;
+  accelerator?: Record<string, unknown>;
 }
 
 export interface SimulationCommandResult {
@@ -69,6 +70,9 @@ export interface ObservationSnapshotRecord {
   observationId: string;
   createdAt: string;
   observationProgramHash: string;
+  observationProgramPath: string;
+  observationProgramSnapshotHash: string;
+  observationProgramFiles: Array<{ path: string; sha256: string }>;
   requestedOutputs: string[];
   validForCommit: boolean;
   observeResult: SimulationCommandResult;
@@ -79,6 +83,7 @@ export interface ObservationSnapshotRecord {
     sha256?: string;
     contentAddress?: string;
     plotPath?: string;
+    plotSha256?: string;
     summary?: string;
     value?: number;
     unit?: string;
@@ -140,6 +145,32 @@ async function copyDeclaredProject(recipe: LoadedSimulationRecipe, destination: 
     if (insidePath(recipe.recipeRoot, input.absolutePath)) continue;
     await cp(input.absolutePath, target, { recursive: input.kind === "directory", force: false, errorOnExist: true, dereference: true, mode: constants.COPYFILE_FICLONE });
   }
+}
+
+async function snapshotObservationProgram(recipe: LoadedSimulationRecipe, observationDirectory: string): Promise<{ path: string; hash: string; files: Array<{ path: string; sha256: string }> }> {
+  const program = join(observationDirectory, "program");
+  await mkdir(program, { recursive: true });
+  await cp(recipe.manifestPath, join(program, "pi-sim.toml"), { force: false, errorOnExist: true, mode: constants.COPYFILE_FICLONE });
+  for (const declaration of recipe.manifest.observationFiles) {
+    const source = resolve(recipe.recipeRoot, declaration);
+    const target = resolve(program, declaration);
+    if (!insidePath(program, target)) throw new Error(`observation program path escapes snapshot: ${declaration}`);
+    await mkdir(dirname(target), { recursive: true });
+    await cp(source, target, { recursive: true, force: true, dereference: true, mode: constants.COPYFILE_FICLONE });
+  }
+  const identity = await hashSimulationPath(program, program);
+  const files: Array<{ path: string; sha256: string }> = [];
+  const visit = async (directory: string): Promise<void> => {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const absolute = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (entry.isFile()) files.push({ path: projectPath(observationDirectory, absolute), sha256: await sha256File(absolute) });
+      else throw new Error(`unsupported observation program snapshot entry: ${projectPath(program, absolute)}`);
+    }
+  };
+  await visit(program);
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { path: projectPath(observationDirectory, program), hash: identity.hash, files };
 }
 
 async function writeJson(path: string, value: unknown): Promise<void> {
@@ -227,6 +258,7 @@ async function runObservation(input: {
   const logs = join(directory, "logs");
   const plots = join(directory, "plots");
   await mkdir(logs, { recursive: true });
+  const programSnapshot = await snapshotObservationProgram(input.recipe, directory);
   await cp(join(input.runDirectory, "raw-project"), workspace, { recursive: true, force: false, errorOnExist: true, dereference: true, mode: constants.COPYFILE_FICLONE });
   // Re-observation takes only the explicitly mutable observation program and
   // the current manifest's observe/export projection. Compute inputs stay the
@@ -277,25 +309,29 @@ async function runObservation(input: {
     if (input.run.status === "completed" && observeResult.exitCode === 0) throw error;
   }
   if (validated) await internObservationFiles(input.runDirectory, validated);
+  const snapshotExports = await Promise.all((validated?.selected ?? []).map(async (entry) => ({
+    name: entry.name,
+    type: entry.declaration.type,
+    ...(entry.absolutePath ? { path: projectPath(directory, entry.absolutePath) } : {}),
+    ...(entry.sha256 ? { sha256: entry.sha256 } : {}),
+    ...(entry.sha256 ? { contentAddress: `sha256:${entry.sha256}` } : {}),
+    ...(entry.plotPath ? { plotPath: projectPath(directory, entry.plotPath), plotSha256: await sha256File(entry.plotPath) } : {}),
+    ...(entry.summary ? { summary: entry.summary } : {}),
+    ...(entry.declaration.type === "scalar" ? { value: (entry.materialized as { value: number }).value, unit: entry.declaration.unit } : {}),
+  })));
   const snapshot: ObservationSnapshotRecord = {
     schema: 1,
     runId: input.run.runId,
     observationId,
     createdAt: nowIso(),
     observationProgramHash: input.recipe.observationProgramHash,
+    observationProgramPath: programSnapshot.path,
+    observationProgramSnapshotHash: programSnapshot.hash,
+    observationProgramFiles: programSnapshot.files,
     requestedOutputs: input.selectedOutputs,
     validForCommit: validated?.validForCommit ?? false,
     observeResult,
-    exports: (validated?.selected ?? []).map((entry) => ({
-      name: entry.name,
-      type: entry.declaration.type,
-      ...(entry.absolutePath ? { path: projectPath(directory, entry.absolutePath) } : {}),
-      ...(entry.sha256 ? { sha256: entry.sha256 } : {}),
-      ...(entry.sha256 ? { contentAddress: `sha256:${entry.sha256}` } : {}),
-      ...(entry.plotPath ? { plotPath: projectPath(directory, entry.plotPath) } : {}),
-      ...(entry.summary ? { summary: entry.summary } : {}),
-      ...(entry.declaration.type === "scalar" ? { value: (entry.materialized as { value: number }).value, unit: entry.declaration.unit } : {}),
-    })),
+    exports: snapshotExports,
     warnings: validated?.warnings ?? ["observer did not produce a valid ObservationBundle"],
   };
   await writeJson(join(directory, "snapshot.json"), snapshot);
@@ -407,6 +443,17 @@ export async function createObservationSnapshot(input: {
 
 export async function verifySnapshotFiles(runDirectory: string, snapshot: ObservationSnapshotRecord): Promise<void> {
   const directory = join(runDirectory, "observations", snapshot.observationId);
+  if (!snapshot.observationProgramPath || !snapshot.observationProgramSnapshotHash) throw new Error(`observation ${snapshot.observationId} has no immutable observation-program snapshot`);
+  if (!Array.isArray(snapshot.observationProgramFiles) || snapshot.observationProgramFiles.length === 0) throw new Error(`observation ${snapshot.observationId} has no observation-program files`);
+  const program = resolve(directory, snapshot.observationProgramPath);
+  if (!insidePath(directory, program)) throw new Error(`observation program snapshot escapes observation directory: ${snapshot.observationId}`);
+  const programIdentity = await hashSimulationPath(program, program);
+  if (programIdentity.hash !== snapshot.observationProgramSnapshotHash) throw new Error(`observation program snapshot changed: ${snapshot.observationId}`);
+  for (const file of snapshot.observationProgramFiles) {
+    const absolute = resolve(directory, file.path);
+    if (!insidePath(program, absolute)) throw new Error(`observation program file escapes snapshot: ${file.path}`);
+    if (await sha256File(absolute) !== file.sha256) throw new Error(`observation program file hash changed: ${file.path}`);
+  }
   for (const entry of snapshot.exports) {
     if (!entry.path || !entry.sha256) continue;
     const absolute = resolve(directory, entry.path);
@@ -415,6 +462,12 @@ export async function verifySnapshotFiles(runDirectory: string, snapshot: Observ
       if (entry.contentAddress !== `sha256:${entry.sha256}`) throw new Error(`invalid observation content address: ${entry.name}`);
       const objectPath = join(runDirectory, "objects", "sha256", entry.sha256.slice(0, 2), entry.sha256);
       if (await sha256File(objectPath) !== entry.sha256) throw new Error(`observation content object changed: ${entry.name}`);
+    }
+    if (entry.plotPath) {
+      if (!entry.plotSha256) throw new Error(`observation plot has no hash: ${entry.name}`);
+      const plot = resolve(directory, entry.plotPath);
+      if (!insidePath(directory, plot)) throw new Error(`observation plot escapes snapshot: ${entry.name}`);
+      if (await sha256File(plot) !== entry.plotSha256) throw new Error(`observation plot hash changed: ${entry.name}`);
     }
   }
 }

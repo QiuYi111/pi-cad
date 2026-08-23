@@ -15,6 +15,7 @@ import type {
   VisualPayload,
 } from "./protocol.ts";
 import { CadProjectStore, sha256File } from "./store.ts";
+import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -74,7 +75,11 @@ function toWslPath(path: string): string {
 
 function pythonArgsForHost(args: string[]): string[] {
   if (process.platform !== "win32") return args;
-  return args.map((arg) => /^[A-Za-z]:[\\/]/.test(arg) ? toWslPath(arg) : arg);
+  return args.map((arg) =>
+    /^[A-Za-z]:[\\/]/.test(arg) || /^\\\\wsl(?:\.localhost)?\\/i.test(arg)
+      ? toWslPath(arg)
+      : arg,
+  );
 }
 
 function pathsFromWsl(value: unknown): unknown {
@@ -457,45 +462,6 @@ export async function drawingCommand(
   return runCadctl(args, { cwd, timeoutMs });
 }
 
-export async function simulationCommand(
-  cwd: string,
-  stage: "validate" | "run",
-  spec: string,
-  outputDir: string,
-  timeoutMs?: number,
-): Promise<CadEventEnvelope> {
-  return runCadctl(
-    ["simulate", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs, extra: "simulation" },
-  );
-}
-
-export async function flowCommand(
-  cwd: string,
-  stage: "validate" | "run",
-  spec: string,
-  outputDir: string,
-  timeoutMs?: number,
-): Promise<CadEventEnvelope> {
-  return runCadctl(
-    ["simulate-flow", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs, extra: "simulation" },
-  );
-}
-
-export async function thermalCommand(
-  cwd: string,
-  stage: "validate" | "run",
-  spec: string,
-  outputDir: string,
-  timeoutMs?: number,
-): Promise<CadEventEnvelope> {
-  return runCadctl(
-    ["simulate-thermal", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs, extra: "simulation" },
-  );
-}
-
 export interface InspectSurfacesOptions {
   output?: string;
   labels?: boolean;
@@ -553,19 +519,68 @@ export async function optimizationCommand(
   cwd: string,
   spec: string,
   outputDir: string,
-  timeoutMs?: number,
+  runtime = "torch-fem-0.9-cu126",
+  timeoutMs = 3_600_000,
 ): Promise<CadEventEnvelope> {
-  return runCadctl(
-    ["optimize", "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs, extra: "simulation" },
-  );
+  const workspace = resolve(outputDir);
+  const specPath = resolve(spec);
+  if (dirname(specPath) !== workspace) throw new Error("managed optimization spec must be inside its run workspace");
+  await managedSimulationRunner.resolveRuntime(cwd, "torch-fem", runtime);
+  const stdoutPath = join(workspace, "managed-stdout.log");
+  const stderrPath = join(workspace, "managed-stderr.log");
+  const result = await managedSimulationRunner.execute({
+    cwd,
+    workspace,
+    recipeDirectory: workspace,
+    command: "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python -m cadctl optimize --spec spec.json --output-dir .",
+    environment: {},
+    stdoutPath,
+    stderrPath,
+    timeoutMs,
+    backend: "torch-fem",
+    runtime,
+  });
+  const stdout = await readFile(stdoutPath, "utf-8").catch(() => result.stdout);
+  let parsed: CadEventEnvelope;
+  try {
+    parsed = JSON.parse(stdout.trim()) as CadEventEnvelope;
+  } catch {
+    return {
+      tool: "cad_optimize",
+      toolVersion: "0.9.0",
+      ok: false,
+      payload: { error: `managed optimization failed with exit ${result.exitCode}`, diagnostics: result.diagnostics },
+      inputHashes: { spec: await sha256File(specPath) },
+      outputHashes: {},
+      artifacts: [],
+      durationMs: result.durationMs,
+      warnings: [],
+    };
+  }
+  const remap = (value: unknown): unknown => {
+    if (typeof value === "string") return value === "/workspace" || value.startsWith("/workspace/") ? join(workspace, value.slice("/workspace".length)) : value;
+    if (Array.isArray(value)) return value.map(remap);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, remap(item)]));
+    return value;
+  };
+  return remap(parsed) as CadEventEnvelope;
 }
 
 export async function imageContent(
   path: string,
 ): Promise<{ type: "image"; data: string; mimeType: string }> {
   const data = await readFile(path);
-  return { type: "image", data: data.toString("base64"), mimeType: "image/png" };
+  const mimeType = detectImageMimeType(data);
+  if (!mimeType) throw new Error(`unsupported image encoding: ${path}`);
+  return { type: "image", data: data.toString("base64"), mimeType };
+}
+
+export function detectImageMimeType(data: Buffer): "image/png" | "image/jpeg" | "image/gif" | "image/webp" | null {
+  if (data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
+  if (data.subarray(0, 6).toString("ascii") === "GIF87a" || data.subarray(0, 6).toString("ascii") === "GIF89a") return "image/gif";
+  if (data.subarray(0, 4).toString("ascii") === "RIFF" && data.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  return null;
 }
 
 export async function readImageContents(

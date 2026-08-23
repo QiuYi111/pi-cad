@@ -1,22 +1,64 @@
 {
-  "schema": 1,
+  "schema": 2,
   "runtimes": [
     {
-      "backend": "openfoam",
-      "runtime": "openfoam-14",
-      "launcher": "bubblewrap",
-      "package": "openfoam14",
-      "resolvedPackageVersion": "20260724",
-      "root": "/opt/openfoam14",
-      "bootstrap": "scripts/bootstrap-openfoam14.sh",
-      "network": "none",
-      "limits": {
-        "cpu": 8,
-        "memoryGiB": 24,
-        "tasks": 1024,
-        "wallHours": 12,
-        "workspaceGiB": 100
-      }
+      "backend": "openfoam", "runtime": "openfoam-14", "kind": "apt", "launcher": "bubblewrap",
+      "bootstrap": "scripts/bootstrap-openfoam14.sh", "network": "none",
+      "immutableRoots": ["/opt/openfoam14", "/opt/pi-cad-runtime/python"],
+      "package": "openfoam14", "expectedVersion": "20260724",
+      "activation": ". /opt/openfoam14/etc/bashrc >/dev/null 2>&1",
+      "environment": { "PI_CAD_PYTHON_PROJECT": "/opt/pi-cad-runtime/python", "UV_NO_SYNC": "1" },
+      "accelerator": "none",
+      "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
+    },
+    {
+      "backend": "su2", "runtime": "su2-8.5.0", "kind": "archive", "launcher": "bubblewrap",
+      "bootstrap": "scripts/bootstrap-su2-8.5.0.sh", "network": "none",
+      "immutableRoots": ["/opt/pi-cad-runtime/su2/8.5.0"],
+      "executable": "/opt/pi-cad-runtime/su2/8.5.0/bin/SU2_CFD", "expectedVersion": "8.5.0", "versionArgument": "--help",
+      "archiveUrl": "https://github.com/su2code/SU2/releases/download/v8.5.0/SU2-v8.5.0-linux64-omp.zip",
+      "sha256": "aadc800cd9df34deff99d4725f5897f620c9f2979f62ab235313311bf501f09b",
+      "environment": {
+        "PI_CAD_SU2_BIN": "/opt/pi-cad-runtime/su2/8.5.0/bin/SU2_CFD",
+        "PI_CAD_PYTHON_PROJECT": "/opt/pi-cad-runtime/su2/8.5.0/project/python/runtimes/su2", "OMP_NUM_THREADS": "1", "UV_NO_SYNC": "1"
+      },
+      "accelerator": "none",
+      "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
+    },
+    {
+      "backend": "torch-fem", "runtime": "torch-fem-0.9-cu126", "kind": "uv", "launcher": "bubblewrap",
+      "bootstrap": "scripts/bootstrap-torch-fem-runtimes.sh", "network": "none",
+      "immutableRoots": ["/opt/pi-cad-runtime/torch-fem-0.9-cu126"],
+      "pythonProject": "/opt/pi-cad-runtime/torch-fem-0.9-cu126/project/python/runtimes/torch-fem-cuda",
+      "probe": {
+        "script": "scripts/probe-torch-fem-runtime.py", "args": ["--require", "cuda"],
+        "expected": { "torch-fem": "0.9.0", "torch": "2.13.0+cu126", "cupy": "14.1.1", "requestedDevice": "cuda", "actualDevice": "cuda", "cudaAvailable": true }
+      },
+      "expectedVersion": "torch-fem=0.9.0;torch=2.13.0+cu126;cupy=14.1.1",
+      "environment": {
+        "PI_CAD_PYTHON_PROJECT": "/opt/pi-cad-runtime/torch-fem-0.9-cu126/project/python/runtimes/torch-fem-cuda",
+        "PI_SIM_ACCELERATOR": "cuda", "CUDA_VISIBLE_DEVICES": "0",
+        "LD_LIBRARY_PATH": "/usr/lib/wsl/lib:/usr/lib/x86_64-linux-gnu", "UV_NO_SYNC": "1"
+      },
+      "accelerator": "cuda",
+      "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
+    },
+    {
+      "backend": "torch-fem", "runtime": "torch-fem-0.9-cpu", "kind": "uv", "launcher": "bubblewrap",
+      "bootstrap": "scripts/bootstrap-torch-fem-runtimes.sh", "network": "none",
+      "immutableRoots": ["/opt/pi-cad-runtime/torch-fem-0.9-cpu"],
+      "pythonProject": "/opt/pi-cad-runtime/torch-fem-0.9-cpu/project/python/runtimes/torch-fem-cpu",
+      "probe": {
+        "script": "scripts/probe-torch-fem-runtime.py", "args": ["--require", "cpu"],
+        "expected": { "torch-fem": "0.9.0", "torch": "2.13.0+cpu", "cupy": "absent", "requestedDevice": "cpu", "actualDevice": "cpu", "cudaAvailable": false }
+      },
+      "expectedVersion": "torch-fem=0.9.0;torch=2.13.0+cpu;cupy=absent",
+      "environment": {
+        "PI_CAD_PYTHON_PROJECT": "/opt/pi-cad-runtime/torch-fem-0.9-cpu/project/python/runtimes/torch-fem-cpu",
+        "PI_SIM_ACCELERATOR": "cpu", "UV_NO_SYNC": "1"
+      },
+      "accelerator": "cpu", "developmentOnly": true,
+      "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
     }
   ]
 }

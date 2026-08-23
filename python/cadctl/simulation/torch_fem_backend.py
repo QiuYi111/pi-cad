@@ -141,7 +141,39 @@ class TorchFemBackend(SimulationBackend):
         from torchfem.solid import Solid
 
         device_info = resolve_device(spec.get("device", "auto"))
+        if device_info.requested == "cuda" and device_info.actual != "cuda":
+            raise SimulationBackendError(
+                f"CUDA torch-fem runtime is unavailable ({device_info.fallbackReason or 'unknown reason'}); "
+                "CPU fallback is forbidden — select the explicit CPU runtime instead"
+            )
         torch.set_default_dtype(torch.float64)
+        accelerator: dict[str, Any] = {
+            "requestedDevice": device_info.requested,
+            "actualDevice": device_info.actual,
+            "torchVersion": torch.__version__,
+            "torchCudaRuntime": torch.version.cuda,
+            "cupyVersion": None,
+            "cudaDriverVersion": None,
+            "cupyCudaRuntime": None,
+            "gpu": None,
+            "vramBytes": None,
+            "computeCapability": None,
+        }
+        if device_info.cupyAvailable:
+            import cupy
+
+            accelerator.update(
+                cupyVersion=cupy.__version__,
+                cudaDriverVersion=int(cupy.cuda.runtime.driverGetVersion()),
+                cupyCudaRuntime=int(cupy.cuda.runtime.runtimeGetVersion()),
+            )
+        if device_info.actual == "cuda":
+            properties = torch.cuda.get_device_properties(torch.cuda.current_device())
+            accelerator.update(
+                gpu=properties.name,
+                vramBytes=int(properties.total_memory),
+                computeCapability=f"{properties.major}.{properties.minor}",
+            )
 
         artifact = spec.get("artifact")
         mesh_spec = spec.get("mesh") or {}
@@ -176,7 +208,9 @@ class TorchFemBackend(SimulationBackend):
 
         nodes = torch.as_tensor(nodes_np, dtype=torch.get_default_dtype(), device="cpu")
         elements = torch.as_tensor(elements_np, dtype=torch.int64)
-        material = IsotropicElasticity3D(E, nu, float((spec.get("materials") or [{}])[0].get("density", 1.0)))
+        sensitivity_requested = (spec.get("sensitivity") or {}).get("type") == "compliance_by_youngs_modulus"
+        youngs_modulus = torch.tensor(E, dtype=torch.float64, requires_grad=sensitivity_requested)
+        material = IsotropicElasticity3D(youngs_modulus, nu, float((spec.get("materials") or [{}])[0].get("density", 1.0)))
         model = Solid(nodes, elements, material)
         _apply_regions(model, nodes_np, spec, mesh_size)
 
@@ -184,7 +218,17 @@ class TorchFemBackend(SimulationBackend):
             increments=torch.tensor([0.0, 1.0], dtype=nodes.dtype),
             device=device_info.actual,
             verbose=False,
+            differentiable_parameters=[youngs_modulus] if sensitivity_requested else None,
         )
+        sensitivity: dict[str, Any] | None = None
+        if sensitivity_requested:
+            compliance = (u * model.forces).sum()
+            derivative = torch.autograd.grad(compliance, youngs_modulus)[0]
+            sensitivity = {
+                "type": "compliance_by_youngs_modulus",
+                "compliance": float(compliance.detach().cpu()),
+                "dCompliance_dE": float(derivative.detach().cpu()),
+            }
 
         displacement_mag = torch.linalg.norm(u, dim=1)
         F_cpu = deformation_gradient.detach().cpu().to(torch.float64)
@@ -257,6 +301,7 @@ class TorchFemBackend(SimulationBackend):
             "mpsAvailable": device_info.mpsAvailable,
             "torchVersion": torch.__version__,
             "torchFemVersion": __import__("importlib.metadata", fromlist=["version"]).version("torch-fem"),
+            "accelerator": accelerator,
             "mesh": {
                 "hash": mesh_hash,
                 "elementType": mesh.get("elementType"),
@@ -290,6 +335,11 @@ class TorchFemBackend(SimulationBackend):
             },
             "interpretationPolicy": "raw deterministic fields only; safety and acceptance are Agent decisions",
         }
+        if sensitivity is not None:
+            sensitivity_path = Path(workdir) / "sensitivity.json"
+            sensitivity_path.write_text(json.dumps(sensitivity, indent=2), encoding="utf-8")
+            result["sensitivity"] = sensitivity
+            result["sensitivityArtifacts"] = [str(sensitivity_path)]
         fields_path = Path(workdir) / "simulation-fields.npz"
         fields_path.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(

@@ -7,38 +7,106 @@ import { fileURLToPath } from "node:url";
 
 import type { RuntimeIdentity, SimulationCommandResult, SimulationCommandRunner } from "./store.ts";
 
-export interface RuntimeRegistration {
+interface RuntimeRegistrationBase {
   backend: string;
   runtime: string;
+  kind: "apt" | "uv" | "archive";
   launcher: "bubblewrap";
-  package: string;
-  resolvedPackageVersion: string;
-  root: string;
+  bootstrap: string;
   network: "none";
+  immutableRoots: string[];
+  expectedVersion: string;
+  activation?: string;
+  environment: Record<string, string>;
+  accelerator: "none" | "cpu" | "cuda";
+  developmentOnly?: boolean;
   limits: { cpu: number; memoryGiB: number; tasks: number; wallHours: number; workspaceGiB: number };
+}
+
+interface RuntimeProbeRegistration {
+  script: string;
+  args: string[];
+  expected: Record<string, string | number | boolean>;
+}
+
+export type RuntimeRegistration = RuntimeRegistrationBase & (
+  | { kind: "apt"; package: string }
+  | { kind: "uv"; pythonProject: string; probe: RuntimeProbeRegistration }
+  | { kind: "archive"; executable: string; versionArgument: string; archiveUrl: string; sha256: string }
+);
+
+const COMMON_RUNTIME_KEYS = new Set([
+  "backend", "runtime", "kind", "launcher", "bootstrap", "network", "immutableRoots",
+  "expectedVersion", "activation", "environment", "accelerator", "developmentOnly", "limits",
+]);
+const KIND_RUNTIME_KEYS: Record<RuntimeRegistration["kind"], Set<string>> = {
+  apt: new Set(["package"]),
+  uv: new Set(["pythonProject", "probe"]),
+  archive: new Set(["executable", "versionArgument", "archiveUrl", "sha256"]),
+};
+
+export function validateRuntimeRegistry(value: unknown): RuntimeRegistration[] {
+  const registry = value as { schema?: unknown; runtimes?: unknown };
+  if (registry?.schema !== 2 || !Array.isArray(registry.runtimes)) throw new Error("invalid simulation runtime registry schema");
+  const seen = new Set<string>();
+  return registry.runtimes.map((raw, index) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`invalid runtime registration at index ${index}`);
+    const entry = raw as Record<string, unknown>;
+    if (!KIND_RUNTIME_KEYS[entry.kind as RuntimeRegistration["kind"]]) throw new Error(`invalid runtime kind at index ${index}`);
+    const allowed = new Set([...COMMON_RUNTIME_KEYS, ...KIND_RUNTIME_KEYS[entry.kind as RuntimeRegistration["kind"]]]);
+    const unknown = Object.keys(entry).filter((key) => !allowed.has(key));
+    if (unknown.length) throw new Error(`unknown runtime registration fields at index ${index}: ${unknown.join(", ")}`);
+    for (const key of ["backend", "runtime", "bootstrap", "expectedVersion"] as const) {
+      if (typeof entry[key] !== "string" || !entry[key]) throw new Error(`runtime ${index} requires ${key}`);
+    }
+    if (entry.launcher !== "bubblewrap" || entry.network !== "none") throw new Error(`runtime ${index} must use bubblewrap with network=none`);
+    if (!Array.isArray(entry.immutableRoots) || !entry.immutableRoots.length || entry.immutableRoots.some((root) => typeof root !== "string" || !root.startsWith("/"))) {
+      throw new Error(`runtime ${index} requires absolute immutableRoots`);
+    }
+    if (!entry.environment || typeof entry.environment !== "object" || Array.isArray(entry.environment)) throw new Error(`runtime ${index} requires environment`);
+    if (!new Set(["none", "cpu", "cuda"]).has(String(entry.accelerator))) throw new Error(`runtime ${index} has invalid accelerator`);
+    const limits = entry.limits as Record<string, unknown> | undefined;
+    if (!limits || ["cpu", "memoryGiB", "tasks", "wallHours", "workspaceGiB"].some((key) => typeof limits[key] !== "number" || Number(limits[key]) <= 0)) {
+      throw new Error(`runtime ${index} has invalid limits`);
+    }
+    const registration = entry as unknown as RuntimeRegistration;
+    if (registration.kind === "apt" && typeof registration.package !== "string") throw new Error(`apt runtime ${index} requires package`);
+    if (registration.kind === "uv") {
+      if (typeof registration.pythonProject !== "string" || !registration.pythonProject.startsWith("/opt/")) throw new Error(`uv runtime ${index} requires an /opt pythonProject`);
+      const probe = registration.probe as unknown as Record<string, unknown> | undefined;
+      if (!probe || Object.keys(probe).some((key) => !["script", "args", "expected"].includes(key))) throw new Error(`uv runtime ${index} requires a strict probe declaration`);
+      if (typeof probe.script !== "string" || !/^scripts\/[A-Za-z0-9_.-]+\.py$/.test(probe.script)) throw new Error(`uv runtime ${index} probe requires a packaged Python script`);
+      if (!Array.isArray(probe.args) || probe.args.some((arg) => typeof arg !== "string")) throw new Error(`uv runtime ${index} probe args must be strings`);
+      if (!probe.expected || typeof probe.expected !== "object" || Array.isArray(probe.expected) || Object.values(probe.expected).some((item) => !["string", "number", "boolean"].includes(typeof item))) {
+        throw new Error(`uv runtime ${index} probe expected projection must contain scalar values`);
+      }
+    }
+    if (registration.kind === "archive" && (
+      typeof registration.executable !== "string" || !registration.executable.startsWith("/opt/")
+      || typeof registration.versionArgument !== "string"
+      || typeof registration.archiveUrl !== "string" || !registration.archiveUrl.startsWith("https://")
+      || typeof registration.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(registration.sha256)
+    )) throw new Error(`archive runtime ${index} requires executable/versionArgument/archiveUrl/sha256`);
+    const identity = `${registration.backend}/${registration.runtime}`;
+    if (seen.has(identity)) throw new Error(`duplicate simulation runtime: ${identity}`);
+    seen.add(identity);
+    return registration;
+  });
 }
 
 let registrations: Promise<RuntimeRegistration[]> | undefined;
 async function runtimeRegistration(backend: string, runtime: string): Promise<RuntimeRegistration> {
   registrations ??= readFile(fileURLToPath(new URL("../../../assets/simulation-runtimes.json", import.meta.url)), "utf-8")
-    .then((text) => JSON.parse(text) as { schema: number; runtimes: RuntimeRegistration[] })
-    .then((registry) => {
-      if (registry.schema !== 1 || !Array.isArray(registry.runtimes)) throw new Error("invalid simulation runtime registry");
-      return registry.runtimes;
-    });
+    .then((text) => validateRuntimeRegistry(JSON.parse(text)));
   const found = (await registrations).find((entry) => entry.backend === backend && entry.runtime === runtime);
   if (!found) throw new Error(`unknown simulation backend/runtime: ${backend}/${runtime}`);
   return found;
 }
 
-export async function simulationRuntimeProjection(): Promise<Array<{ backend: string; runtime: string }>> {
+export async function simulationRuntimeProjection(): Promise<Array<{ backend: string; runtime: string; developmentOnly?: boolean }>> {
   registrations ??= readFile(fileURLToPath(new URL("../../../assets/simulation-runtimes.json", import.meta.url)), "utf-8")
-    .then((text) => JSON.parse(text) as { schema: number; runtimes: RuntimeRegistration[] })
-    .then((registry) => {
-      if (registry.schema !== 1 || !Array.isArray(registry.runtimes)) throw new Error("invalid simulation runtime registry");
-      return registry.runtimes;
-    });
-  return (await registrations).map(({ backend, runtime }) => ({ backend, runtime }));
+    .then((text) => validateRuntimeRegistry(JSON.parse(text)));
+  return (await registrations).map(({ backend, runtime, developmentOnly }) => ({ backend, runtime, ...(developmentOnly ? { developmentOnly } : {}) }));
 }
 
 function commandOutput(command: string, args: string[], cwd: string): Promise<string> {
@@ -187,18 +255,52 @@ export class ManagedSimulationRunner implements SimulationCommandRunner {
       ? commandOutput("wsl.exe", ["-d", distro, "--", command, ...args], cwd)
       : commandOutput(command, args, cwd);
     await linux("test", ["-x", "/usr/bin/bwrap"]);
-    await linux("test", ["-f", `${registration.root}/etc/bashrc`]);
-    const resolvedVersion = await linux("dpkg-query", ["-W", "-f=\\${Version}", registration.package]);
-    if (!resolvedVersion.includes(registration.resolvedPackageVersion)) throw new Error(`unexpected ${registration.package} version: ${resolvedVersion}`);
+    for (const root of registration.immutableRoots) await linux("test", ["-e", root]);
+    let resolvedVersion: string;
+    let accelerator: Record<string, unknown> | undefined;
+    if (registration.kind === "apt") {
+      resolvedVersion = await linux("dpkg-query", ["-W", "-f=\\${Version}", registration.package]);
+      if (!resolvedVersion.includes(registration.expectedVersion)) throw new Error(`unexpected ${registration.package} version: ${resolvedVersion}`);
+    } else if (registration.kind === "archive") {
+      await linux("test", ["-x", registration.executable]);
+      const output = await linux(registration.executable, [registration.versionArgument]);
+      if (!output.includes(registration.expectedVersion)) throw new Error(`unexpected ${registration.backend} version: ${output.slice(0, 512)}`);
+      resolvedVersion = registration.expectedVersion;
+    } else {
+      const packageRoot = fileURLToPath(new URL("../../../", import.meta.url));
+      const probeScript = resolve(packageRoot, registration.probe.script);
+      const probeRelative = relative(packageRoot, probeScript);
+      if (probeRelative.startsWith("..") || isAbsolute(probeRelative)) throw new Error(`runtime probe escapes package root: ${registration.probe.script}`);
+      const probeCode = await readFile(probeScript, "utf-8");
+      const output = await linux("env", [
+        ...Object.entries(registration.environment).map(([key, value]) => `${key}=${value}`),
+        "uv", "run", "--offline", "--frozen", "--project", registration.pythonProject,
+        "python", "-c", probeCode, ...registration.probe.args,
+      ]);
+      const payload = output.split(/\r?\n/).filter(Boolean).at(-1);
+      if (!payload) throw new Error(`runtime probe ${registration.probe.script} produced no JSON`);
+      accelerator = JSON.parse(payload) as Record<string, unknown>;
+      for (const [key, expected] of Object.entries(registration.probe.expected)) {
+        if (accelerator[key] !== expected) throw new Error(`unexpected ${registration.runtime} probe value ${key}: ${String(accelerator[key])}`);
+      }
+      if (registration.accelerator === "cuda" && accelerator.actualDevice !== "cuda") throw new Error(`${registration.runtime} requires CUDA; CPU fallback is forbidden`);
+      if (registration.accelerator === "cpu" && accelerator.actualDevice !== "cpu") throw new Error(`${registration.runtime} requires explicit CPU execution`);
+      resolvedVersion = registration.expectedVersion;
+    }
     const arch = await linux("uname", ["-m"]);
     const launcherVersion = await linux("bwrap", ["--version"]);
-    const hashScript = `set -e; { dpkg-query -L ${registration.package}; find /opt/pi-cad-runtime/python -type f -print; } | sort -u | while IFS= read -r f; do test -f "$f" && sha256sum "$f" || true; done | sha256sum | cut -d' ' -f1`;
+    const roots = registration.immutableRoots.map((root) => `'${root.replaceAll("'", "'\\''")}'`).join(" ");
+    const packageFiles = registration.kind === "apt" ? `dpkg-query -L ${registration.package};` : "";
+    const hashScript = `set -e; { ${packageFiles} find ${roots} -type f -print; } | sort -u | while IFS= read -r f; do test -f "$f" && sha256sum "$f" || true; done | sha256sum | cut -d' ' -f1`;
     const executableHash = process.platform === "win32"
       ? await linux("bash", ["-lc", `echo ${Buffer.from(hashScript).toString("base64")}|base64 -d|bash`])
       : await linux("bash", ["-lc", hashScript]);
-    const environment = { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/tmp", TMPDIR: "/tmp", network: registration.network };
-    const payload = { backend, runtime, resolvedVersion, arch, installedFilesHash: executableHash, launcherVersion, environment };
-    const identity = { backend, runtime, platform: `linux-${arch}`, resolvedVersion, digest: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), launcher: `bubblewrap/${launcherVersion}` };
+    const environment = { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/tmp", TMPDIR: "/tmp", network: registration.network, ...registration.environment };
+    const probeScriptHash = registration.kind === "uv"
+      ? createHash("sha256").update(await readFile(fileURLToPath(new URL(`../../../${registration.probe.script}`, import.meta.url)))).digest("hex")
+      : undefined;
+    const payload = { backend, runtime, resolvedVersion, arch, installedFilesHash: executableHash, launcherVersion, environment, accelerator, registration, probeScriptHash };
+    const identity = { backend, runtime, platform: `linux-${arch}`, resolvedVersion, digest: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), launcher: `bubblewrap/${launcherVersion}`, ...(accelerator ? { accelerator } : {}) };
     this.identities.set(key, identity);
     return identity;
   }
@@ -211,23 +313,45 @@ export class ManagedSimulationRunner implements SimulationCommandRunner {
     const bwrap = [
       "--unshare-net", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--new-session", "--clearenv",
       "--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
-      "--ro-bind", registration.root, registration.root,
-      "--ro-bind", "/opt/pi-cad-runtime", "/opt/pi-cad-runtime",
       "--ro-bind", "/etc/ld.so.cache", "/etc/ld.so.cache", "--ro-bind", "/etc/passwd", "/etc/passwd", "--ro-bind", "/etc/group", "/etc/group",
       "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/home",
       "--bind", workspace, "/workspace", "--chdir", `/workspace/${recipeRel}`,
       "--setenv", "HOME", "/tmp", "--setenv", "TMPDIR", "/tmp", "--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin", "--setenv", "LC_ALL", "C.UTF-8",
     ];
+    for (const root of registration.immutableRoots) bwrap.push("--ro-bind", root, root);
+    if (registration.accelerator === "cuda") {
+      bwrap.push(
+        "--dev-bind-try", "/dev/dxg", "/dev/dxg",
+        "--dev-bind-try", "/dev/nvidiactl", "/dev/nvidiactl",
+        "--dev-bind-try", "/dev/nvidia-uvm", "/dev/nvidia-uvm",
+        "--dev-bind-try", "/dev/nvidia-uvm-tools", "/dev/nvidia-uvm-tools",
+        "--dev-bind-try", "/dev/nvidia0", "/dev/nvidia0",
+      );
+    }
     const hostWorkspace = resolve(input.workspace);
-    for (const [key, value] of Object.entries(input.environment)) {
+    for (const [key, value] of Object.entries({ ...registration.environment, ...input.environment })) {
+      if (value.startsWith("/")) {
+        // Registry paths are already canonical Linux paths. On a Windows
+        // process whose cwd is a WSL UNC, node:path.resolve("/opt/...") can
+        // manufacture a UNC path and falsely classify it as workspace-local.
+        bwrap.push("--setenv", key, value);
+        continue;
+      }
       const absoluteValue = isAbsolute(value) ? resolve(value) : "";
       const rel = absoluteValue ? relative(hostWorkspace, absoluteValue) : "..";
-      const mapped = absoluteValue && !rel.startsWith("..") && !rel.includes(`..${sep}`) && rel !== ".."
+      const mapped = absoluteValue && !isAbsolute(rel) && !rel.startsWith("..") && !rel.includes(`..${sep}`) && rel !== ".."
         ? `/workspace/${rel.split(sep).join("/")}`
         : value.replaceAll(workspace, "/workspace");
       bwrap.push("--setenv", key, mapped);
     }
-    bwrap.push("/bin/bash", "-lc", `. ${registration.root}/etc/bashrc >/dev/null 2>&1 && ${input.command}`);
+    const commandLine = registration.activation ? `${registration.activation} && ${input.command}` : input.command;
+    // Windows WSL interop may reconstruct argv through a shell before
+    // systemd-run starts. Passing Recipe commands verbatim would therefore
+    // expand managed variables such as $PI_CAD_PYTHON_PROJECT outside the
+    // sandbox, where they are intentionally absent. Base64 keeps the command
+    // opaque until the inner shell is running with the bwrap environment.
+    const encodedCommand = Buffer.from(commandLine, "utf-8").toString("base64");
+    bwrap.push("/bin/bash", "-lc", `echo ${encodedCommand}|base64 -d|/bin/bash`);
     const scope = ["--user", "--scope", "--quiet", ...managedLimitProperties(registration.limits).flatMap((property) => ["-p", property]), "bwrap", ...bwrap];
     const command = process.platform === "win32" ? "wsl.exe" : "systemd-run";
     const args = process.platform === "win32" ? ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", "systemd-run", ...scope] : scope;

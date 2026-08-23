@@ -145,15 +145,16 @@ release)确定性对比 → 按哈希绑定证据 → 进入评审。
 按哈希不可变保存;Route 变化时进入 state-level reassessment lock。外部 baseline
 文件缺失可以阻塞执行,但不能让已过时的旧需求继续充当 canonical truth。
 
-**几何** —— `cad_build_step`、`cad_inspect_visual`、`cad_inspect_geometry`、
-`cad_inspect_surfaces`、`cad_inspect_section`、`cad_scan_sections`、
-`cad_measure`、`cad_compare_geometry`、`cad_assembly_tree`、
-`cad_inspect_interference`、`cad_export`。
+**模型与探测** —— `cad_build_step`、`cad_derive_analysis_model`、唯一入口
+`cad_probe`(`visual`、`geometry`、`surfaces`、`measure`、`section`、
+`sections_scan`、`compare`、`assembly`、`interference`、`python`)、
+`cad_recall_observation` 与 `cad_export`。
 
 **工程分析** —— Recipe-native 的 `cad_simulate`、`cad_sim_observe`、
 `cad_commit_simulation`,以及 `cad_optimize`、`cad_generate_drawing`、
-`cad_render_scene`。原有 typed 结构/流体/热工具仅作为 deprecated
-compatibility wrappers 保留。
+`cad_render_scene`。历史 typed 工具名只用于迁移读取,不再注册,也不能用于
+新 obligation;`cadctl` 也不再暴露旧 simulate 命令。solver compiler 只作为
+Recipe-owned 实现库保留。
 
 Simulation V2 只接收 backend、runtime、Recipe 目录和可选的不透明输出名。
 物理、材料、边界、网格与项目指标全部属于 solver-native Recipe,不进入
@@ -180,7 +181,9 @@ primary floor;显式名字只能追加观察;`outputs=[]` 非法。
 Harness 只快照 Recipe 与 declared inputs,在固定版本、默认断网的 runtime
 中执行;完整日志和 raw state 留在上下文之外,图片先于受限的量化摘要返回。
 只修改 observation files 会产生新的 immutable snapshot,不会重跑 Solver;
-修改 compute 文件或输入则必须新建 run。
+每个 Observation 都保存实际运行的 manifest/observer 文件、tree/file hash、
+rendered plot hash 与 materialized exports。因此后续 re-observe 后,旧的精确
+snapshot 仍可独立审计和提交。修改 compute 文件或输入则必须新建 run。
 已物化的文件 export 会进入 run 级 `objects/sha256/` 存储;未变化的大型
 field 通过硬链接复用同一个 immutable object,不支持硬链接时回退到
 copy/reflink。
@@ -189,39 +192,65 @@ simulate 和 observe 都不创建 Evidence。commit 会复验精确的 run、obs
 runtime identity、declared inputs、当前 case obligation,以及 authoritative
 artifact 或受验证 derivation。Evidence 表示溯源成立,不等于工程 PASS。
 
-首个 managed runtime 是 `backend=openfoam`、`runtime=openfoam-14`,固定到
-`openfoam14@20260724`。在 Linux/WSL 内运行
-`scripts/bootstrap-openfoam14.sh` 完成一次性安装。普通 CI 使用 stub runtime;
+schema 2 runtime registry 数据驱动注册四个精确环境:
+
+- `openfoam/openfoam-14`:固定 `openfoam14@20260724`;
+- `su2/su2-8.5.0`:官方 archive 加固定 SHA256;
+- `torch-fem/torch-fem-0.9-cu126`:正式 CUDA 结构求解与优化;
+- `torch-fem/torch-fem-0.9-cpu`:只能显式选择,用于 CI、调试和小算例。
+
+在 Linux/WSL 内分别运行 `scripts/bootstrap-openfoam14.sh`、
+`scripts/bootstrap-su2-8.5.0.sh` 与 `scripts/bootstrap-torch-fem-runtimes.sh`
+完成一次性安装。Windows Node host 一律通过 WSL 启动 Linux runtime,
+Recipe Python 不在 Windows 上执行;entrypoint/observer 使用锁定项目的
+`uv run --offline --frozen`。正式运行由 bubblewrap、user systemd scope、
+断网、只读挂载、资源上限与 workspace quota 隔离。普通 CI 使用 stub runtime;
+每个 uv runtime 的版本/accelerator probe 由 registry entry 声明,generic runner
+不再硬编码 torch-fem/CuPy。trusted Solver health 会在默认 Observation context
+中显示 requested/actual device、GPU 与 CUDA 版本,Recipe 自报不能覆盖。
 真实 qualification Recipe 位于 `benchmarks/simulation-v2/openfoam14-box`。
 仓库内的 `benchmarks/simulation-v2/spec04-template` 已包含 OpenFOAM case
 generator、三阶段 solver runner、收敛/鲁棒性聚合和 Rev1 release gate。
 制造 CAD、材料、surface mapping 与 Rev1 criteria 仍作为 ignored 权威输入;
 缺失时明确返回 `blocked_external`,且不能产生 `SIMULATION_RELEASE_PASS`。
 
-### Deprecated typed compatibility tools
+### 结构、热与流 Recipe
 
-V1 做得好的:
+公开接口不再注册 typed physics wrapper。`cad_probe` 是唯一探测入口;
+所有新仿真都走 Recipe-native 链路。物理、单位、材料、载荷、约束、边界、
+网格、求解控制和项目指标全部留在 Recipe,不进入 Core。
 
-- **线弹性 FEA**:torch-fem 求解,gmsh 对 STEP 划分四面体网格,或参数化
-  盒式网格。单位固定:mm / N / MPa。
-- **可推理的边界条件**:集中力载荷重叠时*相加*,固定约束重叠时*取并集*。
-  区域选择轴向极值节点层,或显式节点编号。
-- **可读的结果**:七张渲染视图(位移、von Mises、变形形状……)、NPZ
-  完整场数据、含反力平衡/网格溯源/设备回退原因的结果 JSON。
-- **多工况并存**:同一零件的常规、峰值、冲击载荷工况按 spec 哈希并排保存,
-  互不覆盖。
-- **设备诚实**:CPU 是一等公民;有匹配 CuPy 时用 CUDA;Metal 明确回退
-  CPU。没有任何伪装。
+`structural-analysis` skill 提供 torch-fem 线弹性 Recipe。正式 CUDA runtime
+固定 torch-fem 0.9.0、PyTorch 2.13.0+cu126、CuPy 14.1.1 和 Python 3.12,
+启动前验证 PyTorch CUDA、CuPy device、compute capability 与一次真实 GPU
+sparse solve。GPU、driver、CuPy 或架构不兼容时返回 `unavailable`,绝不
+静默转 CPU。正式 Evidence 必须记录 `actualDevice=cuda`;显式 CPU 运行绑定
+不同 runtime identity。
 
-### 热与流(SU2)
+当前共享 workflow state schema 为 v6。Simulation V2 的 clean transition 最初
+进入 v5;后续 immutable requirements revision 将总 workflow schema 升至 v6,
+但 Recipe schema 1 与 Observation wire schema 1 没有变化。
 
-`cad_simulate_flow` 与 `cad_simulate_thermal` 把 canonical spec 编译成 SU2
-世界,再把 SU2 结果翻译回 canonical 证据。单位规则冻结且直接写在字段名里:
+`thermal-fluid-analysis` skill 提供 SU2 steady-flow 和 solid-thermal Recipe,
+并说明何时应使用 OpenFOAM。SU2 只从 immutable
+`/opt/pi-cad-runtime/su2/8.5.0` 启动,不接受宿主 PATH 或环境变量绕过。
+
+`cad_optimize` 默认在同一个 managed CUDA runtime 内运行二维 SIMP/MMA
+可微优化。它只生成 optimization artifact,不是 CAD 或 Simulation Evidence。
+
+Skill 分三层:`pi-cad` 负责 workflow/Evidence,`pi-cad-tools` 覆盖完整 active
+public catalog,工程知识 skills 分别处理机械、参数化建模、装配、制造、
+结构分析与热流分析。
+
+#### SU2 Recipe 保留的模型契约
+
+两个 SU2 Recipe 把显式 case 数据编译成 solver config,再把 native 结果翻译
+为通用 Observation export。单位规则冻结且直接写在字段名里:
 CAD 几何按 `geometryUnits` 解释(默认 mm),所有物理量用显式 SI
 (`totalPressurePa`、`temperatureK`、`maxSizeMm`……)——求解器永远不会遇到
 隐式 mm→m。
 
-- `cad_simulate_flow` —— 在显式水密流体域 STEP 上做稳态单区 CFD:
+- **Steady-flow Recipe** —— 在显式水密流体域 STEP 上做稳态单区 CFD:
   可压缩 Euler、可压缩 RANS(SA/SST)、不可压缩 NS/RANS。每个边界面必须
   且只能分类一次(总条件进口、压力出口、壁面);结果含收敛历程、按面积的
   面加权均值、质量平衡、原始场与视图。收敛的喷管算例出口马赫数与等熵
@@ -232,26 +261,19 @@ CAD 几何按 `geometryUnits` 解释(默认 mm),所有物理量用显式 SI
 - **收敛性是执行有效性,不是工程判断。** 未声明或未达到
   `residualTarget` 的运行返回 `status=not_converged`:原始场仍会展示
   用于诊断,但该运行**不会**产生仿真证据,也关不掉 required case。
-- `cad_simulate_thermal` —— 稳态固体导热:定温与定热流边界、其余绝热、
+- **Solid-thermal Recipe** —— 稳态固体导热:定温与定热流边界、其余绝热、
   常导热系数。一维平板 fixture 在 CI 中与 `q = kAΔT/L` 解析解对比。
   边界热流率字段命名为 `reconstructedHeatRateW`,因为它由解的单元梯度
   重构积分而来,不是 SU2 自身的守恒面通量。
-- `cad_inspect_surfaces` —— 确定性的边界面事实(类型、面积、质心、包围盒、
+- `cad_probe preset=surfaces` —— 确定性的边界面事实(类型、面积、质心、包围盒、
   法向/轴线)加带标注的视图。面 ID 只是对当前工件哈希有效的几何选择器,
   绝不是语义标签:哪个面是进口,由智能体自己判断。
 
-SU2 以可选的固定版本运行时发布(官方 8.5.0 "Harrier" 预编译包,SHA256
-校验),安装在 `.runtime/su2/`;下载失败自动降级,`cadctl doctor` 如实
-报告能力。`PI_CAD_SU2_BIN` 可指向自带二进制,`PI_CAD_SKIP_SU2=1` 可完全
-跳过。`thermal-fluid-analysis` skill 描述如何组织与解读这类证据,但并不
-假装教模型 CFD。
+SU2 使用官方 8.5.0 "Harrier" archive 与固定 SHA256,显式 bootstrap 到
+`/opt/pi-cad-runtime`。未安装时返回 `unavailable`;正式运行不搜索宿主 PATH。
 
-V1 刻意不做的:非线性材料、压力/牵引载荷、多材料结构零件、CHT/多区、
-瞬态流、燃烧、叶轮机械特性。工具只返回原始确定性场——它永远不说"安全"、
-"合格"或"能用";这个判断属于智能体,也属于你。
-
-`cad_optimize` 是标注清晰的走通骨架:可微分 SIMP 拓扑优化(二维矩形域、
-MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
+Recipe 和 skill 必须明确与结论有关的非线性、多材料、CHT、燃烧或叶轮机械
+假设。工具只返回观察与 provenance;工程判断不进入 Core。
 
 ## 为什么可以信任输出
 
@@ -269,7 +291,7 @@ MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
   残差目标(或未声明目标)的运行以 `status=not_converged` 返回原始场,
   harness 不会从中记录任何证据。
 - **声明的仿真工况必须真的跑过。** 需求里声明了按工况的义务
-  (如 `nozzle-outlet` 用 `cad_simulate_flow`)时,验收与收尾会被一直挡住,
+  (如 `nozzle-outlet` 用 `cad_simulate`)时,验收与收尾会被一直挡住,
   直到每个工况都用声明的工具产生了当前版本的证据——跑一次结构 FEA
   关不掉一个流场工况。harness 只比对不透明标识,绝不理解物理。
 - **候选一变,旧证据自动过期。** 你无法拿上一版的仿真去验收新几何。
@@ -285,11 +307,8 @@ MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
 | --- | --- |
 | `PI_CAD_UV` | 在原生 Linux 上覆盖 `uv` 可执行文件 |
 | `PI_CAD_WSL_DISTRO` | Windows Node host 使用的 WSL 发行版(默认 `Ubuntu`) |
-| `PI_CAD_VENV` | 安装器与运行时共同指向一个已有 virtualenv |
-| `PI_CAD_SKIP_CUPY` | 跳过尽力而为的 CuPy 安装(设为 `1` 关闭) |
-| `PI_CAD_SU2_BIN` | 流/热分析使用外部 SU2_CFD 二进制 |
-| `PI_CAD_SKIP_SU2` | 跳过可选的 SU2 运行时下载(设为 `1` 关闭) |
-| `PI_CAD_SU2_RUNTIME` | 托管 SU2 运行时的替代根目录 |
+| `PI_CAD_ENABLE_DEV_RUNTIMES` | 显示 development-only runtime,包括显式 CPU (`1`) |
+| `CUDA_VISIBLE_DEVICES` | 选择暴露给 managed runtime 的 CUDA 设备 |
 
 运行时能力检查("doctor" 报告)是对**实际会用到的那份 Python** 的实时
 探测,每个会话尊重一次——不是安装时刻的过期快照。
@@ -300,9 +319,10 @@ MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
 npm test          # 或:bash scripts/test.sh
 ```
 
-31 个 TypeScript harness 测试 + 19 个 Python 后端测试,包括悬臂梁网格
-收敛对梁理论的校验、载荷/约束重叠语义、负向验证矩阵、证据篡改、
-工件中途变更竞态。CI 在每次 push 时于全新安装(Linux CPU)上跑全量套件。
+TypeScript 协议/harness 测试与 WSL/Linux 中通过 `uv run` 执行的 Python
+测试覆盖 manifest/path closure、Observation、显式 commit、资源限制、CUDA
+fail-closed、结构 refinement/平衡/梯度、SU2 解析导热与流动守恒以及 OpenFOAM
+qualification。普通 CI 不伪造 GPU qualification。
 
 ## 磁盘上有什么
 
@@ -325,7 +345,8 @@ npm test          # 或:bash scripts/test.sh
 | 区域 | 路径 |
 | --- | --- |
 | Harness 核心(状态机、策略、证据) | `src/core/` |
-| 工具扩展(几何、视觉、图纸、仿真、演示、UI) | `src/extensions/` |
+| 工具扩展(探测、几何、图纸、仿真、演示、UI) | `src/extensions/` |
+| Skill 路由、工程参考与 Recipe assets | `skills/` |
 | 工作流定义(全部七种) | `src/workflows/` |
 | 分层提示词 | `src/prompts/` |
 | 确定性 Python 后端 | `python/cadctl/` |

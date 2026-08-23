@@ -11,7 +11,13 @@ build/
 ref/
 tests/
 **/__pycache__/
-**/*.pyc
+**/*.py[cod]
+**/.venv/
+**/.uv-cache/
+**/.hf-cache/
+**/.cache/
+benchmarks/cadtestbench/data/
+benchmarks/cadtestbench/external/
 *.log
 *.tmp
 *Zone.Identifier*

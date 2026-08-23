@@ -4,7 +4,7 @@
  * One agent-facing observation tool over the PROBE registry:
  *
  *   - preset mode: visual / geometry / surfaces / measure / section /
- *     sections-scan / compare / assembly / interference;
+ *     sections_scan / compare / assembly / interference;
  *   - programmable mode: python (read-only B-Rep computation).
  *
  * The legacy per-preset tools remain as deprecated wrappers until the

@@ -96,7 +96,7 @@ const pi = {
 
     // read_only blocks ALL raw bash — pattern-based detection is incomplete
     // (python -c "open(...,'w')" matches no redirect rule), so the fence is
-    // absolute; read-only computation goes through cad_probe_python.
+    // absolute; read-only computation goes through cad_probe preset=python.
     const readOnlyBenignBashBlocked = (await toolCall(
       { toolName: "bash", input: { command: "python3 -c \"print('hi')\"" } },
       { cwd },
@@ -106,10 +106,10 @@ const pi = {
     // The programmable probe is exposed exactly on the review-family phases.
     const { toolsForPhase } = await import("../src/core/policies.ts");
     for (const phase of ["review", "compare", "integration_review"] as const) {
-      assert.ok(toolsForPhase(phase).includes("cad_probe_python"), `${phase} exposes cad_probe_python`);
+      assert.ok(toolsForPhase(phase).includes("cad_probe"), `${phase} exposes cad_probe`);
     }
-    for (const phase of ["build", "part_design", "requirements", "plan"] as const) {
-      assert.ok(!toolsForPhase(phase).includes("cad_probe_python"), `${phase} must not expose cad_probe_python`);
+    for (const phase of ["requirements"] as const) {
+      assert.ok(!toolsForPhase(phase).includes("cad_probe"), `${phase} must not expose cad_probe`);
     }
   } finally {
     rmSync(cwd, { recursive: true, force: true });

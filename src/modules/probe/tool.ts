@@ -11,7 +11,6 @@ export const CAD_PROBE_PRESET_NAMES = {
   measure: "measure",
   section: "section",
   sections_scan: "sections_scan",
-  sections_scan_legacy: "sections-scan",
   compare: "compare",
   assembly: "assembly",
   interference: "interference",
@@ -46,9 +45,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
       code: params.code ?? "",
     });
   }
-  const registryName = params.preset === "sections_scan" || params.preset === "sections-scan"
-    ? "sections-scan"
-    : params.preset;
+  const registryName = params.preset;
   const preset = probePreset(registryName);
   if (!preset) {
     return { content: [{ type: "text" as const, text: `cad_probe failed: preset ${registryName} not registered` }] };

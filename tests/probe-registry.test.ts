@@ -16,7 +16,7 @@ function okEnvelope(tool: string, payload: Record<string, unknown> = {}): CadEve
   return {
     ok: true,
     tool,
-    toolVersion: "0.8.0",
+    toolVersion: "0.9.0",
     inputHashes: { artifact: "hash-a" },
     outputHashes: {},
     durationMs: 5,
@@ -36,7 +36,7 @@ test("registry: builtin presets register exactly once and are enumerable", () =>
     "surfaces",
     "measure",
     "section",
-    "sections-scan",
+    "sections_scan",
     "compare",
     "assembly",
     "interference",

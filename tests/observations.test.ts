@@ -17,7 +17,7 @@ function envelope(overrides: Partial<CadEventEnvelope> = {}): CadEventEnvelope {
   return {
     ok: true,
     tool: "cad_inspect_visual",
-    toolVersion: "0.8.0",
+    toolVersion: "0.9.0",
     backendVersion: "build123d 0.7",
     inputHashes: { artifact: "abc123" },
     outputHashes: {},

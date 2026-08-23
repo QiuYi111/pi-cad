@@ -260,17 +260,10 @@ class CadctlBackendTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        sim = run_cadctl(
-            "simulate",
-            "run",
-            "--spec",
-            str(analysis),
-            "--output-dir",
-            str(self.evidence / "fea"),
-            cwd=self.cwd,
-        )
-        self.assertTrue(sim["ok"])
-        self.assertEqual(sim["payload"]["backend"], "torch-fem")
+        from cadctl.simulation.api import run_simulation
+
+        simulation = run_simulation(str(analysis), str(self.evidence / "fea"), stage="run")
+        self.assertEqual(simulation["backend"], "torch-fem")
 
     def test_failed_model_returns_envelope_not_traceback(self) -> None:
         bad = self.cwd / "bad.py"

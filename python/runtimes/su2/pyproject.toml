@@ -1,0 +1,13 @@
+[project]
+name = "pi-cad-su2-runtime"
+version = "8.5.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pi-cad-cadctl",
+  "gmsh==4.15.0",
+  "meshio==5.3.5",
+  "pyvista==0.48.4",
+]
+
+[tool.uv.sources]
+pi-cad-cadctl = { path = "../..", editable = false }

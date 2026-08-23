@@ -17,7 +17,7 @@ import { CAD_PHASES } from "../shared/protocol.ts";
 
 export type Capability =
   // observation family
-  | "observe" // typed probes (cad_probe + legacy inspection wrappers, no interference)
+  | "observe" // unified cad_probe + historical observation recall
   | "observe_interference" // pairwise solid interference facts
   | "observe_programmable" // read-only programmable B-Rep computation
   // model family
@@ -56,24 +56,16 @@ const GRANTS: Record<PhaseGrant, readonly string[]> = {
   observe: [
     "cad_probe",
     "cad_recall_observation",
-    "cad_inspect_visual",
-    "cad_inspect_geometry",
-    "cad_inspect_surfaces",
-    "cad_inspect_section",
-    "cad_measure",
-    "cad_compare_geometry",
-    "cad_assembly_tree",
-    "cad_scan_sections",
   ],
-  observe_interference: ["cad_inspect_interference"],
-  observe_programmable: ["cad_probe_python"],
+  observe_interference: ["cad_probe"],
+  observe_programmable: ["cad_probe"],
 
   // model
   model_build: ["cad_build_step"],
   deliverable: ["cad_export", "cad_generate_drawing", "cad_render_scene"],
 
   // simulation
-  simulate: ["cad_simulate", "cad_sim_observe", "cad_commit_simulation", "cad_simulate_structural_legacy", "cad_simulate_flow", "cad_simulate_thermal"],
+  simulate: ["cad_simulate", "cad_sim_observe", "cad_commit_simulation", "cad_derive_analysis_model"],
   optimize: ["cad_optimize"],
 
   // control

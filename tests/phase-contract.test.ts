@@ -53,22 +53,12 @@ test("contracts: capability grants map to the expected tool families", () => {
   assert.deepEqual(capabilityTools("observe"), [
     "cad_probe",
     "cad_recall_observation",
-    "cad_inspect_visual",
-    "cad_inspect_geometry",
-    "cad_inspect_surfaces",
-    "cad_inspect_section",
-    "cad_measure",
-    "cad_compare_geometry",
-    "cad_assembly_tree",
-    "cad_scan_sections",
   ]);
   assert.deepEqual(capabilityTools("simulate"), [
     "cad_simulate",
     "cad_sim_observe",
     "cad_commit_simulation",
-    "cad_simulate_structural_legacy",
-    "cad_simulate_flow",
-    "cad_simulate_thermal",
+    "cad_derive_analysis_model",
   ]);
   assert.deepEqual(capabilityTools("model_build"), ["cad_build_step"]);
   assert.ok(capabilityTools("deliverable").includes("cad_generate_drawing"));

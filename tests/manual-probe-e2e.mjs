@@ -1,12 +1,12 @@
-// E2E: load the geometry extension through a fake pi, drive a routed state,
-// call cad_probe_python, assert result + no evidence change + subject fence.
+// E2E: load the unified probe extension through a fake pi, drive a routed
+// state, call cad_probe preset=python, and assert immutability + subject fence.
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const cwd = mkdtempSync(join(tmpdir(), "probe-e2e-"));
 try {
-  const { default: ext } = await import("../src/extensions/geometry/index.ts");
+  const { default: ext } = await import("../src/extensions/probe/index.ts");
   const tools = new Map();
   const pi = {
     registerTool: (t) => tools.set(t.name, t),
@@ -14,8 +14,8 @@ try {
     on: () => {},
   };
   ext(pi);
-  const probe = tools.get("cad_probe_python");
-  if (!probe) throw new Error("cad_probe_python not registered");
+  const probe = tools.get("cad_probe");
+  if (!probe) throw new Error("cad_probe not registered");
 
   const stateDir = join(cwd, ".pi-cad", "runs", "r1");
   mkdirSync(stateDir, { recursive: true });
@@ -37,6 +37,7 @@ try {
   writeFileSync(join(stateDir, "state.json"), JSON.stringify(before));
 
   const result = await probe.execute("t1", {
+    preset: "python",
     subject: "current",
     purpose: "shape factor check",
     code: [
@@ -51,7 +52,7 @@ try {
   const after = JSON.parse(readFileSync(join(stateDir, "state.json"), "utf8"));
   console.log("state unchanged:", JSON.stringify(after) === JSON.stringify(before));
 
-  const b = await probe.execute("t2", { subject: "baseline", purpose: "x", code: "result = 1" }, undefined, undefined, { cwd });
+  const b = await probe.execute("t2", { preset: "python", subject: "baseline", purpose: "x", code: "result = 1" }, undefined, undefined, { cwd });
   console.log("baseline-unbound:", b.content[0].text.slice(0, 80));
 } finally {
   rmSync(cwd, { recursive: true, force: true });

@@ -1,0 +1,27 @@
+schema = 1
+entrypoint = "./Allrun"
+observe = "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python observe.py"
+nonvisual = false
+
+inputs = ["../../build/fluid-domain.step"]
+observation_files = ["observe.py"]
+
+[exports.flow_view]
+type = "image"
+primary = true
+
+[exports.mass_imbalance]
+type = "scalar"
+primary = true
+unit = "1"
+
+[exports.worst_residual]
+type = "scalar"
+unit = "log10"
+
+[exports.convergence]
+type = "table"
+
+[exports.fields]
+type = "field"
+format = "npz"

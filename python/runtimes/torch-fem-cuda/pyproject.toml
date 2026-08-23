@@ -1,0 +1,23 @@
+[project]
+name = "pi-cad-torch-fem-cuda-runtime"
+version = "0.9.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pi-cad-cadctl",
+  "torch==2.13.0+cu126",
+  "torch-fem==0.9.0",
+  "cupy-cuda12x[ctk]==14.1.1",
+  "gmsh==4.15.0",
+  "meshio==5.3.5",
+  "pyvista==0.48.4",
+  "nlopt==2.9.1",
+]
+
+[tool.uv.sources]
+pi-cad-cadctl = { path = "../..", editable = false }
+torch = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -92,6 +92,13 @@ test("simulate and re-observe create immutable snapshots without implicit Eviden
     assert.notEqual(second.observation?.observationId, first.observation?.observationId);
     assert.equal(runner.computeCalls, 1, "Allrun must not execute during re-observe");
     assert.equal(runner.observeCalls, 2);
+    assert.notEqual(first.observation!.observationProgramSnapshotHash, second.observation!.observationProgramSnapshotHash);
+    assert.notEqual(first.observation!.observationProgramHash, second.observation!.observationProgramHash);
+    assert.ok(first.observation!.observationProgramFiles.some((item) => item.path.endsWith("observe.py")));
+    const firstProgram = join(first.runDirectory, "observations", first.observation!.observationId, first.observation!.observationProgramPath, "observe.py");
+    const secondProgram = join(first.runDirectory, "observations", second.observation!.observationId, second.observation!.observationProgramPath, "observe.py");
+    assert.equal(await readFile(firstProgram, "utf8"), "observe-v1");
+    assert.equal(await readFile(secondProgram, "utf8"), "observe-v2");
     const firstImage = first.observation!.exports.find((entry) => entry.name === "phase_distribution")!;
     const secondImage = second.observation!.exports.find((entry) => entry.name === "phase_distribution")!;
     assert.equal(firstImage.contentAddress, `sha256:${firstImage.sha256}`);
@@ -106,16 +113,20 @@ test("simulate and re-observe create immutable snapshots without implicit Eviden
     state.currentArtifactHash = await sha256File(join(cwd, "build", "domain.step"));
     state.evidenceObligations = { simulation: { disposition: "required", cases: [{ id: "fill-case", tool: "cad_simulate" }] } };
     await projectStore.save(state);
-    const evidence = await commitSimulation(cwd, first.run.runId, second.observation!.observationId, "fill-case", runner);
+    const evidence = await commitSimulation(cwd, first.run.runId, first.observation!.observationId, "fill-case", runner);
     assert.equal(evidence.simulationRunId, first.run.runId);
-    assert.equal(evidence.observationId, second.observation!.observationId);
+    assert.equal(evidence.observationId, first.observation!.observationId, "an older exact snapshot remains committable after re-observation");
     assert.equal((await projectStore.load())!.evidence.length, 1);
     const replacement = await commitSimulation(cwd, first.run.runId, second.observation!.observationId, "fill-case", runner);
     const committed = (await projectStore.load())!;
     assert.equal(committed.evidence.length, 1);
     assert.equal(committed.staleEvidence.length, 1);
     assert.notEqual(replacement.id, evidence.id);
+    assert.ok(second.observation!.exports.find((item) => item.name === "history")!.plotSha256);
     assert.equal(await verifyEvidenceFilesForHash(cwd, committed, committed.currentArtifactHash!, ["simulation"]), null);
+    await writeFile(secondProgram, "tampered-observer");
+    assert.match((await verifyEvidenceFilesForHash(cwd, committed, committed.currentArtifactHash!, ["simulation"]))!, /artifact/);
+    await writeFile(secondProgram, "observe-v2");
 
     await writeFile(join(cwd, "simulation", "case", "Allrun"), "compute-v2");
     await assert.rejects(createObservationSnapshot({ cwd, workflowRunId: "workflow-001", runId: first.run.runId, runner }), /compute Recipe changed/);

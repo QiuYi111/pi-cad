@@ -2,7 +2,7 @@ import { deflateSync } from "node:zlib";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { readImageContents } from "../../shared/capability.ts";
+import { detectImageMimeType, readImageContents } from "../../shared/capability.ts";
 import { sha256File } from "../../shared/store.ts";
 import type { ExportDeclaration, SimulationRecipeManifest } from "./protocol.ts";
 
@@ -23,6 +23,7 @@ export interface ValidatedExport {
   sha256?: string;
   plotPath?: string;
   summary?: string;
+  tablePreview?: { columns: string[]; rows: unknown[][]; totalRows: number };
 }
 
 export interface ValidatedObservation {
@@ -175,8 +176,7 @@ export async function validateObservationFile(input: {
     if (declaration.type === "image" && size > 20 * 1024 * 1024) throw new Error(`export ${name} image exceeds 20 MiB`);
     if (declaration.type === "image") {
       rejectUnknownFields(value, ["type", "path"], `export ${name}`);
-      const signature = (await readFile(absolutePath)).subarray(0, 8);
-      if (!signature.equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error(`export ${name} image must be PNG`);
+      if (!detectImageMimeType(await readFile(absolutePath))) throw new Error(`export ${name} image must be PNG, JPEG, GIF, or WebP`);
     }
     if ((declaration.type === "timeseries" || declaration.type === "table") && size > 50 * 1024 * 1024) throw new Error(`export ${name} JSON exceeds 50 MiB`);
     const common = { name, declaration, materialized: value as unknown as MaterializedExport, absolutePath, sha256: await sha256File(absolutePath) };
@@ -200,7 +200,15 @@ export async function validateObservationFile(input: {
       rejectUnknownFields(table as Record<string, unknown>, ["columns", "rows"], `export ${name} table`);
       if (!Array.isArray(table.columns) || table.columns.some((column) => typeof column !== "string") || !Array.isArray(table.rows)) throw new Error(`export ${name} table requires columns[] and rows[]`);
       if (table.rows.some((row) => !Array.isArray(row) || row.length !== table.columns!.length)) throw new Error(`export ${name} table row width mismatch`);
-      selected.push({ ...common, summary: `${table.rows.length} rows x ${table.columns.length} columns` });
+      selected.push({
+        ...common,
+        summary: `${table.rows.length} rows x ${table.columns.length} columns`,
+        tablePreview: {
+          columns: table.columns.slice(0, 16),
+          rows: (table.rows as unknown[][]).slice(0, 4).map((row) => row.slice(0, 16)),
+          totalRows: table.rows.length,
+        },
+      });
       continue;
     }
     if (declaration.type === "field" || declaration.type === "artifact") {
@@ -218,22 +226,49 @@ export async function renderSimulationObservation(input: {
   observationId: string;
   backend: string;
   runtime: string;
+  runtimeIdentity: { resolvedVersion: string; digest: string; accelerator?: Record<string, unknown> };
   durationMs: number;
   observation: ValidatedObservation;
   diagnostics?: string[];
 }): Promise<SimulationToolContent[]> {
-  const visualEntries = input.observation.selected.filter((entry) => (entry.declaration.type === "image" && entry.absolutePath) || entry.plotPath);
-  const imagePaths = visualEntries.flatMap((entry) => entry.declaration.type === "image" && entry.absolutePath ? [entry.absolutePath] : entry.plotPath ? [entry.plotPath] : []).slice(0, 8);
-  const images = await readImageContents(imagePaths);
-  const lines = [`Simulation ${input.runId}. Observation ${input.observationId}.`, "", "Quantitative observations"];
-  const quantitative = input.observation.selected.filter((entry) => entry.declaration.type === "scalar" || entry.declaration.type === "timeseries" || entry.declaration.type === "table").slice(0, 16);
-  if (quantitative.length === 0) lines.push("- none materialized");
-  for (const entry of quantitative) lines.push(`- ${entry.name}: ${entry.summary ?? entry.declaration.type}`);
-  lines.push("", "Solver health", `- backend: ${input.backend}`, `- runtime: ${input.runtime}`, `- wall time: ${(input.durationMs / 1000).toFixed(2)} s`);
+  const imageEntries = input.observation.selected.filter((entry) => entry.declaration.type === "image" && entry.absolutePath).slice(0, 8);
+  const scalarEntries = input.observation.selected.filter((entry) => entry.declaration.type === "scalar").slice(0, 16);
+  const seriesEntries = input.observation.selected.filter((entry) => entry.declaration.type === "timeseries").slice(0, Math.max(0, 16 - scalarEntries.length));
+  const tableEntries = input.observation.selected.filter((entry) => entry.declaration.type === "table").slice(0, Math.max(0, 16 - scalarEntries.length - seriesEntries.length));
+  const primaryImages = await readImageContents(imageEntries.flatMap((entry) => entry.absolutePath ? [entry.absolutePath] : []));
+  const scalarLines = [`Simulation ${input.runId}. Observation ${input.observationId}.`, "", "Quantitative scalars"];
+  if (scalarEntries.length === 0) scalarLines.push("- none materialized");
+  for (const entry of scalarEntries) scalarLines.push(`- ${entry.name}: ${entry.summary ?? entry.declaration.type}`);
+  const seriesImages = await readImageContents(seriesEntries.flatMap((entry) => entry.plotPath ? [entry.plotPath] : []));
+  const lines = ["Timeseries"];
+  if (seriesEntries.length === 0) lines.push("- none materialized");
+  for (const entry of seriesEntries) lines.push(`- ${entry.name}: ${entry.summary ?? entry.declaration.type}`);
+  lines.push("", "Tables");
+  if (tableEntries.length === 0) lines.push("- none materialized");
+  for (const entry of tableEntries) {
+    lines.push(`- ${entry.name}: ${entry.summary ?? entry.declaration.type}`);
+    if (entry.tablePreview) {
+      lines.push(`  columns: ${entry.tablePreview.columns.map(contextValue).join(" | ")}`);
+      for (const row of entry.tablePreview.rows) lines.push(`  row: ${row.map(contextValue).join(" | ")}`);
+      if (entry.tablePreview.totalRows > entry.tablePreview.rows.length) lines.push(`  … ${entry.tablePreview.totalRows - entry.tablePreview.rows.length} more rows retained as artifact`);
+    }
+  }
+  lines.push("", "Solver health", `- backend: ${input.backend}`, `- runtime: ${input.runtime}`, `- resolved version: ${input.runtimeIdentity.resolvedVersion}`, `- wall time: ${(input.durationMs / 1000).toFixed(2)} s`);
+  const accelerator = input.runtimeIdentity.accelerator;
+  for (const [label, key] of [
+    ["requested device", "requestedDevice"], ["actual device", "actualDevice"], ["GPU", "gpu"],
+    ["VRAM bytes", "vramBytes"], ["compute capability", "computeCapability"], ["PyTorch", "torch"],
+    ["PyTorch CUDA", "torchCudaRuntime"], ["CuPy", "cupy"], ["CUDA driver", "cudaDriverVersion"],
+    ["CUDA runtime", "cudaRuntimeVersion"], ["torch-fem", "torch-fem"],
+  ] as const) {
+    if (accelerator?.[key] !== undefined) lines.push(`- ${label}: ${contextValue(accelerator[key])}`);
+  }
+  lines.push("", "Diagnostics");
+  if (input.observation.warnings.length === 0 && (input.diagnostics?.length ?? 0) === 0) lines.push("- none");
   for (const warning of input.observation.warnings) lines.push(`- warning: ${warning}`);
   for (const diagnostic of (input.diagnostics ?? []).slice(0, 20)) lines.push(`- ${diagnostic.slice(0, 500)}`);
-  const renderedQuantitative = new Set(quantitative.map((entry) => entry.name));
-  const renderedVisuals = new Set(visualEntries.slice(0, 8).map((entry) => entry.name));
+  const renderedQuantitative = new Set([...scalarEntries, ...seriesEntries, ...tableEntries].map((entry) => entry.name));
+  const renderedVisuals = new Set([...imageEntries, ...seriesEntries.filter((entry) => entry.plotPath)].map((entry) => entry.name));
   const artifacts = input.observation.selected.filter((entry) =>
     entry.declaration.type === "artifact" || entry.declaration.type === "field" ||
     ((entry.declaration.type === "image" || entry.plotPath) && !renderedVisuals.has(entry.name)) ||
@@ -243,5 +278,17 @@ export async function renderSimulationObservation(input: {
     lines.push("", "Artifacts");
     for (const entry of artifacts) lines.push(`- ${entry.name}: ${entry.absolutePath ?? "retained in immutable observation snapshot"}${entry.sha256 ? ` sha256=${entry.sha256}` : ""}`);
   }
-  return [...images, { type: "text", text: lines.join("\n") }];
+  return [
+    ...primaryImages,
+    { type: "text", text: scalarLines.join("\n") },
+    ...seriesImages,
+    { type: "text", text: lines.join("\n") },
+  ];
+}
+
+function contextValue(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "string") return value.replace(/[\r\n|]/g, " ").slice(0, 120);
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value).replace(/[\r\n|]/g, " ").slice(0, 120);
 }
