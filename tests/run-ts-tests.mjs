@@ -2,6 +2,7 @@ import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { moduleCache: false });
 await jiti.import("./state-machine.test.ts", { default: true });
+await jiti.import("./requirements-revision.test.ts", { default: true });
 await jiti.import("./route-compiler.test.ts", { default: true });
 await jiti.import("./schema-migration.test.ts", { default: true });
 await jiti.import("./interference-tool.test.ts", { default: true });

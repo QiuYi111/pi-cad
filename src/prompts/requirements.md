@@ -40,7 +40,7 @@ brief.
 - Use `canonicalCheck` only for an explicit, unambiguous global field (`bbox.x/y/z`, volume, surface area, or topology counts). Never infer a bbox axis merely because a sentence says width/height.
 - When requirements or a recorded coordinate assumption explicitly map a numeric extent to global X/Y/Z, put that axis in `binding.direction` and set the matching `canonicalCheck` (`bbox.x/y/z`). The commit is rejected if an explicit global-axis numeric assertion omits or contradicts that check.
 - Assertions are frozen before implementation. If later review finds that an Assertion misbinds its Must, revise the requirements contract explicitly; do not weaken the test after seeing the candidate.
-- After the first commit, the entire requirements record is immutable. A different record requires `/cad-approve-requirements-revision`, which issues a one-time token bound to the exact proposed hash. An ordinary reply is not authority. HEADLESS has no user to issue the token, so it must repair against the frozen contract or terminate with a user-authority blocker.
+- `cad_commit_requirements` is initial-commit-only. If later authoritative information changes the task, call `cad_revise_requirements` with the complete replacement record and a documented Route assessment before rerouting or performing more engineering.
 - Record interpretation decisions in `assumptions[]`, including unit normalization, which geometric entity a dimension refers to, and any ambiguity you resolved: state the chosen reading and the reason.
 - Preserve the named geometric referent of every dimension. A polygon side length is not its circumradius or diameter; a profile corner radius is not a solid-edge fillet radius. If a CAD API uses a different parameterization, derive the API input explicitly and verify the originally named quantity.
 - Treat explicit final-state instructions such as rotate, align, orient, center, and position as separate `must[]` items — they are acceptance conditions, not style.
@@ -52,7 +52,7 @@ brief.
 - Identify whether the route maturity and explicit physics constraints require engineering simulation evidence.
 - Do not require simulation ceremonially.
 - If strength, stiffness, thermal, flow, dynamics, or another quantitative physical behavior materially determines acceptance, record evidenceObligations.simulation.disposition = required.
-- For new simulation work, declare opaque cases as evidenceObligations.simulation.cases = [{id, tool: "cad_simulate"}]. The Recipe owns solver semantics; the harness only checks an explicit commit for the exact case and current design. Deprecated typed wrapper tool names remain valid only for migrated compatibility workflows.
+- Declare opaque cases as evidenceObligations.simulation.cases = [{id, tool: "cad_simulate"}]. The Recipe owns solver semantics; the harness only checks an explicit commit for the exact case and current design. Historical tool names are migration data and are invalid for new obligations.
 - Name cases after the claim they support (for example "nozzle-outlet" for an outlet-Mach requirement, "hot-section" for a thermal requirement).
 - If the decision can be made without simulation at this maturity, use optional or not_applicable.
 - Missing external loads/materials/BCs should become blocked_external rather than invented.

@@ -133,11 +133,17 @@ route = objective × lineage × structure × maturity
 ## 智能体到底能做什么
 
 **流程控制** —— `cad_route`、`cad_reroute`、`cad_commit_requirements`、
+`cad_revise_requirements`、
 `cad_commit_plan`、`cad_commit_assembly_design`、
 `cad_commit_interface_contracts`、`cad_commit_candidate`、`cad_transition`、
 `cad_wait_for_user`、`cad_finish`。`cad_commit_candidate` 负责自动观测循环:
 构建 → 七张视图 → 几何事实 → 装配树 + 干涉(assembly 路由)→(legacy/
 release)确定性对比 → 按哈希绑定证据 → 进入评审。
+
+`cad_commit_requirements` 只建立首版 canonical contract。后续权威信息变化
+必须先调用 `cad_revise_requirements`,再 reroute 或修改 CAD。每个需求版本都
+按哈希不可变保存;Route 变化时进入 state-level reassessment lock。外部 baseline
+文件缺失可以阻塞执行,但不能让已过时的旧需求继续充当 canonical truth。
 
 **几何** —— `cad_build_step`、`cad_inspect_visual`、`cad_inspect_geometry`、
 `cad_inspect_surfaces`、`cad_inspect_section`、`cad_scan_sections`、

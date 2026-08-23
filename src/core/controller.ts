@@ -1,7 +1,7 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 
 import {
@@ -25,6 +25,7 @@ import {
   deferClarification,
   declareHeadlessBlocker,
   reroute,
+  reviseRequirements,
   route,
   transition,
   validateRequirementsRecord,
@@ -119,6 +120,13 @@ function acceptedEvidenceKinds(state: CadRunState): EvidenceRef["kind"][] {
 }
 
 async function loadCurrentRequirements(store: CadProjectStore, state: CadRunState): Promise<CadRequirements | null> {
+  if (state.requirementsVersion) {
+    try {
+      return await store.readRequirementsVersion<CadRequirements>(state.requirementsVersion);
+    } catch {
+      return null;
+    }
+  }
   const run = store.run(state.runId);
   try {
     return JSON.parse(await readFile(join(run.recordsDir, "requirements.json"), "utf-8")) as CadRequirements;
@@ -127,18 +135,24 @@ async function loadCurrentRequirements(store: CadProjectStore, state: CadRunStat
   }
 }
 
-/** Exact, one-shot authorization predicate for an immutable contract revision. */
-export function requirementsRevisionAuthorized(
-  state: CadRunState,
-  revisionHash: string,
-  authorityToken: string | undefined,
-): boolean {
-  return Boolean(
-    authorityToken &&
-    state.requirementsAuthorityToken &&
-    authorityToken === state.requirementsAuthorityToken &&
-    state.requirementsAuthorityHash === revisionHash,
-  );
+function validateInputDeclarations(record: CadRequirements, cwd: string): string | null {
+  for (const [index, input] of (record.inputs ?? []).entries()) {
+    if (typeof input !== "string" || !input.trim()) return `requirements.inputs[${index}] must be a non-empty path`;
+    if (!/\.(step|stp)$/i.test(input)) {
+      return `requirements.inputs[${index}] must reference a .step or .stp artifact`;
+    }
+    const absolute = resolve(cwd, input);
+    const rel = relative(resolve(cwd), absolute);
+    if (rel.startsWith("..") || isAbsolute(rel)) return `requirements.inputs[${index}] escapes the project root`;
+    if (existsSync(absolute)) {
+      const real = realpathSync(absolute);
+      const realRel = relative(realpathSync(cwd), real);
+      if (realRel.startsWith("..") || isAbsolute(realRel)) {
+        return `requirements.inputs[${index}] resolves outside the project root`;
+      }
+    }
+  }
+  return null;
 }
 
 async function verifyCurrentFinalReview(cwd: string, state: CadRunState): Promise<string | null> {
@@ -562,6 +576,43 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         }
         return errTool(result.reason);
       }
+      if (state.routeRequiresReassessment && workflowSpec(result.state)?.requiresBaselineInput) {
+        const requirements = await loadCurrentRequirements(store, state);
+        const baselineInput = requirements
+          ? (requirements.inputs ?? []).find((item) => /\.(step|stp)$/i.test(item))
+          : null;
+        let blocker: CadRunState["blocker"] | undefined;
+        if (!baselineInput) {
+          blocker = {
+            type: "external_input",
+            reason: "the revised route requires a baseline STEP that is not available",
+            needed: "provide a readable project-contained .step/.stp baseline input",
+            createdAt: nowIso(),
+          };
+        } else {
+          try {
+            await sha256File(resolve(ctx.cwd, baselineInput));
+          } catch {
+            blocker = {
+              type: "external_input",
+              reason: `the revised route baseline is unavailable: ${baselineInput}`,
+              needed: `provide a readable baseline at ${baselineInput}`,
+              createdAt: nowIso(),
+            };
+          }
+        }
+        if (blocker) {
+          const blocked: CadRunState = { ...result.state, status: "blocked_external", blocker };
+          await deps.persist(pi, store, blocked, result.events);
+          return errTool(`Route was reassessed, but execution is BLOCKED_EXTERNAL: ${blocker.needed}`, { state: blocked });
+        }
+        await deps.persist(pi, store, result.state, result.events);
+        const baseline = await deps.runBaselineAuto(pi, store, result.state, baselineInput!, deps.persist);
+        return {
+          content: [{ type: "text", text: `Rerouted ${routeKey(state.route!)} -> ${routeKey(nextRoute)} and rebound baseline ${baselineInput}.` }, ...baseline.images],
+          details: { state: baseline.state },
+        };
+      }
       await deps.persist(pi, store, result.state, result.events);
       return okTool(
         [
@@ -588,7 +639,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       "For legacy/hybrid lineages, analyze, and convert, list supplied STEP/STP files in inputs.",
       "Fully specified greenfield part tasks may commit with zero extra questions.",
       "Follow the authoritative interaction-mode policy in the system context. In HEADLESS mode record material ambiguity in deferredClarifications with an explicit fallback; in INTERACTIVE mode ask the user when the decision is theirs.",
-      "The first committed contract is immutable. Any different requirements record in any later phase needs a user-issued, one-time authorityToken bound to that exact record hash. HEADLESS cannot issue this authority; repair the candidate or declare a blocker.",
+      "Use cad_revise_requirements when later authoritative information changes this committed task definition.",
       "Physical CAD tasks default to REAL/BUILDABLE/FUNCTIONAL; only commit a mockup brief after the user explicitly downgraded maturity.",
     ],
     parameters: Type.Object({
@@ -608,81 +659,20 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       }))),
       inputs: Type.Optional(Type.Array(Type.String())),
       evidenceObligations: Type.Optional(EvidenceObligationsSchema),
-      authorityToken: Type.Optional(Type.String({ description: "One-time user-issued authority bound to this exact requirements revision" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const { authorityToken, ...recordParams } = params;
-      const record = recordParams as unknown as CadRequirements;
-      const validationFailure = validateRequirementsRecord(
-        { ...state, phase: "requirements", mutationPolicy: "read_only" },
-        record,
-      );
+      if (state.requirementsVersion) return errTool("requirements are already committed; use cad_revise_requirements");
+      const record = params as unknown as CadRequirements;
+      const validationFailure = validateRequirementsRecord(state, record) ?? validateInputDeclarations(record, ctx.cwd);
       if (validationFailure) {
-        return errTool(`invalid requirements record: ${validationFailure}. The frozen contract and workflow state are unchanged.`);
+        return errTool(`invalid requirements record: ${validationFailure}. The workflow state is unchanged.`);
       }
-      const previous = await loadCurrentRequirements(store, state);
-      const revisionHash = hashRecord(record);
-      const isRevision = Boolean(previous && hashRecord(previous) !== revisionHash);
-      if (isRevision && !requirementsRevisionAuthorized(state, revisionHash, authorityToken)) {
-        let pending: CadRunState = {
-          ...state,
-          pendingRequirementsRevision: {
-            hash: revisionHash,
-            record,
-            requestedAt: nowIso(),
-          },
-          requirementsAuthorityToken: null,
-          requirementsAuthorityHash: null,
-        };
-        const events: Array<{ type: string; data?: unknown }> = [{
-          type: "RequirementsRevisionAuthorityRequested",
-          data: { revisionHash, phase: state.phase },
-        }];
-        if (isHeadless(state)) {
-          const blocked = declareHeadlessBlocker(pending, {
-            type: "user_authority",
-            reason: "the Agent proposed changing the immutable requirements contract",
-            needed: `/cad-approve-requirements-revision for proposal ${revisionHash}`,
-          });
-          if (blocked.ok) {
-            pending = blocked.state;
-            events.push(...blocked.events);
-          }
-        }
-        await deps.persist(pi, store, pending, events);
-        return errTool(
-          isHeadless(state)
-            ? `requirements contract is immutable; HEADLESS run is BLOCKED_USER for proposed revision ${revisionHash}`
-            : `requirements contract is immutable. Proposed revision ${revisionHash} recorded; ask the user to inspect it and run /cad-approve-requirements-revision, then resubmit this exact record with the issued authorityToken.`,
-        );
-      }
-      if (previous && !isRevision && state.phase !== "requirements") {
-        return errTool("requirements contract is unchanged; continue the current phase instead of recommitting it");
-      }
-      const commitState: CadRunState = isRevision
-        ? { ...state, phase: "requirements", status: "active", mutationPolicy: "read_only" }
-        : state;
-      const result = commitRequirements(commitState, record);
+      const result = commitRequirements(state, record);
       if (!result.ok) return errTool(result.reason);
-      await store.writeRecord("requirements", record);
-      let next: CadRunState = {
-        ...result.state,
-        ...(isRevision
-          ? {
-              pendingRequirementsRevision: null,
-              requirementsAuthorityToken: null,
-              requirementsAuthorityHash: null,
-              blocker: undefined,
-            }
-          : {}),
-      };
-      const resultEvents = [
-        ...result.events,
-        ...(isRevision ? [{ type: "RequirementsRevisionAuthorityConsumed", data: { revisionHash } }] : []),
-      ];
+      let next = result.state;
       const spec = workflowSpec(next);
       const baselineInput = await baselineArtifactCandidate(record, ctx.cwd, store);
       if (spec?.requiresBaselineInput && !baselineInput) {
@@ -695,7 +685,9 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         if (!existsSync(baselineAbs)) {
           return errTool(`requirements.inputs references missing artifact: ${baselineInput}`);
         }
-        await deps.persist(pi, store, next, resultEvents);
+        await store.writeRequirementsVersion(next.requirementsVersion!, record);
+        await store.writeRecord("requirements", record);
+        await deps.persist(pi, store, next, result.events);
         const baseline = await deps.runBaselineAuto(pi, store, next, baselineInput, deps.persist);
         next = baseline.state;
         const text = [
@@ -706,13 +698,137 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         ].join("\n");
         return { content: [{ type: "text", text }, ...baseline.images], details: { state: next } };
       }
-      await deps.persist(pi, store, next, resultEvents);
+      await store.writeRequirementsVersion(next.requirementsVersion!, record);
+      await store.writeRecord("requirements", record);
+      await deps.persist(pi, store, next, result.events);
       return okTool(
         `Requirements committed (${next.requirementsVersion?.slice(0, 12)}). Harness phase is now ${next.phase.toUpperCase()}.\n\n${await loadPrompt(next.phase)}`,
         { state: next, requirementsVersion: next.requirementsVersion },
       );
     },
   });
+
+  pi.registerTool({
+    name: "cad_revise_requirements",
+    label: "Pi-CAD Revise Requirements",
+    description:
+      "Replace the active requirements with a materially revised authoritative task definition, invalidate dependent conclusions, and either confirm the current route or lock engineering until cad_reroute.",
+    promptSnippet: "Revise authoritative requirements before rerouting or continuing engineering",
+    promptGuidelines: [
+      "Call when a replacement specification, user correction, or new authoritative engineering fact materially changes the task definition.",
+      "Supply the complete replacement requirements record, not a patch.",
+      "Set routeAssessment=unchanged only after checking objective, lineage, structure, and maturity against the new requirements.",
+      "Set routeAssessment=changed when cad_reroute must follow; the harness locks all downstream engineering until reroute succeeds.",
+      "A missing declared baseline blocks execution after the new requirements become canonical; it never restores the obsolete version.",
+    ],
+    parameters: Type.Object({
+      goal: Type.String(),
+      deliverables: Type.Array(Type.String(), { minItems: 1 }),
+      must: Type.Array(Type.String(), { default: [] }),
+      assertions: Type.Array(AcceptanceAssertionSchema, { default: [] }),
+      preferences: Type.Array(Type.String(), { default: [] }),
+      assumptions: Type.Array(Type.String(), { default: [] }),
+      openUnknowns: Type.Array(Type.String(), { default: [] }),
+      deferredClarifications: Type.Optional(Type.Array(Type.Object({
+        question: Type.String(),
+        reason: Type.String(),
+        alternatives: Type.Array(Type.String(), { minItems: 2 }),
+        fallback: Type.String(),
+        impact: Type.String(),
+      }))),
+      inputs: Type.Optional(Type.Array(Type.String())),
+      evidenceObligations: Type.Optional(EvidenceObligationsSchema),
+      reason: Type.String({ minLength: 1 }),
+      routeAssessment: Type.Object({
+        outcome: Type.Enum({ unchanged: "unchanged", changed: "changed" }),
+        reason: Type.String({ minLength: 1 }),
+      }, { additionalProperties: false }),
+    }, { additionalProperties: false }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await guardState(store);
+      if (!state) return errTool("No active Pi-CAD workflow with committed requirements.");
+      const { reason, routeAssessment, ...recordParams } = params;
+      const record = recordParams as unknown as CadRequirements;
+      const inputFailure = validateInputDeclarations(record, ctx.cwd);
+      if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}. The canonical requirements are unchanged.`);
+      const previous = await loadCurrentRequirements(store, state);
+      if (!previous) return errTool("current immutable requirements record is missing or corrupt");
+
+      const declaredBaseline = (record.inputs ?? []).find((item) => /\.(step|stp)$/i.test(item));
+      const baselineInput = declaredBaseline;
+      const spec = workflowSpec(state);
+      let baselineIdentityChanged = declaredBaseline !== state.baselineArtifactPath;
+      let externalBlocker: { reason: string; needed: string } | undefined;
+      let baselineAvailable = false;
+      if (routeAssessment.outcome === "unchanged" && spec?.requiresBaselineInput && !baselineInput) {
+        externalBlocker = {
+          reason: "the revised authoritative requirements require a baseline STEP that is not available",
+          needed: "provide a readable project-contained .step/.stp baseline input",
+        };
+      } else if (baselineInput) {
+        try {
+          const baselineHash = await sha256File(resolve(ctx.cwd, baselineInput));
+          // Hash identity, not path spelling, controls whether frame_context
+          // can survive the revision.
+          baselineIdentityChanged = baselineHash !== state.baselineArtifactHash;
+          baselineAvailable = true;
+        } catch {
+          baselineIdentityChanged = true;
+          if (routeAssessment.outcome === "unchanged" && spec?.requiresBaselineInput) {
+            externalBlocker = {
+              reason: `the revised authoritative baseline is unavailable: ${baselineInput}`,
+              needed: `provide a readable baseline at ${baselineInput}`,
+            };
+          }
+        }
+      }
+
+      const result = reviseRequirements(state, previous, record, {
+        reason,
+        routeAssessment,
+        baselineIdentityChanged,
+        externalBlocker,
+      });
+      if (!result.ok) return errTool(result.reason);
+
+      if (result.events[0]?.type === "RequirementsRevised") {
+        await store.writeRequirementsVersion(result.state.requirementsVersion!, record);
+      }
+      await deps.persist(pi, store, result.state, result.events);
+
+      if (
+        routeAssessment.outcome === "unchanged" &&
+        spec?.requiresBaselineInput &&
+        baselineInput && baselineAvailable &&
+        result.state.status === "active"
+      ) {
+        const baseline = await deps.runBaselineAuto(pi, store, result.state, baselineInput, deps.persist);
+        const text = [
+          `Requirements revised (${result.state.requirementsVersion?.slice(0, 12)}); route confirmed unchanged.`,
+          `Baseline ${baselineInput} was rebound and observed for the new requirements version.`,
+          ...(baseline.warnings.length ? [`warnings: ${baseline.warnings.join("; ")}`] : []),
+          "",
+          await loadPrompt(baseline.state.phase),
+        ].join("\n");
+        return { content: [{ type: "text", text }, ...baseline.images], details: { state: baseline.state } };
+      }
+
+      if (result.state.status === "blocked_external") {
+        return errTool(
+          `Requirements V${result.state.requirementsVersion?.slice(0, 12)} are canonical, but execution is BLOCKED_EXTERNAL: ${result.state.blocker?.needed}`,
+          { state: result.state },
+        );
+      }
+      return okTool(
+        routeAssessment.outcome === "changed"
+          ? `Requirements revised (${result.state.requirementsVersion?.slice(0, 12)}). Route reassessment lock is active: ${routeAssessment.reason} Call cad_reroute before downstream engineering.`
+          : `Requirements revised (${result.state.requirementsVersion?.slice(0, 12)}); route confirmed unchanged. Harness resumed at ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
+        { state: result.state, requirementsVersion: result.state.requirementsVersion },
+      );
+    },
+  });
+
 
   pi.registerTool({
     name: "cad_commit_plan",

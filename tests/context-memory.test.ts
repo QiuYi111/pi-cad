@@ -8,7 +8,7 @@ import { test } from "node:test";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { CadProjectStore, CadRunStore } from "../src/shared/store.ts";
+import { CadProjectStore, CadRunStore, hashRecord } from "../src/shared/store.ts";
 import { commitPlan, commitRequirements, route as routeQuick } from "../src/core/state-machine.ts";
 import { maybeAutoContinue } from "../src/core/continuation.ts";
 import type { CadRequirements, CadRunState } from "../src/shared/protocol.ts";
@@ -654,8 +654,7 @@ test("renderTaskContext: full Mission (assumptions/openUnknowns labelled provisi
     // Empty requirement sections are omitted entirely.
     const store = new CadProjectStore(cwd);
     await store.createRun({ runId: "minimal-run" });
-    const minimal = { ...state, runId: "minimal-run" };
-    await new CadRunStore(cwd, "minimal-run").writeRecord("requirements", {
+    const minimalRequirements = {
       goal: "Minimal bracket",
       deliverables: ["STEP artifact"],
       must: [],
@@ -663,7 +662,14 @@ test("renderTaskContext: full Mission (assumptions/openUnknowns labelled provisi
       preferences: [],
       assumptions: [],
       openUnknowns: [],
-    } satisfies CadRequirements);
+    } satisfies CadRequirements;
+    const minimal = {
+      ...state,
+      runId: "minimal-run",
+      requirementsVersion: hashRecord(minimalRequirements),
+      assertionsVersion: hashRecord(minimalRequirements.assertions),
+    };
+    await new CadRunStore(cwd, "minimal-run").writeRecord("requirements", minimalRequirements);
     const minimalRendered = await renderTaskContext(cwd, minimal);
     assert.ok(minimalRendered.includes("Goal: Minimal bracket"));
     assert.ok(minimalRendered.includes("Deliverables:"));

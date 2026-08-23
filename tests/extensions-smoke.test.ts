@@ -71,6 +71,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_route",
     "cad_reroute",
     "cad_commit_requirements",
+    "cad_revise_requirements",
     "cad_commit_frame_context",
     "cad_commit_plan",
     "cad_commit_assembly_design",
@@ -106,7 +107,7 @@ test("all three V0 extensions load and register the expected tools/events", asyn
     "cad_render_scene",
   ];
   assert.deepEqual(pi.tools.sort(), [...expectedTools].sort());
-  assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-requirements-revision", "cad-approve-reroute", "cad-status"]);
+  assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-reroute", "cad-status"]);
   for (const event of ["before_agent_start", "tool_call", "tool_result", "agent_settled"]) {
     assert.ok((pi.handlers.get(event) ?? []).length > 0, `missing ${event} handler`);
   }

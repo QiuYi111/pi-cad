@@ -9,10 +9,15 @@ const routeName = (state: { route?: CadRunState["route"] }) =>
 
 export default function cadUiExtension(pi: ExtensionAPI) {
   pi.events.on("pi-cad:state-changed", (state: CadRunState) => {
+    const lockReason = state.routeRequiresReassessment
+      ? state.lastRequirementsRevision?.routeAssessmentReason
+      : undefined;
     const text = [
-      `Pi-CAD · ${routeName(state)}`,
+      lockReason ? `Pi-CAD · lock=${lockReason}` : `Pi-CAD · ${routeName(state)}`,
+      lockReason ? `route=${routeName(state)}` : "",
       `phase=${state.phase}`,
       `status=${state.status}`,
+      state.routeRequiresReassessment ? "routeReassessment=required" : "",
       state.candidateLabel ? `candidate=${state.candidateLabel}` : "",
       state.currentArtifactHash ? `artifact=${state.currentArtifactHash.slice(0, 12)}` : "",
     ]
@@ -36,6 +41,10 @@ export default function cadUiExtension(pi: ExtensionAPI) {
         `Pi-CAD · ${routeName(state)}`,
         `run=${state.runId}`,
         `phase=${state.phase} status=${state.status} policy=${state.mutationPolicy}`,
+        state.routeRequiresReassessment ? "routeRequiresReassessment=true" : "",
+        state.routeRequiresReassessment && state.lastRequirementsRevision?.routeAssessmentReason
+          ? `routeReassessmentReason=${state.lastRequirementsRevision.routeAssessmentReason}`
+          : "",
         state.baselineArtifactHash ? `baseline=${state.baselineArtifactHash.slice(0, 12)}` : "",
         state.currentArtifactHash ? `artifact=${state.currentArtifactHash.slice(0, 12)}` : "",
         `evidence=${state.evidence.map((e) => e.kind).join(",") || "none"}`,

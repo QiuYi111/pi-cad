@@ -148,12 +148,19 @@ Two 0.8 rules matter more than the table:
 ## What the agent can actually do
 
 **Control** — `cad_route`, `cad_reroute`, `cad_commit_requirements`,
+`cad_revise_requirements`,
 `cad_commit_plan`, `cad_commit_assembly_design`,
 `cad_commit_interface_contracts`, `cad_commit_candidate`, `cad_transition`,
 `cad_wait_for_user`, `cad_finish`. `cad_commit_candidate` runs the automatic
 observation loop: build → seven visual views → geometry facts →
 assembly-tree + interference (assembly routes) → deterministic compare
 (legacy/release) → evidence bound to hashes → review.
+
+`cad_commit_requirements` establishes the first canonical contract. Later
+authoritative changes use `cad_revise_requirements` before rerouting or CAD
+mutation. Each version is immutable and hash-selected; a changed Route places
+the run under a state-level reassessment lock. Missing external baseline files
+may block execution, but cannot keep an obsolete requirements version canonical.
 
 **Geometry** — `cad_build_step`, `cad_inspect_visual`, `cad_inspect_geometry`,
 `cad_inspect_surfaces`, `cad_inspect_section`, `cad_scan_sections`,

@@ -4,6 +4,7 @@ import {
   type CadPhase,
   type CadPlan,
   type CadRequirements,
+  type RequirementsRevisionDiff,
   type CadRunState,
   type EvidenceInputArtifact,
   type EvidenceRef,
@@ -172,6 +173,235 @@ export function commitRequirements(
         data: { phase: state.phase, ...clarification },
       })),
     ],
+  };
+}
+
+const REQUIREMENTS_ARRAY_FIELDS = [
+  "deliverables",
+  "must",
+  "preferences",
+  "assumptions",
+  "openUnknowns",
+  "inputs",
+] as const;
+
+function counted(values: string[]): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const value of values) result.set(value, (result.get(value) ?? 0) + 1);
+  return result;
+}
+
+function arrayDifference(before: string[], after: string[]) {
+  const beforeCounts = counted(before);
+  const afterCounts = counted(after);
+  const added: string[] = [];
+  const removed: string[] = [];
+  for (const [value, count] of afterCounts) {
+    for (let i = beforeCounts.get(value) ?? 0; i < count; i += 1) added.push(value);
+  }
+  for (const [value, count] of beforeCounts) {
+    for (let i = afterCounts.get(value) ?? 0; i < count; i += 1) removed.push(value);
+  }
+  const commonTokens = (values: string[], limits: Map<string, number>) => {
+    const seen = new Map<string, number>();
+    return values.flatMap((value) => {
+      const occurrence = (seen.get(value) ?? 0) + 1;
+      seen.set(value, occurrence);
+      return occurrence <= (limits.get(value) ?? 0) ? [`${value}\u0000${occurrence}`] : [];
+    });
+  };
+  const commonLimits = new Map<string, number>();
+  for (const [value, count] of beforeCounts) {
+    commonLimits.set(value, Math.min(count, afterCounts.get(value) ?? 0));
+  }
+  const orderChanged = hashRecord(commonTokens(before, commonLimits)) !== hashRecord(commonTokens(after, commonLimits));
+  const sequenceChanged = hashRecord(before) !== hashRecord(after);
+  return {
+    added,
+    removed,
+    orderChanged,
+    ...(sequenceChanged ? { before, after } : {}),
+  };
+}
+
+export function diffRequirements(
+  before: CadRequirements,
+  after: CadRequirements,
+): RequirementsRevisionDiff {
+  const arrays: RequirementsRevisionDiff["arrays"] = {};
+  for (const field of REQUIREMENTS_ARRAY_FIELDS) {
+    const diff = arrayDifference(before[field] ?? [], after[field] ?? []);
+    if (diff.added.length || diff.removed.length || diff.orderChanged || diff.before) arrays[field] = diff;
+  }
+
+  const beforeAssertions = new Map(before.assertions.map((item) => [item.id, item]));
+  const afterAssertions = new Map(after.assertions.map((item) => [item.id, item]));
+  const beforeAssertionIds = before.assertions.map((item) => item.id);
+  const afterAssertionIds = after.assertions.map((item) => item.id);
+  const assertionOrder = arrayDifference(beforeAssertionIds, afterAssertionIds);
+  const assertions = {
+    added: [...afterAssertions.keys()].filter((id) => !beforeAssertions.has(id)),
+    removed: [...beforeAssertions.keys()].filter((id) => !afterAssertions.has(id)),
+    changed: [...afterAssertions.keys()].filter((id) =>
+      beforeAssertions.has(id) && hashRecord(beforeAssertions.get(id)) !== hashRecord(afterAssertions.get(id))),
+    orderChanged: assertionOrder.orderChanged,
+    ...(assertionOrder.before ? { before: beforeAssertionIds, after: afterAssertionIds } : {}),
+  };
+  const fields: RequirementsRevisionDiff["fields"] = [];
+  for (const field of ["goal", "evidenceObligations", "deferredClarifications"] as const) {
+    if (hashRecord(before[field]) !== hashRecord(after[field])) {
+      fields.push({ field, before: before[field], after: after[field] });
+    }
+  }
+  const diff = { arrays, assertions, fields };
+  if (
+    hashRecord(before) !== hashRecord(after) &&
+    Object.keys(arrays).length === 0 &&
+    assertions.added.length === 0 && assertions.removed.length === 0 && assertions.changed.length === 0 &&
+    !assertions.orderChanged && !assertions.before &&
+    fields.length === 0
+  ) {
+    fields.push({ field: "record", before, after });
+  }
+  return diff;
+}
+
+const REVISION_RECORD_PHASE_ORDER: CadPhase[] = ["assembly_design", "interface_design"];
+
+export function earliestPhaseAfterRequirementsRevision(
+  state: CadRunState,
+  nextRoute: Route = state.route!,
+): CadPhase {
+  const spec = compiledSpec(nextRoute);
+  if (spec.requiresBaselineInput) {
+    return spec.nextAfterRequirements === "source_baseline" ? "source_baseline" : "baseline";
+  }
+  const committed = new Set(state.phaseRecords ?? []);
+  for (const phase of REVISION_RECORD_PHASE_ORDER) {
+    if ((spec.phaseRecords[phase] ?? []).some((type) => !committed.has(type))) return phase;
+  }
+  for (const phase of ["plan", "part_design", "transform_plan"] as CadPhase[]) {
+    if (spec.planNext[phase]) return phase;
+  }
+  return earliestUnmetPhase(state, nextRoute);
+}
+
+export interface ReviseRequirementsOptions {
+  reason: string;
+  routeAssessment: { outcome: "unchanged" | "changed"; reason: string };
+  baselineIdentityChanged?: boolean;
+  externalBlocker?: { reason: string; needed: string };
+}
+
+export function reviseRequirements(
+  state: CadRunState,
+  previous: CadRequirements,
+  record: CadRequirements,
+  options: ReviseRequirementsOptions,
+): ActionResult {
+  if (!state.route || !state.requirementsVersion) return { ok: false, reason: "requirements are not committed" };
+  if (!options.reason.trim()) return { ok: false, reason: "cad_revise_requirements requires a reason" };
+  if (!options.routeAssessment.reason.trim()) return { ok: false, reason: "routeAssessment.reason is required" };
+  const validationFailure = validateRequirementsRecord(
+    { ...state, phase: "requirements", mutationPolicy: "read_only" },
+    record,
+  );
+  if (validationFailure) return { ok: false, reason: validationFailure };
+
+  const newVersion = hashRecord(record);
+  if (newVersion === state.requirementsVersion) {
+    if (!state.routeRequiresReassessment || options.routeAssessment.outcome !== "unchanged") {
+      return { ok: false, reason: "requirements revision equals the current version" };
+    }
+    const nextPhase = earliestPhaseAfterRequirementsRevision(state);
+    const next: CadRunState = {
+      ...state,
+      phase: nextPhase,
+      status: options.externalBlocker ? "blocked_external" : "active",
+      mutationPolicy: mutationPolicyForPhase(nextPhase, state.route),
+      routeRequiresReassessment: false,
+      blocker: options.externalBlocker
+        ? { type: "external_input", ...options.externalBlocker, createdAt: nowIso() }
+        : undefined,
+      lastRequirementsRevision: state.lastRequirementsRevision
+        ? {
+            ...state.lastRequirementsRevision,
+            routeAssessment: "unchanged",
+            routeAssessmentReason: options.routeAssessment.reason,
+          }
+        : undefined,
+      updatedAt: nowIso(),
+    };
+    return {
+      ok: true,
+      state: next,
+      events: [{
+        type: "RouteReassessmentConfirmed",
+        data: { requirementsVersion: newVersion, reason: options.routeAssessment.reason, phase: nextPhase },
+      }],
+    };
+  }
+
+  const at = nowIso();
+  const staleById = new Map(state.staleEvidence.map((item) => [item.id, item]));
+  for (const item of state.evidence) staleById.set(item.id, item);
+  const phaseRecords = (state.phaseRecords ?? []).filter((type) =>
+    type !== "assembly_design" && type !== "interface_contracts" &&
+    !(options.baselineIdentityChanged && type === "frame_context"));
+  const revision = {
+    previousVersion: state.requirementsVersion,
+    currentVersion: newVersion,
+    supersedesVersion: state.requirementsVersion,
+    reason: options.reason,
+    routeAssessment: options.routeAssessment.outcome,
+    routeAssessmentReason: options.routeAssessment.reason,
+    diff: diffRequirements(previous, record),
+    at,
+  } as const;
+  const invalidated: CadRunState = {
+    ...state,
+    status: options.externalBlocker ? "blocked_external" : "active",
+    mutationPolicy: "read_only",
+    requirementsVersion: newVersion,
+    assertionsVersion: hashRecord(record.assertions),
+    planVersion: undefined,
+    finalReview: undefined,
+    workstreamStatuses: undefined,
+    activeWorkstreams: [],
+    deferredClarifications: (record.deferredClarifications ?? []).map((item) => ({
+      phase: "requirements" as const,
+      ...item,
+      affectsContract: true,
+      createdAt: at,
+    })),
+    evidenceObligations: record.evidenceObligations,
+    evidence: [],
+    staleEvidence: [...staleById.values()],
+    phaseRecords,
+    pendingReroute: null,
+    rerouteAuthorityToken: null,
+    rerouteAuthorityRoute: null,
+    blocker: options.externalBlocker
+      ? { type: "external_input", ...options.externalBlocker, createdAt: at }
+      : undefined,
+    routeRequiresReassessment: options.routeAssessment.outcome === "changed",
+    lastRequirementsRevision: revision,
+    updatedAt: at,
+  };
+  const nextPhase = options.routeAssessment.outcome === "unchanged"
+    ? earliestPhaseAfterRequirementsRevision(invalidated)
+    : state.phase;
+  const next: CadRunState = {
+    ...invalidated,
+    phase: nextPhase,
+    mutationPolicy: options.routeAssessment.outcome === "changed"
+      ? "read_only"
+      : mutationPolicyForPhase(nextPhase, state.route),
+  };
+  return {
+    ok: true,
+    state: next,
+    events: [{ type: "RequirementsRevised", data: { record, ...revision, phase: nextPhase } }],
   };
 }
 
@@ -923,7 +1153,9 @@ export function reroute(
     }
     authority = "user-token";
   }
-  const nextPhase = earliestUnmetPhase(state, nextRoute);
+  const nextPhase = state.routeRequiresReassessment
+    ? earliestPhaseAfterRequirementsRevision(state, nextRoute)
+    : earliestUnmetPhase(state, nextRoute);
   const next: CadRunState = {
     ...state,
     route: nextRoute,
@@ -933,6 +1165,7 @@ export function reroute(
     pendingReroute: null,
     rerouteAuthorityToken: null,
     rerouteAuthorityRoute: null,
+    routeRequiresReassessment: false,
     updatedAt: nowIso(),
   };
   return {

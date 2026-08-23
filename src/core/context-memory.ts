@@ -548,7 +548,7 @@ function renderMission(requirements: CadRequirements): string {
 
 /**
  * Render the per-run task context appended to the system prompt:
- * Mission (from records/requirements.json) + Working Context (working.md) +
+ * Mission (from the immutable record selected by requirementsVersion) + Working Context (working.md) +
  * a short index of archived checkpoints. Canonical state is NOT summarized
  * here — `composeSystemPrompt()` already re-projects it every turn.
  * Returns "" when nothing exists yet (fresh run).
@@ -557,7 +557,9 @@ export async function renderTaskContext(cwd: string, state: CadRunState): Promis
   const run = new CadRunStore(cwd, state.runId);
   const sections: string[] = [];
 
-  const requirements = await readJson<CadRequirements>(join(run.recordsDir, "requirements.json"));
+  const requirements = state.requirementsVersion
+    ? await run.readRequirementsVersion<CadRequirements>(state.requirementsVersion).catch(() => null)
+    : await readJson<CadRequirements>(join(run.recordsDir, "requirements.json"));
   if (requirements?.goal) sections.push(renderMission(requirements));
 
   const lateClarifications = (state.deferredClarifications ?? []).filter(

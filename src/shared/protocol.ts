@@ -26,11 +26,12 @@ export type {
   ObligationKey,
 } from "./route.ts";
 
-export const CAD_STATE_SCHEMA_VERSION = 5;
+export const CAD_STATE_SCHEMA_VERSION = 6;
 export const CONTROL_TOOLS = [
   "cad_route",
   "cad_reroute",
   "cad_commit_requirements",
+  "cad_revise_requirements",
   "cad_commit_frame_context",
   "cad_commit_plan",
   "cad_commit_assembly_design",
@@ -260,6 +261,41 @@ export interface CadRequirements {
   inputs?: string[];
 }
 
+export interface RequirementsArrayDiff {
+  added: string[];
+  removed: string[];
+  orderChanged: boolean;
+  before?: string[];
+  after?: string[];
+}
+
+export interface RequirementsRevisionDiff {
+  arrays: Partial<Record<
+    "deliverables" | "must" | "preferences" | "assumptions" | "openUnknowns" | "inputs",
+    RequirementsArrayDiff
+  >>;
+  assertions: {
+    added: string[];
+    removed: string[];
+    changed: string[];
+    orderChanged: boolean;
+    before?: string[];
+    after?: string[];
+  };
+  fields: Array<{ field: string; before: unknown; after: unknown }>;
+}
+
+export interface RequirementsRevisionState {
+  previousVersion: string;
+  currentVersion: string;
+  supersedesVersion: string;
+  reason: string;
+  routeAssessment: "unchanged" | "changed";
+  routeAssessmentReason: string;
+  diff: RequirementsRevisionDiff;
+  at: string;
+}
+
 export type CanonicalAssertionField =
   | "bbox.x"
   | "bbox.y"
@@ -392,9 +428,9 @@ export interface CadRunState {
   mutationPolicy: MutationPolicy;
 
   /**
-   * Phase-record types committed during this run (e.g. "assembly_design",
-   * "interface_contracts"). Accumulated, never cleared — record guards and
-   * reroute check them against route obligations.
+   * Current requirements-version phase records (e.g. "assembly_design",
+   * "interface_contracts"). A requirements revision invalidates dependent
+   * records before record guards and reroute evaluate them again.
    */
   phaseRecords?: string[];
 
@@ -415,16 +451,10 @@ export interface CadRunState {
    */
   rerouteAuthorityRoute?: string | null;
 
-  /** Proposed immutable-contract replacement awaiting an explicit user-side approval. */
-  pendingRequirementsRevision?: {
-    hash: string;
-    record: CadRequirements;
-    requestedAt: string;
-  } | null;
-  /** One-time authority issued only by /cad-approve-requirements-revision. */
-  requirementsAuthorityToken?: string | null;
-  /** Exact proposed record hash to which the one-time token is bound. */
-  requirementsAuthorityHash?: string | null;
+  /** True after requirements changed the task shape and before cad_reroute. */
+  routeRequiresReassessment?: boolean;
+  /** Durable current revision metadata; also repairs a missing journal append. */
+  lastRequirementsRevision?: RequirementsRevisionState;
 
   requirementsVersion?: string;
   assertionsVersion?: string;

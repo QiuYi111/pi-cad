@@ -329,52 +329,6 @@ export default function cadCore(pi: ExtensionAPI) {
     },
   });
 
-  // Requirements are immutable after their first commit. A revision is a
-  // separate user-owned authority action: the token is one-shot and bound to
-  // the exact canonical hash of the pending proposed record.
-  pi.registerCommand("cad-approve-requirements-revision", {
-    description: "Approve the pending immutable requirements revision (issues a one-time token for that exact record)",
-    handler: async (_args, ctx) => {
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await store.load();
-      if (!state || state.status === "done" || state.status === "aborted") {
-        if (ctx.hasUI) ctx.ui.notify("No active Pi-CAD workflow", "info");
-        return;
-      }
-      const pending = state.pendingRequirementsRevision;
-      if (!pending) {
-        if (ctx.hasUI) {
-          ctx.ui.notify(
-            "No pending requirements revision. The Agent must submit the proposed record first.",
-            "warning",
-          );
-        }
-        return;
-      }
-      const next: CadRunState = {
-        ...state,
-        status: "active",
-        blocker: undefined,
-        requirementsAuthorityToken: randomBytes(16).toString("hex"),
-        requirementsAuthorityHash: pending.hash,
-        updatedAt: nowIso(),
-      };
-      await persist(pi, store, next, [{
-        type: "RequirementsRevisionAuthorityIssued",
-        data: {
-          revisionHash: pending.hash,
-          note: "one-time authority bound to this exact requirements record; consumed by cad_commit_requirements",
-        },
-      }]);
-      if (ctx.hasUI) {
-        ctx.ui.notify(
-          `Requirements revision ${pending.hash.slice(0, 12)} approved exactly once.`,
-          "info",
-        );
-      }
-    },
-  });
-
   registerControlTools(pi, deps);
   registerContextCompaction(pi);
 
@@ -383,6 +337,25 @@ export default function cadCore(pi: ExtensionAPI) {
     await store.migrate();
     const project = await store.ensureProject();
     let state = await store.load();
+    if (state?.requirementsVersion) {
+      try {
+        await store.readRequirementsVersion(state.requirementsVersion);
+        await store.repairRequirementsRevisionJournal(state);
+      } catch (error) {
+        state = {
+          ...state,
+          status: "blocked_external",
+          blocker: {
+            type: "external_input",
+            reason: "canonical requirements storage is missing or corrupt",
+            needed: error instanceof Error ? error.message : "restore the immutable requirements record",
+            createdAt: nowIso(),
+          },
+          updatedAt: nowIso(),
+        };
+        await persist(pi, store, state, [{ type: "CanonicalRequirementsCorrupt", data: state.blocker }]);
+      }
+    }
     if (state && state.status === "waiting_user" && !isHeadless(state)) {
       state = resumeFromUser(state);
       // Deliberately NO reroute authority here: an ordinary user reply only
@@ -421,6 +394,12 @@ export default function cadCore(pi: ExtensionAPI) {
     // visibility hygiene; a tool force-reactivated by the user or another
     // extension must still be blocked here.
     const phaseAllowed = new Set(toolsForState(state));
+    if (state.routeRequiresReassessment && !phaseAllowed.has(event.toolName)) {
+      return {
+        block: true,
+        reason: `Pi-CAD route reassessment lock: ${event.toolName} is disabled until cad_reroute succeeds or the exact same requirements hash is confirmed unchanged`,
+      };
+    }
     if (isHeadless(state) && event.toolName === "cad_wait_for_user") {
       return {
         block: true,

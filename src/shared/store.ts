@@ -89,6 +89,7 @@ export class CadRunStore {
   readonly statePath: string;
   readonly eventsPath: string;
   readonly recordsDir: string;
+  readonly requirementsDir: string;
   readonly evidenceDir: string;
   readonly artifactsDir: string;
   readonly reviewsDir: string;
@@ -100,6 +101,7 @@ export class CadRunStore {
     this.statePath = join(this.runDir, "state.json");
     this.eventsPath = join(this.runDir, "events.jsonl");
     this.recordsDir = join(this.runDir, "records");
+    this.requirementsDir = join(this.recordsDir, "requirements");
     this.evidenceDir = join(this.runDir, "evidence");
     this.artifactsDir = join(this.runDir, "artifacts");
     this.reviewsDir = join(this.runDir, "reviews");
@@ -107,6 +109,7 @@ export class CadRunStore {
 
   async ensureDirs(): Promise<void> {
     await mkdir(join(this.recordsDir), { recursive: true });
+    await mkdir(this.requirementsDir, { recursive: true });
     await mkdir(join(this.evidenceDir, "visual"), { recursive: true });
     await mkdir(join(this.evidenceDir, "geometry"), { recursive: true });
     await mkdir(join(this.evidenceDir, "compare"), { recursive: true });
@@ -139,9 +142,37 @@ export class CadRunStore {
 
   async writeRecord(name: string, data: unknown): Promise<string> {
     await this.ensureDirs();
+    if (name === "requirements") await this.writeRequirementsVersion(hashRecord(data), data);
     const path = join(this.recordsDir, `${name}.json`);
     await atomicWrite(path, `${JSON.stringify(data, null, 2)}\n`);
     return path;
+  }
+
+  requirementsVersionPath(version: string): string {
+    if (!/^[a-f0-9]{64}$/.test(version)) throw new Error(`invalid requirements version: ${version}`);
+    return join(this.requirementsDir, `${version}.json`);
+  }
+
+  async writeRequirementsVersion(version: string, data: unknown): Promise<string> {
+    await this.ensureDirs();
+    if (hashRecord(data) !== version) throw new Error("requirements record hash does not match version");
+    const path = this.requirementsVersionPath(version);
+    try {
+      const existing = JSON.parse(await readFile(path, "utf-8"));
+      if (hashRecord(existing) !== version) throw new Error(`immutable requirements record is corrupt: ${path}`);
+      return path;
+    } catch (error) {
+      if (error instanceof SyntaxError || (error instanceof Error && error.message.includes("corrupt"))) throw error;
+    }
+    await atomicWrite(path, `${JSON.stringify(data, null, 2)}\n`);
+    return path;
+  }
+
+  async readRequirementsVersion<T = unknown>(version: string): Promise<T> {
+    const path = this.requirementsVersionPath(version);
+    const data = JSON.parse(await readFile(path, "utf-8")) as T;
+    if (hashRecord(data) !== version) throw new Error(`requirements record hash mismatch: ${path}`);
+    return data;
   }
 
   async writeManifest(data: unknown): Promise<string> {
@@ -353,6 +384,18 @@ export class CadProjectStore {
     return run.writeRecord(name, data);
   }
 
+  async writeRequirementsVersion(version: string, data: unknown): Promise<string> {
+    const run = await this.currentRun();
+    if (!run) throw new Error("no active workflow run");
+    return run.writeRequirementsVersion(version, data);
+  }
+
+  async readRequirementsVersion<T = unknown>(version: string): Promise<T> {
+    const run = await this.currentRun();
+    if (!run) throw new Error("no active workflow run");
+    return run.readRequirementsVersion<T>(version);
+  }
+
   async writeManifest(data: unknown): Promise<string> {
     const run = await this.currentRun();
     if (!run) throw new Error("no active workflow run");
@@ -368,6 +411,33 @@ export class CadProjectStore {
   async listReviewsNewestFirst<T = unknown>(): Promise<Array<{ path: string; data: T }>> {
     const run = await this.currentRun();
     return run ? run.listReviewsNewestFirst<T>() : [];
+  }
+
+  async repairRequirementsRevisionJournal(state: CadRunState): Promise<boolean> {
+    const revision = state.lastRequirementsRevision;
+    if (!revision || revision.currentVersion !== state.requirementsVersion) return false;
+    const run = this.run(state.runId);
+    const raw = await readFile(run.eventsPath, "utf-8").catch(() => "");
+    const alreadyRecorded = raw.split(/\r?\n/).filter(Boolean).some((line) => {
+      try {
+        const event = JSON.parse(line) as {
+          type?: string;
+          data?: { previousVersion?: string; currentVersion?: string; at?: string };
+        };
+        return (event.type === "RequirementsRevised" || event.type === "RequirementsRevisionJournalRecovered") &&
+          event.data?.previousVersion === revision.previousVersion &&
+          event.data?.currentVersion === revision.currentVersion &&
+          event.data?.at === revision.at;
+      } catch {
+        return false;
+      }
+    });
+    if (alreadyRecorded) return false;
+    await run.appendEvent("RequirementsRevisionJournalRecovered", {
+      ...revision,
+      note: "state.json and immutable requirements record were authoritative; missing journal entry repaired on startup",
+    });
+    return true;
   }
 
   resolve(relativePath: string): string {
@@ -497,12 +567,80 @@ export class CadProjectStore {
     return migrated;
   }
 
+  /** Schema v5 -> v6 adds immutable requirements versions and retires revision approval. */
+  async migrateV5ToV6(): Promise<boolean> {
+    await this.ensure();
+    let migrated = false;
+    try {
+      const project = JSON.parse(await readFile(this.projectPath, "utf-8")) as CadProjectState;
+      if (project.schemaVersion === 5) {
+        project.schemaVersion = 6;
+        project.updatedAt = nowIso();
+        await this.saveProject(project);
+        migrated = true;
+      }
+    } catch {
+      // No project yet.
+    }
+
+    const names = await readdir(this.runsDir).catch(() => []);
+    for (const name of names) {
+      const run = new CadRunStore(this.cwd, name);
+      let state: Record<string, unknown>;
+      try {
+        state = JSON.parse(await readFile(run.statePath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (state.schemaVersion !== 5) continue;
+
+      const version = typeof state.requirementsVersion === "string" ? state.requirementsVersion : undefined;
+      if (version) {
+        const legacyPath = join(run.recordsDir, "requirements.json");
+        const record = JSON.parse(await readFile(legacyPath, "utf-8"));
+        if (hashRecord(record) !== version) {
+          throw new Error(`cannot migrate ${name}: requirements.json does not match requirementsVersion`);
+        }
+        await run.writeRequirementsVersion(version, record);
+      }
+
+      const discarded = state.pendingRequirementsRevision as {
+        hash?: string;
+        requestedAt?: string;
+      } | null | undefined;
+      delete state.pendingRequirementsRevision;
+      delete state.requirementsAuthorityToken;
+      delete state.requirementsAuthorityHash;
+      const blocker = state.blocker as { type?: string; reason?: string; needed?: string } | undefined;
+      if (
+        blocker?.type === "user_authority" &&
+        /requirements revision|approve-requirements-revision/i.test(`${blocker.reason ?? ""} ${blocker.needed ?? ""}`)
+      ) {
+        delete state.blocker;
+        if (state.status === "blocked_user") state.status = "active";
+      }
+      state.schemaVersion = 6;
+      state.updatedAt = nowIso();
+      await atomicWrite(run.statePath, `${JSON.stringify(state, null, 2)}\n`);
+      if (discarded) {
+        await run.appendEvent("RequirementsRevisionApprovalRetired", {
+          ...(discarded.hash ? { discardedProposalHash: discarded.hash } : {}),
+          ...(discarded.requestedAt ? { discardedProposalRequestedAt: discarded.requestedAt } : {}),
+          note: "v6 uses cad_revise_requirements; an unapproved v5 proposal was not applied",
+        }).catch(() => {});
+      }
+      migrated = true;
+    }
+    return migrated;
+  }
+
   /** All migrations: legacy layouts, then schema version steps. */
   async migrate(): Promise<boolean> {
     const legacy = await this.migrateLegacyProject();
     const v4 = await this.migrateV3ToV4();
     const v5 = await this.migrateV4ToV5();
-    return legacy || v4 || v5;
+    const v6 = await this.migrateV5ToV6();
+    return legacy || v4 || v5 || v6;
   }
 
   /** Migrate V0 single-state and V0.4 task layouts into project + runs. */

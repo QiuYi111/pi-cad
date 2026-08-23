@@ -55,6 +55,19 @@ export function applyCadToolOverlay(pi: ExtensionAPI, state: CadRunState | null)
   // optional chaining keeps minimal test doubles working (they track state
   // through setActiveTools only).
   const current = typeof pi.getActiveTools === "function" ? pi.getActiveTools() : [];
+  if (activeState?.routeRequiresReassessment) {
+    // A reassessment marker is a control-plane lock, not ordinary phase
+    // visibility. Hide every tool outside the state-level allowlist,
+    // including tools owned by other extensions.
+    const all = typeof pi.getAllTools === "function" ? pi.getAllTools() : [];
+    const registered = new Set(all.map((tool) => tool.name));
+    const locked = new Set(current.filter((name) => phaseAllowed.has(name)));
+    for (const name of phaseAllowed) {
+      if (registered.size === 0 || registered.has(name)) locked.add(name);
+    }
+    pi.setActiveTools([...locked]);
+    return;
+  }
   const next = new Set<string>(current);
 
   for (const name of PI_CAD_OWNED_TOOLS) {
@@ -98,12 +111,17 @@ export function finalSubmissionAllowed(state: CadRunState): boolean {
 }
 
 export function toolsForState(state: CadRunState): string[] {
+  if (state.routeRequiresReassessment) {
+    return [
+      ...BUILTIN_READONLY,
+      "cad_revise_requirements",
+      "cad_reroute",
+      ...(isHeadless(state) ? ["cad_declare_blocker"] : ["cad_wait_for_user"]),
+    ];
+  }
   let tools = toolsForPhase(state.phase);
-  // Once committed, requirements are immutable. Expose the commit tool in
-  // every active phase only so an Agent can submit an exact revision request;
-  // the controller requires a user-issued, hash-bound one-time token to apply it.
-  if (state.requirementsVersion && !tools.includes("cad_commit_requirements")) {
-    tools = [...tools, "cad_commit_requirements"];
+  if (state.requirementsVersion && !tools.includes("cad_revise_requirements")) {
+    tools = [...tools, "cad_revise_requirements"];
   }
   if (isHeadless(state)) {
     tools = tools.filter((tool) => tool !== "cad_wait_for_user");

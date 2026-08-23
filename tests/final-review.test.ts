@@ -11,7 +11,7 @@ import { runFinalReviewPreflight } from "../src/control/final-review/preflight.t
 import { collectReviewerEvidenceIndex } from "../src/control/final-review/evidence-index.ts";
 import { validateFinalReviewResult } from "../src/control/final-review/reviewer.ts";
 import { aggregateReviewVotes, type StoredReviewVote } from "../src/control/final-review/voting.ts";
-import { requirementsRevisionAuthorized, registerControlTools, type ControllerDeps } from "../src/core/controller.ts";
+import { registerControlTools, type ControllerDeps } from "../src/core/controller.ts";
 import {
   acceptCandidate,
   commitPlan,
@@ -62,111 +62,6 @@ function requirements(expected = 10): CadRequirements {
 function sha(data: string | Buffer): string {
   return createHash("sha256").update(data).digest("hex");
 }
-
-test("requirements revision authority is one-shot input bound to the exact proposed contract hash", () => {
-  const previous = requirements(10);
-  const routed = route(null, quickRoute, "test");
-  assert.equal(routed.ok, true);
-  if (!routed.ok) throw new Error("unreachable");
-  const state: CadRunState = {
-    ...routed.state,
-    interactionMode: "headless",
-    currentSourceHash: "source-a",
-    currentArtifactHash: "artifact-a",
-  };
-  const revisionHash = hashRecord({ ...previous, goal: "revised goal" });
-  assert.equal(requirementsRevisionAuthorized(state, revisionHash, undefined), false);
-  const authorized = {
-    ...state,
-    requirementsAuthorityToken: "once-token",
-    requirementsAuthorityHash: revisionHash,
-  };
-  assert.equal(requirementsRevisionAuthorized(authorized, revisionHash, "wrong-token"), false);
-  assert.equal(requirementsRevisionAuthorized(authorized, "different-hash", "once-token"), false);
-  assert.equal(requirementsRevisionAuthorized(authorized, revisionHash, "once-token"), true);
-});
-
-test("cad_commit_requirements uses exact one-shot authority and headless cannot revise", async () => {
-  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-contract-auth-"));
-  try {
-    const store = new CadProjectStore(cwd);
-    await store.createRun({ runId: "contract-auth-run" });
-    const initial = requirements(10);
-    const routed = route(null, quickRoute, "test");
-    assert.equal(routed.ok, true);
-    if (!routed.ok) throw new Error("unreachable");
-    const committed = commitRequirements(routed.state, initial);
-    assert.equal(committed.ok, true);
-    if (!committed.ok) throw new Error("unreachable");
-    await store.save({ ...committed.state, runId: "contract-auth-run", phase: "build" });
-    await store.run("contract-auth-run").writeRecord("requirements", initial);
-
-    const tools = new Map<string, any>();
-    const pi = { registerTool(tool: { name: string }) { tools.set(tool.name, tool); } } as unknown as ExtensionAPI;
-    registerControlTools(pi, {
-      pi,
-      persist: async (_pi, targetStore, next, events) => {
-        await targetStore.save(next);
-        for (const event of events) await targetStore.appendEvent(event.type, event.data);
-      },
-      runBaselineAuto: async () => { throw new Error("unused"); },
-      runCandidateAuto: async () => { throw new Error("unused"); },
-      runConvertCandidateAuto: async () => { throw new Error("unused"); },
-    });
-    const ctx = { cwd } as ExtensionContext;
-    const beforeInvalid = await store.load();
-    const invalid = await tools.get("cad_commit_requirements").execute(
-      "r0", { ...requirements(11), goal: "" }, undefined, undefined, ctx,
-    );
-    assert.match(invalid.content[0].text, /invalid requirements record/);
-    const afterInvalid = await store.load();
-    assert.equal(afterInvalid?.status, beforeInvalid?.status);
-    assert.equal(afterInvalid?.phase, beforeInvalid?.phase);
-    assert.equal(afterInvalid?.pendingRequirementsRevision, undefined);
-
-    const revision = requirements(11);
-    const requested = await tools.get("cad_commit_requirements").execute(
-      "r1", revision, undefined, undefined, ctx,
-    );
-    assert.match(requested.content[0].text, /immutable/);
-    const pending = await store.load();
-    assert.equal(pending?.pendingRequirementsRevision?.hash, hashRecord(revision));
-
-    await store.save({
-      ...pending!,
-      requirementsAuthorityToken: "approved-once",
-      requirementsAuthorityHash: hashRecord(revision),
-    });
-    const applied = await tools.get("cad_commit_requirements").execute(
-      "r2", { ...revision, authorityToken: "approved-once" }, undefined, undefined, ctx,
-    );
-    assert.match(applied.content[0].text, /Requirements committed/);
-    const consumed = await store.load();
-    assert.equal(consumed?.requirementsAuthorityToken, null);
-    assert.equal(consumed?.pendingRequirementsRevision, null);
-    assert.equal(consumed?.requirementsVersion, hashRecord(revision));
-
-    await store.save({
-      ...consumed!,
-      phase: "review",
-      status: "active",
-      interactionMode: "headless",
-    });
-    const headlessAttempt = requirements(12);
-    const blocked = await tools.get("cad_commit_requirements").execute(
-      "r3", headlessAttempt, undefined, undefined, ctx,
-    );
-    assert.match(blocked.content[0].text, /HEADLESS run is BLOCKED_USER/);
-    const blockedState = await store.load();
-    assert.equal(blockedState?.status, "blocked_user");
-    const frozenRecord = JSON.parse(
-      readFileSync(join(store.run("contract-auth-run").recordsDir, "requirements.json"), "utf-8"),
-    );
-    assert.equal(hashRecord(frozenRecord), hashRecord(revision));
-  } finally {
-    rmSync(cwd, { recursive: true, force: true });
-  }
-});
 
 async function seedReview(cwd: string, expected = 10, observed = 10) {
   const store = new CadProjectStore(cwd);

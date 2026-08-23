@@ -213,6 +213,49 @@ test("plugin composition: re-activating a phase-disallowed cad tool is still blo
   }
 });
 
+test("plugin composition: route reassessment lock gates overlay and forced external mutations", async () => {
+  const pi = {
+    handlers: new Map<string, Function[]>(),
+    activeTools: ["read", "bash", "cad_transition", "cad_reroute", ...EXTERNAL_TOOLS],
+    on(event: string, handler: Function) {
+      const list = pi.handlers.get(event) ?? [];
+      list.push(handler);
+      pi.handlers.set(event, list);
+    },
+    setActiveTools(names: string[]) { pi.activeTools = [...names]; },
+    getActiveTools() { return [...pi.activeTools]; },
+    getAllTools() { return pi.activeTools.map((name) => ({ name })); },
+    appendEntry() {}, sendUserMessage() {}, registerTool() {}, registerCommand() {},
+    events: { emit() {}, on() {} },
+  };
+  const core = (await import("../src/extensions/core/index.ts")).default;
+  core(pi as any);
+  const toolCall = pi.handlers.get("tool_call")![0] as Function;
+  const cwd = mkdtempSync(join(tmpdir(), "pi-cad-reassessment-guard-"));
+  try {
+    const store = new ProjectStateStore(cwd);
+    await store.createRun({ runId: "guard-run" });
+    const state = { ...quickRunState("review", "guard-run"), routeRequiresReassessment: true };
+    await store.save(state);
+    applyCadToolOverlay(pi as any, state);
+    assert.equal(pi.activeTools.includes("bash"), false);
+    assert.equal(pi.activeTools.includes("goal_complete"), false);
+    assert.equal(pi.activeTools.includes("cad_transition"), false);
+    assert.equal(pi.activeTools.includes("cad_reroute"), true);
+    assert.equal(pi.activeTools.includes("read"), true);
+
+    for (const toolName of ["bash", "cad_transition", "goal_complete"]) {
+      const blocked = await toolCall({ toolName, input: {} }, { cwd }) as { block?: boolean; reason?: string };
+      assert.equal(blocked.block, true, toolName);
+      assert.match(blocked.reason ?? "", /route reassessment lock/);
+    }
+    const allowed = await toolCall({ toolName: "cad_reroute", input: {} }, { cwd }) as { block?: boolean };
+    assert.notEqual(allowed?.block, true);
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test("plugin composition: intake state routes via cad_route overlay on fresh sessions", () => {
   const pi = hostPi({ initialActive: [...EXTERNAL_TOOLS] });
   applyCadToolOverlay(pi, createIntakeState({ runId: "fresh" }));

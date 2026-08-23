@@ -43,12 +43,23 @@ export function stateSummary(state: CadRunState): string {
   if (state.staleEvidence.length) lines.push(`staleEvidence=${state.staleEvidence.length}`);
   if (state.phaseRecords?.length) lines.push(`phaseRecords=${state.phaseRecords.join(",")}`);
   if (state.pendingReroute) lines.push(`pendingReroute=${routeKey(state.pendingReroute.route)}`);
-  if (state.pendingRequirementsRevision) {
-    lines.push(`pendingRequirementsRevision=${state.pendingRequirementsRevision.hash}`);
+  if (state.requirementsVersion) lines.push(`requirementsVersion=${state.requirementsVersion.slice(0, 12)}`);
+  if (state.routeRequiresReassessment) {
+    lines.push("routeRequiresReassessment=true");
+    if (state.lastRequirementsRevision?.routeAssessmentReason) {
+      lines.push(`routeReassessmentReason=${state.lastRequirementsRevision.routeAssessmentReason}`);
+    }
   }
-  if (state.requirementsAuthorityToken) {
+  if (state.lastRequirementsRevision) {
     lines.push(
-      `requirementsAuthorityToken=${state.requirementsAuthorityToken} (one-time, bound to ${state.requirementsAuthorityHash ?? "unknown"})`,
+      `lastRequirementsRevision=${state.lastRequirementsRevision.previousVersion.slice(0, 12)}->${state.lastRequirementsRevision.currentVersion.slice(0, 12)}`,
+    );
+    const diff = state.lastRequirementsRevision.diff;
+    const arrays = Object.keys(diff.arrays);
+    const assertionChanges = diff.assertions.added.length + diff.assertions.removed.length + diff.assertions.changed.length +
+      (diff.assertions.orderChanged ? 1 : 0);
+    lines.push(
+      `requirementsDiff=arrays:${arrays.join(",") || "none"}; assertions:${assertionChanges}; fields:${diff.fields.map((entry) => entry.field).join(",") || "none"}`,
     );
   }
   if (state.blocker) lines.push(`blocker=${state.blocker.type}: ${state.blocker.needed}`);
@@ -88,7 +99,7 @@ export async function composeSystemPrompt(
         "## Interaction mode: HEADLESS (authoritative)",
         "This workflow has no user turn available. Never request, await, or claim a user response.",
         "For an engineering interpretation ambiguity, call cad_defer_clarification with alternatives and an explicit fallback, then continue.",
-        "The committed requirements contract is immutable. Never attempt to revise it: no user exists to issue the required hash-bound one-time authority token.",
+        "When authoritative information materially changes the task, call cad_revise_requirements before continuing engineering. This is valid in HEADLESS mode.",
         "If the missing decision belongs exclusively to the user (authority/scope/cost/risk), call cad_declare_blocker instead of inventing consent.",
         "Continue until the workflow is DONE, structurally BLOCKED, ABORTED, or the host budget ends. waiting_user is illegal in this mode.",
       ].join("\n")
