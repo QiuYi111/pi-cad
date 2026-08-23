@@ -116,12 +116,12 @@ export async function installSu2({ root, python, env = process.env }) {
 if (process.argv[1] && process.argv[1].endsWith("install-su2.mjs")) {
   const { fileURLToPath } = await import("node:url");
   const root = fileURLToPath(new URL("..", import.meta.url));
-  const venvPython = process.platform === "win32"
-    ? join(root, ".venv", "Scripts", "python.exe")
-    : join(root, ".venv", "bin", "python");
-  const python = existsSync(venvPython)
-    ? venvPython
-    : process.platform === "win32" ? "py" : "python3";
+  if (process.platform === "win32") {
+    console.error("Run npm postinstall for the WSL-managed Python environment; standalone Windows Python installation is unsupported.");
+    process.exit(2);
+  }
+  execFileSync(process.env.PI_CAD_UV ?? "uv", ["sync", "--project", join(root, "python"), "--extra", "simulation"], { cwd: root, stdio: "inherit" });
+  const python = join(root, "python", ".venv", "bin", "python");
   const result = await installSu2({ root, python });
   process.exit(result.status === "ready" || result.status === "skipped" || result.status === "external" ? 0 : 0);
 }

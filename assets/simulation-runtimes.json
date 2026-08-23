@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "runtimes": [
+    {
+      "backend": "openfoam",
+      "runtime": "openfoam-14",
+      "launcher": "bubblewrap",
+      "package": "openfoam14",
+      "resolvedPackageVersion": "20260724",
+      "root": "/opt/openfoam14",
+      "bootstrap": "scripts/bootstrap-openfoam14.sh",
+      "network": "none",
+      "limits": {
+        "cpu": 8,
+        "memoryGiB": 24,
+        "tasks": 1024,
+        "wallHours": 12,
+        "workspaceGiB": 100
+      }
+    }
+  ]
+}

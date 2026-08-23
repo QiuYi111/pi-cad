@@ -8,6 +8,7 @@ from typing import Any
 import build123d as bd
 import ezdxf
 
+from .common import read_json
 from .render import _normalize, _VIEW_CAMERAS
 
 
@@ -62,7 +63,7 @@ def generate_drawing(spec_path: str | Path, output_dir: str | Path) -> dict[str,
     spec_path = Path(spec_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    spec = read_json(spec_path, normalize_paths=True)
     ok, errors = validate_drawing_spec(spec)
     if not ok:
         raise ValueError("; ".join(errors))

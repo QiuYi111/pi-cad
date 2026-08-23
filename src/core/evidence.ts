@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { obligationsOf, type CadEventEnvelope, type CadRunState, type EvidenceRef } from "../shared/protocol.ts";
 import { sha256File } from "../shared/store.ts";
+import { hashSimulationPath } from "../modules/simulate-v2/protocol.ts";
 import {
   addEvidence,
   evidenceFromEnvelope,
@@ -63,7 +64,10 @@ export async function verifyEvidenceFilesForHash(
         if (!existsSync(resolve(cwd, input.path))) {
           return `${kind} evidence input is missing: ${input.role} (${input.path})`;
         }
-        if ((await sha256File(resolve(cwd, input.path))) !== input.sha256) {
+        const actual = input.hashKind === "simulation-tree-v1"
+          ? (await hashSimulationPath(resolve(cwd, input.path), cwd)).hash
+          : await sha256File(resolve(cwd, input.path));
+        if (actual !== input.sha256) {
           return `${kind} evidence input hash changed: ${input.role} (${input.path})`;
         }
       }

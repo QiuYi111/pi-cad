@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+rm -rf runs
+mkdir -p runs
+for item in coarse:8:16 medium:12:24 fine:16:32; do
+  IFS=: read -r name nxy nz <<<"$item"
+  cp -a case-template "runs/$name"
+  sed -i "s/__NXY__/$nxy/g; s/__NZ__/$nz/g" "runs/$name/system/blockMeshDict"
+  (
+    cd "runs/$name"
+    blockMesh > log.blockMesh 2>&1
+    foamRun > log.foamRun 2>&1
+  )
+done
+
+# Independent closed-bubble retention case: water-filled box with a sealed
+# gas cube below the free outlet. This is a protocol qualification case, not
+# a project-specific engineering model.
+cp -a case-template runs/trapped
+sed -i 's/__NXY__/12/g; s/__NZ__/24/g; s/endTime 0.5;/endTime 0.15;/' runs/trapped/system/blockMeshDict runs/trapped/system/controlDict
+cp variants/alpha.water.bubble runs/trapped/0/alpha.water
+(
+  cd runs/trapped
+  blockMesh > log.blockMesh 2>&1
+  foamRun > log.foamRun 2>&1
+)

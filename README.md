@@ -160,19 +160,61 @@ assembly-tree + interference (assembly routes) → deterministic compare
 `cad_measure`, `cad_compare_geometry`, `cad_assembly_tree`,
 `cad_inspect_interference`, `cad_export`.
 
-**Engineering analysis** — `cad_simulate`, `cad_simulate_flow`,
-`cad_simulate_thermal`, `cad_optimize`, `cad_generate_drawing`,
-`cad_render_scene`.
+**Engineering analysis** — Recipe-native `cad_simulate`,
+`cad_sim_observe`, `cad_commit_simulation`, plus `cad_optimize`,
+`cad_generate_drawing`, and `cad_render_scene`. The former typed structural,
+flow, and thermal tools remain deprecated compatibility wrappers.
 
-All engineering tools take structured arguments (material, loads,
-constraints, mesh, views, directions). You never point them at a spec file or
-an output directory — the harness canonicalizes the spec into run-scoped
-evidence storage itself, which is why even read-only review phases can run a
-simulation without touching your project tree. Unknown physics, load types,
-constraint types, regions, or a second material are rejected with an error,
-not guessed.
+Simulation V2 takes only `backend`, `runtime`, a Recipe directory, and
+optional opaque output names. Physics, materials, boundaries, meshing, and
+project-specific metrics live in the solver-native Recipe, never in Pi-CAD's
+tool schema. Drawing, optimization, and presentation retain their own typed
+contracts.
 
 ## Simulation, honestly scoped
+
+Simulation V2 follows:
+
+```text
+author solver-native Recipe
+→ cad_simulate
+→ optional cad_sim_observe
+→ cad_commit_simulation
+```
+
+Each Recipe contains a strict `pi-sim.toml`, an arbitrary managed entrypoint,
+an observation program, explicit project inputs, and named exports using only
+`image | scalar | timeseries | table | field | artifact`. Visual Recipes owe
+a primary image and a primary quantitative export; nonvisual Recipes owe a
+primary quantitative export. Omitted `outputs` selects the primary floor,
+explicit names add to that floor, and `outputs=[]` is invalid.
+
+The harness snapshots only the Recipe and declared inputs, runs without
+network access in a pinned runtime, retains full logs and raw state outside
+model context, and returns images before bounded quantitative summaries.
+Changing observation files creates a new immutable snapshot without rerunning
+the solver. Changing compute files or inputs requires a new run.
+Materialized file exports are interned under the run's `objects/sha256/`
+store; unchanged large fields are hard-linked to the same immutable object,
+with copy/reflink fallback when hard links are unavailable.
+
+Neither simulate nor observe creates Evidence. Commit verifies the exact run,
+observation, runtime identity, declared inputs, current case obligation, and
+authoritative artifact (or verified derivation). Evidence records provenance;
+it does not assert that engineering requirements pass.
+
+The first managed runtime is `backend=openfoam`, `runtime=openfoam-14`, pinned
+to `openfoam14@20260724`. Bootstrap it inside Linux/WSL with
+`scripts/bootstrap-openfoam14.sh`. Unit CI uses a stub runtime; the real
+qualification Recipe is under `benchmarks/simulation-v2/openfoam14-box`.
+The repository-owned SPEC-04 template under
+`benchmarks/simulation-v2/spec04-template` includes its OpenFOAM case
+generator, three-stage solver runner, convergence/robustness aggregation and
+Rev1 release gate. Manufacturing CAD, materials, surface mapping and Rev1
+criteria remain ignored authoritative inputs; if absent, it reports
+`blocked_external` and cannot emit `SIMULATION_RELEASE_PASS`.
+
+### Deprecated typed compatibility tools
 
 What V1 does well:
 
@@ -296,7 +338,8 @@ density/surface evidence, never a CAD candidate.
 
 | Variable | Effect |
 | --- | --- |
-| `PI_CAD_PYTHON` | Use this Python binary for all cadctl calls |
+| `PI_CAD_UV` | Override the `uv` executable on native Linux |
+| `PI_CAD_WSL_DISTRO` | WSL distribution used by a Windows Node host (default `Ubuntu`) |
 | `PI_CAD_VENV` | Point installer and runtime at an existing virtualenv |
 | `PI_CAD_SKIP_CUPY` | Skip the best-effort CuPy install (`1` to opt out) |
 | `PI_CAD_SU2_BIN` | Use an external SU2_CFD binary for flow/thermal |

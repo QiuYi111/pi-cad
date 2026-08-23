@@ -16,6 +16,7 @@ from typing import Any
 
 import numpy as np
 
+from ..common import read_json, resolve_spec_path
 from .su2_backend import Su2UnavailableError, pre_hash_artifacts, run_su2, verify_unchanged
 from .su2_config import compile_flow_cfg, write_cfg
 from .su2_mesh import mesh_step_su2
@@ -292,7 +293,11 @@ def run_flow(spec_path: str | Path, output_dir: str | Path, stage: str = "run") 
     from .surface_selector import resolve_surface_ids
 
     spec_path = Path(spec_path)
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    spec = read_json(spec_path, normalize_paths=True)
+    if spec.get("fluidDomain"):
+        spec["fluidDomain"] = str(resolve_spec_path(spec_path, spec["fluidDomain"]))
+    if spec.get("artifact"):
+        spec["artifact"] = str(resolve_spec_path(spec_path, spec["artifact"]))
     ok, errors = validate_flow_spec(spec)
     if not ok:
         raise ValueError("; ".join(errors))

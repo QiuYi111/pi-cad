@@ -29,6 +29,7 @@
     "test": "bash scripts/test.sh",
     "test:py": "bash scripts/test.sh",
     "test:ts": "node tests/run-ts-tests.mjs",
+    "test:openfoam14": "node scripts/qualify-openfoam14.mjs",
     "setup:python": "bash scripts/bootstrap-python.sh",
     "pack": "npm pack --cache .npm-cache",
     "postinstall": "node scripts/postinstall.mjs"
@@ -45,6 +46,7 @@
     "skills",
     "python",
     "assets",
+    "benchmarks",
     "scripts",
     "README.md",
     "README.zh-CN.md",

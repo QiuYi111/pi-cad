@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema", "liquid", "gas", "surfaceTension", "gravity", "injectionVelocity", "injectionDuration", "plugEquivalent"],
+  "properties": {
+    "schema": { "const": 1 },
+    "liquid": { "$ref": "#/$defs/phase" },
+    "gas": { "$ref": "#/$defs/phase" },
+    "surfaceTension": { "type": "number", "exclusiveMinimum": 0 },
+    "gravity": { "$ref": "#/$defs/vector" },
+    "injectionVelocity": { "$ref": "#/$defs/vector" },
+    "injectionDuration": { "type": "number", "exclusiveMinimum": 0 },
+    "plugEquivalent": {
+      "type": "object",
+      "required": ["pulseVelocity", "pulseDuration", "relaxationDuration", "targetDisplacement"],
+      "properties": {
+        "pulseVelocity": { "$ref": "#/$defs/vector" },
+        "pulseDuration": { "type": "number", "exclusiveMinimum": 0 },
+        "relaxationDuration": { "type": "number", "exclusiveMinimum": 0 },
+        "targetDisplacement": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "phase": {
+      "type": "object",
+      "required": ["rho", "nu"],
+      "properties": { "rho": { "type": "number", "exclusiveMinimum": 0 }, "nu": { "type": "number", "exclusiveMinimum": 0 } },
+      "additionalProperties": false
+    },
+    "vector": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 }
+  },
+  "additionalProperties": false
+}

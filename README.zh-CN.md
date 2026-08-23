@@ -144,16 +144,55 @@ release)确定性对比 → 按哈希绑定证据 → 进入评审。
 `cad_measure`、`cad_compare_geometry`、`cad_assembly_tree`、
 `cad_inspect_interference`、`cad_export`。
 
-**工程分析** —— `cad_simulate`、`cad_simulate_flow`、`cad_simulate_thermal`、
-`cad_optimize`、`cad_generate_drawing`、`cad_render_scene`。
+**工程分析** —— Recipe-native 的 `cad_simulate`、`cad_sim_observe`、
+`cad_commit_simulation`,以及 `cad_optimize`、`cad_generate_drawing`、
+`cad_render_scene`。原有 typed 结构/流体/热工具仅作为 deprecated
+compatibility wrappers 保留。
 
-工程工具全部接收结构化参数(材料、载荷、约束、网格、视图、方向)。
-你不需要指定 spec 文件或输出目录——harness 自己把 spec 规范化写入 run 级
-证据存储。正因如此,即使是只读的评审阶段也能跑仿真而不碰你的项目目录。
-未知的物理类型、载荷类型、约束类型、区域、或第二份材料,都会报错拒绝,
-绝不靠猜。
+Simulation V2 只接收 backend、runtime、Recipe 目录和可选的不透明输出名。
+物理、材料、边界、网格与项目指标全部属于 solver-native Recipe,不进入
+Pi-CAD 的工具 schema。图纸、优化与 presentation 仍保留各自的 typed contract。
 
 ## 仿真能力的诚实边界
+
+Simulation V2 的正式链路是:
+
+```text
+编写 solver-native Recipe
+→ cad_simulate
+→ 可选 cad_sim_observe
+→ cad_commit_simulation
+```
+
+每个 Recipe 包含严格的 `pi-sim.toml`、可自由编程的 managed entrypoint、
+observation program、显式项目输入,以及只使用
+`image | scalar | timeseries | table | field | artifact` 的命名 exports。
+visual Recipe 必须有 primary image 和 primary quantitative export;
+nonvisual Recipe 必须有 primary quantitative export。省略 `outputs` 返回
+primary floor;显式名字只能追加观察;`outputs=[]` 非法。
+
+Harness 只快照 Recipe 与 declared inputs,在固定版本、默认断网的 runtime
+中执行;完整日志和 raw state 留在上下文之外,图片先于受限的量化摘要返回。
+只修改 observation files 会产生新的 immutable snapshot,不会重跑 Solver;
+修改 compute 文件或输入则必须新建 run。
+已物化的文件 export 会进入 run 级 `objects/sha256/` 存储;未变化的大型
+field 通过硬链接复用同一个 immutable object,不支持硬链接时回退到
+copy/reflink。
+
+simulate 和 observe 都不创建 Evidence。commit 会复验精确的 run、observation、
+runtime identity、declared inputs、当前 case obligation,以及 authoritative
+artifact 或受验证 derivation。Evidence 表示溯源成立,不等于工程 PASS。
+
+首个 managed runtime 是 `backend=openfoam`、`runtime=openfoam-14`,固定到
+`openfoam14@20260724`。在 Linux/WSL 内运行
+`scripts/bootstrap-openfoam14.sh` 完成一次性安装。普通 CI 使用 stub runtime;
+真实 qualification Recipe 位于 `benchmarks/simulation-v2/openfoam14-box`。
+仓库内的 `benchmarks/simulation-v2/spec04-template` 已包含 OpenFOAM case
+generator、三阶段 solver runner、收敛/鲁棒性聚合和 Rev1 release gate。
+制造 CAD、材料、surface mapping 与 Rev1 criteria 仍作为 ignored 权威输入;
+缺失时明确返回 `blocked_external`,且不能产生 `SIMULATION_RELEASE_PASS`。
+
+### Deprecated typed compatibility tools
 
 V1 做得好的:
 
@@ -238,7 +277,8 @@ MMA 内环),输出是密度/曲面证据,永远不是 CAD 候选。
 
 | 变量 | 作用 |
 | --- | --- |
-| `PI_CAD_PYTHON` | 所有 cadctl 调用使用此 Python 二进制 |
+| `PI_CAD_UV` | 在原生 Linux 上覆盖 `uv` 可执行文件 |
+| `PI_CAD_WSL_DISTRO` | Windows Node host 使用的 WSL 发行版(默认 `Ubuntu`) |
 | `PI_CAD_VENV` | 安装器与运行时共同指向一个已有 virtualenv |
 | `PI_CAD_SKIP_CUPY` | 跳过尽力而为的 CuPy 安装(设为 `1` 关闭) |
 | `PI_CAD_SU2_BIN` | 流/热分析使用外部 SU2_CFD 二进制 |

@@ -400,7 +400,7 @@ export class CadProjectStore {
     try {
       const raw = JSON.parse(await readFile(this.projectPath, "utf-8")) as CadProjectState;
       if (raw.schemaVersion === 3) {
-        raw.schemaVersion = CAD_STATE_SCHEMA_VERSION;
+        raw.schemaVersion = 4;
         raw.updatedAt = nowIso();
         await this.saveProject(raw);
         migrated = true;
@@ -429,7 +429,7 @@ export class CadProjectStore {
         state.status === "active" || state.status === "waiting_user" || state.status === "ready";
       delete state.workflow;
       delete state.maturity;
-      state.schemaVersion = CAD_STATE_SCHEMA_VERSION;
+      state.schemaVersion = 4;
       state.route = null;
       state.updatedAt = nowIso();
       if (wasActive) state.status = "aborted";
@@ -439,7 +439,7 @@ export class CadProjectStore {
         await run
           .appendEvent("RunAbortedBySchemaMigration", {
             from: 3,
-            to: CAD_STATE_SCHEMA_VERSION,
+            to: 4,
             note: "0.8 route ontology: re-route from intake with cad_route; project head is unchanged",
           })
           .catch(() => {});
@@ -449,11 +449,60 @@ export class CadProjectStore {
     return migrated;
   }
 
+  /**
+   * Schema v4 → v5 replaces implicit typed-solver evidence with the
+   * Recipe-native simulate → observe → commit protocol. Active v4 runs are
+   * aborted because their case obligations cannot be translated without
+   * silently changing their declared tool identity. Terminal history and
+   * the project head remain intact.
+   */
+  async migrateV4ToV5(): Promise<boolean> {
+    await this.ensure();
+    let migrated = false;
+    try {
+      const project = JSON.parse(await readFile(this.projectPath, "utf-8")) as CadProjectState;
+      if (project.schemaVersion === 4) {
+        project.schemaVersion = 5;
+        project.updatedAt = nowIso();
+        await this.saveProject(project);
+        migrated = true;
+      }
+    } catch {
+      // No project yet.
+    }
+    const names = await readdir(this.runsDir).catch(() => []);
+    for (const name of names) {
+      const statePath = join(this.runsDir, name, "state.json");
+      let state: Record<string, unknown>;
+      try {
+        state = JSON.parse(await readFile(statePath, "utf-8")) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (state.schemaVersion !== 4) continue;
+      const wasActive = state.status === "active" || state.status === "waiting_user" || state.status === "ready";
+      state.schemaVersion = 5;
+      state.updatedAt = nowIso();
+      if (wasActive) state.status = "aborted";
+      await atomicWrite(statePath, `${JSON.stringify(state, null, 2)}\n`);
+      if (wasActive) {
+        await new CadRunStore(this.cwd, name).appendEvent("RunAbortedBySchemaMigration", {
+          from: 4,
+          to: 5,
+          note: "Simulation V2 requires re-route and explicit Recipe-native case obligations; project head is unchanged",
+        }).catch(() => {});
+      }
+      migrated = true;
+    }
+    return migrated;
+  }
+
   /** All migrations: legacy layouts, then schema version steps. */
   async migrate(): Promise<boolean> {
     const legacy = await this.migrateLegacyProject();
-    const version = await this.migrateV3ToV4();
-    return legacy || version;
+    const v4 = await this.migrateV3ToV4();
+    const v5 = await this.migrateV4ToV5();
+    return legacy || v4 || v5;
   }
 
   /** Migrate V0 single-state and V0.4 task layouts into project + runs. */

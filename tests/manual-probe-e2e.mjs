@@ -20,7 +20,7 @@ try {
   const stateDir = join(cwd, ".pi-cad", "runs", "r1");
   mkdirSync(stateDir, { recursive: true });
   writeFileSync(join(cwd, ".pi-cad", "project.json"), JSON.stringify({
-    schemaVersion: 4, projectId: "p", head: {}, currentRunId: "r1",
+    schemaVersion: 5, projectId: "p", head: {}, currentRunId: "r1",
     createdAt: "x", updatedAt: "x",
   }));
   const fixture = readFileSync(new URL("../tests/fixtures/interference_contact.step", import.meta.url));
@@ -28,7 +28,7 @@ try {
   mkdirSync(join(cwd, "build"), { recursive: true });
   writeFileSync(artifactPath, fixture);
   const before = {
-    schemaVersion: 4, runId: "r1", projectId: "p", createdAt: "x", updatedAt: "x",
+    schemaVersion: 5, runId: "r1", projectId: "p", createdAt: "x", updatedAt: "x",
     route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype" },
     phase: "review", status: "active", mutationPolicy: "read_only",
     evidence: [], staleEvidence: [],

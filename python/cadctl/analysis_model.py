@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .common import sha256_file
+from .common import read_json, sha256_file
 
 OPERATIONS_MECHANICAL = {"fused", "bonded"}
 OPERATIONS_AUTHORED = {"simplified", "defeatured", "sectioned"}
@@ -75,7 +75,7 @@ def validate_derive_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
 def run_derivation(spec_path: str | Path, output_dir: str | Path) -> dict[str, Any]:
     started = time.monotonic()
     spec_path = Path(spec_path)
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    spec = read_json(spec_path, normalize_paths=True)
     ok, errors = validate_derive_spec(spec)
     if not ok:
         raise ValueError("; ".join(errors))

@@ -72,6 +72,7 @@ export async function composeSystemPrompt(
   state: CadRunState | null,
   unavailableCapabilities: string[] = [],
   project: CadProjectState | null = null,
+  simulationCapabilities = "",
 ): Promise<string> {
   const invariants = await loadPrompt("invariants");
   if (!state) {
@@ -124,5 +125,6 @@ export async function composeSystemPrompt(
     statusNote,
     projectHead,
     unavailable,
+    simulationCapabilities,
   ].join("\n\n");
 }

@@ -1,0 +1,22 @@
+FoamFile { format ascii; class volScalarField; object alpha.water; }
+dimensions [];
+internalField
+{
+  type zonal;
+  defaultValue 1;
+  zones
+  {
+    bubble
+    {
+      type box;
+      box (.015 .015 .025) (.025 .025 .035);
+      value 0;
+    }
+  }
+}
+boundaryField
+{
+  inlet { type fixedValue; value uniform 1; }
+  atmosphere { type inletOutlet; inletValue uniform 0; value uniform 1; }
+  walls { type zeroGradient; }
+}

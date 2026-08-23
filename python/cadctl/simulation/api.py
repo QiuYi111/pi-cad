@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..common import read_json, resolve_spec_path
+
 from .base import SimulationBackendError
 from .torch_fem_backend import TorchFemBackend
 
@@ -169,7 +171,9 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
 
 def run_simulation(spec_path: str | Path, output_dir: str | Path, stage: str = "run") -> dict[str, Any]:
     spec_path = Path(spec_path)
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    spec = read_json(spec_path, normalize_paths=True)
+    if spec.get("artifact"):
+        spec["artifact"] = str(resolve_spec_path(spec_path, spec["artifact"]))
     ok, errors = validate_spec(spec)
     if not ok:
         raise ValueError("; ".join(errors))

@@ -1,0 +1,4 @@
+FoamFile { format ascii; class dictionary; object physicalProperties.water; }
+viscosityModel constant;
+nu 1e-06;
+rho 1000;

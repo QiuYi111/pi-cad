@@ -26,7 +26,7 @@ export type {
   ObligationKey,
 } from "./route.ts";
 
-export const CAD_STATE_SCHEMA_VERSION = 4;
+export const CAD_STATE_SCHEMA_VERSION = 5;
 export const CONTROL_TOOLS = [
   "cad_route",
   "cad_reroute",
@@ -42,6 +42,7 @@ export const CONTROL_TOOLS = [
   "cad_defer_clarification",
   "cad_declare_blocker",
   "cad_finish",
+  "cad_commit_simulation",
 ] as const;
 export const CAPABILITY_TOOLS = [
   "cad_probe",
@@ -58,6 +59,8 @@ export const CAPABILITY_TOOLS = [
   "cad_scan_sections",
   "cad_export",
   "cad_simulate",
+  "cad_sim_observe",
+  "cad_simulate_structural_legacy",
   "cad_simulate_flow",
   "cad_simulate_thermal",
   "cad_optimize",
@@ -73,6 +76,7 @@ export const CAPABILITY_TOOLS = [
  */
 export const SIMULATION_TOOLS = [
   "cad_simulate",
+  "cad_simulate_structural_legacy",
   "cad_simulate_flow",
   "cad_simulate_thermal",
 ] as const;
@@ -173,6 +177,8 @@ export interface EvidenceInputArtifact {
   sha256: string;
   /** Provenance role, e.g. spec | artifact | fluidDomain. Opaque to the harness. */
   role: string;
+  /** File hash by default; Simulation V2 declared paths use its tree identity. */
+  hashKind?: "sha256-file" | "simulation-tree-v1";
 }
 
 export interface EvidenceRef {
@@ -215,6 +221,12 @@ export interface EvidenceRef {
    * outlive a rewritten fluid-domain STEP that the harness never tracks.
    */
   inputArtifacts?: EvidenceInputArtifact[];
+  /** Explicit Simulation V2 identity and immutable provenance binding. */
+  simulationRunId?: string;
+  observationId?: string;
+  computeIdentity?: string;
+  provenanceManifestPath?: string;
+  provenanceManifestHash?: string;
   createdAt: string;
 }
 

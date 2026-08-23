@@ -122,14 +122,14 @@ try {
     writeFileSync(
       join(cwd, ".pi-cad", "project.json"),
       JSON.stringify({
-        schemaVersion: 4, projectId: "p", head: {}, currentRunId: runId,
+        schemaVersion: 5, projectId: "p", head: {}, currentRunId: runId,
         createdAt: "x", updatedAt: "x",
       }),
     );
     writeFileSync(
       join(cwd, ".pi-cad", "runs", runId, "state.json"),
       JSON.stringify({
-        schemaVersion: 4, runId, projectId: "p", createdAt: "x", updatedAt: "x",
+        schemaVersion: 5, runId, projectId: "p", createdAt: "x", updatedAt: "x",
         route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype" },
         phase: "review", status: "active", mutationPolicy: "read_only",
         evidence: [], staleEvidence: [],

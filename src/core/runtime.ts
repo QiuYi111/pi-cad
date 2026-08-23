@@ -21,10 +21,14 @@ import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
 import { applyCadToolOverlay, PI_CAD_OWNED_TOOLS, toolsForState, writePathAllowed } from "./policies.ts";
 import { resumeFromUser } from "./state-machine.ts";
 import { isHeadless, isTerminalStatus } from "./interaction-mode.ts";
+import { managedSimulationRunner, simulationRuntimeProjection } from "../modules/simulate-v2/runtime.ts";
 
 const OPTIONAL_TOOL_NAMES = [
   "cad_generate_drawing",
   "cad_simulate",
+  "cad_sim_observe",
+  "cad_commit_simulation",
+  "cad_simulate_structural_legacy",
   "cad_simulate_flow",
   "cad_simulate_thermal",
   "cad_optimize",
@@ -179,8 +183,8 @@ async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<
   const result = missing.filter((name) =>
     (OPTIONAL_TOOL_NAMES as readonly string[]).includes(name),
   );
-  // Runtime source of truth is a live `cadctl doctor` against the Python the
-  // harness would actually use (PI_CAD_PYTHON / PI_CAD_VENV honored), cached
+  // Runtime source of truth is a live `cadctl doctor` against the uv-managed
+  // Python project the harness actually uses, cached
   // per session. The install-time .pi-cad-runtime.json is only a fallback
   // diagnostic when the live probe itself cannot run.
   let doctor: DoctorReport | null = await currentDoctorReport(cwd);
@@ -194,8 +198,8 @@ async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<
     }
   }
   if (doctor?.capabilities) {
-    if (available.has("cad_simulate") && doctor.capabilities.simulation?.status !== "ready") {
-      result.push("cad_simulate: doctor simulation backend not ready");
+    if (available.has("cad_simulate_structural_legacy") && doctor.capabilities.simulation?.status !== "ready") {
+      result.push("cad_simulate_structural_legacy: doctor simulation backend not ready");
     }
     const thermalFluid = doctor.capabilities.thermalFluid as { status?: string } | undefined;
     if (available.has("cad_simulate_flow") && thermalFluid?.status !== "ready") {
@@ -212,6 +216,23 @@ async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<
     }
   }
   return result;
+}
+
+async function simulationCapabilityContext(cwd: string, enabled: boolean): Promise<string> {
+  if (!enabled) return "";
+  const configured = await simulationRuntimeProjection().catch(() => []);
+  const ready: Array<{ backend: string; runtime: string }> = [];
+  for (const entry of configured) {
+    try {
+      await managedSimulationRunner.resolveRuntime(cwd, entry.backend, entry.runtime);
+      ready.push(entry);
+    } catch {
+      // Unavailable runtimes are reported by tool execution and diagnostics;
+      // they must not be advertised as usable in the model context.
+    }
+  }
+  if (ready.length === 0) return "## Available simulation runtimes\n- none ready";
+  return ["## Available simulation runtimes", ...ready.map((entry) => `- backend=${entry.backend} runtime=${entry.runtime}`)].join("\n");
 }
 
 export default function cadCore(pi: ExtensionAPI) {
@@ -381,7 +402,10 @@ export default function cadCore(pi: ExtensionAPI) {
     // canonical state projection. Empty on fresh runs until the first
     // context rebuild writes working.md.
     const taskContext = active ? await renderTaskContext(store.cwd, state) : "";
-    const base = await composeSystemPrompt("", active ? state : null, missing, project);
+    const simulationCapabilities = active
+      ? await simulationCapabilityContext(ctx.cwd, toolsForState(state).includes("cad_simulate"))
+      : "";
+    const base = await composeSystemPrompt("", active ? state : null, missing, project, simulationCapabilities);
     const suffix = taskContext ? `\n\n${taskContext}` : "";
     return {
       systemPrompt: `${event.systemPrompt}\n\n${base}${suffix}`,
@@ -414,7 +438,12 @@ export default function cadCore(pi: ExtensionAPI) {
     if (event.toolName === "write" || event.toolName === "edit") {
       const input = event.input as { path?: string };
       if (input.path) {
-        const check = writePathAllowed(ctx.cwd, input.path, state.mutationPolicy);
+        const check = writePathAllowed(
+          ctx.cwd,
+          input.path,
+          state.mutationPolicy,
+          phaseAllowed.has("cad_simulate"),
+        );
         if (!check.allowed) {
           return { block: true, reason: `Pi-CAD ${state.mutationPolicy}: ${check.reason}` };
         }

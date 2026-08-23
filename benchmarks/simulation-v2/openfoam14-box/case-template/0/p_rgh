@@ -1,0 +1,9 @@
+FoamFile { format ascii; class volScalarField; object p_rgh; }
+dimensions [pressure];
+internalField uniform 0;
+boundaryField
+{
+  inlet { type fixedFluxPressure; value uniform 0; }
+  atmosphere { type prghTotalPressure; p0 uniform 0; value uniform 0; }
+  walls { type fixedFluxPressure; value uniform 0; }
+}

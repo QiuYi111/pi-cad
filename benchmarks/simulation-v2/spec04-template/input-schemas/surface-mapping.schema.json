@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema", "lengthUnit", "insidePoint", "patches"],
+  "properties": {
+    "schema": { "const": 1 },
+    "lengthUnit": { "enum": ["mm", "m"] },
+    "insidePoint": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "patches": {
+      "type": "object",
+      "required": ["inlet", "vent", "walls", "plugSurface"],
+      "properties": {
+        "inlet": { "$ref": "#/$defs/patch" },
+        "vent": { "$ref": "#/$defs/patch" },
+        "walls": { "$ref": "#/$defs/patch" },
+        "plugSurface": { "$ref": "#/$defs/patch" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "patch": {
+      "type": "object",
+      "required": ["faceIndices"],
+      "properties": { "faceIndices": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "minItems": 1, "uniqueItems": true } },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -431,8 +431,8 @@ def _cmd_capability(args: argparse.Namespace) -> int:
 
 
 def _load_spec(spec_path: str) -> dict:
-    import json
-    return json.loads(Path(spec_path).read_text(encoding="utf-8"))
+    from .common import read_json
+    return read_json(spec_path, normalize_paths=True)
 
 
 def _cmd_drawing(args: argparse.Namespace) -> int:

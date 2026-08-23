@@ -1,0 +1,9 @@
+FoamFile { format ascii; class volVectorField; object U; }
+dimensions [velocity];
+internalField uniform (0 0 0);
+boundaryField
+{
+  inlet { type fixedValue; value uniform (0 0 0.02); }
+  atmosphere { type pressureInletOutletVelocity; value uniform (0 0 0); }
+  walls { type noSlip; }
+}

@@ -1,0 +1,2 @@
+.ignored-benchmark-inputs/*
+!.ignored-benchmark-inputs/README.md

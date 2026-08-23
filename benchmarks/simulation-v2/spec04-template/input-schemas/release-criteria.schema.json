@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema", "limits"],
+  "properties": {
+    "schema": { "const": 1 },
+    "limits": {
+      "type": "object",
+      "required": ["maxPostPlugTrappedGas", "maxPeakPressure", "maxPeakForce", "maxPoseError", "maxMassError", "maxConvergenceDelta", "maxRobustnessSpread"],
+      "properties": {
+        "maxPostPlugTrappedGas": { "type": "number", "minimum": 0 },
+        "maxPeakPressure": { "type": "number", "minimum": 0 },
+        "maxPeakForce": { "type": "number", "minimum": 0 },
+        "maxPoseError": { "type": "number", "minimum": 0 },
+        "maxMassError": { "type": "number", "minimum": 0 },
+        "maxConvergenceDelta": { "type": "number", "minimum": 0 },
+        "maxRobustnessSpread": { "type": "number", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Pi-CAD 0.6 uses the cross-platform Node postinstall as the single Python
-# runtime bootstrap. It creates .venv when possible and falls back to a
-# repository-local .python/site-packages target install.
+# The Node entrypoint delegates all Python environment work to uv. On a
+# Windows host it launches uv inside WSL and never creates a Windows venv for
+# a WSL-backed checkout.
 node scripts/postinstall.mjs

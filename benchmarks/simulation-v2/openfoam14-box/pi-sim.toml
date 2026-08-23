@@ -1,0 +1,35 @@
+schema = 1
+entrypoint = "bash Allrun"
+observe = "uv run --offline --no-sync --project /opt/pi-cad-runtime/python python observe.py"
+nonvisual = false
+inputs = ["domain.step"]
+observation_files = ["observe.py"]
+
+[exports.phase_distribution]
+type = "image"
+primary = true
+
+[exports.fill_fraction]
+type = "scalar"
+primary = true
+unit = "1"
+
+[exports.interface_progress]
+type = "timeseries"
+primary = true
+x_unit = "s"
+y_unit = "1"
+
+[exports.refinement]
+type = "table"
+primary = false
+
+[exports.interface_animation]
+type = "artifact"
+primary = false
+format = "gif"
+
+[exports.qualification_report]
+type = "artifact"
+primary = false
+format = "json"

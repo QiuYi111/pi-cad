@@ -50,13 +50,9 @@ test("convert workflow accepts a STEP source and produces an STL sidecar", async
   // then feed it to the workflow as the user-supplied STEP. Spawn through the
   // same Python resolution the harness itself uses (venv when present) so the
   // test passes on fresh installs and CI, not only on a dev checkout.
-  const { execFileSync } = await import("node:child_process");
-  const { cadctlEnv, pythonBinary } = await import("../src/shared/capability.ts");
+  const { buildStep } = await import("../src/shared/capability.ts");
   const repoRoot = process.cwd();
-  execFileSync(pythonBinary(), ["-m", "cadctl", "build", "--source", join(repoRoot, "tests", "fixtures", "plate.py"), "--output", join(cwd, "plate.step")], {
-    cwd,
-    env: cadctlEnv(),
-  });
+  await buildStep(cwd, { source: join(repoRoot, "tests", "fixtures", "plate.py"), output: join(cwd, "plate.step"), force: true });
 
   const route = pi.tools.get("cad_route");
   const req = pi.tools.get("cad_commit_requirements");

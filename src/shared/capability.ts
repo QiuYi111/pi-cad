@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -25,55 +25,102 @@ export function packageRoot(): string {
   return fileURLToPath(new URL("../../", import.meta.url));
 }
 
-function sitePackages(): string | null {
-  const path = join(packageRoot(), ".python", "site-packages");
-  return existsSync(path) ? path : null;
-}
-
-function venvPythonPath(): string {
-  const venvRoot = process.env.PI_CAD_VENV ?? join(packageRoot(), ".venv");
-  return process.platform === "win32"
-    ? join(venvRoot, "Scripts", "python.exe")
-    : join(venvRoot, "bin", "python");
-}
-
-/** Resolve the Python binary the harness uses for cadctl (PI_CAD_PYTHON > PI_CAD_VENV > .venv > PATH). */
-export function pythonBinary(): string {
-  const override = process.env.PI_CAD_PYTHON;
-  if (override) return override;
-  const venv = venvPythonPath();
-  if (existsSync(venv)) return venv;
-  return process.platform === "win32" ? "python" : "python3";
-}
-
-/** Env (PYTHONPATH) for spawning cadctl with pythonBinary(). */
-export function cadctlEnv(): NodeJS.ProcessEnv {
-  const entries = [join(packageRoot(), "python")];
-  // The package venv is self-contained. Never let the target-mode fallback
-  // layout shadow it: .python/site-packages may hold extensions built for a
-  // different Python version, which would break imports inside the venv.
-  if (!existsSync(venvPythonPath())) {
-    const site = sitePackages();
-    if (site) entries.push(site);
+function wslHostEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of Object.keys(env).filter((name) => name.toLowerCase() === "path")) {
+    env[key] = (env[key] ?? "").split(delimiter).filter((entry) => !/^V:[\\/]/i.test(entry) && !/^\\\\wsl(?:\.localhost)?\\/i.test(entry)).join(delimiter);
   }
-  const previous = process.env.PYTHONPATH;
-  const pythonPath = previous ? [...entries, previous].join(delimiter) : entries.join(delimiter);
-  return { ...process.env, PYTHONPATH: pythonPath };
+  return env;
+}
+
+/** Reproducible uv-managed Python command; Windows always crosses into WSL. */
+export function pythonInvocation(extra?: "simulation", cwd?: string): { command: string; prefixArgs: string[] } {
+  const uvExtra = extra ? ["--extra", extra] : [];
+  if (process.platform === "win32") {
+    const wslEnv = [
+      "env",
+      `PI_CAD_WINDOWS_WORKSPACE=${packageRoot().replaceAll("\\", "/")}`,
+      `PI_CAD_WSL_WORKSPACE=${toWslPath(packageRoot())}`,
+      ...(cwd ? [`PI_CAD_INVOCATION_CWD=${toWslPath(resolve(cwd))}`] : []),
+    ];
+    return {
+      command: "wsl.exe",
+      prefixArgs: ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", ...wslEnv, "uv", "run", "--project", toWslPath(join(packageRoot(), "python")), ...uvExtra, "python"],
+    };
+  }
+  return {
+    command: process.env.PI_CAD_UV ?? "uv",
+    prefixArgs: ["run", "--project", join(packageRoot(), "python"), ...uvExtra, "python"],
+  };
+}
+
+function toWslPath(path: string): string {
+  if (process.platform !== "win32") return path;
+  const unc = path.match(/^\\\\wsl(?:\.localhost)?\\([^\\]+)\\(.*)$/i);
+  if (unc?.[1] === (process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu")) return `/${unc[2].replaceAll("\\", "/")}`;
+  const drive = path.match(/^([A-Za-z]):[\\/](.*)$/);
+  if (drive?.[1].toUpperCase() === "V") return `/${drive[2].replaceAll("\\", "/")}`;
+  try {
+    return execFileSync("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", "wslpath", "-a", path.replaceAll("\\", "/")], {
+      cwd: process.env.SystemRoot ?? "C:\\Windows",
+      env: wslHostEnv(),
+      encoding: "utf-8",
+      windowsHide: true,
+    }).trim();
+  } catch {
+    throw new Error(`cannot translate Windows path for WSL Python: ${path}`);
+  }
+}
+
+function pythonArgsForHost(args: string[]): string[] {
+  if (process.platform !== "win32") return args;
+  return args.map((arg) => /^[A-Za-z]:[\\/]/.test(arg) ? toWslPath(arg) : arg);
+}
+
+function pathsFromWsl(value: unknown): unknown {
+  if (process.platform !== "win32") return value;
+  if (typeof value === "string") {
+    const mounted = value.match(/^\/mnt\/([a-z])\/(.*)$/i);
+    if (mounted) return `${mounted[1].toUpperCase()}:\\${mounted[2].replaceAll("/", "\\")}`;
+    const wslRoot = toWslPath(packageRoot()).replace(/\/$/, "");
+    if (value === wslRoot || value.startsWith(`${wslRoot}/`)) {
+      const suffix = value.slice(wslRoot.length).replace(/^\//, "").replaceAll("/", "\\");
+      return suffix ? join(packageRoot(), suffix) : packageRoot();
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map(pathsFromWsl);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, pathsFromWsl(item)]));
+  return value;
+}
+
+/** Minimal host environment for spawning the uv-managed cadctl process. */
+export function cadctlEnv(cwd?: string): NodeJS.ProcessEnv {
+  if (process.platform === "win32") {
+    const env = wslHostEnv();
+    delete env.PYTHONPATH;
+    env.PI_CAD_WINDOWS_WORKSPACE = packageRoot();
+    env.PI_CAD_WSL_WORKSPACE = toWslPath(packageRoot());
+    if (cwd) env.PI_CAD_INVOCATION_CWD = toWslPath(resolve(cwd));
+    return env;
+  }
+  return { ...process.env };
 }
 
 export interface CadctlOptions {
   cwd: string;
   timeoutMs?: number;
+  extra?: "simulation";
 }
 
 async function runCadctl(
   args: string[],
   options: CadctlOptions,
 ): Promise<CadEventEnvelope> {
-  const bin = pythonBinary();
-  const { stdout } = await execFileAsync(bin, ["-m", "cadctl", ...args], {
-    cwd: options.cwd,
-    env: cadctlEnv(),
+  const python = pythonInvocation(options.extra, options.cwd);
+  const { stdout } = await execFileAsync(python.command, [...python.prefixArgs, "-m", "cadctl", ...pythonArgsForHost(args)], {
+    cwd: process.platform === "win32" ? (process.env.SystemRoot ?? "C:\\Windows") : options.cwd,
+    env: cadctlEnv(options.cwd),
     timeout: options.timeoutMs ?? 180_000,
     maxBuffer: 64 * 1024 * 1024,
     killSignal: "SIGKILL",
@@ -88,7 +135,7 @@ async function runCadctl(
   if (!parsed || typeof parsed !== "object" || !("ok" in parsed)) {
     throw new Error("cadctl returned an invalid envelope");
   }
-  return parsed as CadEventEnvelope;
+  return pathsFromWsl(parsed) as CadEventEnvelope;
 }
 
 export interface CapabilityBuildInput {
@@ -359,7 +406,7 @@ export async function cadctlCapabilities(cwd: string, timeoutMs?: number): Promi
 
 /**
  * Live doctor report for the Python runtime the harness would actually use
- * right now (honoring PI_CAD_PYTHON / PI_CAD_VENV). Cached per process: the
+ * right now through the uv-managed project. Cached per process: the
  * probe runs once per Pi session, so the startup cost is paid once and later
  * capability gating reads the same snapshot. `.pi-cad-runtime.json` remains
  * an install-time diagnostic, not the runtime source of truth.
@@ -382,9 +429,10 @@ export async function currentDoctorReport(
 ): Promise<DoctorReport | null> {
   if (doctorProbeCache !== undefined) return doctorProbeCache;
   try {
-    const { stdout } = await execFileAsync(pythonBinary(), ["-m", "cadctl", "doctor", "--json"], {
-      cwd,
-      env: cadctlEnv(),
+    const python = pythonInvocation(undefined, cwd);
+    const { stdout } = await execFileAsync(python.command, [...python.prefixArgs, "-m", "cadctl", "doctor", "--json"], {
+      cwd: process.platform === "win32" ? (process.env.SystemRoot ?? "C:\\Windows") : cwd,
+      env: cadctlEnv(cwd),
       timeout: timeoutMs,
       maxBuffer: 16 * 1024 * 1024,
       killSignal: "SIGKILL",
@@ -418,7 +466,7 @@ export async function simulationCommand(
 ): Promise<CadEventEnvelope> {
   return runCadctl(
     ["simulate", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs },
+    { cwd, timeoutMs, extra: "simulation" },
   );
 }
 
@@ -431,7 +479,7 @@ export async function flowCommand(
 ): Promise<CadEventEnvelope> {
   return runCadctl(
     ["simulate-flow", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs },
+    { cwd, timeoutMs, extra: "simulation" },
   );
 }
 
@@ -444,7 +492,7 @@ export async function thermalCommand(
 ): Promise<CadEventEnvelope> {
   return runCadctl(
     ["simulate-thermal", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs },
+    { cwd, timeoutMs, extra: "simulation" },
   );
 }
 
@@ -509,7 +557,7 @@ export async function optimizationCommand(
 ): Promise<CadEventEnvelope> {
   return runCadctl(
     ["optimize", "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs },
+    { cwd, timeoutMs, extra: "simulation" },
   );
 }
 

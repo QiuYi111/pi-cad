@@ -1,4 +1,5 @@
 import {
+  CAD_STATE_SCHEMA_VERSION,
   type AcceptanceAssertion,
   type CadPhase,
   type CadPlan,
@@ -71,7 +72,7 @@ export interface CreateIntakeOptions {
 export function createIntakeState(options: CreateIntakeOptions = {}): CadRunState {
   const createdAt = nowIso();
   return {
-    schemaVersion: 4,
+    schemaVersion: CAD_STATE_SCHEMA_VERSION,
     runId:
       options.runId ??
       `run-${createdAt.slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8)}`,

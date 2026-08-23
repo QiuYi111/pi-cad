@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema", "status", "validForRelease", "releaseVerdict"],
+  "properties": {
+    "schema": { "const": 1 },
+    "status": { "enum": ["blocked_external", "complete"] },
+    "validForRelease": { "type": "boolean" },
+    "releaseVerdict": { "type": ["string", "null"], "enum": ["SIMULATION_RELEASE_PASS", "SIMULATION_RELEASE_FAIL", null] }
+  },
+  "additionalProperties": true
+}

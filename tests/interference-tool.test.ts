@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
@@ -168,7 +168,7 @@ test("assembly candidate auto-records interference evidence and gates integratio
 
     // The observed pair is the deliberate overlap: a fact, not a verdict.
     const evidenceFile = interference[0].paths[0];
-    const evidenceAbs = evidenceFile.startsWith("/") ? evidenceFile : join(cwd, evidenceFile);
+    const evidenceAbs = isAbsolute(evidenceFile) ? evidenceFile : join(cwd, evidenceFile);
     const payload = JSON.parse(readFileSync(evidenceAbs, "utf-8"));
     assert.equal(payload.pairs.length, 1);
     assert.equal(payload.pairs[0].classification, "penetration");

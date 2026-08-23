@@ -8,8 +8,8 @@ Inspect every returned view yourself. Tool output contains facts, not design mea
 - Do not accept the candidate because it compiled or looks plausible.
 - Use targeted tools for any question that can be answered by measurement, section, geometry, or an explicit solver run.
 - If evidenceObligations.simulation.disposition is required, run the required simulation tool(s) against the current candidate and inspect the raw fields before accepting.
-- When simulation cases are declared, each case closes only with its declared tool and caseId against the current artifact version (cad_simulate, cad_simulate_flow, or cad_simulate_thermal).
-- For flow/thermal cases: inspect surfaces first, then run the case, then check convergence and mass/energy balance yourself before interpreting the numbers.
+- For new simulation cases, author the solver-native Recipe under simulation/**, call cad_simulate, inspect its images-first Observation, optionally revise declared observation files and call cad_sim_observe, then call cad_commit_simulation with the exact caseId. Solve/observe alone never closes a case.
+- Treat export names as opaque Recipe-defined quantities. Inspect convergence, conservation, and engineering meaning yourself; the harness validates structure and provenance, not physics or PASS.
 - cad_optimize is optional and produces density/surface evidence only; it does not replace CAD or simulation.
 - Verify every user-specified critical dimension and relationship with cad_probe (preset=geometry yields #pN/#cN selectors, preset=measure verifies a number, preset=section resolves internal geometry).
 - When the typed presets cannot express a check — derived ratios, fill/shape factors, symmetry, hole-spacing patterns, mass-property relations — compute it yourself with cad_probe preset=python (read-only, JSON result) instead of accepting an unverified inference.

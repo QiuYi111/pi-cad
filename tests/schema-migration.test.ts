@@ -49,17 +49,17 @@ async function writeLayout(cwd: string, run: unknown, project = v3Project()) {
   writeFileSync(join(cwd, ".pi-cad", "runs", "run-001", "state.json"), JSON.stringify(run));
 }
 
-test("schema migration v3->v4: active run aborts with an event, head untouched", async () => {
+test("schema migration chain v3->v5: active run aborts with an event, head untouched", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-mig-active-"));
   try {
     await writeLayout(cwd, v3Run());
     const store = new CadProjectStore(cwd);
-    assert.equal(await store.migrateV3ToV4(), true);
+    assert.equal(await store.migrate(), true);
 
     // Project head survives byte-for-byte in meaning.
     const project = await store.loadProject();
     assert.ok(project);
-    assert.equal(project?.schemaVersion, 4);
+    assert.equal(project?.schemaVersion, 5);
     assert.equal(project?.head.artifactPath, "build/bracket.step");
     assert.equal(project?.head.artifactHash, "artifact-hash");
     assert.equal(project?.currentRunId, "run-001");
@@ -67,7 +67,7 @@ test("schema migration v3->v4: active run aborts with an event, head untouched",
     // The active run is aborted at v4 with route null (no lossy mapping).
     const statePath = join(cwd, ".pi-cad", "runs", "run-001", "state.json");
     const state = JSON.parse(readFileSync(statePath, "utf-8"));
-    assert.equal(state.schemaVersion, 4);
+    assert.equal(state.schemaVersion, 5);
     assert.equal(state.status, "aborted");
     assert.equal(state.workflow, undefined);
     assert.equal(state.route, null);
@@ -78,7 +78,7 @@ test("schema migration v3->v4: active run aborts with an event, head untouched",
     assert.match(events, /cad_route/);
 
     // Migration is idempotent.
-    assert.equal(await store.migrateV3ToV4(), false);
+    assert.equal(await store.migrate(), false);
 
     // The aborted run is not an active workflow: guard-style load returns it
     // but downstream guards see "aborted".
@@ -90,16 +90,16 @@ test("schema migration v3->v4: active run aborts with an event, head untouched",
   }
 });
 
-test("schema migration v3->v4: finished runs keep their terminal status", async () => {
+test("schema migration chain: finished v3 runs keep their terminal status", async () => {
   const cwd = mkdtempSync(join(tmpdir(), "pi-cad-mig-done-"));
   try {
     await writeLayout(cwd, v3Run({ status: "done", phase: "done", workflow: "quick" }));
     const store = new CadProjectStore(cwd);
-    assert.equal(await store.migrateV3ToV4(), true);
+    assert.equal(await store.migrate(), true);
     const state = JSON.parse(
       readFileSync(join(cwd, ".pi-cad", "runs", "run-001", "state.json"), "utf-8"),
     );
-    assert.equal(state.schemaVersion, 4);
+    assert.equal(state.schemaVersion, 5);
     assert.equal(state.status, "done");
     assert.equal(state.route, null);
     assert.ok(!existsSync(join(cwd, ".pi-cad", "runs", "run-001", "events.jsonl")));
@@ -114,11 +114,36 @@ test("schema migration: waiting_user and ready runs also abort", async () => {
     try {
       await writeLayout(cwd, v3Run({ status }));
       const store = new CadProjectStore(cwd);
-      await store.migrateV3ToV4();
+      await store.migrate();
       const state = JSON.parse(
         readFileSync(join(cwd, ".pi-cad", "runs", "run-001", "state.json"), "utf-8"),
       );
       assert.equal(state.status, "aborted", status);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  }
+});
+
+test("schema migration v4->v5 aborts active simulation workflows and preserves terminal history/head", async () => {
+  for (const status of ["active", "done"]) {
+    const cwd = mkdtempSync(join(tmpdir(), `pi-cad-mig-v4-${status}-`));
+    try {
+      const project = { ...v3Project(), schemaVersion: 4 };
+      const run = { ...v3Run({ schemaVersion: 4, status, route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype" } }) };
+      delete (run as Record<string, unknown>).workflow;
+      delete (run as Record<string, unknown>).maturity;
+      await writeLayout(cwd, run, project);
+      const store = new CadProjectStore(cwd);
+      assert.equal(await store.migrateV4ToV5(), true);
+      const migrated = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", "run-001", "state.json"), "utf-8"));
+      assert.equal(migrated.schemaVersion, 5);
+      assert.equal(migrated.status, status === "active" ? "aborted" : "done");
+      const head = await store.loadProject();
+      assert.equal(head?.head.artifactHash, "artifact-hash");
+      const eventPath = join(cwd, ".pi-cad", "runs", "run-001", "events.jsonl");
+      assert.equal(existsSync(eventPath), status === "active");
+      if (status === "active") assert.match(readFileSync(eventPath, "utf-8"), /Simulation V2/);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }

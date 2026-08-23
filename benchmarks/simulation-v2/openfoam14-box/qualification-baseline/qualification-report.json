@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "qualifiedAt": "2026-08-23T00:00:00+08:00",
+  "runtime": "openfoam14@20260724",
+  "runtimeIdentity": "93f30dfb9419db47b74c31eeecb28999c3427784daa9f37d7532ee28e4c951b3",
+  "launcher": "bubblewrap 0.11.1",
+  "platform": "linux-x86_64",
+  "geometry": "3D bottom-inlet/top-outlet box plus independent closed-bubble case",
+  "checks": {
+    "gravityDirection": [0, 0, -9.81],
+    "interfaceProgressionMonotonic": true,
+    "openTopVent": true,
+    "massError": 2.0632765834749378e-7,
+    "fineMediumDelta": 7.040717972528476e-8,
+    "closedBubbleRetention": 1.2963188137110961
+  },
+  "limits": {
+    "massErrorMax": 0.03,
+    "fineMediumDeltaMax": 0.02,
+    "closedBubbleRetentionMin": 0.85,
+    "closedBubbleRetentionMax": 1.5
+  },
+  "qualified": true
+}

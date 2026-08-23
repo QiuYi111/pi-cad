@@ -34,12 +34,12 @@ function mockPi(): MockPi {
   return pi;
 }
 
-test("cad_simulate takes structured arguments and canonicalizes the spec without an active run", async () => {
+test("deprecated structural wrapper keeps the strict typed interface", async () => {
   const pi = mockPi();
   const simulation = (await import("../src/extensions/simulation/index.ts")).default;
   simulation(pi as any);
-  const tool = pi.tools.get("cad_simulate");
-  assert.ok(tool, "cad_simulate is registered");
+  const tool = pi.tools.get("cad_simulate_structural_legacy");
+  assert.ok(tool, "cad_simulate_structural_legacy is registered");
 
   // Structured interface: no spec path, no outputDir.
   const params = tool.parameters;
@@ -209,7 +209,7 @@ test("structural FEA accepts a fused analysis model via derivationRef and binds 
     const simulation = (await import("../src/extensions/simulation/index.ts")).default;
     simulation(pi as any);
     const deriveTool = pi.tools.get("cad_derive_analysis_model");
-    const simulateTool = pi.tools.get("cad_simulate");
+    const simulateTool = pi.tools.get("cad_simulate_structural_legacy");
 
     // 1. Harness-executed derivation: fuse the assembly for solid FEA.
     const derived = await deriveTool.execute(

@@ -52,7 +52,7 @@ brief.
 - Identify whether the route maturity and explicit physics constraints require engineering simulation evidence.
 - Do not require simulation ceremonially.
 - If strength, stiffness, thermal, flow, dynamics, or another quantitative physical behavior materially determines acceptance, record evidenceObligations.simulation.disposition = required.
-- When distinct questions need distinct solvers, declare opaque simulation cases: evidenceObligations.simulation.cases = [{id, tool}] with tool in cad_simulate, cad_simulate_flow, cad_simulate_thermal. The harness only checks that each case produced current-version evidence from the declared tool; it does not understand the physics.
+- For new simulation work, declare opaque cases as evidenceObligations.simulation.cases = [{id, tool: "cad_simulate"}]. The Recipe owns solver semantics; the harness only checks an explicit commit for the exact case and current design. Deprecated typed wrapper tool names remain valid only for migrated compatibility workflows.
 - Name cases after the claim they support (for example "nozzle-outlet" for an outlet-Mach requirement, "hot-section" for a thermal requirement).
 - If the decision can be made without simulation at this maturity, use optional or not_applicable.
 - Missing external loads/materials/BCs should become blocked_external rather than invented.

@@ -64,6 +64,9 @@ test("contracts: capability grants map to the expected tool families", () => {
   ]);
   assert.deepEqual(capabilityTools("simulate"), [
     "cad_simulate",
+    "cad_sim_observe",
+    "cad_commit_simulation",
+    "cad_simulate_structural_legacy",
     "cad_simulate_flow",
     "cad_simulate_thermal",
   ]);

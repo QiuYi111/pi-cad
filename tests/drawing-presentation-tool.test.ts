@@ -56,12 +56,8 @@ test("cad_generate_drawing takes structured arguments and canonicalizes the spec
     // Produce a real STEP artifact so the drawing backend can import it.
     // Spawn through the harness's own Python resolution (venv when present)
     // so the test passes on fresh installs and CI.
-    const { cadctlEnv, pythonBinary } = await import("../src/shared/capability.ts");
-    execFileSync(
-      pythonBinary(),
-      ["-m", "cadctl", "build", "--source", join(process.cwd(), "tests/fixtures/plate.py"), "--output", join(cwd, "plate.step")],
-      { cwd, env: cadctlEnv(), encoding: "utf-8" },
-    );
+    const { buildStep } = await import("../src/shared/capability.ts");
+    await buildStep(cwd, { source: join(process.cwd(), "tests/fixtures/plate.py"), output: join(cwd, "plate.step"), force: true });
 
     const result = await tool.execute(
       "d1",
@@ -222,8 +218,7 @@ test("cad_render_scene preview renders with blender and binds evidence to the de
   } catch {
     blender = "";
   }
-  const venvPython = join(cwd0(), ".venv", "bin", "python");
-  if (!blender || !existsSync(venvPython)) {
+  if (!blender) {
     // Honest skip: same fail-soft contract as the capability itself.
     return;
   }
@@ -244,11 +239,8 @@ test("cad_render_scene preview renders with blender and binds evidence to the de
         "",
       ].join("\n"),
     );
-    execFileSync(venvPython, ["-m", "cadctl", "build", "--source", "boxes.py", "--output", "boxes.step", "--force"], {
-      cwd,
-      encoding: "utf-8",
-      env: { ...process.env, PYTHONPATH: join(cwd0(), "python") },
-    });
+    const { buildStep } = await import("../src/shared/capability.ts");
+    await buildStep(cwd, { source: "boxes.py", output: "boxes.step", force: true });
     // Minimal valid 1x1 grayscale PNG, written without image libraries.
     for (const name of ["ref1.png", "ref2.png"]) {
       const { deflateSync, crc32 } = await import("node:zlib");

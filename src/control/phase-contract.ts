@@ -41,7 +41,7 @@ export type ControlGrant =
   | "finish";
 
 /** File/shell access levels for builtin (non-cad) tools. */
-export type AccessGrant = "file_read" | "shell" | "file_edit_source";
+export type AccessGrant = "file_read" | "shell" | "file_edit_source" | "file_edit_recipe";
 
 export type PhaseGrant = AccessGrant | Capability | ControlGrant;
 
@@ -50,6 +50,7 @@ const GRANTS: Record<PhaseGrant, readonly string[]> = {
   file_read: ["read", "grep", "find", "ls"],
   shell: ["bash"],
   file_edit_source: ["edit", "write"],
+  file_edit_recipe: ["edit", "write"],
 
   // observation
   observe: [
@@ -72,7 +73,7 @@ const GRANTS: Record<PhaseGrant, readonly string[]> = {
   deliverable: ["cad_export", "cad_generate_drawing", "cad_render_scene"],
 
   // simulation
-  simulate: ["cad_simulate", "cad_simulate_flow", "cad_simulate_thermal"],
+  simulate: ["cad_simulate", "cad_sim_observe", "cad_commit_simulation", "cad_simulate_structural_legacy", "cad_simulate_flow", "cad_simulate_thermal"],
   optimize: ["cad_optimize"],
 
   // control
@@ -114,6 +115,7 @@ const SOURCE_GRANTS: PhaseGrant[] = [
 const REVIEW_GRANTS: PhaseGrant[] = [
   "file_read",
   "shell",
+  "file_edit_recipe",
   "observe",
   "observe_interference",
   "observe_programmable",
@@ -159,14 +161,14 @@ const PHASE_GRANTS: Record<CadPhase, PhaseGrant[]> = {
   assembly_design: [...COGNITIVE_CORE, "commit_assembly_design", "wait_for_user"],
   interface_design: [...COGNITIVE_CORE, "commit_interface_contracts", "wait_for_user"],
 
-  baseline: [...COGNITIVE_CORE, "simulate", "commit_frame_context", "wait_for_user"],
-  source_baseline: [...COGNITIVE_CORE, "simulate", "commit_frame_context", "wait_for_user"],
-  investigate: [...COGNITIVE_CORE, "simulate", "wait_for_user"],
-  explain: [...COGNITIVE_CORE, "simulate", "wait_for_user"],
-  concept: [...COGNITIVE_CORE, "simulate", "wait_for_user"],
-  system_concept: [...COGNITIVE_CORE, "simulate", "wait_for_user"],
-  domain_analysis: [...COGNITIVE_CORE, "simulate", "wait_for_user"],
-  final_review: [...COGNITIVE_CORE, "simulate", "wait_for_user"],
+  baseline: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "commit_frame_context", "wait_for_user"],
+  source_baseline: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "commit_frame_context", "wait_for_user"],
+  investigate: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "wait_for_user"],
+  explain: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "wait_for_user"],
+  concept: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "wait_for_user"],
+  system_concept: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "wait_for_user"],
+  domain_analysis: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "wait_for_user"],
+  final_review: [...COGNITIVE_CORE, "file_edit_recipe", "simulate", "wait_for_user"],
 
   // release suffix
   audit: [
@@ -174,6 +176,7 @@ const PHASE_GRANTS: Record<CadPhase, PhaseGrant[]> = {
     "observe_interference",
     "model_build",
     "deliverable",
+    "file_edit_recipe",
     "simulate",
     "commit_assembly_design",
     "commit_interface_contracts",
@@ -188,6 +191,7 @@ const PHASE_GRANTS: Record<CadPhase, PhaseGrant[]> = {
     "observe_interference",
     "model_build",
     "deliverable",
+    "file_edit_recipe",
     "simulate",
     "optimize",
     "commit_candidate",
@@ -203,6 +207,7 @@ const PHASE_GRANTS: Record<CadPhase, PhaseGrant[]> = {
     "observe_interference",
     "model_build",
     "deliverable",
+    "file_edit_recipe",
     "simulate",
     "optimize",
     "commit_plan",
@@ -217,6 +222,7 @@ const PHASE_GRANTS: Record<CadPhase, PhaseGrant[]> = {
     "observe_interference",
     "model_build",
     "deliverable",
+    "file_edit_recipe",
     "simulate",
     "finish",
   ],

@@ -13,6 +13,7 @@ import { runSimulationLifecycle, simulateAdapter } from "../../modules/simulate/
 
 import cadFlowExtension from "./flow.ts";
 import cadThermalExtension from "./thermal.ts";
+import cadSimulationV2Extension from "./v2.ts";
 
 const RegionSchema = Type.Union(
   [
@@ -56,14 +57,15 @@ function shortSimulationText(envelope: any): string {
 }
 
 export default function cadSimulationExtension(pi: ExtensionAPI) {
+  cadSimulationV2Extension(pi);
   cadFlowExtension(pi);
   cadThermalExtension(pi);
 
   pi.registerTool({
-    name: "cad_simulate",
-    label: "CAD Simulate",
+    name: "cad_simulate_structural_legacy",
+    label: "CAD Simulate Structural (Deprecated)",
     description:
-      "Run a linear elastic finite element simulation with torch-fem. Pass the simulation directly: artifact or mesh.box, one homogeneous material, loads, constraints, mesh size. Boundary regions are V1 simple axis-extreme node slabs or explicit node indices, not arbitrary CAD face selection. The tool canonicalizes the spec into run-scoped evidence storage itself; it returns deterministic fields and provenance only; it never says safe, good, or passes.",
+      "DEPRECATED compatibility wrapper for the V1 typed linear-elastic solver. New work must author a pi-sim.toml Recipe and use cad_simulate, cad_sim_observe, then cad_commit_simulation.",
     promptSnippet: "Run deterministic torch-fem linear elasticity on a STEP artifact",
     promptGuidelines: [
       "Supply material constants, loads, constraints, and mesh explicitly; unknown physics is rejected.",

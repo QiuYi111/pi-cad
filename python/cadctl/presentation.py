@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .common import sha256_file
+from .common import read_json, sha256_file
 from .presentation_driver import (  # noqa: E402  (driver imports bpy lazily)
     COMPOSITION_PRESETS as _COMPOSITION_PRESETS,
     MATERIAL_FAMILIES as _MATERIAL_FAMILIES,
@@ -330,7 +330,7 @@ def run_presentation(
     stage: str = "generate",
 ) -> dict[str, Any]:
     spec_path = Path(spec_path)
-    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    spec = read_json(spec_path, normalize_paths=True)
     ok, errors = validate_spec(spec)
     if not ok:
         raise ValueError("; ".join(errors))

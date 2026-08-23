@@ -88,29 +88,36 @@ def spec_input_paths(
     entries: list[tuple[str, str]] = []
     if include_spec:
         entries.append(("spec", str(Path(spec_path).resolve())))
+    from .common import read_json, resolve_spec_path
+
     try:
-        spec: Any = json.loads(Path(spec_path).read_text(encoding="utf-8"))
+        spec: Any = read_json(spec_path, normalize_paths=True)
     except Exception:
         return entries
     if not isinstance(spec, dict):
         return entries
     for role in roles:
         value = spec.get(role)
-        if isinstance(value, str) and value and Path(value).exists():
-            entries.append((role, str(Path(value).resolve())))
+        if isinstance(value, str) and value:
+            resolved = resolve_spec_path(spec_path, value)
+            if resolved.exists():
+                entries.append((role, str(resolved)))
     # The analysis-model derivation chain is frozen like any other input:
     # the record itself and the authoritative design it names. Mid-solve
     # mutation of either discards the invocation.
     model = spec.get("analysisModel")
     if isinstance(model, dict):
         ref = model.get("derivationRef")
-        if isinstance(ref, str) and ref and Path(ref).exists():
-            entries.append(("derivationRecord", str(Path(ref).resolve())))
+        if isinstance(ref, str) and ref and resolve_spec_path(spec_path, ref).exists():
+            ref_path = resolve_spec_path(spec_path, ref)
+            entries.append(("derivationRecord", str(ref_path)))
             try:
-                record = json.loads(Path(ref).read_text(encoding="utf-8"))
+                record = json.loads(ref_path.read_text(encoding="utf-8"))
                 source = record.get("source") if isinstance(record, dict) else None
-                if isinstance(source, str) and source and Path(source).exists():
-                    entries.append(("analysisSource", str(Path(source).resolve())))
+                if isinstance(source, str) and source:
+                    source_path = resolve_spec_path(ref_path, source)
+                    if source_path.exists():
+                        entries.append(("analysisSource", str(source_path)))
             except Exception:
                 pass
     return entries
