@@ -31,6 +31,9 @@ const num = (value: unknown, digits = 3): string =>
 const list = (value: unknown): string[] =>
   Array.isArray(value) ? value.map(String) : [];
 
+const vector = (value: unknown, digits = 6): string =>
+  Array.isArray(value) ? `[${value.map((item) => num(item, digits)).join(", ")}]` : "n/a";
+
 /** Extract views[] entries {name, path} as visuals. */
 function viewVisuals(payload: Record<string, unknown>): ObservationVisual[] {
   const views = Array.isArray(payload.views) ? payload.views : [];
@@ -66,6 +69,8 @@ const PROFILES: Record<string, ObservationProfile> = {
     visuals: viewVisuals,
     facts: (p) => [
       { key: "bbox", value: bboxFact(p) },
+      ...(Array.isArray(p.bboxMin) ? [{ key: "bboxMin", value: vector(p.bboxMin) }] : []),
+      ...(Array.isArray(p.bboxMax) ? [{ key: "bboxMax", value: vector(p.bboxMax) }] : []),
       { key: "units", value: String(p.units ?? "mm") },
       ...(p.solidCount !== undefined ? [{ key: "solids", value: String(p.solidCount) }] : []),
       ...(p.occurrenceCount !== undefined
@@ -79,6 +84,8 @@ const PROFILES: Record<string, ObservationProfile> = {
       p.error ? `geometry inspection failed: ${p.error}` : "geometry inspection succeeded",
     facts: (p) => [
       { key: "bbox", value: bboxFact(p) },
+      ...(Array.isArray(p.bboxMin) ? [{ key: "bboxMin", value: vector(p.bboxMin) }] : []),
+      ...(Array.isArray(p.bboxMax) ? [{ key: "bboxMax", value: vector(p.bboxMax) }] : []),
       { key: "volume", value: num(p.volume) },
       { key: "surfaceArea", value: num(p.surfaceArea) },
       ...(p.solidCount !== undefined ? [{ key: "solids", value: String(p.solidCount) }] : []),
@@ -98,6 +105,24 @@ const PROFILES: Record<string, ObservationProfile> = {
                 key: `cylinderRadius:${String(item.label ?? index)}`,
                 value: num(item.radius, 6),
               }))),
+            ...((p.cylinders as Array<Record<string, unknown>>)
+              .filter((item) => typeof item.radius === "number")
+              .slice(0, 16)
+              .map((item, index) => {
+                const axis = item.axis && typeof item.axis === "object" ? item.axis as Record<string, unknown> : {};
+                const radius = item.radius as number;
+                const axialLength = typeof item.area === "number" && radius > 0 ? item.area / (2 * Math.PI * radius) : undefined;
+                return {
+                  key: `cylinderGeometry:${String(item.label ?? index)}`,
+                  value: [
+                    `axisPosition=${vector(axis.position)}`,
+                    `axisDirection=${vector(axis.direction)}`,
+                    `faceCenter=${vector(item.center)}`,
+                    ...(typeof item.area === "number" ? [`lateralArea=${num(item.area, 6)}`] : []),
+                    ...(axialLength !== undefined ? [`axialLength=${num(axialLength, 6)}`] : []),
+                  ].join(" "),
+                };
+              })),
           ]
         : []),
     ],

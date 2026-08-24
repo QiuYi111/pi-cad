@@ -80,13 +80,17 @@ test("profiles: render/measure/interference projections", () => {
       tool: "cad_inspect_geometry",
       payload: {
         bbox: { x: 1.5, y: 1.5, z: 0.20923 },
-        cylinders: [{ label: "#c0", radius: 0.75 }],
+        bboxMin: [-0.75, -0.75, 0],
+        bboxMax: [0.75, 0.75, 0.20923],
+        cylinders: [{ label: "#c0", radius: 0.75, area: 0.985973, center: [-0.75, 0, 0.104615], axis: { position: [0, 0, 0], direction: [0, 0, -1] } }],
         solidCount: 1,
       },
     }),
   );
   assert.ok(geometry.facts.some((f) => f.key === "bbox" && f.value === "size=[1.500000, 1.500000, 0.209230]"));
+  assert.ok(geometry.facts.some((f) => f.key === "bboxMax" && f.value === "[0.750000, 0.750000, 0.209230]"));
   assert.ok(geometry.facts.some((f) => f.key === "cylinderRadius:#c0" && f.value === "0.750000"));
+  assert.ok(geometry.facts.some((f) => f.key === "cylinderGeometry:#c0" && f.value.includes("axialLength=0.209230")));
 
   const measured = profileProjection(
     envelope({ tool: "cad_measure", payload: { metric: "distance", value: 32.5, units: "mm" } }),

@@ -9,6 +9,7 @@ import core from "../src/extensions/core/index.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { mechanicalReviewProfile } from "../src/domains/mechanical/review-profile.ts";
 import { selectReviewCandidate } from "../src/domains/mechanical/review-executor-v7.ts";
+import { mechanicalReviewRegressionEvent } from "../src/domains/mechanical/control-actions-v7.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { transitionRun } from "../src/harness/reducer.ts";
 import { runFreshReviewV7 } from "../src/harness/review.ts";
@@ -21,6 +22,15 @@ test("fresh Mechanical reviewer selects the authoritative shape instead of an ea
     "candidate:authoritative": { id: "candidate:authoritative", path: "exports/part.step", sha256: "step", role: "candidate-authoritative" },
   });
   assert.equal(selected?.path, "exports/part.step");
+});
+
+test("failed v7 review selects the workflow's editable regression edge", () => {
+  const workflow = { phases: {
+    review: { purpose: "Review", actions: ["cad_submit_for_review"], grants: ["observe"], writeScopes: [], recordObligations: [], evidenceObligations: [], contextProviders: [], hooks: [], reviewProfile: "mechanical.design-review", transitions: { revise: { target: "build" }, accepted: { target: "done" } } },
+    build: { purpose: "Build", actions: ["cad_commit_candidate"], grants: ["file_edit_source"], writeScopes: ["project:source", "project:deliverable"], recordObligations: [], evidenceObligations: [], contextProviders: [], hooks: [], transitions: { candidate_committed: { target: "review" } } },
+    done: { purpose: "Done", actions: ["read"], grants: ["file_read"], writeScopes: [], recordObligations: [], evidenceObligations: [], contextProviders: [], hooks: [], transitions: {}, terminal: true },
+  } } as any;
+  assert.equal(mechanicalReviewRegressionEvent({ phase: "review" } as any, workflow), "revise");
 });
 
 test("Generic Review Runner pins a fresh Mechanical profile result before acceptance", async () => {

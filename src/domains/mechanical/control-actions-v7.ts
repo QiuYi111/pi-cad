@@ -2,6 +2,7 @@ import { canonicalDigest, jsonValue, type JsonValue } from "../../harness/canoni
 import { commitRecordRef, finishRun, reviseRecordRef, transitionRun } from "../../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../../harness/run-store.ts";
 import type { HarnessRunStateV7, RecordRefV7 } from "../../harness/state.ts";
+import type { WorkflowSnapshotV1 } from "../../harness/workflow/types.ts";
 import { RELEASE_WORKSTREAMS } from "../../shared/route.ts";
 import { mechanicalRegistries } from "./registries.ts";
 
@@ -68,6 +69,28 @@ export async function transitionMechanicalRunV7(input: { cwd: string; event: str
     state: transitionRun(state, workflow, input.event),
     event: { type: "WorkflowTransitioned", data: { event: input.event, note: input.note, from: state.phase, to: workflow.phases[state.phase]!.transitions[input.event]!.target } },
   }));
+}
+
+export function mechanicalReviewRegressionEvent(
+  state: HarnessRunStateV7,
+  workflow: WorkflowSnapshotV1,
+): string | null {
+  const transitions = workflow.phases[state.phase]?.transitions ?? {};
+  const priorities = ["revise", "repair", "engineering_issue", "artifact_issue", "local_geometry_issue"];
+  for (const event of priorities) {
+    const transition = transitions[event];
+    if (!transition) continue;
+    const scopes = workflow.phases[transition.target]?.writeScopes ?? [];
+    if (scopes.includes("project:source") || scopes.includes("project:deliverable")) return event;
+  }
+  return null;
+}
+
+export async function regressMechanicalReviewV7(input: { cwd: string; note: string }) {
+  const loaded = await current(input.cwd);
+  const event = mechanicalReviewRegressionEvent(loaded.state, loaded.workflow);
+  if (!event) return null;
+  return transitionMechanicalRunV7({ cwd: input.cwd, event, note: input.note });
 }
 
 export async function deferMechanicalClarificationV7(input: {

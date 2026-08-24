@@ -60,6 +60,7 @@ import {
   commitMechanicalRecordV7,
   deferMechanicalClarificationV7,
   finishMechanicalRunV7,
+  regressMechanicalReviewV7,
   transitionMechanicalRunV7,
   waitMechanicalRunV7,
 } from "../domains/mechanical/control-actions-v7.ts";
@@ -1219,7 +1220,16 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           const profileId = active.workflow.phases[active.state.phase]!.reviewProfile;
           if (profileId !== "mechanical.design-review" && profileId !== "mechanical.final-review") return errTool(`cad_submit_for_review is not enabled for phase ${active.state.phase}`);
           const reviewed = await runFreshReviewV7({ cwd: ctx.cwd, workflowRunId: active.state.runId, registries: mechanicalRegistries, profile: mechanicalReviewProfile(profileId), executor: mechanicalReviewExecutorV7(ctx) });
-          if (reviewed.state.latestReview?.verdict !== "pass") return errTool(`Independent v7 review ${reviewed.state.latestReview?.verdict ?? "unresolved"}; phase remains ${reviewed.state.phase}.`, { state: reviewed.state, review: reviewed.state.latestReview });
+          if (reviewed.state.latestReview?.verdict !== "pass") {
+            const verdict = reviewed.state.latestReview?.verdict ?? "unresolved";
+            const regressed = await regressMechanicalReviewV7({ cwd: ctx.cwd, note: `fresh independent review ${verdict}` });
+            return errTool(
+              regressed
+                ? `Independent v7 review ${verdict}; returned to editable phase ${regressed.state.phase}.`
+                : `Independent v7 review ${verdict}; no editable regression edge exists from ${reviewed.state.phase}.`,
+              { state: regressed?.state ?? reviewed.state, review: reviewed.state.latestReview },
+            );
+          }
           const advanced = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: "accepted", note: params.summary ?? "fresh independent review PASS" });
           return okTool(`Independent v7 review PASS. Phase is now ${advanced.state.phase.toUpperCase()}.`, { state: advanced.state, review: reviewed.state.latestReview });
         } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
