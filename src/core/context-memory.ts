@@ -44,6 +44,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import type { CadRequirements, CadRunState } from "../shared/protocol.ts";
 import { CadProjectStore, CadRunStore, nowIso } from "../shared/store.ts";
+import { readJsonLinesTail, readTextPrefix } from "../shared/bounded-files.ts";
 import { maybeAutoContinue } from "./continuation.ts";
 
 /** Rebuild threshold in Pi's percent scale (0-100). Experimental initial value. */
@@ -150,6 +151,15 @@ async function readRefs(run: CadRunStore): Promise<ContextRef[]> {
     }
   }
   return refs;
+}
+
+async function readRecentRefs(run: CadRunStore): Promise<{ refs: ContextRef[]; truncated: boolean }> {
+  const result = await readJsonLinesTail<ContextRef>(
+    join(contextDirOf(run), "refs.jsonl"),
+    256 * 1024,
+    ARCHIVE_INDEX_LIMIT,
+  );
+  return { refs: result.records, truncated: result.truncated };
 }
 
 function clip(text: string, maxChars: number): string {
@@ -580,8 +590,16 @@ export async function renderTaskContext(cwd: string, state: CadRunState): Promis
   // injected: its "Current intent" would outrank the fresher default
   // compaction summary now carrying the run in the conversation.
   const meta = await readWorkingMeta(run);
-  const working = meta.status === "stale" ? "" : (await readText(workingPath(run))).trim();
-  if (working) sections.push(`## Working Context\n\n${clip(working, WORKING_CONTEXT_MAX_CHARS)}`);
+  const workingRead = meta.status === "stale"
+    ? { text: "", truncated: false }
+    : await readTextPrefix(workingPath(run), WORKING_CONTEXT_MAX_CHARS);
+  const working = workingRead.text.trim();
+  if (working) {
+    const note = workingRead.truncated
+      ? `\n\n[... working context clipped at ${WORKING_CONTEXT_MAX_CHARS} bytes; full file at context/working.md ...]`
+      : "";
+    sections.push(`## Working Context\n\n${working}${note}`);
+  }
 
   const review = state.finalReview;
   if (
@@ -607,14 +625,14 @@ export async function renderTaskContext(cwd: string, state: CadRunState): Promis
     ].filter(Boolean).join("\n"));
   }
 
-  const refs = await readRefs(run);
+  const { refs, truncated: refsTruncated } = await readRecentRefs(run);
   if (refs.length) {
     const index = refs
       .slice(-ARCHIVE_INDEX_LIMIT)
       .reverse()
       .map((ref) => `- ${ref.id} — ${ref.summary}`);
-    const archiveNote = refs.length > ARCHIVE_INDEX_LIMIT
-      ? `.pi-cad/runs/${state.runId}/context/archive/ (${refs.length} checkpoints)`
+    const archiveNote = refsTruncated
+      ? `.pi-cad/runs/${state.runId}/context/archive/ (older checkpoints also available)`
       : `.pi-cad/runs/${state.runId}/context/archive/`;
     sections.push(
       [

@@ -8,7 +8,7 @@ from picad_sim import export as write_observation
 
 
 root = Path(__file__).resolve().parent
-observation_file = Path(os.environ["PI_SIM_OBSERVATION_FILE"]).resolve()
+observation_file = Path(os.environ.get("PI_RECIPE_OBSERVATION_FILE") or os.environ["PI_SIM_OBSERVATION_FILE"]).resolve()
 result = json.loads((root / "result.json").read_text(encoding="utf-8"))
 views = result.get("visualization", {}).get("views", [])
 sensitivity_path = Path((result.get("sensitivityArtifacts") or [""])[0])

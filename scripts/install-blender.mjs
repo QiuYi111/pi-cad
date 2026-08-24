@@ -24,10 +24,8 @@ function sha256File(path) {
 }
 
 function platformKey() {
-  if (process.platform === "linux") return process.arch === "arm64" ? "linux-arm64" : "linux-x64";
-  if (process.platform === "darwin") return process.arch === "arm64" ? "darwin-arm64" : "darwin-x64";
-  if (process.platform === "win32") return "win32-x64";
-  return null;
+  if (process.platform !== "linux") throw new Error("Pi-CAD Blender installation must run inside Linux or WSL");
+  return process.arch === "arm64" ? "linux-arm64" : "linux-x64";
 }
 
 function pythonExtract(python, env, root, archivePath, distribution, destDir) {
@@ -142,8 +140,8 @@ export async function installBlender({ root, python, env = process.env }) {
 if (process.argv[1] && process.argv[1].endsWith("install-blender.mjs")) {
   const { fileURLToPath } = await import("node:url");
   const root = fileURLToPath(new URL("..", import.meta.url));
-  if (process.platform === "win32") {
-    console.error("Run npm postinstall for the WSL-managed Python environment; standalone Windows Python installation is unsupported.");
+  if (process.platform !== "linux") {
+    console.error("Run Pi-CAD and its installers inside Linux or a WSL distribution.");
     process.exit(2);
   }
   execFileSync(process.env.PI_CAD_UV ?? "uv", ["sync", "--project", join(root, "python"), "--extra", "simulation"], { cwd: root, stdio: "inherit" });

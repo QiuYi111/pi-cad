@@ -1,0 +1,14 @@
+schema: 1
+id: optimization/torch-fem-v1
+version: 1.0.0
+kind: optimization
+runtimeProfile: torch-fem/torch-fem-0.9-cpu
+inputs: []
+actions:
+  run: {argv: [/bin/bash, run.sh], files: [run.sh, spec.json], timeoutSeconds: 3600}
+observer: {argv: [/usr/bin/python3, observer.py], files: [observer.py], timeoutSeconds: 30}
+exports:
+  result: {type: artifact, primary: true}
+  density: {type: field, primary: false}
+  history: {type: table, primary: false}
+resources: {cpu: 8, memoryGiB: 24, workspaceGiB: 16}

@@ -1,0 +1,15 @@
+schema: 1
+id: analysis-model/cadctl-v1
+version: 1.0.0
+kind: analysis-model
+runtimeProfile: pi-cad/cadctl-0.9
+inputs:
+  - {path: inputs/design.step, role: authoritative-design, type: file}
+actions:
+  run: {argv: [/opt/pi-cad/python/.venv/bin/python, run.py], files: [run.py, spec.json], timeoutSeconds: 3600}
+observer: {argv: [/usr/bin/python3, observer.py], files: [observer.py], timeoutSeconds: 30}
+exports:
+  result: {type: artifact, primary: true}
+  analysis_model: {type: artifact, primary: false}
+  derivation_record: {type: artifact, primary: false}
+resources: {cpu: 4, memoryGiB: 8, workspaceGiB: 8}

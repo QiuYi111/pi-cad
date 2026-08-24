@@ -1,0 +1,22 @@
+schema: 1
+id: simulation/torch-fem-differentiable-sensitivity
+version: 1.0.0
+kind: simulation
+runtimeProfile: torch-fem/torch-fem-0.9-cu126
+inputs:
+  - {path: build/model.step, role: structural-domain, type: file}
+actions:
+  run:
+    argv: [/bin/bash, Allrun]
+    files: [Allrun, run_case.py, case.json]
+    timeoutSeconds: 43200
+observer:
+  argv: [/bin/bash, -lc, 'uv run --offline --frozen --project "$PI_CAD_PYTHON_PROJECT" python observe.py']
+  files: [observe.py]
+  timeoutSeconds: 3600
+exports:
+  von_mises_view: {type: image, primary: true}
+  gradient_relative_error: {type: scalar, primary: true, unit: "1"}
+  sensitivity: {type: artifact, primary: false}
+  runtime_health: {type: table, primary: false}
+resources: {cpu: 8, memoryGiB: 24, workspaceGiB: 100}

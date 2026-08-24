@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, copyFile, cp, link, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, link, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { CadProjectStore, nowIso, sha256File } from "../../shared/store.ts";
@@ -38,6 +38,7 @@ export interface SimulationCommandRunner {
     timeoutMs: number;
     backend: string;
     runtime: string;
+    signal?: AbortSignal;
   }): Promise<SimulationCommandResult>;
 }
 
@@ -145,6 +146,16 @@ async function copyDeclaredProject(recipe: LoadedSimulationRecipe, destination: 
     if (insidePath(recipe.recipeRoot, input.absolutePath)) continue;
     await cp(input.absolutePath, target, { recursive: input.kind === "directory", force: false, errorOnExist: true, dereference: true, mode: constants.COPYFILE_FICLONE });
   }
+}
+
+function frozenClosureIdentity(recipe: LoadedSimulationRecipe): string {
+  return stable({
+    recipePath: recipe.recipePath,
+    manifest: recipe.manifest,
+    computeRecipeHash: recipe.computeRecipeHash,
+    observationProgramHash: recipe.observationProgramHash,
+    inputs: recipe.inputs.map(({ declaration, projectPath, sha256, kind }) => ({ declaration, projectPath, sha256, kind })),
+  });
 }
 
 async function snapshotObservationProgram(recipe: LoadedSimulationRecipe, observationDirectory: string): Promise<{ path: string; hash: string; files: Array<{ path: string; sha256: string }> }> {
@@ -349,18 +360,42 @@ export async function createSimulationRun(input: {
   prepared?: { recipe: LoadedSimulationRecipe; selectedOutputs: string[]; runtimeIdentity: RuntimeIdentity };
 }): Promise<SimulationRunResult> {
   const workflowRunId = await currentWorkflowRun(input.cwd);
-  const recipe = input.prepared?.recipe ?? await loadSimulationRecipe(input.cwd, input.recipePath);
-  const selectedOutputs = input.prepared?.selectedOutputs ?? selectSimulationOutputs(recipe.manifest, input.outputs);
-  const runtimeIdentity = input.prepared?.runtimeIdentity ?? await input.runner.resolveRuntime(input.cwd, input.backend, input.runtime);
+  const preparedRecipe = input.prepared?.recipe ?? await loadSimulationRecipe(input.cwd, input.recipePath);
+  const preparedOutputs = input.prepared?.selectedOutputs ?? selectSimulationOutputs(preparedRecipe.manifest, input.outputs);
+  const preparedRuntimeIdentity = input.prepared?.runtimeIdentity ?? await input.runner.resolveRuntime(input.cwd, input.backend, input.runtime);
   const root = simulationRoot(input.cwd, workflowRunId);
   await mkdir(root, { recursive: true });
   const runId = await nextId(root, "sim");
   const runDirectory = join(root, runId);
-  const rawProject = join(runDirectory, "raw-project");
-  const logs = join(runDirectory, "logs");
-  await mkdir(logs, { recursive: true });
-  await cp(recipe.recipeRoot, join(runDirectory, "recipe"), { recursive: true, force: false, errorOnExist: true, dereference: true, mode: constants.COPYFILE_FICLONE });
-  await copyDeclaredProject(recipe, rawProject);
+  const stagingDirectory = `${runDirectory}.staging-${process.pid}-${Date.now()}`;
+  const rawProject = join(stagingDirectory, "raw-project");
+  const logs = join(stagingDirectory, "logs");
+  let recipe: LoadedSimulationRecipe;
+  let selectedOutputs: string[];
+  let runtimeIdentity: RuntimeIdentity;
+  try {
+    await mkdir(logs, { recursive: true });
+    await copyDeclaredProject(preparedRecipe, rawProject);
+    // The solver never executes the live project. Reload and hash the copied
+    // closure, then compare it with the exact closure approved by preflight.
+    // Any edit before or during copy fails closed before run.json is exposed.
+    recipe = await loadSimulationRecipe(rawProject, preparedRecipe.recipePath);
+    if (frozenClosureIdentity(recipe) !== frozenClosureIdentity(preparedRecipe)) {
+      throw new Error("simulation Recipe or declared input changed between preflight and freeze");
+    }
+    selectedOutputs = selectSimulationOutputs(recipe.manifest, input.outputs);
+    if (stable(selectedOutputs) !== stable(preparedOutputs)) {
+      throw new Error("simulation output selection changed between preflight and freeze");
+    }
+    runtimeIdentity = await input.runner.resolveRuntime(input.cwd, input.backend, input.runtime);
+    if (stable(runtimeIdentity) !== stable(preparedRuntimeIdentity)) {
+      throw new Error("simulation runtime identity changed between preflight and freeze");
+    }
+    await cp(recipe.recipeRoot, join(stagingDirectory, "recipe"), { recursive: true, force: false, errorOnExist: true, dereference: true, mode: constants.COPYFILE_FICLONE });
+  } catch (error) {
+    await rm(stagingDirectory, { recursive: true, force: true });
+    throw error;
+  }
   const computeIdentity = createHash("sha256").update(stable({
     computeRecipeHash: recipe.computeRecipeHash,
     inputs: recipe.inputs.map((item) => ({ path: item.projectPath, sha256: item.sha256 })),
@@ -384,17 +419,21 @@ export async function createSimulationRun(input: {
     runtimeIdentity,
     inputs: recipe.inputs.map((item) => ({ declaration: item.declaration, projectPath: item.projectPath, sha256: item.sha256, kind: item.kind })),
   };
-  await writeJson(join(runDirectory, "run.json"), run);
+  await writeJson(join(stagingDirectory, "run.json"), run);
+  await rename(stagingDirectory, runDirectory);
+  const frozenRawProject = join(runDirectory, "raw-project");
+  const frozenLogs = join(runDirectory, "logs");
+  recipe = await loadSimulationRecipe(frozenRawProject, preparedRecipe.recipePath);
   let entrypoint: SimulationCommandResult;
   try {
     entrypoint = await input.runner.execute({
       cwd: input.cwd,
-      workspace: rawProject,
-      recipeDirectory: join(rawProject, recipe.recipePath),
+      workspace: frozenRawProject,
+      recipeDirectory: join(frozenRawProject, recipe.recipePath),
       command: recipe.manifest.entrypoint,
       environment: { PI_SIM_RUN_ID: runId },
-      stdoutPath: join(logs, "stdout.log"),
-      stderrPath: join(logs, "stderr.log"),
+      stdoutPath: join(frozenLogs, "stdout.log"),
+      stderrPath: join(frozenLogs, "stderr.log"),
       timeoutMs: 12 * 60 * 60 * 1000,
       backend: input.backend,
       runtime: input.runtime,
@@ -404,7 +443,7 @@ export async function createSimulationRun(input: {
   }
   let rawProjectHash: string;
   try {
-    rawProjectHash = (await hashSimulationPath(rawProject, rawProject)).hash;
+    rawProjectHash = (await hashSimulationPath(frozenRawProject, frozenRawProject)).hash;
   } catch (error) {
     entrypoint = { ...entrypoint, exitCode: entrypoint.exitCode || 126, diagnostics: [...entrypoint.diagnostics, `raw-project freeze failed: ${String(error)}`] };
     rawProjectHash = "invalid";

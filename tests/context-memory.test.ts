@@ -644,7 +644,7 @@ test("renderTaskContext: full Mission (assumptions/openUnknowns labelled provisi
     assert.ok(rendered.includes("- ctx-007"));
     assert.ok(rendered.includes("- ctx-003"));
     assert.ok(!rendered.includes("- ctx-001"), "index must be capped, not the whole history");
-    assert.ok(rendered.includes("7 checkpoints"));
+    assert.ok(rendered.includes("older checkpoints also available"));
     // The archive body itself never enters the prompt.
     assert.ok(!rendered.includes("ARCHIVE_BODY_MARKER_DO_NOT_RENDER"));
     // Section order: mission before working context before references.

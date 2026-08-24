@@ -2,6 +2,21 @@
 
 > Generated from active registrations, TypeBox schemas, phase grants, and the cookbook catalog. Do not edit.
 
+## cad_start
+
+Start a generic v7 run from the project-selected immutable workflow.
+
+- Available phases: conditional only
+- Availability: Only when no active run exists; Mechanical tasks normally start with cad_route.
+- Writes: workflow state, records, and journal
+- Produces: Declared tool artifact or canonical workflow state
+- Lifecycle: Use only when exposed by the action card; inspect returned state/artifacts.
+- Success means: The declared state/artifact operation completed; engineering PASS still requires workflow review.
+- Cookbook: `pi-cad/references/cookbooks/workflow-records.md`
+- Parameter contract: embedded TypeBox JSON schema in assets/agent-contract.json
+
+The live registered TypeBox schema and embedded contract are fail-closed. The cookbook supplies valid complete examples and parameter-selection rules.
+
 ## cad_route
 
 Select the route that compiles the workflow and obligations.

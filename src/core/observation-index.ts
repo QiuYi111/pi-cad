@@ -16,6 +16,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ObservationBundle } from "../observations/bundle.ts";
+import { readJsonLinesTail } from "../shared/bounded-files.ts";
 
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
@@ -360,7 +361,8 @@ export async function renderObservationIndex(
   runId: string,
   limit = 8,
 ): Promise<string> {
-  const records = await queryObservations(cwd, runId, { okOnly: true, limit });
+  const recent = await readJsonLinesTail<ObservationRecord>(indexPath(cwd, runId), 512 * 1024, 256);
+  const records = recent.records.filter((record) => record.ok).slice(-limit).reverse();
   if (records.length === 0) return "";
   const lines = records.map(
     (r) =>

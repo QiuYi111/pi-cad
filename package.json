@@ -27,7 +27,7 @@
   "scripts": {
     "generate:agent-contract": "node scripts/generate-agent-contract.mjs",
     "check:agent-contract": "node scripts/generate-agent-contract.mjs --check",
-    "test": "bash scripts/test.sh",
+    "test": "npm run check:agent-contract && bash scripts/test.sh",
     "test:py": "bash scripts/test.sh",
     "test:ts": "node tests/run-ts-tests.mjs",
     "test:openfoam14": "node scripts/qualify-openfoam14.mjs",
@@ -41,6 +41,9 @@
   "engines": {
     "node": ">=20.19.0"
   },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
   "devDependencies": {
     "jiti": "^2.7.0",
     "typebox": "^1.3.15"
@@ -50,6 +53,7 @@
     "skills",
     "python",
     "assets",
+    "recipes",
     "benchmarks/README.md",
     "benchmarks/corpus.json",
     "benchmarks/run.mjs",

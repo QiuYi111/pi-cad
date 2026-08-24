@@ -70,6 +70,7 @@ export interface AgentContract {
 }
 
 export const TOOL_PURPOSES: Record<ActivePublicTool, string> = {
+  cad_start: "Start a generic v7 run from the project-selected immutable workflow.",
   cad_route: "Select the route that compiles the workflow and obligations.",
   cad_reroute: "Change route without bypassing obligations; downgrades require authority.",
   cad_commit_requirements: "Commit the first complete mission and acceptance contract.",
@@ -197,6 +198,7 @@ function phasesForTool(name: ActivePublicTool): CadPhase[] {
 }
 
 function availabilityFor(name: ActivePublicTool): string | undefined {
+  if (name === "cad_start") return "Only when no active run exists; Mechanical tasks normally start with cad_route.";
   if (name === "cad_revise_requirements") return "After the first requirements commit.";
   if (name === "cad_submit_for_review") return "Only on a final accepted edge when independent review is enabled.";
   if (name === "cad_defer_clarification" || name === "cad_declare_blocker") return "Headless workflows only.";

@@ -16,12 +16,13 @@
  *     plane, not here.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
 
 import { readImageContents } from "../../shared/capability.ts";
 import { CadProbeParametersSchema, CadRecallObservationParametersSchema, executeCadProbe } from "../../modules/probe/tool.ts";
 
 export default function cadProbeExtension(pi: ExtensionAPI) {
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_probe",
     label: "CAD Probe",
     description:
@@ -42,7 +43,7 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
   // Phase 8: post-compaction rehydration over the per-run observation
   // index. The index references evidence images by path; recall re-
   // attaches them without re-running any backend.
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_recall_observation",
     label: "CAD Recall Observation",
     description:

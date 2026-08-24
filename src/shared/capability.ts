@@ -1,10 +1,8 @@
-import { execFile, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 
 import type {
@@ -16,8 +14,8 @@ import type {
 } from "./protocol.ts";
 import { CadProjectStore, sha256File } from "./store.ts";
 import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
-
-const execFileAsync = promisify(execFile);
+import { assertLinuxRuntime } from "./platform.ts";
+import { runProcess } from "./process-runner.ts";
 
 export const DEFAULT_VIEWS = ["iso", "front", "back", "left", "right", "top", "bottom"];
 
@@ -26,90 +24,20 @@ export function packageRoot(): string {
   return fileURLToPath(new URL("../../", import.meta.url));
 }
 
-function wslHostEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const key of Object.keys(env).filter((name) => name.toLowerCase() === "path")) {
-    env[key] = (env[key] ?? "").split(delimiter).filter((entry) => !/^V:[\\/]/i.test(entry) && !/^\\\\wsl(?:\.localhost)?\\/i.test(entry)).join(delimiter);
-  }
-  return env;
-}
-
-/** Reproducible uv-managed Python command; Windows always crosses into WSL. */
-export function pythonInvocation(extra?: "simulation", cwd?: string): { command: string; prefixArgs: string[] } {
+/** Reproducible uv-managed Python command inside the Linux/WSL runtime. */
+export function pythonInvocation(extra?: "simulation", _cwd?: string): { command: string; prefixArgs: string[] } {
+  assertLinuxRuntime("Pi-CAD Python capability");
   const uvExtra = extra ? ["--extra", extra] : [];
-  if (process.platform === "win32") {
-    const wslEnv = [
-      "env",
-      `PI_CAD_WINDOWS_WORKSPACE=${packageRoot().replaceAll("\\", "/")}`,
-      `PI_CAD_WSL_WORKSPACE=${toWslPath(packageRoot())}`,
-      ...(cwd ? [`PI_CAD_INVOCATION_CWD=${toWslPath(resolve(cwd))}`] : []),
-    ];
-    return {
-      command: "wsl.exe",
-      prefixArgs: ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", ...wslEnv, "uv", "run", "--project", toWslPath(join(packageRoot(), "python")), ...uvExtra, "python"],
-    };
-  }
   return {
     command: process.env.PI_CAD_UV ?? "uv",
     prefixArgs: ["run", "--project", join(packageRoot(), "python"), ...uvExtra, "python"],
   };
 }
 
-function toWslPath(path: string): string {
-  if (process.platform !== "win32") return path;
-  const unc = path.match(/^\\\\wsl(?:\.localhost)?\\([^\\]+)\\(.*)$/i);
-  if (unc?.[1] === (process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu")) return `/${unc[2].replaceAll("\\", "/")}`;
-  const drive = path.match(/^([A-Za-z]):[\\/](.*)$/);
-  if (drive?.[1].toUpperCase() === "V") return `/${drive[2].replaceAll("\\", "/")}`;
-  try {
-    return execFileSync("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", "wslpath", "-a", path.replaceAll("\\", "/")], {
-      cwd: process.env.SystemRoot ?? "C:\\Windows",
-      env: wslHostEnv(),
-      encoding: "utf-8",
-      windowsHide: true,
-    }).trim();
-  } catch {
-    throw new Error(`cannot translate Windows path for WSL Python: ${path}`);
-  }
-}
-
-function pythonArgsForHost(args: string[]): string[] {
-  if (process.platform !== "win32") return args;
-  return args.map((arg) =>
-    /^[A-Za-z]:[\\/]/.test(arg) || /^\\\\wsl(?:\.localhost)?\\/i.test(arg)
-      ? toWslPath(arg)
-      : arg,
-  );
-}
-
-function pathsFromWsl(value: unknown): unknown {
-  if (process.platform !== "win32") return value;
-  if (typeof value === "string") {
-    const mounted = value.match(/^\/mnt\/([a-z])\/(.*)$/i);
-    if (mounted) return `${mounted[1].toUpperCase()}:\\${mounted[2].replaceAll("/", "\\")}`;
-    const wslRoot = toWslPath(packageRoot()).replace(/\/$/, "");
-    if (value === wslRoot || value.startsWith(`${wslRoot}/`)) {
-      const suffix = value.slice(wslRoot.length).replace(/^\//, "").replaceAll("/", "\\");
-      return suffix ? join(packageRoot(), suffix) : packageRoot();
-    }
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(pathsFromWsl);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, pathsFromWsl(item)]));
-  return value;
-}
-
 /** Minimal host environment for spawning the uv-managed cadctl process. */
 export function cadctlEnv(cwd?: string): NodeJS.ProcessEnv {
-  if (process.platform === "win32") {
-    const env = wslHostEnv();
-    delete env.PYTHONPATH;
-    env.PI_CAD_WINDOWS_WORKSPACE = packageRoot();
-    env.PI_CAD_WSL_WORKSPACE = toWslPath(packageRoot());
-    if (cwd) env.PI_CAD_INVOCATION_CWD = toWslPath(resolve(cwd));
-    return env;
-  }
-  return { ...process.env };
+  assertLinuxRuntime("Pi-CAD cadctl capability");
+  return { ...process.env, ...(cwd ? { PI_CAD_INVOCATION_CWD: resolve(cwd) } : {}) };
 }
 
 export interface CadctlOptions {
@@ -123,24 +51,31 @@ async function runCadctl(
   options: CadctlOptions,
 ): Promise<CadEventEnvelope> {
   const python = pythonInvocation(options.extra, options.cwd);
-  const { stdout } = await execFileAsync(python.command, [...python.prefixArgs, "-m", "cadctl", ...pythonArgsForHost(args)], {
-    cwd: process.platform === "win32" ? (process.env.SystemRoot ?? "C:\\Windows") : options.cwd,
+  const result = await runProcess({
+    command: python.command,
+    args: [...python.prefixArgs, "-m", "cadctl", ...args],
+    cwd: options.cwd,
     env: cadctlEnv(options.cwd),
-    timeout: options.timeoutMs ?? 180_000,
-    maxBuffer: 64 * 1024 * 1024,
-    killSignal: "SIGKILL",
+    timeoutMs: options.timeoutMs ?? 180_000,
+    maxStdoutBytes: 16 * 1024 * 1024,
+    maxStderrBytes: 1024 * 1024,
   });
+  if (result.exitCode !== 0 || result.terminationReason) {
+    throw new Error(
+      `cadctl process failed${result.terminationDetail ? `: ${result.terminationDetail}` : ` with exit ${result.exitCode}`}: ${result.stderr.slice(-8192)}`,
+    );
+  }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stdout.trim());
+    parsed = JSON.parse(result.stdout.trim());
   } catch (error) {
     throw new Error(`cadctl returned non-JSON output: ${String(error)}`);
   }
   if (!parsed || typeof parsed !== "object" || !("ok" in parsed)) {
     throw new Error("cadctl returned an invalid envelope");
   }
-  return pathsFromWsl(parsed) as CadEventEnvelope;
+  return parsed as CadEventEnvelope;
 }
 
 export interface CapabilityBuildInput {
@@ -435,14 +370,17 @@ export async function currentDoctorReport(
   if (doctorProbeCache !== undefined) return doctorProbeCache;
   try {
     const python = pythonInvocation(undefined, cwd);
-    const { stdout } = await execFileAsync(python.command, [...python.prefixArgs, "-m", "cadctl", "doctor", "--json"], {
-      cwd: process.platform === "win32" ? (process.env.SystemRoot ?? "C:\\Windows") : cwd,
+    const result = await runProcess({
+      command: python.command,
+      args: [...python.prefixArgs, "-m", "cadctl", "doctor", "--json"],
+      cwd: cwd ?? packageRoot(),
       env: cadctlEnv(cwd),
-      timeout: timeoutMs,
-      maxBuffer: 16 * 1024 * 1024,
-      killSignal: "SIGKILL",
+      timeoutMs,
+      maxStdoutBytes: 4 * 1024 * 1024,
+      maxStderrBytes: 256 * 1024,
     });
-    doctorProbeCache = JSON.parse(stdout.trim()) as DoctorReport;
+    if (result.exitCode !== 0 || result.terminationReason) throw new Error(result.terminationDetail ?? result.stderr);
+    doctorProbeCache = JSON.parse(result.stdout.trim()) as DoctorReport;
   } catch {
     doctorProbeCache = null;
   }

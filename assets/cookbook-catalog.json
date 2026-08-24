@@ -2,6 +2,14 @@
   "schema": 1,
   "tools": [
     {
+      "tool": "cad_start",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
       "tool": "cad_route",
       "responsibleSkill": "pi-cad",
       "generatedReference": "pi-cad-tools/references/generated/control.md",

@@ -1,0 +1,18 @@
+schema: 1
+id: simulation/openfoam14-box
+version: 1.0.0
+kind: simulation
+runtimeProfile: openfoam/openfoam-14
+inputs:
+  - {path: benchmarks/simulation-v2/openfoam14-box/domain.step, role: domain, type: file}
+actions:
+  run: {argv: [/bin/bash, Allrun], files: [Allrun, variants], timeoutSeconds: 43200}
+observer: {argv: [/bin/bash, -lc, 'uv run --offline --frozen --project "$PI_CAD_PYTHON_PROJECT" python observe.py'], files: [observe.py], timeoutSeconds: 3600}
+exports:
+  phase_distribution: {type: image, primary: true}
+  fill_fraction: {type: scalar, primary: true, unit: "1"}
+  interface_progress: {type: timeseries, primary: true}
+  refinement: {type: table, primary: false}
+  interface_animation: {type: artifact, primary: false}
+  qualification_report: {type: artifact, primary: false}
+resources: {cpu: 8, memoryGiB: 24, workspaceGiB: 100}

@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 
 
 root = Path(__file__).resolve().parent
+observation_file = Path(os.environ.get("PI_RECIPE_OBSERVATION_FILE") or os.environ["PI_SIM_OBSERVATION_FILE"]).resolve()
+observation_root = observation_file.parent
 log = (root / "solver.log").read_text(encoding="utf-8", errors="replace")
 residuals = [float(value) for value in re.findall(r"Initial residual = ([0-9.eE+-]+)", log)]
 continuity = [abs(float(value)) for value in re.findall(r"global = ([0-9.eE+-]+)", log)]
@@ -25,10 +27,11 @@ ax.grid(True)
 fig.tight_layout()
 fig.savefig(results / "convergence.png", dpi=150)
 plt.close(fig)
-observation = {
-    "convergence_plot": {"path": "observation-results/convergence.png"},
-    "continuity_error": {"value": max(continuity, default=0.0), "unit": "1"},
-    "residual_history": {"path": "observation-results/residuals.json"},
-    "solver_log": {"path": "solver.log"},
+relative = lambda path: os.path.relpath(Path(path).resolve(), observation_root)
+exports = {
+    "convergence_plot": {"type": "image", "path": relative(results / "convergence.png")},
+    "continuity_error": {"type": "scalar", "value": max(continuity, default=0.0), "unit": "1"},
+    "residual_history": {"type": "timeseries", "path": relative(results / "residuals.json")},
+    "solver_log": {"type": "artifact", "path": relative(root / "solver.log")},
 }
-Path(os.environ["PI_SIM_OBSERVATION_FILE"]).write_text(json.dumps(observation), encoding="utf-8")
+observation_file.write_text(json.dumps({"schema": 1, "exports": exports}), encoding="utf-8")

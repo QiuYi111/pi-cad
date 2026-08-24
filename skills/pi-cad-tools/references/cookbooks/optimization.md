@@ -2,7 +2,7 @@
 
 ## Applicable / not applicable
 
-Use only for the supported differentiable 2D rectangular topology domain and declared SIMP/MMA contract. It produces an optimization artifact, not CAD or Simulation Evidence.
+Use a `kind: optimization` Recipe for the supported differentiable topology domain and declared SIMP/MMA contract. It produces an immutable optimization result/artifact, not CAD acceptance or Simulation Evidence.
 
 ## Environment and permissions
 
@@ -10,11 +10,11 @@ Production uses the ready managed CUDA runtime. CPU is permitted only when expli
 
 ## Minimum valid input
 
-Declare domain bounds/resolution, `float64` material properties, compliance objective, one volume-fraction constraint, optimizer iterations/penalty, explicit device, loads, and constraints.
+In `pi-recipe.yaml`, declare the pinned torch-fem runtime, explicit input files, a named action closure, observer closure, primary result export, optional density/history exports, and resource limits. The input/spec declares domain bounds/resolution, `float64` material properties, objective, volume constraint, iterations/penalty, device, loads, and constraints.
 
 ## Complete working example
 
-Run the optimization in CUDA, inspect requested/actual device and convergence, reconstruct the selected density into robust build123d geometry, commit a CAD candidate, then run case-specific simulation again.
+Call `cad_optimize({recipe, outputs:["density","history"]})`, inspect the immutable Observation and requested/actual device, reconstruct selected density into robust build123d geometry, commit a CAD candidate, then run case-specific simulation again.
 
 ## Preflight
 

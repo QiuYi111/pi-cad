@@ -1,0 +1,23 @@
+schema: 1
+id: simulation/su2-solid-thermal
+version: 1.0.0
+kind: simulation
+runtimeProfile: su2/su2-8.5.0
+inputs:
+  - {path: build/thermal-solid.step, role: thermal-domain, type: file}
+actions:
+  run:
+    argv: [/bin/bash, Allrun]
+    files: [Allrun, run_case.py, case.json]
+    timeoutSeconds: 43200
+observer:
+  argv: [/bin/bash, -lc, 'uv run --offline --frozen --project "$PI_CAD_PYTHON_PROJECT" python observe.py']
+  files: [observe.py]
+  timeoutSeconds: 3600
+exports:
+  temperature_view: {type: image, primary: true}
+  max_temperature: {type: scalar, primary: true, unit: K}
+  energy_imbalance: {type: scalar, primary: false, unit: "1"}
+  convergence: {type: table, primary: false}
+  fields: {type: field, primary: false}
+resources: {cpu: 8, memoryGiB: 24, workspaceGiB: 100}

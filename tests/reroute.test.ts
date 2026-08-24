@@ -233,6 +233,8 @@ test("reroute: full downgrade flow through harness tools (request -> pause -> us
 
     // 2. The Agent asks the user; an ordinary reply issues NOTHING.
     await waitTool.execute("f4", { reason: "downgrade to prototype maturity?" }, undefined, undefined, ctx);
+    const inputHandler = pi.handlers.get("input")[0];
+    await inputHandler({ text: "yes", source: "interactive" }, { cwd });
     const beforeAgentStart = pi.handlers.get("before_agent_start")[0];
     await beforeAgentStart({ systemPrompt: "" }, { cwd });
     state = JSON.parse(readFileSync(join(cwd, ".pi-cad", "runs", await currentRunIdOf(cwd), "state.json"), "utf-8"));

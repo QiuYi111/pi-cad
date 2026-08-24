@@ -166,6 +166,12 @@ interference pairs, Python arrays/tables, and full failure logs are retained as
 collections and can be filtered, ordered, and paged to exhaustion. Quota
 exhaustion fails explicitly rather than silently dropping detail.
 
+## Harness Kernel v7 and domain Recipes
+
+New work defaults to the transactional v7 Kernel. The generic start action freezes the selected Workflow and Registry Contract; Mechanical routing is a Domain Pack action that replaces the intake snapshot. Active v6 runs remain on v6 and are never auto-migrated. Context providers read only bounded committed snapshots, while Project Head changes become visible only after a completed run is atomically promoted.
+
+Simulation, optimization, drawing, presentation, and analysis-model derivation share one strict `pi-recipe.yaml` protocol. MODEL build/export and typed PROBE operations remain primitives. Each Recipe selects a named argv-form action, declares its exact closure and inputs, runs in a pinned profile, and produces immutable observer snapshots. Evidence-producing runs bind an exact workflow obligation before compute; commit can close only that binding.
+
 ## Simulation, honestly scoped
 
 Simulation V2 follows:
@@ -177,8 +183,8 @@ author solver-native Recipe
 → explicit case-scoped Evidence commit
 ```
 
-Each Recipe contains a strict `pi-sim.toml`, an arbitrary managed entrypoint,
-an observation program, explicit project inputs, and named exports using only
+Each new Recipe contains a strict `pi-recipe.yaml`, named managed actions,
+an independently revisable observation program, explicit project inputs, and named exports using only
 `image | scalar | timeseries | table | field | artifact`. Visual Recipes owe
 a primary image and a primary quantitative export; nonvisual Recipes owe a
 primary quantitative export. Omitted `outputs` selects the primary floor,
@@ -187,14 +193,13 @@ explicit names add to that floor, and `outputs=[]` is invalid.
 The harness snapshots only the Recipe and declared inputs, runs without
 network access in a pinned runtime, retains full logs and raw state outside
 model context, and returns images before bounded quantitative summaries.
-Changing observation files creates a new immutable snapshot without rerunning
-the solver. Every Observation stores the exact manifest/observer files it ran,
+Changing only the observer closure creates a new immutable snapshot without rerunning
+the solver. Every Observation stores the exact observer contract/files it ran,
 their tree/file hashes, rendered plot hashes, and materialized exports, so an
 older exact snapshot remains independently auditable and committable after a
 later re-observation. Changing compute files or inputs requires a new run.
-Materialized file exports are interned under the run's `objects/sha256/`
-store; unchanged large fields are hard-linked to the same immutable object,
-with copy/reflink fallback when hard links are unavailable.
+Legacy `pi-sim.toml` cases remain available through a read-only adapter while
+the bundled benchmarks migrate; the adapter does not create a second runtime protocol.
 
 Neither simulate nor observe creates Evidence. Commit verifies the exact run,
 observation, runtime identity, declared inputs, current case obligation, and
@@ -212,9 +217,11 @@ The schema-2 runtime registry declares four exact environments:
 
 Bootstrap them inside native Linux or WSL with
 `scripts/bootstrap-openfoam14.sh`, `scripts/bootstrap-su2-8.5.0.sh`, and
-`scripts/bootstrap-torch-fem-runtimes.sh`. A Windows Node host always launches
-Linux through WSL; it never runs Recipe Python on Windows. Entrypoints and
-observers use `uv run --offline --frozen` in the selected immutable runtime.
+`scripts/bootstrap-torch-fem-runtimes.sh`. Under WSL, Pi-CAD, Node, `uv`,
+Recipe entrypoints, and observers all run inside the same Linux distribution;
+Windows-host Node and cross-host process/path translation are unsupported.
+Entrypoints and observers use `uv run --offline --frozen` in the selected
+immutable runtime.
 
 Formal runs use bubblewrap, a user systemd scope, no network, read-only
 runtime mounts, bounded CPU/RAM/PIDs/wall time, and a workspace quota. Runtime
@@ -358,8 +365,7 @@ provenance; engineering judgment remains outside Core.
 
 | Variable | Effect |
 | --- | --- |
-| `PI_CAD_UV` | Override the `uv` executable on native Linux |
-| `PI_CAD_WSL_DISTRO` | WSL distribution used by a Windows Node host (default `Ubuntu`) |
+| `PI_CAD_UV` | Override the Linux `uv` executable |
 | `PI_CAD_ENABLE_DEV_RUNTIMES` | Advertise development-only runtimes such as explicit torch-fem CPU (`1`) |
 | `CUDA_VISIBLE_DEVICES` | Select the CUDA device exposed to the managed runtime |
 | `PI_CAD_BLENDER_BIN` | Use an external Blender binary for presentation |
@@ -373,9 +379,10 @@ capability honestly. When no Blender is available, the presentation renderer
 returns an explicit `unavailable` — an honest evidence state, never a
 substitute render.
 
-Runtime capability checks (the "doctor" report) are a **live probe** of the
-Python that would actually be used, honored once per session — not a stale
-install-time snapshot.
+Runtime qualification is performed outside the prompt path and persisted as
+a registry-hash-bound availability record. The prompt path only reads that
+bounded record (`ready` or `unknown`); `PI_CAD_REQUALIFY_RUNTIME=1` explicitly
+forces a fresh qualification at execution time.
 
 ## Tests & CI
 
@@ -383,7 +390,7 @@ install-time snapshot.
 npm test          # or: bash scripts/test.sh
 ```
 
-TypeScript protocol/harness tests and WSL/Linux `uv run` Python tests cover
+TypeScript protocol/harness tests and Linux `uv run` Python tests cover
 strict manifests and paths, Observation materialization, explicit commit,
 runtime limits, CUDA fail-closed behavior, structural refinement/balance and
 sensitivity, SU2 analytic conduction and flow conservation, and OpenFOAM

@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 root = Path(__file__).resolve().parent
-observation_file = Path(os.environ["PI_SIM_OBSERVATION_FILE"]).resolve()
+observation_file = Path(os.environ.get("PI_RECIPE_OBSERVATION_FILE") or os.environ["PI_SIM_OBSERVATION_FILE"]).resolve()
 observation_root = observation_file.parent
 result = json.loads((root / "result.json").read_text(encoding="utf-8"))
 

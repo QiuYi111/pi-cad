@@ -1,0 +1,22 @@
+schema: 1
+id: presentation/cadctl-v1
+version: 1.0.0
+kind: presentation
+runtimeProfile: pi-cad/cadctl-0.9
+inputs:
+  - {path: inputs/design.step, role: authoritative-design, type: file}
+  - {path: inputs/presentation-references, role: visual-references, type: directory}
+actions:
+  validate: {argv: [/opt/pi-cad/python/.venv/bin/python, run.py], files: [run.py, spec.json], timeoutSeconds: 180}
+  preview: {argv: [/opt/pi-cad/python/.venv/bin/python, run.py], files: [run.py, spec.json], timeoutSeconds: 900}
+  generate: {argv: [/opt/pi-cad/python/.venv/bin/python, run.py], files: [run.py, spec.json], timeoutSeconds: 1800}
+  run: {argv: [/opt/pi-cad/python/.venv/bin/python, run.py], files: [run.py, spec.json], timeoutSeconds: 7200}
+observer: {argv: [/usr/bin/python3, observer.py], files: [observer.py], timeoutSeconds: 60}
+exports:
+  result: {type: artifact, primary: true}
+  hero: {type: image, primary: false}
+  exploded: {type: image, primary: false}
+  manifest: {type: artifact, primary: false}
+  turntable: {type: artifact, primary: false}
+  assembly: {type: artifact, primary: false}
+resources: {cpu: 8, memoryGiB: 16, workspaceGiB: 16}

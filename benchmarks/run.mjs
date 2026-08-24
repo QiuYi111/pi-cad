@@ -21,19 +21,9 @@ const TIMEOUT_MS = Number(process.env.PI_CAD_TIMEOUT_MS ?? 600_000);
 const RETRIES = Number(process.env.PI_CAD_RETRIES ?? 1);
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR ?? join(REPO, ".pi-agent");
 
-function toWslPath(path) {
-  const unc = path.match(/^\\\\wsl(?:\.localhost)?\\([^\\]+)\\(.*)$/i);
-  if (unc) return `/${unc[2].replaceAll("\\", "/")}`;
-  const drive = path.match(/^([A-Za-z]):[\\/](.*)$/);
-  if (drive?.[1].toUpperCase() === "V") return `/${drive[2].replaceAll("\\", "/")}`;
-  return execFileSync("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", "wslpath", "-a", path.replaceAll("\\", "/")], { encoding: "utf-8", cwd: process.env.SystemRoot ?? "C:\\Windows" }).trim();
-}
+if (process.platform !== "linux") throw new Error("Pi-CAD benchmarks must run inside Linux or WSL");
 
 function cadctl(args, workdir) {
-  if (process.platform === "win32") {
-    execFileSync("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", "uv", "run", "--project", toWslPath(join(REPO, "python")), "python", "-m", "cadctl", ...args.map((arg) => /^[A-Za-z]:[\\/]|^\\\\wsl/i.test(arg) ? toWslPath(arg) : arg)], { cwd: process.env.SystemRoot ?? "C:\\Windows", stdio: "pipe" });
-    return;
-  }
   execFileSync(process.env.PI_CAD_UV ?? "uv", ["run", "--project", join(REPO, "python"), "python", "-m", "cadctl", ...args], { cwd: workdir, stdio: "pipe" });
 }
 

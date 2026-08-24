@@ -2,7 +2,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# The Node entrypoint delegates all Python environment work to uv. On a
-# Windows host it launches uv inside WSL and never creates a Windows venv for
-# a WSL-backed checkout.
+# The Node entrypoint and uv both run in the same Linux environment. WSL is
+# supported only when this script is invoked from inside the distribution.
 node scripts/postinstall.mjs

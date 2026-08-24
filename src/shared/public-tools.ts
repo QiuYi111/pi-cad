@@ -8,6 +8,7 @@
  */
 export const ACTIVE_PUBLIC_TOOLS = {
   control: [
+    "cad_start",
     "cad_route",
     "cad_reroute",
     "cad_commit_requirements",

@@ -1,0 +1,1 @@
+{"mode":"topology_2d_rect_v0","device":"cpu","designDomain":{"x":[0,1],"y":[0,0.5],"nx":80,"ny":40},"material":{"E":1.0,"nu":0.3},"objective":{"type":"compliance","sense":"minimize"},"constraints":[{"type":"volume_fraction","max":0.4}],"optimizer":{"type":"mma","maxIterations":100}}

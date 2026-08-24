@@ -63,6 +63,22 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+const migrationPromises = new Map<string, Promise<boolean>>();
+
+/** Run legacy/schema maintenance at most once per cwd/schema in this process. */
+export async function migrateProjectOnce(store: CadProjectStore): Promise<boolean> {
+  const key = `${store.cwd}\0${CAD_STATE_SCHEMA_VERSION}`;
+  let pending = migrationPromises.get(key);
+  if (!pending) {
+    pending = store.migrate().catch((error) => {
+      migrationPromises.delete(key);
+      throw error;
+    });
+    migrationPromises.set(key, pending);
+  }
+  return pending;
+}
+
 export function makeEvidenceId(
   kind: EvidenceRef["kind"],
   artifactHash: string,
@@ -283,7 +299,10 @@ export class CadProjectStore {
   }
 
   async currentRunId(): Promise<string | null> {
-    const project = await this.ensureProject();
+    // Reads must stay side-effect free: before_agent_start calls load() on
+    // every prompt, including in directories that have never used Pi-CAD.
+    const project = await this.loadProject();
+    if (!project) return null;
     return project.currentRunId;
   }
 

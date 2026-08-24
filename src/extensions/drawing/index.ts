@@ -1,10 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
 import { drawingCommand } from "../../shared/capability.ts";
 import { writeRunSpec } from "../../shared/run-spec.ts";
+import { selectKernelEngine } from "../../harness/engine-router.ts";
+import { executeMechanicalRecipeV7 } from "../../domains/mechanical/recipe-actions-v7.ts";
 
 const ViewName = Type.Enum({
   iso: "iso",
@@ -16,8 +19,12 @@ const ViewName = Type.Enum({
   bottom: "bottom",
 });
 
+function legacyInspectableUnion(recipe: any, legacy: any): any {
+  return { ...Type.Union([recipe, legacy]), properties: legacy.properties };
+}
+
 export default function cadDrawingExtension(pi: ExtensionAPI) {
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_generate_drawing",
     label: "CAD Generate Drawing",
     description:
@@ -28,8 +35,9 @@ export default function cadDrawingExtension(pi: ExtensionAPI) {
       "A projection without complete manufacturing definition is not a release drawing.",
       "Treat generated files as execution evidence, not automatic drawing completeness.",
     ],
-    parameters: Type.Object(
-      {
+    parameters: legacyInspectableUnion(
+      Type.Object({ recipe: Type.String({ minLength: 1 }), obligationRef: Type.Optional(Type.String({ minLength: 1 })), stage: Type.Enum({ validate: "validate", generate: "generate" }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))) }, { additionalProperties: false }),
+      Type.Object({
         stage: Type.Enum({ validate: "validate", generate: "generate" }),
         artifact: Type.String({ description: "STEP artifact the drawing documents" }),
         units: Type.Optional(Type.Literal("mm")),
@@ -74,10 +82,17 @@ export default function cadDrawingExtension(pi: ExtensionAPI) {
           ),
         ),
         notes: Type.Optional(Type.Array(Type.String())),
-      },
-      { additionalProperties: false },
+      }, { additionalProperties: false }),
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_generate_drawing v7 requires {recipe, stage}" }] };
+        try {
+          const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "drawing", recipe: params.recipe, action: params.stage, ...(params.obligationRef ? { obligationRef: params.obligationRef } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
+          return { content: [{ type: "text", text: `Drawing Recipe ${result.record.runId} stage=${params.stage} committed; exports=${result.observation.exports.map((item) => item.name).join(",")}.` }], details: { recipeRunId: result.record.runId, observationId: result.observation.observationId, kind: "drawing" as const } };
+        } catch (error) { return { content: [{ type: "text", text: `cad_generate_drawing failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+      }
+      if ("recipe" in params) return { content: [{ type: "text", text: "cad_generate_drawing v6 requires a structured drawing specification" }] };
       if (!existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`drawing artifact does not exist: ${params.artifact}`);
       }

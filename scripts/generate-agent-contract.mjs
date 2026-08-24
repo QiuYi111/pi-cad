@@ -8,9 +8,11 @@ const checking = process.argv.includes("--check");
 const jiti = createJiti(import.meta.url, { moduleCache: false });
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const { buildAgentContract } = await jiti.import(join(root, "src/core/agent-contract.ts"), { default: true });
+const { buildRegistryContract } = await jiti.import(join(root, "src/harness/registry-contract.ts"), { default: true });
 const registeredSchemas = {};
+const registeredTools = {};
 const mockPi = {
-  registerTool(tool) { registeredSchemas[tool.name] = tool.parameters; },
+  registerTool(tool) { registeredSchemas[tool.name] = tool.parameters; registeredTools[tool.name] = tool; },
   registerCommand() {}, on() {}, setActiveTools() {}, getActiveTools() { return []; }, getAllTools() { return []; },
   appendEntry() {}, sendUserMessage() {}, setSessionName() {}, events: { emit() {}, on() {} },
 };
@@ -18,12 +20,16 @@ for (const extension of pkg.pi.extensions) {
   const register = await jiti.import(join(root, extension), { default: true });
   register(mockPi);
 }
+const { captureMechanicalAction, mechanicalRegistries } = await jiti.import(join(root, "src/domains/mechanical/register-action.ts"), { default: true });
+for (const tool of Object.values(registeredTools)) captureMechanicalAction(tool);
 const contract = buildAgentContract(registeredSchemas);
+const registryContract = buildRegistryContract(mechanicalRegistries);
 const unresolvedSchemas = contract.tools.filter((tool) => tool.inputSchema?.schemaSource).map((tool) => tool.name);
 if (unresolvedSchemas.length) throw new Error(`active tools missing registered schemas: ${unresolvedSchemas.join(", ")}`);
 
 const generated = new Map();
 generated.set("assets/agent-contract.json", `${JSON.stringify(contract, null, 2)}\n`);
+generated.set("assets/registry-contract.json", `${JSON.stringify(registryContract, null, 2)}\n`);
 generated.set("skills/pi-cad/references/generated/architecture.md", renderArchitecture(contract));
 generated.set("skills/pi-cad/references/generated/workflow.md", renderWorkflow(contract));
 generated.set("assets/cookbook-catalog.json", `${JSON.stringify(renderCookbookCatalog(contract), null, 2)}\n`);

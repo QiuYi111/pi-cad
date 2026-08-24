@@ -1,7 +1,15 @@
 import { createJiti } from "jiti";
 
+// Legacy behavior tests are explicit v6 compatibility gates. Individual v7
+// tests call the v7 services directly or override this variable.
+process.env.PI_CAD_KERNEL ??= "v6";
+
 const jiti = createJiti(import.meta.url, { moduleCache: false });
 await jiti.import("./state-machine.test.ts", { default: true });
+await jiti.import("./bounded-files.test.ts", { default: true });
+await jiti.import("./prompt-fast-path.test.ts", { default: true });
+await jiti.import("./process-runner.test.ts", { default: true });
+await jiti.import("./linux-runtime-boundary.test.ts", { default: true });
 await jiti.import("./requirements-revision.test.ts", { default: true });
 await jiti.import("./route-compiler.test.ts", { default: true });
 await jiti.import("./schema-migration.test.ts", { default: true });
@@ -9,6 +17,21 @@ await jiti.import("./interference-tool.test.ts", { default: true });
 await jiti.import("./reroute.test.ts", { default: true });
 await jiti.import("./analysis-model.test.ts", { default: true });
 await jiti.import("./extensions-smoke.test.ts", { default: true });
+await jiti.import("./registry-contract.test.ts", { default: true });
+await jiti.import("./workflow-v7.test.ts", { default: true });
+await jiti.import("./transaction-v7.test.ts", { default: true });
+await jiti.import("./context-v7.test.ts", { default: true });
+await jiti.import("./recipe-kernel.test.ts", { default: true });
+await jiti.import("./recipe-adapter.test.ts", { default: true });
+await jiti.import("./permissions-v7.test.ts", { default: true });
+await jiti.import("./mechanical-recipe-actions.test.ts", { default: true });
+await jiti.import("./recipe-templates.test.ts", { default: true });
+await jiti.import("./engine-router.test.ts", { default: true });
+await jiti.import("./v7-extension-routing.test.ts", { default: true });
+await jiti.import("./v7-walking-skeleton.test.ts", { default: true });
+await jiti.import("./review-v7.test.ts", { default: true });
+await jiti.import("./observations-v7.test.ts", { default: true });
+await jiti.import("./harness-boundary.test.ts", { default: true });
 await jiti.import("./harness-v0.test.ts", { default: true });
 await jiti.import("./restore.test.ts", { default: true });
 await jiti.import("./policy.test.ts", { default: true });

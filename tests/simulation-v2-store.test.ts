@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import { createIntakeState } from "../src/core/state-machine.ts";
 import { createObservationSnapshot, createSimulationRun, type SimulationCommandRunner } from "../src/modules/simulate-v2/store.ts";
+import { preflightSimulation } from "../src/modules/simulate-v2/preflight.ts";
 import { CadProjectStore, sha256File } from "../src/shared/store.ts";
 import { commitSimulation } from "../src/extensions/simulation/v2.ts";
 import { verifyEvidenceFilesForHash } from "../src/core/evidence.ts";
@@ -37,7 +38,7 @@ class StubRunner implements SimulationCommandRunner {
 
 const TOML = `schema = 1
 entrypoint = "./Allrun"
-observe = "uv run --project /opt/pi-cad-runtime/python python observe.py"
+observe = "uv run --offline --frozen --project /opt/pi-cad-runtime/python python observe.py"
 nonvisual = false
 inputs = ["../../build/domain.step", "../../build/materials.json"]
 observation_files = ["observe.py"]
@@ -64,12 +65,45 @@ async function fixture(): Promise<string> {
   await writeFile(join(cwd, "build", "materials.json"), "{\"material\":\"v1\"}");
   await writeFile(join(cwd, "simulation", "case", "pi-sim.toml"), TOML);
   await writeFile(join(cwd, "simulation", "case", "Allrun"), "compute-v1");
+  await chmod(join(cwd, "simulation", "case", "Allrun"), 0o755);
   await writeFile(join(cwd, "simulation", "case", "observe.py"), "observe-v1");
   const store = new CadProjectStore(cwd);
   const workflow = await store.createRun({ runId: "workflow-001" });
   await workflow.save(createIntakeState({ runId: "workflow-001", projectId: store.projectId }));
   return cwd;
 }
+
+test("simulation freezes the preflight-approved closure and rejects TOCTOU edits before compute", async () => {
+  const cwd = await fixture();
+  const runner = new StubRunner();
+  try {
+    const state = {
+      phase: "review",
+      mutationPolicy: "read_only",
+      route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "engineering" },
+    } as any;
+    const prepared = await preflightSimulation({
+      cwd,
+      state,
+      backend: "stub",
+      runtime: "stub-1",
+      recipePath: "simulation/case",
+      outputs: ["history"],
+      runner,
+    });
+    await writeFile(join(cwd, "build", "materials.json"), "{\"material\":\"changed-after-preflight\"}");
+    await assert.rejects(
+      createSimulationRun({ cwd, backend: "stub", runtime: "stub-1", recipePath: "simulation/case", outputs: ["history"], runner, prepared }),
+      /changed between preflight and freeze/,
+    );
+    assert.equal(runner.computeCalls, 0);
+    assert.equal(runner.observeCalls, 0);
+    const root = join(cwd, ".pi-cad", "runs", "workflow-001", "simulation");
+    assert.deepEqual(await readdir(root), [], "failed freeze must not expose a canonical or staging run");
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
+});
 
 test("simulate and re-observe create immutable snapshots without implicit Evidence", async () => {
   const cwd = await fixture();

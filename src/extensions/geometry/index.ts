@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
@@ -19,7 +20,7 @@ const outputParam = Type.String({
 });
 
 export default function cadGeometryExtension(pi: ExtensionAPI) {
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_build_step",
     label: "CAD Build STEP",
     description:
@@ -61,7 +62,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_export",
     label: "CAD Export",
     description:

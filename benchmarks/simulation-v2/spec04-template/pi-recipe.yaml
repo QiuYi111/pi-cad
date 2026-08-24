@@ -1,0 +1,21 @@
+schema: 1
+id: simulation/spec04-template
+version: 1.0.0
+kind: simulation
+runtimeProfile: openfoam/openfoam-14
+inputs:
+  - {path: benchmarks/simulation-v2/spec04-template/.ignored-benchmark-inputs, role: benchmark-inputs, type: directory}
+actions:
+  run:
+    argv: [/bin/bash, Allrun]
+    files: [Allrun, aggregate_results.py, case_driver.py, orchestrate.py, prepare_inputs.py, input-schemas]
+    timeoutSeconds: 43200
+observer: {argv: [/bin/bash, -lc, 'uv run --offline --frozen --project "$PI_CAD_PYTHON_PROJECT" python observe.py'], files: [observe.py, report-schemas], timeoutSeconds: 3600}
+exports:
+  phase_distribution: {type: image, primary: true}
+  post_plug_trapped_gas: {type: scalar, primary: true, unit: mm3}
+  pressure_history: {type: timeseries, primary: true}
+  release_report: {type: artifact, primary: true}
+  robustness: {type: table, primary: false}
+  convergence: {type: table, primary: false}
+resources: {cpu: 8, memoryGiB: 24, workspaceGiB: 100}

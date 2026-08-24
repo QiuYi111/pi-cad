@@ -1,4 +1,5 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerKernelActionTool, registerMechanicalActionTool } from "../domains/mechanical/register-action.ts";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -14,7 +15,7 @@ import {
   isRoute,
   routeKey,
 } from "../shared/protocol.ts";
-import { CadProjectStore, hashRecord, nowIso, sha256File } from "../shared/store.ts";
+import { CadProjectStore, hashRecord, migrateProjectOnce, nowIso, sha256File } from "../shared/store.ts";
 import { workflowSpec } from "./state-machine.ts";
 import {
   commitPhaseRecord,
@@ -48,6 +49,23 @@ import {
   isHeadless,
   isTerminalStatus,
 } from "./interaction-mode.ts";
+import { selectKernelEngine } from "../harness/engine-router.ts";
+import { CadStartParamsSchema, cadStart } from "../harness/kernel.ts";
+import { cadRerouteV7, cadRouteV7 } from "../domains/mechanical/actions-v7.ts";
+import { mechanicalBuiltinWorkflows } from "../domains/mechanical/workflows.ts";
+import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
+import {
+  blockMechanicalRunV7,
+  commitMechanicalRecordV7,
+  deferMechanicalClarificationV7,
+  finishMechanicalRunV7,
+  transitionMechanicalRunV7,
+  waitMechanicalRunV7,
+} from "../domains/mechanical/control-actions-v7.ts";
+import { commitMechanicalCandidateV7 } from "../domains/mechanical/candidate-actions-v7.ts";
+import { runFreshReviewV7 } from "../harness/review.ts";
+import { mechanicalReviewProfile } from "../domains/mechanical/review-profile.ts";
+import { mechanicalReviewExecutorV7 } from "../domains/mechanical/review-executor-v7.ts";
 
 /** Route a failed closure review through the process's existing editable regression edge. */
 function regressFinalReview(state: CadRunState, note: string) {
@@ -425,7 +443,22 @@ const InterfaceContractsRecordSchema = Type.Object(
 );
 
 export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): void {
-  pi.registerTool({
+  registerKernelActionTool(pi, {
+    name: "cad_start",
+    label: "Pi-CAD Start v7 Workflow",
+    description: "Start the project-selected immutable v7 workflow. Mechanical tasks normally use cad_route, which starts the intake workflow automatically.",
+    promptSnippet: "Start the selected generic v7 workflow explicitly",
+    promptGuidelines: ["Use for a project-selected custom workflow; Mechanical routing can begin directly with cad_route."],
+    parameters: CadStartParamsSchema,
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      try {
+        const loaded = await cadStart({ cwd: ctx.cwd, registries: mechanicalRegistries, builtins: mechanicalBuiltinWorkflows(), reason: params.reason, interactionMode: params.interactionMode ?? interactionModeFromEnvironment() });
+        return okTool(`Started v7 workflow ${loaded.workflow.id}@${loaded.workflow.version}; phase=${loaded.state.phase}.`, { state: loaded.state, workflow: loaded.workflow });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+    },
+  });
+
+  registerMechanicalActionTool(pi, {
     name: "cad_route",
     label: "Pi-CAD Route",
     description:
@@ -442,13 +475,22 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     ],
     parameters: RouteParamsSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new CadProjectStore(ctx.cwd);
-      await store.migrate();
-      const project = await store.ensureProject();
-      let state = await store.load();
       const nextRoute: Route = buildRoute(params);
       if (typeof nextRoute === "string") return errTool(nextRoute);
       if (!isRoute(nextRoute)) return errTool("invalid route");
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        const project = new (await import("../harness/run-store.ts")).HarnessProjectStoreV7(ctx.cwd);
+        const activeV7 = await project.currentRun(mechanicalRegistries);
+        if (!activeV7 || ["done", "aborted", "blocked_external", "budget_exhausted"].includes(activeV7.state.status)) {
+          await cadStart({ cwd: ctx.cwd, registries: mechanicalRegistries, builtins: mechanicalBuiltinWorkflows(), reason: params.reason, interactionMode: interactionModeFromEnvironment() });
+        }
+        const loaded = await cadRouteV7({ cwd: ctx.cwd, route: nextRoute, reason: params.reason });
+        return okTool(`Routed v7 workflow to ${routeKey(nextRoute)}.`, { state: loaded.state, workflow: loaded.workflow });
+      }
+      const store = new CadProjectStore(ctx.cwd);
+      await migrateProjectOnce(store);
+      const project = await store.ensureProject();
+      let state = await store.load();
       if (!state) {
         const existingRunId = await store.currentRunId();
         const run = existingRunId
@@ -492,7 +534,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_reroute",
     label: "Pi-CAD Reroute",
     description:
@@ -524,12 +566,20 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       { additionalProperties: false },
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const nextRoute = buildRoute(params);
       if (typeof nextRoute === "string") return errTool(nextRoute);
       if (!isRoute(nextRoute)) return errTool("invalid route");
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await cadRerouteV7({ cwd: ctx.cwd, route: nextRoute, reason: params.reason });
+          return okTool(`Rerouted v7 workflow to ${routeKey(nextRoute)}.`, { state: loaded.state, workflow: loaded.workflow });
+        } catch (error) {
+          return errTool(error instanceof Error ? error.message : String(error));
+        }
+      }
+      const store = new CadProjectStore(ctx.cwd);
+      const state = await guardState(store);
+      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
       const result = reroute(state, nextRoute, params.reason, params.authorityToken);
       if (!result.ok) {
         if (result.requiresAuthority) {
@@ -623,7 +673,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_commit_requirements",
     label: "Pi-CAD Commit Requirements",
     description:
@@ -658,6 +708,14 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       evidenceObligations: Type.Optional(EvidenceObligationsSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        const inputFailure = validateInputDeclarations(params as unknown as CadRequirements, ctx.cwd);
+        if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
+        try {
+          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "requirements", value: params });
+          return okTool(`Requirements committed to v7 (${loaded.state.records["record:requirements"]?.sha256.slice(0, 12)}). Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -705,7 +763,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_revise_requirements",
     label: "Pi-CAD Revise Requirements",
     description:
@@ -742,6 +800,15 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       }, { additionalProperties: false }),
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        const { reason, routeAssessment, ...record } = params;
+        const inputFailure = validateInputDeclarations(record as unknown as CadRequirements, ctx.cwd);
+        if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
+        try {
+          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "requirements", value: record, revise: true, advance: false });
+          return okTool(`Requirements revised in v7 (${reason}); dependent records/evidence were invalidated. Route assessment: ${routeAssessment.outcome}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow with committed requirements.");
@@ -827,7 +894,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
   });
 
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_commit_plan",
     label: "Pi-CAD Commit Plan",
     description:
@@ -862,6 +929,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "plan", value: params });
+          return okTool(`Plan committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -877,7 +950,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_commit_frame_context",
     label: "Pi-CAD Commit Frame Context",
     description:
@@ -929,6 +1002,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       { additionalProperties: false },
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "frame_context", value: params });
+          return okTool(`Frame context committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -980,7 +1059,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_commit_assembly_design",
     label: "Pi-CAD Commit Assembly Design",
     description:
@@ -992,6 +1071,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     ],
     parameters: AssemblyDesignRecordSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "assembly_design", value: params });
+          return okTool(`Assembly design committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1006,7 +1091,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_commit_interface_contracts",
     label: "Pi-CAD Commit Interface Contracts",
     description:
@@ -1018,6 +1103,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     ],
     parameters: InterfaceContractsRecordSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "interface_contracts", value: params });
+          return okTool(`Interface contracts committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1032,7 +1123,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_commit_candidate",
     label: "Pi-CAD Commit Candidate",
     description:
@@ -1050,6 +1141,15 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const result = await commitMechanicalCandidateV7({ cwd: ctx.cwd, sources: params.sources, label: params.label, ...(params.format ? { format: params.format } : {}), ...(params.output ? { output: params.output } : {}) });
+          return {
+            content: [{ type: "text", text: `Candidate ${params.label} committed to v7; artifactHash=${result.proposal.artifactHash.slice(0, 12)}; phase=${result.loaded.state.phase}${result.pending.length ? `; remaining obligations=${result.pending.join(",")}` : ""}.` }, ...result.images],
+            details: { state: result.loaded.state, proposal: result.proposal },
+          };
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1090,7 +1190,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_submit_for_review",
     label: "Pi-CAD Submit for Independent Review",
     description:
@@ -1106,6 +1206,19 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       { additionalProperties: false },
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        if (!finalReviewerEnabled()) return errTool("cad_submit_for_review is disabled by PI_CAD_FINAL_REVIEWER=0");
+        try {
+          const active = await new (await import("../harness/run-store.ts")).HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+          if (!active) return errTool("No active v7 workflow.");
+          const profileId = active.workflow.phases[active.state.phase]!.reviewProfile;
+          if (profileId !== "mechanical.design-review" && profileId !== "mechanical.final-review") return errTool(`cad_submit_for_review is not enabled for phase ${active.state.phase}`);
+          const reviewed = await runFreshReviewV7({ cwd: ctx.cwd, workflowRunId: active.state.runId, registries: mechanicalRegistries, profile: mechanicalReviewProfile(profileId), executor: mechanicalReviewExecutorV7(ctx) });
+          if (reviewed.state.latestReview?.verdict !== "pass") return errTool(`Independent v7 review ${reviewed.state.latestReview?.verdict ?? "unresolved"}; phase remains ${reviewed.state.phase}.`, { state: reviewed.state, review: reviewed.state.latestReview });
+          const advanced = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: "accepted", note: params.summary ?? "fresh independent review PASS" });
+          return okTool(`Independent v7 review PASS. Phase is now ${advanced.state.phase.toUpperCase()}.`, { state: advanced.state, review: reviewed.state.latestReview });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1299,7 +1412,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_transition",
     label: "Pi-CAD Transition",
     description:
@@ -1315,6 +1428,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       note: Type.String(),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: params.event, note: params.note });
+          return okTool(`Transition ${params.event} accepted by v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1411,7 +1530,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_wait_for_user",
     label: "Pi-CAD Wait for User",
     description:
@@ -1425,6 +1544,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     ],
     parameters: Type.Object({ reason: Type.String() }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await waitMechanicalRunV7({ cwd: ctx.cwd, reason: params.reason });
+          return okTool(`v7 workflow paused in ${loaded.state.phase}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1443,7 +1568,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_defer_clarification",
     label: "Pi-CAD Record Headless Clarification",
     description:
@@ -1463,6 +1588,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       affectsContract: Type.Boolean(),
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await deferMechanicalClarificationV7({ cwd: ctx.cwd, ...params });
+          return okTool(`Headless clarification recorded in v7; continue in ${loaded.state.phase.toUpperCase()} using the fallback.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1478,7 +1609,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_declare_blocker",
     label: "Pi-CAD Declare Headless Blocker",
     description:
@@ -1495,6 +1626,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       needed: Type.String({ minLength: 1 }),
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await blockMechanicalRunV7({ cwd: ctx.cwd, status: params.type === "user_authority" ? "blocked_user" : "blocked_external", type: params.type, reason: params.reason, needed: params.needed });
+          return okTool(`v7 workflow blocked as ${loaded.state.status.toUpperCase()}: ${params.reason}`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
@@ -1508,7 +1645,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_finish",
     label: "Pi-CAD Finish",
     description:
@@ -1517,6 +1654,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptGuidelines: ["Only call after cad_submit_for_review has produced READY (analyze routes keep their existing findings-delivered closure)."],
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await finishMechanicalRunV7({ cwd: ctx.cwd });
+          return okTool(`v7 workflow finished. Status is ${loaded.state.status.toUpperCase()}.`, { state: loaded.state });
+        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
       if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");

@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
-import { lstat, mkdir, readFile, readdir } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { RuntimeIdentity, SimulationCommandResult, SimulationCommandRunner } from "./store.ts";
+import { assertLinuxRuntime } from "../../shared/platform.ts";
+import { runProcess } from "../../shared/process-runner.ts";
 
 interface RuntimeRegistrationBase {
   backend: string;
@@ -125,6 +125,73 @@ async function runtimeRegistration(backend: string, runtime: string): Promise<Ru
   return found;
 }
 
+interface RuntimeAvailabilityManifest {
+  schema: 1;
+  status: "ready";
+  backend: string;
+  runtime: string;
+  registryHash: string;
+  qualifiedAt: string;
+  identity: RuntimeIdentity;
+}
+
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
+}
+
+function registrationHash(registration: RuntimeRegistration): string {
+  return createHash("sha256").update(canonical(registration)).digest("hex");
+}
+
+function availabilityPath(cwd: string, backend: string, runtime: string): string {
+  const name = createHash("sha256").update(`${backend}\0${runtime}`).digest("hex");
+  return resolve(cwd, ".pi-cad", "cache", "runtimes", `${name}.json`);
+}
+
+export async function readRuntimeAvailability(
+  cwd: string,
+  backend: string,
+  runtime: string,
+): Promise<RuntimeAvailabilityManifest | null> {
+  const registration = await runtimeRegistration(backend, runtime);
+  try {
+    const parsed = JSON.parse(await readFile(availabilityPath(cwd, backend, runtime), "utf-8")) as RuntimeAvailabilityManifest;
+    if (
+      parsed.schema !== 1 || parsed.status !== "ready" || parsed.backend !== backend || parsed.runtime !== runtime
+      || parsed.registryHash !== registrationHash(registration)
+      || parsed.identity.backend !== backend || parsed.identity.runtime !== runtime
+      || !/^[a-f0-9]{64}$/.test(parsed.identity.digest)
+    ) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeRuntimeAvailability(
+  cwd: string,
+  registration: RuntimeRegistration,
+  identity: RuntimeIdentity,
+): Promise<void> {
+  const path = availabilityPath(cwd, registration.backend, registration.runtime);
+  await mkdir(dirname(path), { recursive: true });
+  const manifest: RuntimeAvailabilityManifest = {
+    schema: 1,
+    status: "ready",
+    backend: registration.backend,
+    runtime: registration.runtime,
+    registryHash: registrationHash(registration),
+    qualifiedAt: new Date().toISOString(),
+    identity,
+  };
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, "utf-8");
+  await rename(temporary, path);
+}
+
 export async function simulationRuntimeProjection(): Promise<Array<{
   backend: string;
   runtime: string;
@@ -138,32 +205,27 @@ export async function simulationRuntimeProjection(): Promise<Array<{
   return (await registrations).map(({ backend, runtime, kind, developmentOnly, limits, agentCapabilities }) => ({ backend, runtime, kind, limits, agentCapabilities, ...(developmentOnly ? { developmentOnly } : {}) }));
 }
 
-function commandOutput(command: string, args: string[], cwd: string): Promise<string> {
-  return new Promise((resolvePromise, reject) => {
-    const safeCwd = process.platform === "win32" && command.toLowerCase().includes("wsl") ? (process.env.SystemRoot ?? "C:\\Windows") : cwd;
-    const env = process.platform === "win32" && command.toLowerCase().includes("wsl")
-      ? Object.fromEntries(Object.entries(process.env).map(([key, value]) => key.toLowerCase() === "path" ? [key, (value ?? "").split(";").filter((entry) => !/^V:[\\/]/i.test(entry) && !/^\\\\wsl(?:\.localhost)?\\/i.test(entry)).join(";")] : [key, value]))
-      : process.env;
-    const child = spawn(command, args, { cwd: safeCwd, env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-    const stdout: Buffer[] = []; const stderr: Buffer[] = [];
-    child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
-    child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on("error", reject);
-    child.on("close", (code) => code === 0 ? resolvePromise(Buffer.concat(stdout).toString("utf-8").trim()) : reject(new Error(Buffer.concat(stderr).toString("utf-8").trim() || `${command} exited ${code}`)));
+async function commandOutput(command: string, args: string[], cwd: string): Promise<string> {
+  assertLinuxRuntime("Pi-CAD managed runtime");
+  const result = await runProcess({
+    command,
+    args,
+    cwd,
+    env: process.env,
+    timeoutMs: 30_000,
+    maxStdoutBytes: 1024 * 1024,
+    maxStderrBytes: 256 * 1024,
   });
+  if (result.exitCode !== 0 || result.terminationReason !== "exit") {
+    throw new Error(result.stderr.trim() || `${command} exited ${result.exitCode}`);
+  }
+  return result.stdout.trim();
 }
 
 async function linuxPath(path: string, cwd: string): Promise<string> {
-  if (process.platform !== "win32") return path;
-  const unc = path.match(/^\\\\wsl(?:\.localhost)?\\([^\\]+)\\(.*)$/i);
-  if (unc?.[1] === (process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu")) return `/${unc[2].replaceAll("\\", "/")}`;
-  const drive = path.match(/^([A-Za-z]):[\\/](.*)$/);
-  if (drive) {
-    const displayRoot = await commandOutput("powershell.exe", ["-NoProfile", "-Command", `(Get-PSDrive -Name '${drive[1]}').DisplayRoot`], process.env.SystemRoot ?? "C:\\Windows").catch(() => "");
-    const match = displayRoot.match(/^\\\\wsl(?:\.localhost)?\\([^\\]+)$/i);
-    if (match?.[1] === (process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu")) return `/${drive[2].replaceAll("\\", "/")}`;
-  }
-  return commandOutput("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", "wslpath", "-a", path.replaceAll("\\", "/")], cwd);
+  void cwd;
+  assertLinuxRuntime("Pi-CAD managed runtime");
+  return path;
 }
 
 export function boundedFailure(stderr: string, stdout: string): string[] {
@@ -197,65 +259,63 @@ export async function spawnLogged(input: {
   stderrPath: string;
   timeoutMs: number;
   env?: NodeJS.ProcessEnv;
+  signal?: AbortSignal;
   workspaceLimit?: { path: string; maxBytes: number };
   quotaPollMs?: number;
 }): Promise<SimulationCommandResult> {
-  await mkdir(dirname(input.stdoutPath), { recursive: true });
-  const stdoutFile = createWriteStream(input.stdoutPath);
-  const stderrFile = createWriteStream(input.stderrPath);
-  const capturedOut: Buffer[] = []; const capturedErr: Buffer[] = [];
-  const capture = (target: Buffer[], chunk: Buffer) => {
-    target.push(Buffer.from(chunk));
-    let total = target.reduce((sum, item) => sum + item.length, 0);
-    while (total > 1024 * 1024 && target.length > 1) total -= target.shift()!.length;
+  const treeSize = async (path: string): Promise<number> => {
+    const info = await lstat(path);
+    if (!info.isDirectory()) return info.size;
+    let total = 0;
+    for (const name of await readdir(path)) total += await treeSize(resolve(path, name));
+    return total;
   };
-  const started = Date.now();
-  return new Promise((resolvePromise, reject) => {
-    const child = spawn(input.command, input.args, { cwd: input.cwd, env: input.env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-    let timedOut = false;
-    let quotaExceeded = false;
-    let quotaCheckRunning = false;
-    const treeSize = async (path: string): Promise<number> => {
-      const info = await lstat(path);
-      if (!info.isDirectory()) return info.size;
-      let total = 0;
-      for (const name of await readdir(path)) total += await treeSize(resolve(path, name));
-      return total;
-    };
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, input.timeoutMs);
-    const quotaTimer = input.workspaceLimit ? setInterval(async () => {
-      if (quotaCheckRunning) return;
-      quotaCheckRunning = true;
-      try {
-        if (await treeSize(input.workspaceLimit!.path) > input.workspaceLimit!.maxBytes) {
-          quotaExceeded = true;
-          child.kill("SIGKILL");
+  const result = await runProcess({
+    command: input.command,
+    args: input.args,
+    cwd: input.cwd,
+    env: input.env,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+    stdoutPath: input.stdoutPath,
+    stderrPath: input.stderrPath,
+    maxStdoutBytes: 1024 * 1024,
+    maxStderrBytes: 1024 * 1024,
+    poll: input.workspaceLimit ? {
+      intervalMs: input.quotaPollMs ?? 5000,
+      check: async () => {
+        try {
+          return await treeSize(input.workspaceLimit!.path) > input.workspaceLimit!.maxBytes
+            ? "workspace quota exceeded"
+            : null;
+        } catch {
+          // Solvers commonly rename files while a traversal is in progress.
+          // A transient miss is rechecked on the next bounded interval.
+          return null;
         }
-      } catch {
-        // A concurrent solver rename can make a traversal transiently stale;
-        // the next bounded interval rechecks the complete tree.
-      } finally {
-        quotaCheckRunning = false;
-      }
-    }, input.quotaPollMs ?? 5000) : undefined;
-    child.stdout.on("data", (chunk) => { stdoutFile.write(chunk); capture(capturedOut, chunk); });
-    child.stderr.on("data", (chunk) => { stderrFile.write(chunk); capture(capturedErr, chunk); });
-    child.on("error", (error) => { clearTimeout(timer); if (quotaTimer) clearInterval(quotaTimer); stdoutFile.end(); stderrFile.end(); reject(error); });
-    child.on("close", (code) => {
-      clearTimeout(timer); if (quotaTimer) clearInterval(quotaTimer); stdoutFile.end(); stderrFile.end();
-      const stdout = Buffer.concat(capturedOut).toString("utf-8");
-      const stderr = Buffer.concat(capturedErr).toString("utf-8");
-      const classified = classifyResourceFailure(stderr, stdout);
-      const failure = quotaExceeded
-        ? `workspace quota exceeded\n${stderr}`
-        : timedOut
-          ? `timeout after ${input.timeoutMs}ms\n${stderr}`
-          : classified
-            ? `${classified}\n${stderr}`
-            : stderr;
-      resolvePromise({ exitCode: quotaExceeded ? 122 : timedOut ? 124 : code ?? 1, durationMs: Date.now() - started, stdout: stdout.slice(-8192), stderr: stderr.slice(-8192), diagnostics: boundedFailure(failure, stdout) });
-    });
+      },
+    } : undefined,
   });
+  const classified = classifyResourceFailure(result.stderr, result.stdout);
+  const failure = result.terminationReason === "poll"
+    ? `${result.terminationDetail ?? "workspace quota exceeded"}\n${result.stderr}`
+    : result.terminationReason === "timeout"
+      ? `timeout after ${input.timeoutMs}ms\n${result.stderr}`
+      : result.terminationReason === "aborted"
+        ? `aborted\n${result.stderr}`
+        : classified
+          ? `${classified}\n${result.stderr}`
+          : result.stderr;
+  return {
+    exitCode: result.terminationReason === "poll" ? 122
+      : result.terminationReason === "timeout" ? 124
+        : result.terminationReason === "aborted" ? 130
+          : result.exitCode,
+    durationMs: result.durationMs,
+    stdout: result.stdout.slice(-8192),
+    stderr: result.stderr.slice(-8192),
+    diagnostics: boundedFailure(failure, result.stdout),
+  };
 }
 
 export class LocalSimulationRunner implements SimulationCommandRunner {
@@ -264,25 +324,54 @@ export class LocalSimulationRunner implements SimulationCommandRunner {
   }
 
   async execute(input: Parameters<SimulationCommandRunner["execute"]>[0]): Promise<SimulationCommandResult> {
+    assertLinuxRuntime("Pi-CAD local simulation runtime");
     const env = { ...process.env, ...input.environment };
     await mkdir(dirname(input.stdoutPath), { recursive: true });
-    const command = process.platform === "win32" ? "bash.exe" : "/bin/bash";
-    return spawnLogged({ command, args: ["-lc", input.command], cwd: input.recipeDirectory, stdoutPath: input.stdoutPath, stderrPath: input.stderrPath, timeoutMs: input.timeoutMs, env });
+    return spawnLogged({ command: "/bin/bash", args: ["-lc", input.command], cwd: input.recipeDirectory, stdoutPath: input.stdoutPath, stderrPath: input.stderrPath, timeoutMs: input.timeoutMs, env });
   }
 }
 
 export class ManagedSimulationRunner implements SimulationCommandRunner {
   private readonly identities = new Map<string, RuntimeIdentity>();
+  private readonly qualifications = new Map<string, Promise<RuntimeIdentity>>();
 
   async resolveRuntime(cwd: string, backend: string, runtime: string): Promise<RuntimeIdentity> {
+    assertLinuxRuntime("Pi-CAD managed simulation runtime");
     const registration = await runtimeRegistration(backend, runtime);
     const key = `${backend}/${runtime}`;
     const cached = this.identities.get(key);
-    if (cached) return cached;
-    const distro = process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu";
-    const linux = (command: string, args: string[]) => process.platform === "win32"
-      ? commandOutput("wsl.exe", ["-d", distro, "--", command, ...args], cwd)
-      : commandOutput(command, args, cwd);
+    if (cached) {
+      await writeRuntimeAvailability(cwd, registration, cached);
+      return cached;
+    }
+    if (process.env.PI_CAD_REQUALIFY_RUNTIME !== "1") {
+      const persisted = await readRuntimeAvailability(cwd, backend, runtime);
+      if (persisted) {
+        this.identities.set(key, persisted.identity);
+        return persisted.identity;
+      }
+    }
+    const inFlight = this.qualifications.get(key);
+    if (inFlight) {
+      const identity = await inFlight;
+      await writeRuntimeAvailability(cwd, registration, identity);
+      return identity;
+    }
+    const qualification = this.qualifyRuntime(cwd, registration);
+    this.qualifications.set(key, qualification);
+    try {
+      const identity = await qualification;
+      this.identities.set(key, identity);
+      await writeRuntimeAvailability(cwd, registration, identity);
+      return identity;
+    } finally {
+      this.qualifications.delete(key);
+    }
+  }
+
+  private async qualifyRuntime(cwd: string, registration: RuntimeRegistration): Promise<RuntimeIdentity> {
+    const { backend, runtime } = registration;
+    const linux = (command: string, args: string[]) => commandOutput(command, args, cwd);
     await linux("test", ["-x", "/usr/bin/bwrap"]);
     for (const root of registration.immutableRoots) await linux("test", ["-e", root]);
     let resolvedVersion: string;
@@ -321,20 +410,18 @@ export class ManagedSimulationRunner implements SimulationCommandRunner {
     const roots = registration.immutableRoots.map((root) => `'${root.replaceAll("'", "'\\''")}'`).join(" ");
     const packageFiles = registration.kind === "apt" ? `dpkg-query -L ${registration.package};` : "";
     const hashScript = `set -e; { ${packageFiles} find ${roots} -type f -print; } | sort -u | while IFS= read -r f; do test -f "$f" && sha256sum "$f" || true; done | sha256sum | cut -d' ' -f1`;
-    const executableHash = process.platform === "win32"
-      ? await linux("bash", ["-lc", `echo ${Buffer.from(hashScript).toString("base64")}|base64 -d|bash`])
-      : await linux("bash", ["-lc", hashScript]);
+    const executableHash = await linux("bash", ["-lc", hashScript]);
     const environment = { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/tmp", TMPDIR: "/tmp", network: registration.network, ...registration.environment };
     const probeScriptHash = registration.kind === "uv"
       ? createHash("sha256").update(await readFile(fileURLToPath(new URL(`../../../${registration.probe.script}`, import.meta.url)))).digest("hex")
       : undefined;
     const payload = { backend, runtime, resolvedVersion, arch, installedFilesHash: executableHash, launcherVersion, environment, accelerator, registration, probeScriptHash };
     const identity = { backend, runtime, platform: `linux-${arch}`, resolvedVersion, digest: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), launcher: `bubblewrap/${launcherVersion}`, ...(accelerator ? { accelerator } : {}) };
-    this.identities.set(key, identity);
     return identity;
   }
 
   async execute(input: Parameters<SimulationCommandRunner["execute"]>[0]): Promise<SimulationCommandResult> {
+    assertLinuxRuntime("Pi-CAD managed simulation runtime");
     const registration = await runtimeRegistration(input.backend, input.runtime);
     const workspace = await linuxPath(resolve(input.workspace), input.cwd);
     const recipeRel = relative(resolve(input.workspace), resolve(input.recipeDirectory)).split(sep).join("/");
@@ -358,14 +445,12 @@ export class ManagedSimulationRunner implements SimulationCommandRunner {
       );
     }
     const hostWorkspace = resolve(input.workspace);
-    for (const [key, value] of Object.entries({ ...registration.environment, ...input.environment })) {
-      if (value.startsWith("/")) {
-        // Registry paths are already canonical Linux paths. On a Windows
-        // process whose cwd is a WSL UNC, node:path.resolve("/opt/...") can
-        // manufacture a UNC path and falsely classify it as workspace-local.
-        bwrap.push("--setenv", key, value);
-        continue;
-      }
+    // Registry paths identify immutable runtime roots and keep their absolute
+    // sandbox identity. Per-run values, in contrast, must be remapped into
+    // /workspace; otherwise an observer would receive an inaccessible host
+    // path and could never write its declared snapshot.
+    for (const [key, value] of Object.entries(registration.environment)) bwrap.push("--setenv", key, value);
+    for (const [key, value] of Object.entries(input.environment)) {
       const absoluteValue = isAbsolute(value) ? resolve(value) : "";
       const rel = absoluteValue ? relative(hostWorkspace, absoluteValue) : "..";
       const mapped = absoluteValue && !isAbsolute(rel) && !rel.startsWith("..") && !rel.includes(`..${sep}`) && rel !== ".."
@@ -374,17 +459,12 @@ export class ManagedSimulationRunner implements SimulationCommandRunner {
       bwrap.push("--setenv", key, mapped);
     }
     const commandLine = registration.activation ? `${registration.activation} && ${input.command}` : input.command;
-    // Windows WSL interop may reconstruct argv through a shell before
-    // systemd-run starts. Passing Recipe commands verbatim would therefore
-    // expand managed variables such as $PI_CAD_PYTHON_PROJECT outside the
-    // sandbox, where they are intentionally absent. Base64 keeps the command
-    // opaque until the inner shell is running with the bwrap environment.
+    // Keep the command opaque until the inner shell runs with the bwrap
+    // environment so managed variables expand only inside the sandbox.
     const encodedCommand = Buffer.from(commandLine, "utf-8").toString("base64");
     bwrap.push("/bin/bash", "-lc", `echo ${encodedCommand}|base64 -d|/bin/bash`);
     const scope = ["--user", "--scope", "--quiet", ...managedLimitProperties(registration.limits).flatMap((property) => ["-p", property]), "bwrap", ...bwrap];
-    const command = process.platform === "win32" ? "wsl.exe" : "systemd-run";
-    const args = process.platform === "win32" ? ["-d", process.env.PI_CAD_WSL_DISTRO ?? "Ubuntu", "--", "systemd-run", ...scope] : scope;
-    return spawnLogged({ command, args, cwd: process.platform === "win32" ? (process.env.SystemRoot ?? "C:\\Windows") : input.cwd, stdoutPath: input.stdoutPath, stderrPath: input.stderrPath, timeoutMs: input.timeoutMs, workspaceLimit: { path: input.workspace, maxBytes: registration.limits.workspaceGiB * 1024 ** 3 } });
+    return spawnLogged({ command: "systemd-run", args: scope, cwd: input.cwd, stdoutPath: input.stdoutPath, stderrPath: input.stderrPath, timeoutMs: input.timeoutMs, workspaceLimit: { path: input.workspace, maxBytes: registration.limits.workspaceGiB * 1024 ** 3 } });
   }
 }
 

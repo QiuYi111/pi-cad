@@ -1,0 +1,518 @@
+{
+  "schema": 1,
+  "kernelProtocol": "pi-cad-harness/7.0",
+  "actions": {
+    "bash": {
+      "version": "1.0.0",
+      "schemaDigest": "a4d0faccb0ae72cce72c30335fa8b488566ba21393b777c2f0db4c89b0a6375b",
+      "semanticsDigest": "c8ac1e69a0ea452f1e368970a31003f8dbefeb7c2799c779c27c18ccbb569706"
+    },
+    "cad_build_step": {
+      "version": "1.0.0",
+      "schemaDigest": "966e44789a7054c6c9417c351a09a310a0777c10671230d792289aa63595d352",
+      "semanticsDigest": "032fadb1476782c7a5dce13077e12af86bc008e9d52e53a61142c8b13d2bc10b"
+    },
+    "cad_commit_assembly_design": {
+      "version": "1.0.0",
+      "schemaDigest": "1810a3c34b5702c6cfa9dfe5e3cdb7b0ed3f034d487010939714df24db2f85f8",
+      "semanticsDigest": "85f9836c524082839365c27e25d8a5ed527d990f7a77563312d92de01201e5b1"
+    },
+    "cad_commit_candidate": {
+      "version": "1.0.0",
+      "schemaDigest": "12fa61c8c8d5460973f5f3a9edde3fbb9859747f84074243b08f660babf21762",
+      "semanticsDigest": "c1ad7f63da51c07e873821e7448bdb571281b07b33a02713de514a461602e807"
+    },
+    "cad_commit_frame_context": {
+      "version": "1.0.0",
+      "schemaDigest": "177c5585b609680eddfa00ff328bb6553925ecfe4a8eba3a94e593cf05ac0586",
+      "semanticsDigest": "2fa22aa6503c89dfacd460a00f38584f4e5623cbfd24dcd95e0f9970da46ff6c"
+    },
+    "cad_commit_interface_contracts": {
+      "version": "1.0.0",
+      "schemaDigest": "32888e8e80645a71e626baf2300a8b07f06fad3d8ff2cdcc599a9f08d9b21d59",
+      "semanticsDigest": "51c5c19d2c5c45b9615df186ea0936bd06a64edaa3bf61ecede4738173838580"
+    },
+    "cad_commit_plan": {
+      "version": "1.0.0",
+      "schemaDigest": "2fb4775ebb2632d8f7521108bfdeca4904f9002af429576f51d12a1a5e337bfb",
+      "semanticsDigest": "698d1d3c4c2dc281486e6832cf3766c0f25c19019e443d3d5be31185f8b2e224"
+    },
+    "cad_commit_requirements": {
+      "version": "1.0.0",
+      "schemaDigest": "fcb89cc71fe7697ef396220c5918ee109030c8cb26e4753da73b4e8818e7ab64",
+      "semanticsDigest": "4cc583bec50fdddd4f207684720b7c13c5788ed92a72ba7ac22859fedee80337"
+    },
+    "cad_commit_simulation": {
+      "version": "1.0.0",
+      "schemaDigest": "ef0d0c896ab7dbe2eb5659c69ef3d2426a6bcd6fc9c6683fb284ead9cce62700",
+      "semanticsDigest": "3f5dfd421ac5515eed36bc714e560cc0ed8dfc2231f5e5b760ed41c91da86a64"
+    },
+    "cad_declare_blocker": {
+      "version": "1.0.0",
+      "schemaDigest": "d0734fbc8447596e08a25a13732df906c9be9389c7bbcb924fd381d8d04d1547",
+      "semanticsDigest": "10b82165eaddfabc10b3d15d96303f9c4330d0233c2e772deb0cc6d2f54db9e7"
+    },
+    "cad_defer_clarification": {
+      "version": "1.0.0",
+      "schemaDigest": "5eb4a814deb4cea35b9b4615796bdd56651900cc04a3dea9b241b29e5629a402",
+      "semanticsDigest": "279229d718ded6d3742cf0484399a0bff6704196a0038f2802f68d32986ecc9f"
+    },
+    "cad_derive_analysis_model": {
+      "version": "1.0.0",
+      "schemaDigest": "88c1bd5f7834fee2c3b13054801f49d5bf9a8a576d0cfeef1b672f89e147cd72",
+      "semanticsDigest": "35b69016fae66c1bf530bf5d30f3ee0ab6e1a2085edb36ad85514cf86b3dd6af"
+    },
+    "cad_export": {
+      "version": "1.0.0",
+      "schemaDigest": "e9fa5b70f3357847cb14572ae4d8266803cf6e3ac171f276f2f404c5a4b5c7b4",
+      "semanticsDigest": "d3b7efb28623d5e84354d83b65ba2b7ca0dde2c3ecc6f1f9f1bd71a1258571cd"
+    },
+    "cad_finish": {
+      "version": "1.0.0",
+      "schemaDigest": "258c1f18be1f12069c35033cbbbb7b8943b9134bfa14b8bf870f834e3e6876d1",
+      "semanticsDigest": "82feaf20038c89d5f25757ebdb9aade36faf108a6972bd2be4eb2cba60d1df0e"
+    },
+    "cad_generate_drawing": {
+      "version": "1.0.0",
+      "schemaDigest": "870addff3554f10502de3a22196e2a11762c3b1c48438b224329f2d941986221",
+      "semanticsDigest": "a6413d9669d2017392844ef3ca52ae6d205623d47d0e40142053a39a1b461f49"
+    },
+    "cad_optimize": {
+      "version": "1.0.0",
+      "schemaDigest": "566e57645546e2e7975e1ede43a1d9efe4bdc6c9a8940ace5b0fdf78c35da5cf",
+      "semanticsDigest": "d9a7b049c41dd4c3d756f9f87495bf069cf9b775ce0483423741e7c4e4642541"
+    },
+    "cad_probe": {
+      "version": "1.0.0",
+      "schemaDigest": "cf0cdd1bb6949f3737283ff283a908f170fadcb39743a267cde174afb65705ac",
+      "semanticsDigest": "e9285e8b82c40296dcd6dd5925198a3479e4c0081aaa026e189b558b3ac79580"
+    },
+    "cad_recall_observation": {
+      "version": "1.0.0",
+      "schemaDigest": "ece841331bea3bcebd191215a87ba05723dfae1468c129e8abdfa9aedaadf5f9",
+      "semanticsDigest": "9fe231d1df8708f16101690acf3179759f9792e3dfc70c82c6cdacba5441b9bb"
+    },
+    "cad_render_scene": {
+      "version": "1.0.0",
+      "schemaDigest": "b44ca2be4ca40e9364bfaa5af61b10e11f95095f0e04d5df87f14bb43ff074d7",
+      "semanticsDigest": "4ae7259e7d097b2f056bb7c8258a2df2aa421cd7868a245fc0e9c0454c35248e"
+    },
+    "cad_reroute": {
+      "version": "1.0.0",
+      "schemaDigest": "bfdde16230ea740bb8edec4be26d19dd60e70cac905507ced73e8e58e79f0e9e",
+      "semanticsDigest": "2b19e3944d54a3f9264cda6b4cda1ea0e3dc5ea190fb2ab7ff870d65aa8e7e89"
+    },
+    "cad_revise_requirements": {
+      "version": "1.0.0",
+      "schemaDigest": "008c978ea86c255c3ffd3ae5ab71d7a7dd573b8509e7d7881de635bc1d02ad15",
+      "semanticsDigest": "2aa1a1f1d41ddc58ae2c7cf8bff5c0543030111c512d353e2a481fbcb1dc942e"
+    },
+    "cad_route": {
+      "version": "1.0.0",
+      "schemaDigest": "194499b24d21571c895ec46fb644acf30a24408fdbc4dc9f37ceb5252ef0d3e7",
+      "semanticsDigest": "602a4af5811513abe0141ccc766d3f34fdf88f00d2072f11ee954c211990ddc7"
+    },
+    "cad_sim_observe": {
+      "version": "1.0.0",
+      "schemaDigest": "8ca610b091543ca12c08d219db7ae47fe483d0cbef62a17c6d84ac5e9018e29f",
+      "semanticsDigest": "cb02a866f3322838c54a26f881de3c6d3033ddec7c2f7758a6beeedbdee1a255"
+    },
+    "cad_simulate": {
+      "version": "1.0.0",
+      "schemaDigest": "c0bd2abff6f74028209a9f1cc4aaf1c480ab534f78098df9d6594b75c7205c59",
+      "semanticsDigest": "12f5e48f2d6983c8bec257a68f3c9c4d7f4e3293d35529530de3e7d87738f857"
+    },
+    "cad_start": {
+      "version": "1.0.0",
+      "schemaDigest": "fb594901a23021f28dff45229ee4d7fe393b2358179935e050ef459eb4ff805e",
+      "semanticsDigest": "f7f1fd331f574bc206ae50989e323761b768db3bbb522cb91f646dc6634d8748"
+    },
+    "cad_submit_for_review": {
+      "version": "1.0.0",
+      "schemaDigest": "d7ff55a8026fd4837b3e1ce3a0a6c48cbf072a1e6077289c7ede32737d2c9862",
+      "semanticsDigest": "085c97f498847b41cbc1b2476564cd26296edf8e10695a42947885ecef548b51"
+    },
+    "cad_transition": {
+      "version": "1.0.0",
+      "schemaDigest": "e9860d19377b034a5e3e12c5e3e6393ba94bd4bee1f8fc4225b57e83c8eb6903",
+      "semanticsDigest": "1685976c71003bec20ecb1849982aa479fd70262785294365fa8710122903732"
+    },
+    "cad_wait_for_user": {
+      "version": "1.0.0",
+      "schemaDigest": "ebd2241a8fa7e144676d821ff6144790b78296ea3e7482000c611089ebcce56c",
+      "semanticsDigest": "9421504ecc8c2a619ac38942af639a892107cf6b6075e6130fb99efd7eec5495"
+    },
+    "commit_evidence": {
+      "version": "1.0.0",
+      "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
+      "semanticsDigest": "a872d90c6b148605fcb60c09da7c5484a4b6a92a3e5f47dfc3e43002444eb5c3"
+    },
+    "commit_record": {
+      "version": "1.0.0",
+      "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
+      "semanticsDigest": "83263d126e430fab3997e9889a2ba566f1d0c8018564895c49a35533b4d69997"
+    },
+    "edit": {
+      "version": "1.0.0",
+      "schemaDigest": "c20ae01dfed4d9c3feb6c7e165d55c0e6b6d35e45ab39608cfef43b7127e8945",
+      "semanticsDigest": "8883163acee40ab9217e8c1bbbc263b46f91b6a133c5a1cea540f625a624cfc0"
+    },
+    "find": {
+      "version": "1.0.0",
+      "schemaDigest": "35a0f8e28f21f7efaa3a5e746535599472ab85e1646b462b9e004ce2c96ff398",
+      "semanticsDigest": "7db3851e6b20a421f22758035a334ca2738c0375b8886630c34991f62c8deba1"
+    },
+    "finish": {
+      "version": "1.0.0",
+      "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
+      "semanticsDigest": "fe8810d567b721c7f2d77b46db33567faf01f3c5877c80d4cf220b5c50baf605"
+    },
+    "grep": {
+      "version": "1.0.0",
+      "schemaDigest": "7e7f5ac241176bf36570f78f1cb48eb0305c2b11d0ad223c312535e177c181d2",
+      "semanticsDigest": "5beb7eea67750c29478409d8dd04b2c9acd145ed0f56f5a75891121aefecec42"
+    },
+    "ls": {
+      "version": "1.0.0",
+      "schemaDigest": "f79057a22d353f9a1bbdf375da6d2bacb0ef7b3a6b501464b8cff601936d17b0",
+      "semanticsDigest": "bf47b720bd4d46019b0ec5276f13b35f8e03f01c08cb307fbd45059a7ba821c2"
+    },
+    "read": {
+      "version": "1.0.0",
+      "schemaDigest": "d8b84aa4ce0434ed0b1539147665050e2b513dd24ec84fee6fb07a65f63577e2",
+      "semanticsDigest": "1b624634c787e672575bf4e96e94956a8de1f15e4cc8dcc684b66717bc1e80f2"
+    },
+    "transition": {
+      "version": "1.0.0",
+      "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
+      "semanticsDigest": "b514b911481b577bd8ed399dea735cc02087ab18853f283bf445094733e56c76"
+    },
+    "workflow_replace": {
+      "version": "1.0.0",
+      "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
+      "semanticsDigest": "d11b1b88ce9a35ab839b7cd043e1449a6dfdfa0464801ca52c2b0535119a434a"
+    },
+    "write": {
+      "version": "1.0.0",
+      "schemaDigest": "e04a69ef8e26e43bd9342be2ffa376b2be7d635b742ef8f3e690ac5ce52aa8f1",
+      "semanticsDigest": "6bc51518dcb5d6ebec42bf41e6853284af45ae0494b2dbbcaa2c6cdf668fc733"
+    }
+  },
+  "grants": {
+    "commit_assembly_design": {
+      "version": "1.0.0",
+      "schemaDigest": "0d9dc05af9c0c98855e936f5b99a2359eced4b6e6256dcea823481466bb1fdf0",
+      "semanticsDigest": "7e0a78fc7b2a88a8acbe4765adf0edca19445e4d1af38884fef42c70f275cb1a"
+    },
+    "commit_candidate": {
+      "version": "1.0.0",
+      "schemaDigest": "7a048ded1f8d58b6d03962eef6aa3a405201e1d1f1f59f237126b002534e2bd9",
+      "semanticsDigest": "cca96db3439ef8d17b3053ceeed17fa34c57a13e0aa13c3d4117ef64972fd147"
+    },
+    "commit_frame_context": {
+      "version": "1.0.0",
+      "schemaDigest": "e7cc37e41641928e6bca4a6218000a6bda5a97bfb5893e94ac1a52dd63c3b610",
+      "semanticsDigest": "d4542fa1056c54af84675bf21b1498fc84e94c969f27361a4f5853a200f7be42"
+    },
+    "commit_interface_contracts": {
+      "version": "1.0.0",
+      "schemaDigest": "33f73f35e0965682d8c872aecabe8bcd40edc8a45a71452cdf4e3b15b832d747",
+      "semanticsDigest": "be0431365f59213e583deb7ac1aa85ba1e17f8293f23c6e2100f002cb80afa3e"
+    },
+    "commit_plan": {
+      "version": "1.0.0",
+      "schemaDigest": "9dd2d602ee48f9ac553b9589333f38745e26a9568faf0ee76a9e1eb945952992",
+      "semanticsDigest": "46bb766923f18f029f9f24736af36a6203c021ab7312169e16b08b8de1bc5120"
+    },
+    "commit_requirements": {
+      "version": "1.0.0",
+      "schemaDigest": "5ba1a08b2432a5d2abb9f2ca7639c0748f402f388027d9bbfae18fae5a5c173c",
+      "semanticsDigest": "5e12a3731765474a3e98d2a86c9113ffee7d4b1d9ed0f3fce1b4be10a466242c"
+    },
+    "deliverable": {
+      "version": "1.0.0",
+      "schemaDigest": "44f248bb7f98720e44772a6966984db3d3089c5029b857decd7f198c905f9ece",
+      "semanticsDigest": "b36a859120032bc64ec4d69145bddc4ad4c10288413aa68ac48cd623a1d60cf8"
+    },
+    "file_edit_recipe": {
+      "version": "1.0.0",
+      "schemaDigest": "e73e78deb69e0671cbf3fdf62a5cd315ad7fd9e097867608d394a8714051bb1f",
+      "semanticsDigest": "2bd391828cde090439b48dce8ffc41e328d6223391572f194665b87e67ba9b88"
+    },
+    "file_edit_source": {
+      "version": "1.0.0",
+      "schemaDigest": "e4d4f3eea20ea4e6f27c1aa627d211fbe53de48c5426d3b75448c09b7177df39",
+      "semanticsDigest": "c4dc639905b4a47206be17f562906314b77905b0638a0a53356f62d1b0c8f05d"
+    },
+    "file_read": {
+      "version": "1.0.0",
+      "schemaDigest": "5c164dc94236a056fd1c46750f19700dce9a590dc7fbfe97376418721e823132",
+      "semanticsDigest": "fdb19ec0f820b04646a49395fdf3805e62df4233ff1f8fa34510fd01484a327a"
+    },
+    "finish": {
+      "version": "1.0.0",
+      "schemaDigest": "2fedbeb65d82092dad4873e8020ccd21058f410f33155712b92e68b6fe763f82",
+      "semanticsDigest": "afd55c980bc390001bdf6136830870dde35fd6f0d5688f558d033c6c45178711"
+    },
+    "model_build": {
+      "version": "1.0.0",
+      "schemaDigest": "120cd0c0cfbe99addfa50288bac567707d1de17788035f975bdf7852a869bed6",
+      "semanticsDigest": "86abeed8b3d1a032039d3eac0069c9a5d11fcbb443d4b3a95098dc76bce19f97"
+    },
+    "observe": {
+      "version": "1.0.0",
+      "schemaDigest": "5d427b1a303e3cc93f7a4e75ef1d15d57cf9b28f7be7fe8ee292d9658e3d1916",
+      "semanticsDigest": "d60bc5255f5dd5c4f2f7c1873b30629e7f97153e4da2398e1357b29fb944fda6"
+    },
+    "observe_interference": {
+      "version": "1.0.0",
+      "schemaDigest": "5d427b1a303e3cc93f7a4e75ef1d15d57cf9b28f7be7fe8ee292d9658e3d1916",
+      "semanticsDigest": "e45e17ed66ee7ac38419b419fdf418313b7d6ee4ed193fadd0805f3d93836266"
+    },
+    "observe_programmable": {
+      "version": "1.0.0",
+      "schemaDigest": "5d427b1a303e3cc93f7a4e75ef1d15d57cf9b28f7be7fe8ee292d9658e3d1916",
+      "semanticsDigest": "3b2b5a4a9e0b7183201428d4773a8a5ef960178077291fbe449481ed5268f037"
+    },
+    "optimize": {
+      "version": "1.0.0",
+      "schemaDigest": "3636344e0c85e55682167f4ce8443513d941cf4b72fee9b5697930801ebf6c6a",
+      "semanticsDigest": "f5852baecf319b5059448c5ae71f45ea80c0b66d634b1ae491ad4b90b4633db9"
+    },
+    "reroute": {
+      "version": "1.0.0",
+      "schemaDigest": "1bd37c77a0dccc257d56436d60c87d5a32f49f497914b23513c1dc51eff3a588",
+      "semanticsDigest": "7725b0a5e2b2dc8b181c00adaa6815d9a3772610484ca0380d488f20e53cf56e"
+    },
+    "route": {
+      "version": "1.0.0",
+      "schemaDigest": "b7b253c18f4de9012c770fb9a0b7edcc99e9630d166523c7bef070fe211f1f1a",
+      "semanticsDigest": "7fea5dea46f734355187707c4a848fdbbb90c20b42a724e2d0800449d1f1bf5f"
+    },
+    "shell": {
+      "version": "1.0.0",
+      "schemaDigest": "b67f8686879b8fa6699d078d5e7c88f7eba28f8ce2d7eeb53a65c26bbc694aa0",
+      "semanticsDigest": "cb4f17e12db945cedb1adf98d2a68c1bf0adcc57c94f03dc38f3d417c8784afb"
+    },
+    "simulate": {
+      "version": "1.0.0",
+      "schemaDigest": "76e909f2e64259d92de7b16fe23fc10a7110984af3fa3b6a211853946542b1b2",
+      "semanticsDigest": "eb263c9834d99c9b0f755dfd04a0e0544b0f76cb403693d5a64c4e19164fc6e9"
+    },
+    "transition": {
+      "version": "1.0.0",
+      "schemaDigest": "276df1a061d29ea4095ec20d57d42beb1b0eeee34b15f17a13d24b9990b6ba9a",
+      "semanticsDigest": "a02f534a14ebc676fd3c2b709c2b0e0abbefc00ee38bfea467e92544edce213e"
+    },
+    "wait_for_user": {
+      "version": "1.0.0",
+      "schemaDigest": "4e522a6bc69312b5c28dcecba2a82724399c72f9054e5fb807bc0433686b8497",
+      "semanticsDigest": "a6eeb93b89707b6e33206f720b379cf73bc6adfc9ad55ecac5c9e9f167adebe6"
+    }
+  },
+  "hooks": {
+    "mechanical.candidate.observe": {
+      "version": "1.0.0",
+      "schemaDigest": "3d5eb9bc90d0b2bbfdbf42541ec524e465a0c394ac99144bf4ddc8fd18513aae",
+      "semanticsDigest": "e6bca09c1612555baeae841730424151101df7523b62949376c9e961e7db0d7a"
+    },
+    "mechanical.project.promote": {
+      "version": "1.0.0",
+      "schemaDigest": "3d5eb9bc90d0b2bbfdbf42541ec524e465a0c394ac99144bf4ddc8fd18513aae",
+      "semanticsDigest": "a5bf4847653fb1c21659f466953c1cadbc01c03353b1dc842225aa151e92e050"
+    },
+    "mechanical.requirements.invalidate": {
+      "version": "1.0.0",
+      "schemaDigest": "3d5eb9bc90d0b2bbfdbf42541ec524e465a0c394ac99144bf4ddc8fd18513aae",
+      "semanticsDigest": "bfff1a71bb7ce38f55b53878409f93dde6db230c52bb7343250e1bb8d61e9d11"
+    }
+  },
+  "contextProviders": {
+    "kernel.current-action": {
+      "version": "1.0.0",
+      "schemaDigest": "2be0f9a7cb3e52e371793d58f84102494ca049c87da93da132abbb077df5cff3",
+      "semanticsDigest": "574c1e10cbb5cc4490932cf46180c5abfd66ed6e74e580df91ffe93be4bee7fb"
+    },
+    "mechanical.mission": {
+      "version": "1.0.0",
+      "schemaDigest": "2be0f9a7cb3e52e371793d58f84102494ca049c87da93da132abbb077df5cff3",
+      "semanticsDigest": "4d69e562d3a2d80d24e210db6db2cbb6737e217d946ac34e638e0680043c4e1a"
+    },
+    "mechanical.observations": {
+      "version": "1.0.0",
+      "schemaDigest": "2be0f9a7cb3e52e371793d58f84102494ca049c87da93da132abbb077df5cff3",
+      "semanticsDigest": "ca598e74cc9c672feb7980f41c00fc1d8542644c2efd7f9b5c858371c804e6c0"
+    },
+    "mechanical.runtime-availability": {
+      "version": "1.0.0",
+      "schemaDigest": "2be0f9a7cb3e52e371793d58f84102494ca049c87da93da132abbb077df5cff3",
+      "semanticsDigest": "518e117aac935fd212bf55a3c09b9e3816d1b2dd575b2796b02c7a2ccf6eeb32"
+    }
+  },
+  "reviewProfiles": {
+    "mechanical.design-review": {
+      "version": "1.0.0",
+      "schemaDigest": "3fe79c3dd81975916de20f7a3e402e39e6faec44088d4912750529b2f139bf24",
+      "semanticsDigest": "c4ec90348060772a08822769c2c9c40aaff3c6ac38d479ddbff8a006c8fb3dc1"
+    },
+    "mechanical.final-review": {
+      "version": "1.0.0",
+      "schemaDigest": "3fe79c3dd81975916de20f7a3e402e39e6faec44088d4912750529b2f139bf24",
+      "semanticsDigest": "0fbf69b5a2a7dd139fede9d66f4325af2d2036afab0094759c1e6872b13ddc41"
+    }
+  },
+  "recordTypes": {
+    "assembly_design": {
+      "version": "1.0.0",
+      "schemaDigest": "56a2bdccb703a4ffd8260bb7a104491c854a9779a40e15b232247104e9f658a2",
+      "semanticsDigest": "805d2b90c872836d8a0673c7b64ce47a6cd4810447ef4070e56ee976fd01f466"
+    },
+    "frame_context": {
+      "version": "1.0.0",
+      "schemaDigest": "56a2bdccb703a4ffd8260bb7a104491c854a9779a40e15b232247104e9f658a2",
+      "semanticsDigest": "dfc4da6c89dc6cdbcf3459ca4ec573f2860f06e48d1f6beac1dc9b263ed495ca"
+    },
+    "interface_contracts": {
+      "version": "1.0.0",
+      "schemaDigest": "56a2bdccb703a4ffd8260bb7a104491c854a9779a40e15b232247104e9f658a2",
+      "semanticsDigest": "d4206a5b45ce0c7c01549c78aedbee8b866706a0e6b38e1d9c32209359950f15"
+    },
+    "plan": {
+      "version": "1.0.0",
+      "schemaDigest": "56a2bdccb703a4ffd8260bb7a104491c854a9779a40e15b232247104e9f658a2",
+      "semanticsDigest": "79e40023fa70a125632ea966351df0e5147331d913cd14ec96d4724ecac3e7b0"
+    },
+    "requirements": {
+      "version": "1.0.0",
+      "schemaDigest": "56a2bdccb703a4ffd8260bb7a104491c854a9779a40e15b232247104e9f658a2",
+      "semanticsDigest": "c08615c2e83a1138628e7355cd2aa8553b53d1d002871196403d206feed08661"
+    }
+  },
+  "evidenceTypes": {
+    "assembly": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "build": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "compare": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "convert": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "drawing": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "geometry": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "interference": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "optimization": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "presentation": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "section": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "sections": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "simulation": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "63bd436c9f0ca9634241db24576ab85520b585ba268c764840799bc98f58d034"
+    },
+    "surfaces": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
+    "visual": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    }
+  },
+  "recipeKinds": {
+    "analysis-model": {
+      "version": "1.0.0",
+      "schemaDigest": "889ada32bf50570c45d08e288d8ae5dc078aa9b6945340b4bcea496839b4535b",
+      "semanticsDigest": "91c78a8bdaebd38c36628a2ca79e44987f00b6f0c66113be93dfc8915b65f25d"
+    },
+    "drawing": {
+      "version": "1.0.0",
+      "schemaDigest": "889ada32bf50570c45d08e288d8ae5dc078aa9b6945340b4bcea496839b4535b",
+      "semanticsDigest": "6f5e3bd2f43d5875a7c0f3309b12686666269af263443b68e54310c536af72c5"
+    },
+    "optimization": {
+      "version": "1.0.0",
+      "schemaDigest": "889ada32bf50570c45d08e288d8ae5dc078aa9b6945340b4bcea496839b4535b",
+      "semanticsDigest": "6f5e3bd2f43d5875a7c0f3309b12686666269af263443b68e54310c536af72c5"
+    },
+    "presentation": {
+      "version": "1.0.0",
+      "schemaDigest": "889ada32bf50570c45d08e288d8ae5dc078aa9b6945340b4bcea496839b4535b",
+      "semanticsDigest": "6f5e3bd2f43d5875a7c0f3309b12686666269af263443b68e54310c536af72c5"
+    },
+    "simulation": {
+      "version": "1.0.0",
+      "schemaDigest": "889ada32bf50570c45d08e288d8ae5dc078aa9b6945340b4bcea496839b4535b",
+      "semanticsDigest": "af11b213c9dadc7128f8f9ae4c3f7697121ff41e3cd69b2ad4de2547090fc8ff"
+    }
+  },
+  "runtimeProfiles": {
+    "openfoam/openfoam-14": {
+      "version": "1.0.0",
+      "schemaDigest": "6a5627a9322baa03cb88ffe2bec4934f936fd0bd80192a287c802bb9785fd9a5",
+      "semanticsDigest": "46bf12319e6a0b336e60265a278225f32f1673d6328ef26ca3deaef021bce866"
+    },
+    "pi-cad/cadctl-0.9": {
+      "version": "1.0.0",
+      "schemaDigest": "5d164d44e7e76f90c96ea9eebccec6fbd6b4714fb378f6f32dfcade89555bf0a",
+      "semanticsDigest": "af40cf97b1e15d72d582ebe8db5b902b1da561206428b074e94082b39f342190"
+    },
+    "su2/su2-8.5.0": {
+      "version": "1.0.0",
+      "schemaDigest": "6a5627a9322baa03cb88ffe2bec4934f936fd0bd80192a287c802bb9785fd9a5",
+      "semanticsDigest": "f91575809c195662b6a60c84246856b0a0d9dc67ede571983ceb15139b310816"
+    },
+    "torch-fem/torch-fem-0.9-cpu": {
+      "version": "1.0.0",
+      "schemaDigest": "6a5627a9322baa03cb88ffe2bec4934f936fd0bd80192a287c802bb9785fd9a5",
+      "semanticsDigest": "c2b75abc8bf74450bdeb5b80f411f1753def0df89ca9be88fce310546c66de7b"
+    },
+    "torch-fem/torch-fem-0.9-cu126": {
+      "version": "1.0.0",
+      "schemaDigest": "6a5627a9322baa03cb88ffe2bec4934f936fd0bd80192a287c802bb9785fd9a5",
+      "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
+    }
+  },
+  "hash": "ab37e98dac3e7a70b1b9f77570e979ead339e1757353508f6fe07182051d0b84"
+}

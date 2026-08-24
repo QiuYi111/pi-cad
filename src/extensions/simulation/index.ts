@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Type } from "typebox";
@@ -7,11 +8,13 @@ import { deriveAnalysisModel, optimizationCommand } from "../../shared/capabilit
 import { writeRunSpec } from "../../shared/run-spec.ts";
 import { DeriveAnalysisModelSchema } from "./analysis-model.ts";
 import cadSimulationV2Extension from "./v2.ts";
+import { selectKernelEngine } from "../../harness/engine-router.ts";
+import { executeMechanicalRecipeV7 } from "../../domains/mechanical/recipe-actions-v7.ts";
 
 export default function cadSimulationExtension(pi: ExtensionAPI) {
   cadSimulationV2Extension(pi);
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_derive_analysis_model",
     label: "CAD Derive Analysis Model",
     description:
@@ -22,8 +25,19 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       "Use simplified/defeatured/sectioned only for an intentionally authored analysis model.",
       "Declare the derivation record and derived artifact as simulation Recipe inputs.",
     ],
-    parameters: DeriveAnalysisModelSchema,
+    parameters: Type.Union([
+      Type.Object({ recipe: Type.String({ minLength: 1 }), action: Type.Optional(Type.String({ minLength: 1 })), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))) }, { additionalProperties: false }),
+      DeriveAnalysisModelSchema,
+    ]),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_derive_analysis_model v7 requires {recipe}" }] };
+        try {
+          const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "analysis-model", recipe: params.recipe, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
+          return { content: [{ type: "text", text: `Analysis-model Recipe ${result.record.runId} committed ${result.observation.exports.length} exports.` }], details: { recipeRunId: result.record.runId, observationId: result.observation.observationId, kind: "build" as const } };
+        } catch (error) { return { content: [{ type: "text", text: `cad_derive_analysis_model failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+      }
+      if ("recipe" in params) return { content: [{ type: "text", text: "cad_derive_analysis_model v6 requires source/operations" }] };
       if (!existsSync(resolve(ctx.cwd, params.source))) throw new Error(`derivation source does not exist: ${params.source}`);
       if (params.output && !existsSync(resolve(ctx.cwd, params.output))) {
         const mechanical = params.operations.every((op) => op === "fused" || op === "bonded");
@@ -39,7 +53,7 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_optimize",
     label: "CAD Optimize",
     description:
@@ -50,8 +64,9 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       "Optimization output is not CAD; reconstruct it as build123d geometry and commit a candidate.",
       "Accepted CAD must be simulated again before engineering acceptance.",
     ],
-    parameters: Type.Object(
-      {
+    parameters: Type.Union([
+      Type.Object({ recipe: Type.String({ minLength: 1 }), action: Type.Optional(Type.String({ minLength: 1 })), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))) }, { additionalProperties: false }),
+      Type.Object({
         mode: Type.Optional(Type.Literal("topology_2d_rect_v0")),
         runtime: Type.Optional(Type.Enum({
           cuda: "torch-fem-0.9-cu126",
@@ -81,10 +96,17 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
           },
           { additionalProperties: false },
         ),
-      },
-      { additionalProperties: false },
-    ),
+      }, { additionalProperties: false }),
+    ]),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_optimize v7 requires {recipe}" }] };
+        try {
+          const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "optimization", recipe: params.recipe, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
+          return { content: [{ type: "text", text: `Optimization Recipe ${result.record.runId} committed; exports=${result.observation.exports.map((item) => item.name).join(",")}. Output is not accepted CAD.` }], details: { recipeRunId: result.record.runId, observationId: result.observation.observationId, computeIdentity: result.record.computeIdentity, kind: "optimization" as const } };
+        } catch (error) { return { content: [{ type: "text", text: `cad_optimize failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+      }
+      if ("recipe" in params) return { content: [{ type: "text", text: "cad_optimize v6 requires a structured topology specification" }] };
       const { runtime = "torch-fem-0.9-cu126", ...rest } = params;
       const spec = { ...rest, mode: rest.mode ?? "topology_2d_rect_v0", device: runtime.endsWith("-cpu") ? "cpu" : "cuda" };
       const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "optimization", spec);

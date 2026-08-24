@@ -7,7 +7,7 @@ import {
   type EvidenceRef,
 } from "../shared/protocol.ts";
 import { randomBytes } from "node:crypto";
-import { CadProjectStore, nowIso } from "../shared/store.ts";
+import { CadProjectStore, migrateProjectOnce, nowIso } from "../shared/store.ts";
 import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
 import { recordObservation } from "./observation-index.ts";
 import { composeSystemPrompt } from "./context.ts";
@@ -18,7 +18,29 @@ import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
 import { applyCadToolOverlay, PI_CAD_OWNED_TOOLS, toolsForState, writePathAllowed } from "./policies.ts";
 import { resumeFromUser } from "./state-machine.ts";
 import { isHeadless, isTerminalStatus } from "./interaction-mode.ts";
-import { managedSimulationRunner, simulationRuntimeProjection } from "../modules/simulate-v2/runtime.ts";
+import { readRuntimeAvailability, simulationRuntimeProjection } from "../modules/simulate-v2/runtime.ts";
+import { assertLinuxRuntime } from "../shared/platform.ts";
+import { selectKernelEngine } from "../harness/engine-router.ts";
+import { PermissionEngineV7, assertScopedWrite } from "../harness/permissions.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
+import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
+import { mechanicalContextCompiler } from "../domains/mechanical/context-providers.ts";
+import { abortMechanicalRunV7, resumeMechanicalRunV7 } from "../domains/mechanical/control-actions-v7.ts";
+import { approveMechanicalRerouteV7 } from "../domains/mechanical/actions-v7.ts";
+
+const V7_WRITE_RULES = [
+  { scope: "project:source", roots: ["models", "src", "design"] },
+  { scope: "project:recipe", roots: ["recipes", "simulation"] },
+  { scope: "project:deliverable", roots: ["build", "drawings", "presentation", "exports"] },
+] as const;
+
+function applyV7ToolOverlay(pi: ExtensionAPI, enabled: readonly string[]): void {
+  const available = new Set((pi.getAllTools?.() ?? []).map((tool) => tool.name));
+  const current = pi.getActiveTools?.() ?? [];
+  const foreign = current.filter((name) => !PI_CAD_OWNED_TOOLS.has(name));
+  const owned = enabled.filter((name) => available.has(name));
+  pi.setActiveTools?.([...new Set([...foreign, ...owned])]);
+}
 
 const OPTIONAL_TOOL_NAMES = [
   "cad_generate_drawing",
@@ -170,52 +192,43 @@ async function handleToolResult(
   ]);
 }
 
-async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<string[]> {
+async function unavailableCapabilities(pi: ExtensionAPI): Promise<string[]> {
   const available = new Set((pi.getAllTools?.() ?? []).map((tool) => tool.name));
   const missing = [...CAPABILITY_TOOLS].filter((name) => !available.has(name));
-  const result = missing.filter((name) =>
+  return missing.filter((name) =>
     (OPTIONAL_TOOL_NAMES as readonly string[]).includes(name),
   );
-  // Optimization availability comes from the exact managed production
-  // runtime, never from the host CAD Python environment. This also prevents a
-  // CPU-only host doctor from advertising the CUDA optimizer as ready.
-  if (cwd && available.has("cad_optimize")) {
-    try {
-      await managedSimulationRunner.resolveRuntime(cwd, "torch-fem", "torch-fem-0.9-cu126");
-    } catch {
-      result.push("cad_optimize: managed torch-fem-0.9-cu126 unavailable");
-    }
-  }
-  return result;
 }
 
 async function simulationCapabilityContext(cwd: string, enabled: boolean): Promise<string> {
   if (!enabled) return "";
   const configured = await simulationRuntimeProjection().catch(() => []);
-  const ready: Array<(typeof configured)[number] & { actualAccelerator?: string }> = [];
-  for (const entry of configured) {
-    if (entry.developmentOnly && process.env.PI_CAD_ENABLE_DEV_RUNTIMES !== "1") continue;
-    try {
-      const identity = await managedSimulationRunner.resolveRuntime(cwd, entry.backend, entry.runtime);
-      ready.push({ ...entry, ...(identity.accelerator?.actualDevice ? { actualAccelerator: String(identity.accelerator.actualDevice) } : {}) });
-    } catch {
-      // Unavailable runtimes are reported by tool execution and diagnostics;
-      // they must not be advertised as usable in the model context.
-    }
-  }
-  if (ready.length === 0) return "## Available simulation runtimes\n- none ready";
+  const visible = configured.filter((entry) =>
+    !entry.developmentOnly || process.env.PI_CAD_ENABLE_DEV_RUNTIMES === "1",
+  );
+  if (visible.length === 0) return "## Configured managed runtimes\n- none configured";
+  const availability = new Map<string, Awaited<ReturnType<typeof readRuntimeAvailability>>>();
+  await Promise.all(visible.map(async (entry) => {
+    const value = await readRuntimeAvailability(cwd, entry.backend, entry.runtime).catch(() => null);
+    availability.set(`${entry.backend}/${entry.runtime}`, value);
+  }));
   return [
-    "## Ready managed runtimes",
-    ...ready.map((entry) => [
-      `- backend=${entry.backend} runtime=${entry.runtime} kind=${entry.kind}`,
+    "## Configured managed runtimes",
+    "Availability is qualified only when the corresponding tool is executed; unknown never means ready.",
+    ...visible.map((entry) => {
+      const cached = availability.get(`${entry.backend}/${entry.runtime}`);
+      return [
+      `- backend=${entry.backend} runtime=${entry.runtime} kind=${entry.kind} availability=${cached ? "ready" : "unknown"}`,
       `  executable=${entry.agentCapabilities.executables.join(",") || "none"}; pythonModules=${entry.agentCapabilities.pythonModules.join(",") || "none"}`,
       `  python=${entry.agentCapabilities.pythonCommand}; sandbox=${entry.agentCapabilities.sandbox}; network=${entry.agentCapabilities.network}`,
-      `  accelerator=requested:${entry.agentCapabilities.accelerator},actual:${entry.actualAccelerator ?? entry.agentCapabilities.accelerator}; limits=${entry.limits.cpu}CPU/${entry.limits.memoryGiB}GiB/${entry.limits.wallHours}h; template=${entry.agentCapabilities.cookbookTemplateId}`,
-    ].join("\n")),
+      `  accelerator=requested:${entry.agentCapabilities.accelerator}${cached?.identity.accelerator?.actualDevice ? `,actual:${String(cached.identity.accelerator.actualDevice)}` : ""}; limits=${entry.limits.cpu}CPU/${entry.limits.memoryGiB}GiB/${entry.limits.wallHours}h; template=${entry.agentCapabilities.cookbookTemplateId}`,
+    ].join("\n");
+    }),
   ].join("\n");
 }
 
 export default function cadCore(pi: ExtensionAPI) {
+  assertLinuxRuntime("Pi-CAD extension");
   const deps: ControllerDeps = {
     pi,
     persist,
@@ -227,8 +240,23 @@ export default function cadCore(pi: ExtensionAPI) {
   pi.registerCommand("cad", {
     description: "Show the Pi-CAD workspace: project, design head, and active run",
     handler: async (args, ctx) => {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        const project = new HarnessProjectStoreV7(ctx.cwd);
+        const [{ state }, run] = await Promise.all([project.load(), project.currentRun(mechanicalRegistries)]);
+        if (ctx.hasUI) {
+          const artifacts = Object.values(state.head.artifacts);
+          ctx.ui.notify([
+            "Pi-CAD workspace (Kernel v7)",
+            `project=${state.projectId}`,
+            artifacts.length ? `head=${artifacts.map((item) => `${item.path}@${item.sha256.slice(0, 12)}`).join(",")}` : "head=none",
+            run ? `activeRun=${run.state.runId} workflow=${run.workflow.id} phase=${run.state.phase}` : "activeRun=none (IDLE)",
+          ].join(" · "), "info");
+        }
+        if (args.trim()) pi.sendUserMessage(args, { expandPromptTemplates: false });
+        return;
+      }
       const store = new CadProjectStore(ctx.cwd);
-      await store.migrate();
+      await migrateProjectOnce(store);
       const project = await store.ensureProject();
       const run = await store.load();
       if (ctx.hasUI) {
@@ -251,6 +279,11 @@ export default function cadCore(pi: ExtensionAPI) {
   pi.registerCommand("cad-abort", {
     description: "Abort the active workflow run only; project head is untouched",
     handler: async (_args, ctx) => {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        const state = await abortMechanicalRunV7(ctx.cwd);
+        if (state && ctx.hasUI) ctx.ui.notify(`Run ${state.runId} aborted; v7 Project Head unchanged`, "warning");
+        return;
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await store.load();
       if (!state) return;
@@ -274,6 +307,15 @@ export default function cadCore(pi: ExtensionAPI) {
   pi.registerCommand("cad-approve-reroute", {
     description: "Approve the pending Pi-CAD reroute (issues a one-time authority token for that exact route)",
     handler: async (_args, ctx) => {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const loaded = await approveMechanicalRerouteV7(ctx.cwd);
+          if (ctx.hasUI) ctx.ui.notify(`Exact v7 reroute authority issued for run ${loaded.state.runId}`, "info");
+        } catch (error) {
+          if (ctx.hasUI) ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+        }
+        return;
+      }
       const store = new CadProjectStore(ctx.cwd);
       const state = await store.load();
       if (!state || state.status === "done" || state.status === "aborted") {
@@ -312,45 +354,54 @@ export default function cadCore(pi: ExtensionAPI) {
   registerControlTools(pi, deps);
   registerContextCompaction(pi);
 
-  pi.on("before_agent_start", async (event, ctx) => {
-    const store = new CadProjectStore(ctx.cwd);
-    await store.migrate();
-    const project = await store.ensureProject();
-    let state = await store.load();
-    if (state?.requirementsVersion) {
-      try {
-        await store.readRequirementsVersion(state.requirementsVersion);
-        await store.repairRequirementsRevisionJournal(state);
-      } catch (error) {
-        state = {
-          ...state,
-          status: "blocked_external",
-          blocker: {
-            type: "external_input",
-            reason: "canonical requirements storage is missing or corrupt",
-            needed: error instanceof Error ? error.message : "restore the immutable requirements record",
-            createdAt: nowIso(),
-          },
-          updatedAt: nowIso(),
-        };
-        await persist(pi, store, state, [{ type: "CanonicalRequirementsCorrupt", data: state.blocker }]);
-      }
+  // Resolve an interactive wait as a bounded input transaction. Prompt
+  // projection remains read-only and never repairs/migrates state.
+  pi.on("input", async (event, ctx) => {
+    if (event.source === "extension") return { action: "continue" as const };
+    if (await selectKernelEngine(ctx.cwd) === "v7") {
+      await resumeMechanicalRunV7(ctx.cwd);
+      return { action: "continue" as const };
     }
+    const store = new CadProjectStore(ctx.cwd);
+    const state = await store.load();
     if (state && state.status === "waiting_user" && !isHeadless(state)) {
-      state = resumeFromUser(state);
-      // Deliberately NO reroute authority here: an ordinary user reply only
-      // proves the user spoke, not that they approved a downgrade. Downgrade
-      // authority is issued exclusively by the /cad-approve-reroute command.
-      await persist(pi, store, state, [
+      const next = resumeFromUser(state);
+      await persist(pi, store, next, [
         { type: "UserInputResolved", data: { phase: state.phase } },
       ]);
     }
+    return { action: "continue" as const };
+  });
+
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (await selectKernelEngine(ctx.cwd) === "v7") {
+      const project = new HarnessProjectStoreV7(ctx.cwd);
+      const loaded = await project.currentRun(mechanicalRegistries);
+      if (!loaded || ["done", "aborted"].includes(loaded.state.status)) {
+        applyV7ToolOverlay(pi, ["cad_start", "cad_route"]);
+        return { systemPrompt: `${event.systemPrompt}\n\n## Pi-CAD Harness Kernel v7\nNo active run. Call cad_route for the default Mechanical intake, or cad_start for the project-selected generic workflow.` };
+      }
+      const permissions = new PermissionEngineV7(mechanicalRegistries, loaded.registryContract);
+      applyV7ToolOverlay(pi, permissions.enabledActions(loaded.state, loaded.workflow));
+      const phase = loaded.workflow.phases[loaded.state.phase]!;
+      const compiled = await mechanicalContextCompiler(mechanicalRegistries).compile({
+        project: project.transactions,
+        run: new HarnessRunStoreV7(ctx.cwd, loaded.state.runId).transactions,
+        providerIds: phase.contextProviders,
+        allowedIndexes: new Set(["obligations", "observations", "runtime-availability"]),
+        aggregateReadBudget: 1024 * 1024,
+        aggregateEmitBudget: 96 * 1024,
+      });
+      return { systemPrompt: `${event.systemPrompt}\n\n## Pi-CAD Harness Kernel v7\nworkflow=${loaded.workflow.id}@${loaded.workflow.version} hash=${loaded.workflow.hash}\nregistryContract=${loaded.registryContract.hash}\n\n${compiled.text}` };
+    }
+    const store = new CadProjectStore(ctx.cwd);
+    const [project, state] = await Promise.all([store.loadProject(), store.load()]);
     const active = state && !isTerminalStatus(state.status);
     // Always apply — also when idle/done/aborted — so a finished run drops
     // back to the intake overlay (cad_route) without disturbing any other
     // plugin's active tools.
     applyCadToolOverlay(pi, active ? state : null);
-    const missing = await unavailableCapabilities(pi, ctx.cwd);
+    const missing = await unavailableCapabilities(pi);
     // Mission + Working Context + reference index, appended after the
     // canonical state projection. Empty on fresh runs until the first
     // context rebuild writes working.md.
@@ -366,6 +417,27 @@ export default function cadCore(pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event, ctx) => {
+    if (await selectKernelEngine(ctx.cwd) === "v7") {
+      const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+      if (!loaded) {
+        if (PI_CAD_OWNED_TOOLS.has(event.toolName) && !["cad_start", "cad_route"].includes(event.toolName)) return { block: true, reason: "Pi-CAD v7 has no active run; call cad_route or cad_start first" };
+        return undefined;
+      }
+      const permissions = new PermissionEngineV7(mechanicalRegistries, loaded.registryContract);
+      if (PI_CAD_OWNED_TOOLS.has(event.toolName)) {
+        try { permissions.assertAction(loaded.state, loaded.workflow, event.toolName); }
+        catch (error) { return { block: true, reason: error instanceof Error ? error.message : String(error) }; }
+      }
+      if (event.toolName === "write" || event.toolName === "edit") {
+        const path = (event.input as { path?: string }).path;
+        if (path) {
+          try {
+            assertScopedWrite({ cwd: ctx.cwd, target: path, enabledScopes: loaded.workflow.phases[loaded.state.phase]!.writeScopes, rules: V7_WRITE_RULES.map((rule) => ({ scope: rule.scope, roots: [...rule.roots] })) });
+          } catch (error) { return { block: true, reason: error instanceof Error ? error.message : String(error) }; }
+        }
+      }
+      return undefined;
+    }
     const store = new CadProjectStore(ctx.cwd);
     const state = await guardState(store);
     if (!state) return;
@@ -432,11 +504,13 @@ export default function cadCore(pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", async (event, ctx) => {
+    if (await selectKernelEngine(ctx.cwd) === "v7") return;
     const store = new CadProjectStore(ctx.cwd);
     await handleToolResult(pi, store, event);
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    if (await selectKernelEngine(ctx.cwd) === "v7") return;
     const store = new CadProjectStore(ctx.cwd);
     const state = await guardState(store);
     if (!state) return;

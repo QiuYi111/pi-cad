@@ -2,19 +2,19 @@
 
 ## Applicable / not applicable
 
-Use for deterministic exports, drawings, and explicit render/scene specifications. Do not use packaging to invent tolerances, repair geometry, or prove analysis.
+Use primitives for deterministic geometry export. Use Recipe-first `drawing` and `presentation` packages for multi-step drawing/render execution. Do not use packaging to invent tolerances, repair geometry, or prove analysis.
 
 ## Environment and permissions
 
-Follow action-card write scope. Source STEP remains authoritative; sidecars and presentation files retain hash-bound provenance.
+Follow the Action Card write scope. Source STEP remains authoritative. Drawing/presentation compute runs in a pinned, network-denied runtime; the exact Recipe closure, inputs, selected action, observer revision, and exports are snapshotted.
 
 ## Minimum valid input
 
-Export: source artifact and format/output. Drawing: views, units, dimensions/notes explicitly supported by requirements. Scene: models, transforms, camera, lighting, output, and animation intent.
+Export: source artifact and format/output. Drawing: a `kind: drawing` `pi-recipe.yaml` plus a `validate|generate` action. Presentation: a `kind: presentation` Recipe plus a `validate|preview|generate|run` action. When the Action Card exposes a Recipe-backed Evidence obligation, pass its exact `obligationRef` and every `requiredOutputs` name.
 
 ## Complete working example
 
-Verify current artifact hash, author a structured drawing or scene spec, generate the deliverable, inspect its visual/metadata result, and include it in package/final review without claiming more than it shows.
+Verify the current artifact hash, author the Recipe/spec, then call `cad_generate_drawing({recipe, stage, obligationRef, outputs})` or `cad_render_scene({recipe, stage, obligationRef, outputs})`. The one-shot domain action executes, observes, and explicitly commits either the pre-bound Evidence or non-Evidence artifacts. Inspect previews and immutable export hashes before review.
 
 ## Preflight
 

@@ -33,6 +33,45 @@
   },
   "tools": [
     {
+      "name": "cad_start",
+      "category": "control",
+      "purpose": "Start a generic v7 run from the project-selected immutable workflow.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "interactionMode": {
+            "enum": [
+              "interactive",
+              "headless"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [],
+      "availability": "Only when no active run exists; Mechanical tasks normally start with cad_route.",
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
       "name": "cad_route",
       "category": "control",
       "purpose": "Select the route that compiles the workflow and obligations.",
@@ -1791,26 +1830,48 @@
       "category": "control",
       "purpose": "Bind one immutable run/observation to a simulation case obligation.",
       "inputSchema": {
-        "type": "object",
-        "required": [
-          "run",
-          "caseId"
-        ],
-        "properties": {
-          "run": {
-            "type": "string",
-            "minLength": 1
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "run",
+              "observation"
+            ],
+            "properties": {
+              "run": {
+                "type": "string",
+                "minLength": 1
+              },
+              "observation": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
           },
-          "observation": {
-            "type": "string",
-            "minLength": 1
-          },
-          "caseId": {
-            "type": "string",
-            "minLength": 1
+          {
+            "type": "object",
+            "required": [
+              "run",
+              "caseId"
+            ],
+            "properties": {
+              "run": {
+                "type": "string",
+                "minLength": 1
+              },
+              "observation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "caseId": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "phases": [
         "review",
@@ -2927,36 +2988,64 @@
       "category": "model",
       "purpose": "Create a provenance-bound solver derivation.",
       "inputSchema": {
-        "type": "object",
-        "required": [
-          "source",
-          "operations"
-        ],
-        "properties": {
-          "source": {
-            "type": "string",
-            "description": "Authoritative design STEP this model derives from"
-          },
-          "operations": {
-            "type": "array",
-            "items": {
-              "enum": [
-                "fused",
-                "bonded",
-                "simplified",
-                "defeatured",
-                "sectioned"
-              ]
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "recipe"
+            ],
+            "properties": {
+              "recipe": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outputs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
             },
-            "minItems": 1,
-            "description": "fused/bonded are executed by the harness; simplified/defeatured/sectioned record your authored model"
+            "additionalProperties": false
           },
-          "output": {
-            "type": "string",
-            "description": "Output STEP. Required for authored operations; optional for fused/bonded (harness writes it)"
+          {
+            "type": "object",
+            "required": [
+              "source",
+              "operations"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "description": "Authoritative design STEP this model derives from"
+              },
+              "operations": {
+                "type": "array",
+                "items": {
+                  "enum": [
+                    "fused",
+                    "bonded",
+                    "simplified",
+                    "defeatured",
+                    "sectioned"
+                  ]
+                },
+                "minItems": 1,
+                "description": "fused/bonded are executed by the harness; simplified/defeatured/sectioned record your authored model"
+              },
+              "output": {
+                "type": "string",
+                "description": "Output STEP. Required for authored operations; optional for fused/bonded (harness writes it)"
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "phases": [
         "review",
@@ -2994,37 +3083,73 @@
       "category": "simulation",
       "purpose": "Run a solver-native Recipe in a managed runtime; creates no Evidence.",
       "inputSchema": {
-        "type": "object",
-        "required": [
-          "backend",
-          "runtime",
-          "recipe"
-        ],
-        "properties": {
-          "backend": {
-            "type": "string",
-            "minLength": 1
-          },
-          "runtime": {
-            "type": "string",
-            "minLength": 1
-          },
-          "recipe": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Directory containing pi-sim.toml; never pass the manifest file itself"
-          },
-          "outputs": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "recipe",
+              "obligationRef"
+            ],
+            "properties": {
+              "recipe": {
+                "type": "string",
+                "minLength": 1,
+                "description": "v7 directory containing pi-recipe.yaml"
+              },
+              "obligationRef": {
+                "type": "string",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "minLength": 1
+              },
+              "outputs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              }
             },
-            "minItems": 1,
-            "uniqueItems": true
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "backend",
+              "runtime",
+              "recipe"
+            ],
+            "properties": {
+              "backend": {
+                "type": "string",
+                "minLength": 1
+              },
+              "runtime": {
+                "type": "string",
+                "minLength": 1
+              },
+              "recipe": {
+                "type": "string",
+                "minLength": 1,
+                "description": "v6 directory containing pi-sim.toml"
+              },
+              "outputs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "minItems": 1,
+                "uniqueItems": true
+              }
+            },
+            "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "phases": [
         "review",
@@ -3120,152 +3245,180 @@
       "category": "optimization",
       "purpose": "Produce a managed torch-fem optimization artifact.",
       "inputSchema": {
-        "type": "object",
-        "required": [
-          "designDomain",
-          "material",
-          "objective",
-          "constraints",
-          "optimizer"
-        ],
-        "properties": {
-          "mode": {
-            "type": "string",
-            "const": "topology_2d_rect_v0"
-          },
-          "runtime": {
-            "enum": [
-              "torch-fem-0.9-cu126",
-              "torch-fem-0.9-cpu"
-            ],
-            "description": "Managed torch-fem runtime; CUDA is the production default and never falls back to CPU"
-          },
-          "designDomain": {
-            "type": "object",
-            "properties": {
-              "x": {
-                "type": "array",
-                "additionalItems": false,
-                "items": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "number"
-                  }
-                ],
-                "minItems": 2
-              },
-              "y": {
-                "type": "array",
-                "additionalItems": false,
-                "items": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "number"
-                  }
-                ],
-                "minItems": 2
-              },
-              "nx": {
-                "type": "integer",
-                "minimum": 2
-              },
-              "ny": {
-                "type": "integer",
-                "minimum": 2
-              }
-            },
-            "additionalProperties": false
-          },
-          "material": {
+        "anyOf": [
+          {
             "type": "object",
             "required": [
-              "E",
-              "nu"
+              "recipe"
             ],
             "properties": {
-              "E": {
-                "type": "number"
-              },
-              "nu": {
-                "type": "number"
-              }
-            },
-            "additionalProperties": false
-          },
-          "objective": {
-            "type": "object",
-            "required": [
-              "type",
-              "sense"
-            ],
-            "properties": {
-              "type": {
+              "recipe": {
                 "type": "string",
-                "const": "compliance"
+                "minLength": 1
               },
-              "sense": {
+              "action": {
                 "type": "string",
-                "const": "minimize"
-              }
-            },
-            "additionalProperties": false
-          },
-          "constraints": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "type",
-                "max"
-              ],
-              "properties": {
-                "type": {
+                "minLength": 1
+              },
+              "outputs": {
+                "type": "array",
+                "items": {
                   "type": "string",
-                  "const": "volume_fraction"
-                },
-                "max": {
-                  "type": "number",
-                  "exclusiveMinimum": 0,
-                  "maximum": 1
+                  "minLength": 1
                 }
-              },
-              "additionalProperties": false
+              }
             },
-            "minItems": 1,
-            "maxItems": 1
+            "additionalProperties": false
           },
-          "optimizer": {
+          {
             "type": "object",
             "required": [
-              "type",
-              "maxIterations"
+              "designDomain",
+              "material",
+              "objective",
+              "constraints",
+              "optimizer"
             ],
             "properties": {
-              "type": {
+              "mode": {
                 "type": "string",
-                "const": "mma"
+                "const": "topology_2d_rect_v0"
               },
-              "maxIterations": {
-                "type": "integer",
-                "minimum": 1
+              "runtime": {
+                "enum": [
+                  "torch-fem-0.9-cu126",
+                  "torch-fem-0.9-cpu"
+                ],
+                "description": "Managed torch-fem runtime; CUDA is the production default and never falls back to CPU"
               },
-              "penalty": {
-                "type": "number",
-                "exclusiveMinimum": 1
+              "designDomain": {
+                "type": "object",
+                "properties": {
+                  "x": {
+                    "type": "array",
+                    "additionalItems": false,
+                    "items": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "minItems": 2
+                  },
+                  "y": {
+                    "type": "array",
+                    "additionalItems": false,
+                    "items": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "minItems": 2
+                  },
+                  "nx": {
+                    "type": "integer",
+                    "minimum": 2
+                  },
+                  "ny": {
+                    "type": "integer",
+                    "minimum": 2
+                  }
+                },
+                "additionalProperties": false
               },
-              "Emin": {
-                "type": "number",
-                "exclusiveMinimum": 0
+              "material": {
+                "type": "object",
+                "required": [
+                  "E",
+                  "nu"
+                ],
+                "properties": {
+                  "E": {
+                    "type": "number"
+                  },
+                  "nu": {
+                    "type": "number"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "objective": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "sense"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "compliance"
+                  },
+                  "sense": {
+                    "type": "string",
+                    "const": "minimize"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "constraints": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "type",
+                    "max"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "volume_fraction"
+                    },
+                    "max": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 1
+              },
+              "optimizer": {
+                "type": "object",
+                "required": [
+                  "type",
+                  "maxIterations"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "mma"
+                  },
+                  "maxIterations": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "penalty": {
+                    "type": "number",
+                    "exclusiveMinimum": 1
+                  },
+                  "Emin": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "additionalProperties": false
               }
             },
             "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        ]
       },
       "phases": [
         "review",
@@ -3344,11 +3497,187 @@
       "category": "deliverable",
       "purpose": "Generate a structured drawing from declared intent.",
       "inputSchema": {
-        "type": "object",
-        "required": [
-          "stage",
-          "artifact",
-          "views"
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "recipe",
+              "stage"
+            ],
+            "properties": {
+              "recipe": {
+                "type": "string",
+                "minLength": 1
+              },
+              "obligationRef": {
+                "type": "string",
+                "minLength": 1
+              },
+              "stage": {
+                "enum": [
+                  "validate",
+                  "generate"
+                ]
+              },
+              "outputs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "stage",
+              "artifact",
+              "views"
+            ],
+            "properties": {
+              "stage": {
+                "enum": [
+                  "validate",
+                  "generate"
+                ]
+              },
+              "artifact": {
+                "type": "string",
+                "description": "STEP artifact the drawing documents"
+              },
+              "units": {
+                "type": "string",
+                "const": "mm"
+              },
+              "sheet": {
+                "type": "object",
+                "required": [
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "width": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "height": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "views": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "enum": [
+                        "iso",
+                        "front",
+                        "back",
+                        "left",
+                        "right",
+                        "top",
+                        "bottom"
+                      ]
+                    },
+                    "scale": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "dimensions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "p1",
+                    "p2",
+                    "text"
+                  ],
+                  "properties": {
+                    "p1": {
+                      "type": "array",
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "minItems": 2
+                    },
+                    "p2": {
+                      "type": "array",
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "minItems": 2
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "featureRefs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "tolerance": {
+                      "type": "object",
+                      "required": [
+                        "lower",
+                        "upper"
+                      ],
+                      "properties": {
+                        "lower": {
+                          "type": "number"
+                        },
+                        "upper": {
+                          "type": "number"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "inspectionMethod": {
+                      "type": "string"
+                    },
+                    "ctq": {
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "notes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
         ],
         "properties": {
           "stage": {
@@ -3489,8 +3818,7 @@
               "type": "string"
             }
           }
-        },
-        "additionalProperties": false
+        }
       },
       "phases": [
         "build",
@@ -3520,14 +3848,272 @@
       "category": "deliverable",
       "purpose": "Create presentation assets from an explicit scene specification.",
       "inputSchema": {
-        "type": "object",
-        "required": [
-          "stage",
-          "artifact",
-          "directions",
-          "materials",
-          "lighting",
-          "camera"
+        "anyOf": [
+          {
+            "type": "object",
+            "required": [
+              "recipe",
+              "stage"
+            ],
+            "properties": {
+              "recipe": {
+                "type": "string",
+                "minLength": 1
+              },
+              "obligationRef": {
+                "type": "string",
+                "minLength": 1
+              },
+              "stage": {
+                "enum": [
+                  "validate",
+                  "preview",
+                  "generate",
+                  "run"
+                ]
+              },
+              "outputs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "stage",
+              "artifact",
+              "directions",
+              "materials",
+              "lighting",
+              "camera"
+            ],
+            "properties": {
+              "stage": {
+                "enum": [
+                  "validate",
+                  "preview",
+                  "generate",
+                  "run"
+                ]
+              },
+              "artifact": {
+                "type": "string",
+                "description": "Artifact (STEP or GLB) the scene presents — the evidence subject"
+              },
+              "directions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "reference"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "reference": {
+                      "type": "string",
+                      "description": "Path to a reference image backing this direction"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 2
+              },
+              "materials": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "pattern",
+                    "family"
+                  ],
+                  "properties": {
+                    "pattern": {
+                      "type": "string"
+                    },
+                    "family": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "lighting": {
+                "type": "object",
+                "required": [
+                  "key",
+                  "fill",
+                  "rim"
+                ],
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "fill": {
+                    "type": "string"
+                  },
+                  "rim": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "camera": {
+                "type": "object",
+                "required": [
+                  "lens",
+                  "composition"
+                ],
+                "properties": {
+                  "lens": {
+                    "type": "string"
+                  },
+                  "composition": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "assemblyDefinition": {
+                "type": "object",
+                "required": [
+                  "sequence"
+                ],
+                "properties": {
+                  "sequence": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "step",
+                        "installs"
+                      ],
+                      "properties": {
+                        "step": {
+                          "type": "number"
+                        },
+                        "installs": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          },
+                          "minItems": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "description": "Install order from the committed assembly_design record"
+                  },
+                  "modules": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "name"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "envelopeMm": {
+                          "type": "array",
+                          "additionalItems": false,
+                          "items": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "minItems": 3
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "explodeDirections": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^.*$": {
+                        "type": "array",
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "minItems": 3
+                      }
+                    },
+                    "description": "Module name -> unit-ish explode direction; unmatched objects explode radially"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "resolution": {
+                "type": "object",
+                "required": [
+                  "width",
+                  "height"
+                ],
+                "properties": {
+                  "width": {
+                    "type": "integer",
+                    "minimum": 16
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 16
+                  }
+                },
+                "additionalProperties": false
+              },
+              "fps": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 120
+              },
+              "outputs": {
+                "type": "object",
+                "properties": {
+                  "hero": {
+                    "type": "boolean"
+                  },
+                  "exploded": {
+                    "type": "boolean"
+                  },
+                  "turntable": {
+                    "type": "boolean"
+                  },
+                  "assembly": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
         ],
         "properties": {
           "stage": {
@@ -3748,8 +4334,7 @@
             },
             "additionalProperties": false
           }
-        },
-        "additionalProperties": false
+        }
       },
       "phases": [
         "build",

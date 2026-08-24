@@ -1,0 +1,16 @@
+schema: 1
+id: drawing/cadctl-v1
+version: 1.0.0
+kind: drawing
+runtimeProfile: pi-cad/cadctl-0.9
+inputs:
+  - {path: inputs/design.step, role: authoritative-design, type: file}
+actions:
+  validate: {argv: [/opt/pi-cad/python/.venv/bin/python, run.py], files: [run.py, spec.json], timeoutSeconds: 180}
+  generate: {argv: [/opt/pi-cad/python/.venv/bin/python, run.py], files: [run.py, spec.json], timeoutSeconds: 300}
+observer: {argv: [/usr/bin/python3, observer.py], files: [observer.py], timeoutSeconds: 30}
+exports:
+  result: {type: artifact, primary: true}
+  drawing_svg: {type: image, primary: false}
+  drawing_dxf: {type: artifact, primary: false}
+resources: {cpu: 2, memoryGiB: 4, workspaceGiB: 4}

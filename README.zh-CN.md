@@ -149,6 +149,12 @@ faces、assembly occurrences、interference pairs、Python 数组/表格与完�
 都进入压缩 collection,可按 filter/order/cursor 分页读完。超出存储 quota 会明确
 失败,绝不静默丢数据。
 
+## Harness Kernel v7 与领域 Recipe
+
+新任务默认进入 transactional v7 Kernel。通用 start action 冻结选定的 Workflow 与 Registry Contract；Mechanical routing 是 Domain Pack action，通过通用 workflow replacement transaction 替换 intake snapshot。正在运行的 v6 始终留在 v6，绝不自动迁移。Context Provider 只读取受限的 committed snapshot；Project Head 只有在 run 完成后才通过单个 project transaction 可见。
+
+Simulation、Optimization、Drawing、Presentation 与 analysis-model derivation 共用严格的 `pi-recipe.yaml` 协议；MODEL build/export 与 typed PROBE 继续作为 primitives。Recipe 选择命名的 argv action，声明精确 closure/input 和固定 runtime profile，并产生不可变 observer snapshot。会生成 Evidence 的 run 必须在 compute 前绑定精确 obligation，commit 只能关闭该 binding。
+
 ## 仿真能力的诚实边界
 
 Simulation V2 的正式链路是:
@@ -160,8 +166,8 @@ Simulation V2 的正式链路是:
 → 显式 case-scoped Evidence commit
 ```
 
-每个 Recipe 包含严格的 `pi-sim.toml`、可自由编程的 managed entrypoint、
-observation program、显式项目输入,以及只使用
+每个新 Recipe 包含严格的 `pi-recipe.yaml`、命名 managed actions、
+可独立修订的 observation program、显式项目输入,以及只使用
 `image | scalar | timeseries | table | field | artifact` 的命名 exports。
 visual Recipe 必须有 primary image 和 primary quantitative export;
 nonvisual Recipe 必须有 primary quantitative export。省略 `outputs` 返回
@@ -169,13 +175,12 @@ primary floor;显式名字只能追加观察;`outputs=[]` 非法。
 
 Harness 只快照 Recipe 与 declared inputs,在固定版本、默认断网的 runtime
 中执行;完整日志和 raw state 留在上下文之外,图片先于受限的量化摘要返回。
-只修改 observation files 会产生新的 immutable snapshot,不会重跑 Solver;
-每个 Observation 都保存实际运行的 manifest/observer 文件、tree/file hash、
+只修改 observer closure 会产生新的 immutable snapshot,不会重跑 Solver;
+每个 Observation 都保存实际运行的 observer contract/files 与 hash、
 rendered plot hash 与 materialized exports。因此后续 re-observe 后,旧的精确
 snapshot 仍可独立审计和提交。修改 compute 文件或输入则必须新建 run。
-已物化的文件 export 会进入 run 级 `objects/sha256/` 存储;未变化的大型
-field 通过硬链接复用同一个 immutable object,不支持硬链接时回退到
-copy/reflink。
+现有 `pi-sim.toml` case 在 bundled benchmark 完成迁移前由只读 adapter 支持；
+adapter 不会形成第二套 runtime protocol。
 
 simulate 和 observe 都不创建 Evidence。commit 会复验精确的 run、observation、
 runtime identity、declared inputs、当前 case obligation,以及 authoritative
@@ -190,8 +195,9 @@ schema 2 runtime registry 数据驱动注册四个精确环境:
 
 在 Linux/WSL 内分别运行 `scripts/bootstrap-openfoam14.sh`、
 `scripts/bootstrap-su2-8.5.0.sh` 与 `scripts/bootstrap-torch-fem-runtimes.sh`
-完成一次性安装。Windows Node host 一律通过 WSL 启动 Linux runtime,
-Recipe Python 不在 Windows 上执行;entrypoint/observer 使用锁定项目的
+完成一次性安装。在 WSL 下，Pi-CAD、Node、`uv`、Recipe entrypoint 与
+observer 必须全部运行在同一个 Linux 发行版内；不支持 Windows-host Node
+或跨宿主进程/路径转换。entrypoint/observer 使用锁定项目的
 `uv run --offline --frozen`。正式运行由 bubblewrap、user systemd scope、
 断网、只读挂载、资源上限与 workspace quota 隔离。普通 CI 使用 stub runtime;
 每个 uv runtime 的版本/accelerator probe 由 registry entry 声明,generic runner
@@ -294,13 +300,13 @@ Recipe 和 skill 必须明确与结论有关的非线性、多材料、CHT、燃
 
 | 变量 | 作用 |
 | --- | --- |
-| `PI_CAD_UV` | 在原生 Linux 上覆盖 `uv` 可执行文件 |
-| `PI_CAD_WSL_DISTRO` | Windows Node host 使用的 WSL 发行版(默认 `Ubuntu`) |
+| `PI_CAD_UV` | 覆盖 Linux `uv` 可执行文件 |
 | `PI_CAD_ENABLE_DEV_RUNTIMES` | 显示 development-only runtime,包括显式 CPU (`1`) |
 | `CUDA_VISIBLE_DEVICES` | 选择暴露给 managed runtime 的 CUDA 设备 |
 
-运行时能力检查("doctor" 报告)是对**实际会用到的那份 Python** 的实时
-探测,每个会话尊重一次——不是安装时刻的过期快照。
+运行时 qualification 在 prompt 热路径之外执行，并持久化为绑定 registry
+hash 的 availability record。prompt 路径只读取这个有界记录（`ready` 或
+`unknown`）；执行时设置 `PI_CAD_REQUALIFY_RUNTIME=1` 可强制重新检查。
 
 ## 测试与 CI
 
@@ -308,7 +314,7 @@ Recipe 和 skill 必须明确与结论有关的非线性、多材料、CHT、燃
 npm test          # 或:bash scripts/test.sh
 ```
 
-TypeScript 协议/harness 测试与 WSL/Linux 中通过 `uv run` 执行的 Python
+TypeScript 协议/harness 测试与 Linux 中通过 `uv run` 执行的 Python
 测试覆盖 manifest/path closure、Observation、显式 commit、资源限制、CUDA
 fail-closed、结构 refinement/平衡/梯度、SU2 解析导热与流动守恒以及 OpenFOAM
 qualification。普通 CI 不伪造 GPU qualification。

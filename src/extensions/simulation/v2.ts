@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
 import { existsSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
@@ -22,6 +23,8 @@ import {
   type ObservationSnapshotRecord,
   type SimulationRunRecord,
 } from "../../modules/simulate-v2/store.ts";
+import { selectKernelEngine } from "../../harness/engine-router.ts";
+import { cadSimulateV7, commitMechanicalRecipeByRefV7, observeMechanicalRecipeV7 } from "../../domains/mechanical/recipe-actions-v7.ts";
 
 function rel(cwd: string, path: string): string {
   return relative(resolve(cwd), resolve(path)).split(sep).join("/");
@@ -254,12 +257,18 @@ export async function commitSimulation(cwd: string, runId: string, observationId
   return evidence;
 }
 
-export const CadSimulateParametersSchema = Type.Object({ backend: Type.String({ minLength: 1 }), runtime: Type.String({ minLength: 1 }), recipe: Type.String({ minLength: 1, description: "Directory containing pi-sim.toml; never pass the manifest file itself" }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false });
+export const CadSimulateParametersSchema = Type.Union([
+  Type.Object({ recipe: Type.String({ minLength: 1, description: "v7 directory containing pi-recipe.yaml" }), obligationRef: Type.String({ minLength: 1 }), action: Type.Optional(Type.String({ minLength: 1 })), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false }),
+  Type.Object({ backend: Type.String({ minLength: 1 }), runtime: Type.String({ minLength: 1 }), recipe: Type.String({ minLength: 1, description: "v6 directory containing pi-sim.toml" }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false }),
+]);
 export const CadSimObserveParametersSchema = Type.Object({ run: Type.String({ minLength: 1 }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false });
-export const CadCommitSimulationParametersSchema = Type.Object({ run: Type.String({ minLength: 1 }), observation: Type.Optional(Type.String({ minLength: 1 })), caseId: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+export const CadCommitSimulationParametersSchema = Type.Union([
+  Type.Object({ run: Type.String({ minLength: 1 }), observation: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+  Type.Object({ run: Type.String({ minLength: 1 }), observation: Type.Optional(Type.String({ minLength: 1 })), caseId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+]);
 
 export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_simulate",
     label: "CAD Simulate Recipe",
     description: "Run an agent-authored solver-native Recipe in a managed backend/runtime and return a controlled multimodal Observation. The Recipe owns physics, configuration, meshing, execution, and project-specific postprocessing. Pi-CAD freezes the Recipe and every explicitly declared input, runs without implicit project access, validates generic exports, returns images before bounded quantitative context and diagnostics, and retains raw artifacts/logs. This creates an immutable SimulationRun and ObservationSnapshot but never Evidence; use cad_commit_simulation after inspection.",
@@ -267,6 +276,14 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     promptGuidelines: ["Author or revise solver-native Recipes only under simulation/**; never encode physics in tool arguments.", "Declare every external project input in pi-sim.toml and choose a backend/runtime advertised in context.", "Inspect the images-first Observation and quantitative health. A successful solve is not Evidence until cad_commit_simulation."],
     parameters: CadSimulateParametersSchema,
     async execute(_id, params, _signal, _update, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        if (!("obligationRef" in params)) return { content: [{ type: "text", text: "cad_simulate v7 requires recipe and obligationRef; backend/runtime come from pi-recipe.yaml" }] };
+        try {
+          const result = await cadSimulateV7({ cwd: ctx.cwd, recipe: params.recipe, obligationRef: params.obligationRef, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
+          return { content: [{ type: "text", text: `Simulation Recipe ${result.record.runId} ${result.record.status}; obligation=${params.obligationRef}. Call cad_sim_observe with this run.` }], details: { simulationRunId: result.record.runId, computeIdentity: result.record.computeIdentity, validForCommit: false } };
+        } catch (error) { return { content: [{ type: "text", text: `cad_simulate failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+      }
+      if (!("backend" in params)) return { content: [{ type: "text", text: "cad_simulate v6 requires backend/runtime" }] };
       const { store, state, workflowRunId } = await currentWorkflow(ctx.cwd);
       let prepared;
       try {
@@ -292,7 +309,7 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_sim_observe",
     label: "CAD Re-observe Simulation",
     description: "Run only the observation program over one frozen SimulationRun and create a new immutable ObservationSnapshot without rerunning compute. Only the originally declared observation_files plus observe/export declarations may change; solver, mesh, entrypoint, inputs, runtime, and frozen raw state must still match.",
@@ -300,6 +317,12 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     promptGuidelines: ["Use this after editing only declared observation_files.", "Changing solver, mesh, entrypoint, or inputs requires cad_simulate."],
     parameters: CadSimObserveParametersSchema,
     async execute(_id, params, _signal, _update, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        try {
+          const observation = await observeMechanicalRecipeV7({ cwd: ctx.cwd, run: params.run, signal: _signal });
+          return { content: [{ type: "text", text: `Observation ${observation.observationId} validForCommit=${observation.validForCommit}; exports=${observation.exports.map((item) => item.name).join(",")}` }], details: { simulationRunId: params.run, observationId: observation.observationId, validForCommit: observation.validForCommit } };
+        } catch (error) { return { content: [{ type: "text", text: `cad_sim_observe failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+      }
       const { workflowRunId, store, state } = await currentWorkflow(ctx.cwd);
       let result;
       try {
@@ -322,7 +345,7 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.registerTool({
+  registerMechanicalActionTool(pi, {
     name: "cad_commit_simulation",
     label: "Commit Simulation Evidence",
     description: "Promote one successfully completed managed SimulationRun and one exact valid ObservationSnapshot into version-bound Evidence for an existing case whose declared tool is cad_simulate. Pi-CAD re-verifies the frozen raw state, Recipe, runtime identity, all declared inputs, observation artifacts/program, and authoritative design or verified derivation. This performs no solve or postprocessing and does not judge engineering PASS.",
@@ -330,6 +353,15 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     promptGuidelines: ["Commit only after inspecting the Observation.", "Evidence records provenance; it does not imply an engineering PASS."],
     parameters: CadCommitSimulationParametersSchema,
     async execute(_id, params, _signal, _update, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        if (!params.observation || "caseId" in params) return { content: [{ type: "text", text: "cad_commit_simulation v7 accepts only {run, observation}; the obligation was pre-bound at execution" }] };
+        try {
+          const committed = await commitMechanicalRecipeByRefV7({ cwd: ctx.cwd, run: params.run, observation: params.observation });
+          const evidence = committed.state.evidence.find((item) => item.computeIdentity);
+          return { content: [{ type: "text", text: `Committed pre-bound Simulation Evidence ${evidence?.id ?? "(idempotent)"}.` }], details: { evidenceId: evidence?.id, simulationRunId: params.run, observationId: params.observation } };
+        } catch (error) { return { content: [{ type: "text", text: `cad_commit_simulation failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+      }
+      if (!("caseId" in params)) return { content: [{ type: "text", text: "cad_commit_simulation v6 requires caseId" }] };
       try {
         const evidence = await commitSimulation(ctx.cwd, params.run, params.observation, params.caseId);
         return { content: [{ type: "text", text: `Committed simulation Evidence ${evidence.id} for case ${params.caseId}. Evidence provenance is bound to ${evidence.simulationRunId}/${evidence.observationId}; existence does not imply engineering PASS.` }], details: { evidenceId: evidence.id, simulationRunId: evidence.simulationRunId, observationId: evidence.observationId, computeIdentity: evidence.computeIdentity } };
