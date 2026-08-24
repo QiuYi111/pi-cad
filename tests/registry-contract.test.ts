@@ -40,9 +40,10 @@ test("Mechanical tools register their live schemas and produce a deterministic R
   const second = buildRegistryContract(mechanicalRegistries);
   assert.deepEqual(second, first);
   assert.equal(first.hash, registryContractHash(first));
-  // Seven host actions plus five internal generic reducer actions; cad_start
-  // is both public and Kernel-owned, so it is counted only once.
-  assert.equal(Object.keys(first.actions).length, ACTIVE_PUBLIC_TOOL_NAMES.length + 12);
+  // Seven host actions plus the internal generic reducer actions (including
+  // Plan C's generic workspace commit); cad_start is both public and
+  // Kernel-owned, so it is counted only once.
+  assert.equal(Object.keys(first.actions).length, ACTIVE_PUBLIC_TOOL_NAMES.length + 13);
   assert.equal(Object.keys(first.runtimeProfiles).length, 5);
 });
 

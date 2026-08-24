@@ -12,6 +12,11 @@
       "schemaDigest": "966e44789a7054c6c9417c351a09a310a0777c10671230d792289aa63595d352",
       "semanticsDigest": "032fadb1476782c7a5dce13077e12af86bc008e9d52e53a61142c8b13d2bc10b"
     },
+    "cad_commit": {
+      "version": "1.0.0",
+      "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
+      "semanticsDigest": "28b55b19f06b3524bf9fd59c231020b90d45246deef1acc812942a5bde9a73bd"
+    },
     "cad_commit_assembly_design": {
       "version": "1.0.0",
       "schemaDigest": "1810a3c34b5702c6cfa9dfe5e3cdb7b0ed3f034d487010939714df24db2f85f8",
@@ -386,6 +391,11 @@
       "version": "1.0.0",
       "schemaDigest": "56a2bdccb703a4ffd8260bb7a104491c854a9779a40e15b232247104e9f658a2",
       "semanticsDigest": "c08615c2e83a1138628e7355cd2aa8553b53d1d002871196403d206feed08661"
+    },
+    "workspace_commit": {
+      "version": "1.0.0",
+      "schemaDigest": "56a2bdccb703a4ffd8260bb7a104491c854a9779a40e15b232247104e9f658a2",
+      "semanticsDigest": "c750bed435b13c9650e61041cf3335af1ada401280e03606884c0715ba2afa06"
     }
   },
   "evidenceTypes": {
@@ -514,5 +524,5 @@
       "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
     }
   },
-  "hash": "ab37e98dac3e7a70b1b9f77570e979ead339e1757353508f6fe07182051d0b84"
+  "hash": "18702088a62667109e3fd20b2f06e8d194b859ef4c29803d1fd0d2c8c1411c69"
 }

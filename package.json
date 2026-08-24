@@ -3,6 +3,9 @@
   "version": "0.9.0",
   "description": "Harness-native agentic mechanical CAD for Pi with evidence-bound workflows, unified probes, Recipe-native simulation, and managed OpenFOAM, SU2, and CUDA torch-fem runtimes.",
   "type": "module",
+  "bin": {
+    "pi-cad": "./scripts/pi-cad-agent-api.mjs"
+  },
   "keywords": [
     "pi-package",
     "cad",
@@ -12,6 +15,7 @@
   ],
   "pi": {
     "extensions": [
+      "./src/integrations/prime/extension.ts",
       "./src/extensions/core/index.ts",
       "./src/extensions/probe/index.ts",
       "./src/extensions/geometry/index.ts",

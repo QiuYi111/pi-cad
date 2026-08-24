@@ -20,6 +20,7 @@ function staticRegistration(id: string, schema: unknown, semantics: unknown): Re
 
 const genericActions = {
   cad_start: "Compile and atomically start the selected immutable workflow.",
+  cad_commit: "Freeze selected Python values and artifacts as a generic workspace commit.",
   workflow_replace: "Replace a workflow snapshot without mutating its predecessor.",
   transition: "Apply a legal workflow event through the generic reducer.",
   commit_record: "Close one predeclared record obligation with a typed immutable record.",
@@ -103,6 +104,7 @@ simple("reviewProfiles", {
   "mechanical.final-review": { reviewer: "fresh", deterministicPreflight: true, authority: "closure-gate" },
 });
 simple("recordTypes", {
+  workspace_commit: { freshness: "workflow-phase-and-content-hashes", closure: "cad_commit" },
   requirements: { freshness: "requirements-version", closure: "cad_commit_requirements" },
   frame_context: { freshness: "baseline-and-requirements", closure: "cad_commit_frame_context" },
   plan: { freshness: "phase-and-requirements", closure: "cad_commit_plan" },

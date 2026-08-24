@@ -37,11 +37,12 @@ test("pi-cad-tools references cover every active public tool", () => {
   }
 });
 
-test("the skill surface has one core skill and six engineering knowledge skills", () => {
+test("the skill surface includes the Plan C Python capability skill", () => {
   const skillsDir = fileURLToPath(new URL("../skills/", import.meta.url));
   const names = readdirSync(skillsDir).sort();
   assert.deepEqual(names, [
     "assembly-design",
+    "cad",
     "design-for-manufacturing",
     "mechanical-design",
     "parametric-cad-modeling",

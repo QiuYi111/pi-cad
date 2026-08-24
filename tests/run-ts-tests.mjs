@@ -21,6 +21,7 @@ await jiti.import("./registry-contract.test.ts", { default: true });
 await jiti.import("./workflow-v7.test.ts", { default: true });
 await jiti.import("./transaction-v7.test.ts", { default: true });
 await jiti.import("./context-v7.test.ts", { default: true });
+await jiti.import("./plan-c.test.ts", { default: true });
 await jiti.import("./recipe-kernel.test.ts", { default: true });
 await jiti.import("./recipe-adapter.test.ts", { default: true });
 await jiti.import("./permissions-v7.test.ts", { default: true });

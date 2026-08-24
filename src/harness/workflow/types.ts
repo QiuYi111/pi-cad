@@ -22,6 +22,12 @@ export interface WorkflowTransitionDefinition {
 
 export interface WorkflowPhaseDefinition {
   purpose: string;
+  /** Compact phase-local SOP rendered into the Agent-facing Phase Card. */
+  guidance?: string;
+  /** Non-authoritative Python working structures suggested for this phase. */
+  recommendedTemplates?: string[];
+  /** Non-authoritative Prime skills suggested for this phase. */
+  recommendedSkills?: string[];
   actions: string[];
   grants: string[];
   writeScopes: string[];

@@ -1,0 +1,68 @@
+from __future__ import annotations
+
+import ast
+import inspect
+import textwrap
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from .client import request
+from .refs import ProbeResult
+
+
+def _captured_source(function: Callable[..., Any]) -> str:
+    try:
+        source = textwrap.dedent(inspect.getsource(function))
+    except (OSError, TypeError) as error:
+        raise TypeError("cad.probe could not capture function source; define it in an IPython cell or source file") from error
+    tree = ast.parse(source)
+    definitions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    if len(definitions) != 1 or isinstance(definitions[0], ast.AsyncFunctionDef):
+        raise TypeError("cad.probe requires one synchronous function definition")
+    definition = definitions[0]
+    definition.decorator_list = []
+    return ast.unparse(definition)
+
+
+@dataclass(frozen=True, repr=False)
+class ProbeProgram:
+    function: Callable[..., Any]
+    subject: str
+    purpose: str
+    source: str
+
+    def __repr__(self) -> str:
+        return f"ProbeProgram(name={self.function.__name__!r}, subject={self.subject!r})"
+
+    async def result(self, **arguments: Any) -> ProbeResult:
+        if self.function.__code__.co_freevars:
+            raise TypeError(f"cad.probe does not capture closures: {', '.join(self.function.__code__.co_freevars)}; pass values explicitly")
+        signature = inspect.signature(self.function)
+        preloaded = {"shape", "bd", "np", "math", "statistics"}
+        callable_parameters = [name for name in signature.parameters if name not in preloaded]
+        missing = [name for name in callable_parameters if name not in arguments and signature.parameters[name].default is inspect.Parameter.empty]
+        extra = [name for name in arguments if name not in callable_parameters]
+        if missing or extra:
+            raise TypeError(f"probe arguments mismatch; missing={missing}, extra={extra}")
+        call_items = []
+        for name in signature.parameters:
+            if name in preloaded:
+                call_items.append(f"{name}={name}")
+            elif name in arguments:
+                call_items.append(f"{name}={arguments[name]!r}")
+        code = f"{self.source}\nresult = {self.function.__name__}({', '.join(call_items)})"
+        payload = await request("probe", subject=self.subject, purpose=self.purpose, code=code)
+        return ProbeResult(payload["value"], payload.get("artifactHash"), payload.get("scriptHash"), payload.get("observationId"))
+
+    async def __call__(self, **arguments: Any) -> Any:
+        return (await self.result(**arguments)).value
+
+
+def probe(*, subject: str = "current", purpose: str = "") -> Callable[[Callable[..., Any]], ProbeProgram]:
+    if subject not in {"current", "baseline"}:
+        raise ValueError("cad.probe subject must be 'current' or 'baseline' in the controlled v7 runtime")
+
+    def decorate(function: Callable[..., Any]) -> ProbeProgram:
+        return ProbeProgram(function, subject, purpose or function.__name__.replace("_", " "), _captured_source(function))
+
+    return decorate
