@@ -28,6 +28,6 @@ One contract per module pair that touches (mates, fastens, locates, seals):
 
 ## Exit
 
-`cad_commit_interface_contracts` writes the record (an obligation at
+The action card's interface-record operation writes the record (an obligation at
 engineering maturity and above) and enters PART DESIGN, where parts are
 derived backwards from these contracts.

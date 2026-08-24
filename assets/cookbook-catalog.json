@@ -1,0 +1,248 @@
+{
+  "schema": 1,
+  "tools": [
+    {
+      "tool": "cad_route",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_reroute",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_commit_requirements",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_revise_requirements",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_commit_frame_context",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_commit_plan",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_commit_assembly_design",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_commit_interface_contracts",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_commit_candidate",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_submit_for_review",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_transition",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_wait_for_user",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_defer_clarification",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_declare_blocker",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_finish",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_commit_simulation",
+      "responsibleSkill": "pi-cad",
+      "generatedReference": "pi-cad-tools/references/generated/control.md",
+      "authoringCookbook": "pi-cad/references/cookbooks/workflow-records.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_probe",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/probe.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/probe.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_recall_observation",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/probe.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/probe.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_build_step",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/model.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/modeling.md",
+      "executableAssets": [
+        "parametric-cad-modeling/assets/build123d-part",
+        "parametric-cad-modeling/assets/build123d-assembly"
+      ],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_derive_analysis_model",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/model.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/modeling.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_simulate",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/simulation.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/simulation-recipes.md",
+      "executableAssets": [
+        "thermal-fluid-analysis/assets/recipes",
+        "structural-analysis/assets/recipes"
+      ],
+      "qualification": "opt-in backend qualification plus stub smoke"
+    },
+    {
+      "tool": "cad_sim_observe",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/simulation.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/simulation-recipes.md",
+      "executableAssets": [
+        "thermal-fluid-analysis/assets/recipes",
+        "structural-analysis/assets/recipes"
+      ],
+      "qualification": "opt-in backend qualification plus stub smoke"
+    },
+    {
+      "tool": "cad_optimize",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/optimization.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/optimization.md",
+      "executableAssets": [
+        "structural-analysis/assets/recipes/torch-fem-differentiable-sensitivity"
+      ],
+      "qualification": "opt-in backend qualification plus stub smoke"
+    },
+    {
+      "tool": "cad_export",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/deliverable.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/deliverable.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_generate_drawing",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/deliverable.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/deliverable.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    },
+    {
+      "tool": "cad_render_scene",
+      "responsibleSkill": "pi-cad-tools",
+      "generatedReference": "pi-cad-tools/references/generated/deliverable.md",
+      "authoringCookbook": "pi-cad-tools/references/cookbooks/deliverable.md",
+      "executableAssets": [],
+      "qualification": "fast behavioral/tool registration smoke"
+    }
+  ],
+  "authoredObjects": [
+    "requirements",
+    "frame context",
+    "implementation/investigation plan",
+    "assembly design",
+    "interface contracts",
+    "build123d part source",
+    "build123d assembly source",
+    "analysis derivation",
+    "typed/programmable Probe",
+    "pi-sim.toml",
+    "Allrun",
+    "solver configuration",
+    "observer",
+    "optimization spec",
+    "drawing spec",
+    "export spec",
+    "scene/render spec",
+    "review decision",
+    "transition",
+    "clarification",
+    "blocker",
+    "Evidence commit"
+  ]
+}

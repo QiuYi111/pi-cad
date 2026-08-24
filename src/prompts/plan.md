@@ -2,4 +2,4 @@
 
 Current state: PLAN.
 
-Record protected invariants, planned changes, interfaces, datums, and review plan. Commit with cad_commit_plan. Do not modify geometry yet.
+Record protected invariants, planned changes, interfaces, datums, and review plan. Commit with the dedicated action-card operation. Do not modify geometry yet.

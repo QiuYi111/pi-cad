@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { CadProjectState, CadRunState } from "../shared/protocol.ts";
 import { routeKey } from "../shared/protocol.ts";
 import { interactionModeOf, isHeadless } from "./interaction-mode.ts";
+import { renderCurrentActionCard } from "./agent-contract.ts";
 
 const PROMPT_DIR = new URL("../prompts/", import.meta.url);
 const promptCache = new Map<string, string>();
@@ -130,12 +131,12 @@ export async function composeSystemPrompt(
     invariants,
     interactionPolicy,
     phasePrompt,
-    "## Current canonical state (authoritative)",
+    renderCurrentActionCard(state, simulationCapabilities),
+    "## Current canonical hashes and versions",
     stateSummary(state),
-    "Use cad_* control tools to move the workflow. Do not claim completion without the corresponding state and evidence.",
+    "Use only actions exposed by the action card. Normal Pi-CAD operation must not require reading Pi-CAD source code.",
     statusNote,
     projectHead,
     unavailable,
-    simulationCapabilities,
   ].join("\n\n");
 }

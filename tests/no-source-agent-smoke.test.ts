@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { test } from "node:test";
+
+import { renderCurrentActionCard } from "../src/core/agent-contract.ts";
+
+function nextActionFromInstalledContext(actionCard: string): string {
+  const line = actionCard.split(/\r?\n/).find((item) => item.startsWith("Recommended next action:"));
+  if (!line) throw new Error("installed action card has no recommendation");
+  return line.slice("Recommended next action:".length).trim();
+}
+
+function state(overrides: Record<string, unknown>) {
+  return {
+    schemaVersion: 6, runId: "r", projectId: "p", createdAt: "x", updatedAt: "x",
+    route: null, phase: "intake", status: "active", mutationPolicy: "read_only",
+    phaseRecords: [], evidence: [], staleEvidence: [], activeWorkstreams: [], ...overrides,
+  } as any;
+}
+
+test("installed contract/skills/action cards drive representative decisions without source lookup", async () => {
+  const contract = JSON.parse(await readFile(join(process.cwd(), "assets", "agent-contract.json"), "utf-8"));
+  const cookbook = await readFile(join(process.cwd(), "skills", "pi-cad-tools", "references", "cookbooks", "simulation-recipes.md"), "utf-8");
+  assert.ok(contract.tools.every((tool: { inputSchema?: unknown }) => tool.inputSchema));
+  assert.match(cookbook, /Recipe directory/i);
+  assert.doesNotMatch(cookbook, /read .*src\//i);
+
+  assert.match(nextActionFromInstalledContext(renderCurrentActionCard(state({}))), /cad_route/);
+  assert.match(nextActionFromInstalledContext(renderCurrentActionCard(state({ route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype" }, phase: "requirements" }))), /cad_commit_requirements/);
+  const review = renderCurrentActionCard(state({
+    route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "engineering" },
+    phase: "review", currentArtifactPath: "build/part.step", currentArtifactHash: "a".repeat(64),
+    evidenceObligations: { simulation: { disposition: "required", cases: [{ id: "load-case", tool: "cad_simulate" }] } },
+  }), "## Ready managed runtimes\n- backend=torch-fem runtime=torch-fem-0.9-cu126 actual=cuda");
+  assert.match(nextActionFromInstalledContext(review), /simulate\/observe|case Recipe/i);
+  assert.match(review, /simulation:load-case/);
+  assert.match(review, /actual=cuda/);
+  assert.doesNotMatch(review, /read src\//i);
+});

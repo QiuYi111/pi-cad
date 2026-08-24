@@ -1,0 +1,6632 @@
+{
+  "schema": 1,
+  "architecture": {
+    "layers": [
+      {
+        "name": "Control Plane",
+        "responsibility": "Compile routes, enforce phases/obligations, and bind Evidence."
+      },
+      {
+        "name": "Context Runtime",
+        "responsibility": "Project canonical state, action cards, observation memory, and compaction."
+      },
+      {
+        "name": "Observation Layer",
+        "responsibility": "Return bounded semantic context plus immutable detail."
+      },
+      {
+        "name": "Capability Modules",
+        "responsibility": "MODEL, PROBE, SIMULATE, optimization, and deliverable execution."
+      },
+      {
+        "name": "Skills/Cookbooks",
+        "responsibility": "Teach operation and authoring without duplicating runtime state."
+      }
+    ],
+    "invariants": [
+      "Project Head changes only through accepted workflow closure.",
+      "Tool success is not engineering acceptance.",
+      "Observations are immutable and hash-bound.",
+      "Simulation creates Evidence only through cad_commit_simulation.",
+      "The current action card is authoritative for tools, writes, obligations, and events."
+    ]
+  },
+  "tools": [
+    {
+      "name": "cad_route",
+      "category": "control",
+      "purpose": "Select the route that compiles the workflow and obligations.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "objective",
+          "reason"
+        ],
+        "properties": {
+          "objective": {
+            "enum": [
+              "analyze",
+              "convert",
+              "design"
+            ]
+          },
+          "lineage": {
+            "enum": [
+              "greenfield",
+              "legacy",
+              "hybrid"
+            ]
+          },
+          "structure": {
+            "enum": [
+              "part",
+              "assembly"
+            ]
+          },
+          "maturity": {
+            "enum": [
+              "prototype",
+              "engineering",
+              "manufacturing",
+              "release"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why this route matches the task, decided level by level"
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "intake"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_reroute",
+      "category": "control",
+      "purpose": "Change route without bypassing obligations; downgrades require authority.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "objective",
+          "reason"
+        ],
+        "properties": {
+          "objective": {
+            "enum": [
+              "analyze",
+              "convert",
+              "design"
+            ]
+          },
+          "lineage": {
+            "enum": [
+              "greenfield",
+              "legacy",
+              "hybrid"
+            ]
+          },
+          "structure": {
+            "enum": [
+              "part",
+              "assembly"
+            ]
+          },
+          "maturity": {
+            "enum": [
+              "prototype",
+              "engineering",
+              "manufacturing",
+              "release"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "What changed about the task's shape and why the new route fits"
+          },
+          "authorityToken": {
+            "type": "string",
+            "description": "One-time harness-issued downgrade authority"
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "build",
+        "review",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_commit_requirements",
+      "category": "control",
+      "purpose": "Commit the first complete mission and acceptance contract.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "goal",
+          "deliverables",
+          "must",
+          "assertions",
+          "preferences",
+          "assumptions",
+          "openUnknowns"
+        ],
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "deliverables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "must": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "mustRef",
+                "statement",
+                "binding",
+                "expectation"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mustRef": {
+                  "type": "string",
+                  "pattern": "^M[1-9][0-9]*$"
+                },
+                "statement": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Observable acceptance claim about the completed deliverable; never describe feature history, pre-operation construction geometry, or removed geometry"
+                },
+                "binding": {
+                  "type": "object",
+                  "required": [
+                    "subject",
+                    "quantity"
+                  ],
+                  "properties": {
+                    "subject": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Entity observable in the completed deliverable"
+                    },
+                    "quantity": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "reference": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Reference observable or derivable from the completed deliverable, not an intermediate or removed entity"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "expectation": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "value"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "exact"
+                        },
+                        "value": {
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "tolerance": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "range"
+                        },
+                        "min": {
+                          "type": "number"
+                        },
+                        "max": {
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "expected"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "boolean"
+                        },
+                        "expected": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "description"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "relation"
+                        },
+                        "description": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "canonicalCheck": {
+                  "type": "object",
+                  "required": [
+                    "field"
+                  ],
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "bbox.x",
+                        "bbox.y",
+                        "bbox.z",
+                        "volume",
+                        "surfaceArea",
+                        "solidCount",
+                        "occurrenceCount",
+                        "cylinderCount"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "preferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "openUnknowns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "deferredClarifications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "question",
+                "reason",
+                "alternatives",
+                "fallback",
+                "impact"
+              ],
+              "properties": {
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "alternatives": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 2
+                },
+                "fallback": {
+                  "type": "string"
+                },
+                "impact": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidenceObligations": {
+            "type": "object",
+            "properties": {
+              "simulation": {
+                "type": "object",
+                "required": [
+                  "disposition"
+                ],
+                "properties": {
+                  "disposition": {
+                    "enum": [
+                      "required",
+                      "optional",
+                      "not_applicable",
+                      "blocked_external"
+                    ]
+                  },
+                  "rationale": {
+                    "type": "string"
+                  },
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "tool"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "tool": {
+                          "type": "string",
+                          "const": "cad_simulate"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "description": "Opaque Recipe-native simulation cases: the harness checks current-version evidence from cad_simulate but never interprets what a case means"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "phases": [
+        "requirements"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_revise_requirements",
+      "category": "control",
+      "purpose": "Replace requirements after authoritative information changes.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "goal",
+          "deliverables",
+          "must",
+          "assertions",
+          "preferences",
+          "assumptions",
+          "openUnknowns",
+          "reason",
+          "routeAssessment"
+        ],
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "deliverables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "must": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "assertions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "mustRef",
+                "statement",
+                "binding",
+                "expectation"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "mustRef": {
+                  "type": "string",
+                  "pattern": "^M[1-9][0-9]*$"
+                },
+                "statement": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Observable acceptance claim about the completed deliverable; never describe feature history, pre-operation construction geometry, or removed geometry"
+                },
+                "binding": {
+                  "type": "object",
+                  "required": [
+                    "subject",
+                    "quantity"
+                  ],
+                  "properties": {
+                    "subject": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Entity observable in the completed deliverable"
+                    },
+                    "quantity": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "reference": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "Reference observable or derivable from the completed deliverable, not an intermediate or removed entity"
+                    },
+                    "direction": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "expectation": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "value"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "exact"
+                        },
+                        "value": {
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "tolerance": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "range"
+                        },
+                        "min": {
+                          "type": "number"
+                        },
+                        "max": {
+                          "type": "number"
+                        },
+                        "unit": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "expected"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "boolean"
+                        },
+                        "expected": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "kind",
+                        "description"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "relation"
+                        },
+                        "description": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "canonicalCheck": {
+                  "type": "object",
+                  "required": [
+                    "field"
+                  ],
+                  "properties": {
+                    "field": {
+                      "enum": [
+                        "bbox.x",
+                        "bbox.y",
+                        "bbox.z",
+                        "volume",
+                        "surfaceArea",
+                        "solidCount",
+                        "occurrenceCount",
+                        "cylinderCount"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "default": []
+          },
+          "preferences": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "openUnknowns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "deferredClarifications": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "question",
+                "reason",
+                "alternatives",
+                "fallback",
+                "impact"
+              ],
+              "properties": {
+                "question": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "alternatives": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 2
+                },
+                "fallback": {
+                  "type": "string"
+                },
+                "impact": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidenceObligations": {
+            "type": "object",
+            "properties": {
+              "simulation": {
+                "type": "object",
+                "required": [
+                  "disposition"
+                ],
+                "properties": {
+                  "disposition": {
+                    "enum": [
+                      "required",
+                      "optional",
+                      "not_applicable",
+                      "blocked_external"
+                    ]
+                  },
+                  "rationale": {
+                    "type": "string"
+                  },
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "tool"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "tool": {
+                          "type": "string",
+                          "const": "cad_simulate"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "description": "Opaque Recipe-native simulation cases: the harness checks current-version evidence from cad_simulate but never interprets what a case means"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "routeAssessment": {
+            "type": "object",
+            "required": [
+              "outcome",
+              "reason"
+            ],
+            "properties": {
+              "outcome": {
+                "enum": [
+                  "unchanged",
+                  "changed"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "requirements",
+        "build",
+        "review",
+        "ready",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "availability": "After the first requirements commit.",
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_commit_frame_context",
+      "category": "control",
+      "purpose": "Record the interpretation of an imported coordinate frame.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "disposition",
+          "axes",
+          "howConfirmed"
+        ],
+        "properties": {
+          "disposition": {
+            "enum": [
+              "confirmed",
+              "already_provided",
+              "not_applicable",
+              "user_declined",
+              "assumed_headless"
+            ],
+            "description": "confirmed: you asked and the user answered. already_provided: the user stated the mapping unprompted earlier. not_applicable: coordinates carry through and direction is irrelevant. user_declined: the user explicitly declined. assumed_headless: no user turn exists, so a best-effort mapping is recorded as clarification debt."
+          },
+          "axes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "axis",
+                "mapsTo"
+              ],
+              "properties": {
+                "axis": {
+                  "enum": [
+                    "x",
+                    "y",
+                    "z"
+                  ]
+                },
+                "mapsTo": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Functional meaning of this artifact axis, in the user's words"
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 3,
+            "description": "All three artifact axes must be mapped — including not_applicable/declined records (a best-effort reading of the file's own axes, honestly attributed)"
+          },
+          "howConfirmed": {
+            "type": "string",
+            "minLength": 1,
+            "description": "What the user pointed at or said when confirming; for other dispositions, why that disposition applies (e.g. which earlier message stated the mapping)"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "baseline",
+        "source_baseline"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_commit_plan",
+      "category": "control",
+      "purpose": "Commit the implementation or investigation plan owed by this phase.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "summary",
+          "protected",
+          "plannedChanges",
+          "interfaces",
+          "datums",
+          "reviewPlan"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "protected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "plannedChanges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "interfaces": {
+            "type": "array",
+            "items": {},
+            "default": []
+          },
+          "datums": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "reviewPlan": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "architecture": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selectionRationale": {
+            "type": "string"
+          },
+          "evidenceObligations": {
+            "type": "object",
+            "properties": {
+              "simulation": {
+                "type": "object",
+                "required": [
+                  "disposition"
+                ],
+                "properties": {
+                  "disposition": {
+                    "enum": [
+                      "required",
+                      "optional",
+                      "not_applicable",
+                      "blocked_external"
+                    ]
+                  },
+                  "rationale": {
+                    "type": "string"
+                  },
+                  "cases": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "id",
+                        "tool"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "tool": {
+                          "type": "string",
+                          "const": "cad_simulate"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "minItems": 1,
+                    "description": "Opaque Recipe-native simulation cases: the harness checks current-version evidence from cad_simulate but never interprets what a case means"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "workstreams": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "open",
+                    "complete",
+                    "not_applicable",
+                    "blocked_external"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "phases": [
+        "review",
+        "plan",
+        "transform_plan",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_commit_assembly_design",
+      "category": "control",
+      "purpose": "Commit modules, datums, ownership, and assembly sequence.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "summary",
+          "modules",
+          "datums",
+          "sequence"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modules": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "purpose"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "purpose": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "envelopeMm": {
+                  "type": "array",
+                  "additionalItems": false,
+                  "items": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "minItems": 3
+                },
+                "notes": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 2,
+            "description": "An assembly has at least two modules"
+          },
+          "datums": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "kind",
+                "definedBy"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "kind": {
+                  "enum": [
+                    "primary",
+                    "secondary",
+                    "tertiary"
+                  ]
+                },
+                "definedBy": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Physical features that realize this datum"
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "sequence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "step",
+                "installs"
+              ],
+              "properties": {
+                "step": {
+                  "type": "number"
+                },
+                "installs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1
+                },
+                "notes": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "description": "Install order; each step names the modules it installs"
+          },
+          "envelopes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "module",
+                "bboxMm"
+              ],
+              "properties": {
+                "module": {
+                  "type": "string"
+                },
+                "bboxMm": {
+                  "type": "array",
+                  "additionalItems": false,
+                  "items": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "minItems": 6
+                },
+                "massKg": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "audit",
+        "assembly_design"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_commit_interface_contracts",
+      "category": "control",
+      "purpose": "Commit locating, DOF, fit, fastening, and access contracts.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "contracts"
+        ],
+        "properties": {
+          "contracts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "a",
+                "b",
+                "purpose",
+                "locating",
+                "dof",
+                "fasteners",
+                "fits",
+                "assemblyDirection",
+                "toolAccess"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "a": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Module on side A"
+                },
+                "b": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Module on side B"
+                },
+                "purpose": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "locating": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Locating scheme: which features/datums locate A against B"
+                },
+                "dof": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Which degrees of freedom the interface constrains"
+                },
+                "fasteners": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Fastener plan (type, size, count) or 'none/integral'"
+                },
+                "fits": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Fits and tolerances at the locating features"
+                },
+                "assemblyDirection": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Direction the parts approach along"
+                },
+                "toolAccess": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Tool access for fastening/inspection"
+                },
+                "notes": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "audit",
+        "interface_design"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_commit_candidate",
+      "category": "control",
+      "purpose": "Build and propose source-authored CAD with automatic observations.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "sources",
+          "label"
+        ],
+        "properties": {
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "format": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          }
+        }
+      },
+      "phases": [
+        "build",
+        "modify",
+        "convert",
+        "gap_closure"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_submit_for_review",
+      "category": "control",
+      "purpose": "Submit the immutable candidate for independent final verification.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Optional terse submission label; not acceptance evidence"
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "review",
+        "compare",
+        "integration_review",
+        "final_review"
+      ],
+      "availability": "Only on a final accepted edge when independent review is enabled.",
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_transition",
+      "category": "control",
+      "purpose": "Apply one legal decision event from the compiled workflow.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "event",
+          "note"
+        ],
+        "properties": {
+          "event": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "phases": [
+        "build",
+        "review",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_wait_for_user",
+      "category": "control",
+      "purpose": "Pause an interactive workflow for a user-owned decision.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "phases": [
+        "requirements",
+        "build",
+        "review",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "availability": "Interactive workflows only.",
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_defer_clarification",
+      "category": "control",
+      "purpose": "Record a bounded headless assumption and continue.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "question",
+          "reason",
+          "alternatives",
+          "fallback",
+          "impact",
+          "affectsContract"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 2
+          },
+          "fallback": {
+            "type": "string",
+            "minLength": 1
+          },
+          "impact": {
+            "type": "string",
+            "minLength": 1
+          },
+          "affectsContract": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "requirements",
+        "build",
+        "review",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "availability": "Headless workflows only.",
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_declare_blocker",
+      "category": "control",
+      "purpose": "Stop honestly on missing authority or indispensable external input.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "type",
+          "reason",
+          "needed"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "user_authority",
+              "external_input"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "needed": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "requirements",
+        "build",
+        "review",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "availability": "Headless workflows only.",
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_finish",
+      "category": "control",
+      "purpose": "Close a ready workflow after deterministic checks.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "phases": [
+        "ready"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_commit_simulation",
+      "category": "control",
+      "purpose": "Bind one immutable run/observation to a simulation case obligation.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "run",
+          "caseId"
+        ],
+        "properties": {
+          "run": {
+            "type": "string",
+            "minLength": 1
+          },
+          "observation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "caseId": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "review",
+        "ready",
+        "baseline",
+        "investigate",
+        "explain",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "integration_review"
+      ],
+      "writes": [
+        "workflow state, records, and journal"
+      ],
+      "produces": [
+        "Simulation EvidenceRef"
+      ],
+      "lifecycle": "author Recipe → simulate → optional re-observe → inspect → commit",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad/references/cookbooks/workflow-records.md"
+    },
+    {
+      "name": "cad_probe",
+      "category": "probe",
+      "purpose": "Inspect an artifact through a strict typed or programmable read-only probe.",
+      "inputSchema": {
+        "anyOf": [
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "visual"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "properties": {
+                      "views": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "height": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "labels": {
+                        "type": "boolean"
+                      },
+                      "display": {
+                        "type": "string",
+                        "const": "solid"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "visual"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "views": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "height": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "labels": {
+                        "type": "boolean"
+                      },
+                      "display": {
+                        "type": "string",
+                        "const": "solid"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "geometry"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "properties": {
+                      "output": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "geometry"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "surfaces"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "properties": {
+                      "labels": {
+                        "type": "boolean"
+                      },
+                      "views": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "surfaces"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "labels": {
+                        "type": "boolean"
+                      },
+                      "views": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "measure"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "metric",
+                      "a"
+                    ],
+                    "properties": {
+                      "metric": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "a": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "b": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "measure"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact",
+                      "metric",
+                      "a"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "metric": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "a": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "b": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "section"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "origin",
+                      "normal"
+                    ],
+                    "properties": {
+                      "origin": {
+                        "type": "array",
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "minItems": 3
+                      },
+                      "normal": {
+                        "type": "array",
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "minItems": 3
+                      },
+                      "display": {
+                        "enum": [
+                          "solid",
+                          "hidden_edges",
+                          "solid_with_hidden"
+                        ]
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "height": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "labels": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "section"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact",
+                      "origin",
+                      "normal"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "origin": {
+                        "type": "array",
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "minItems": 3
+                      },
+                      "normal": {
+                        "type": "array",
+                        "additionalItems": false,
+                        "items": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ],
+                        "minItems": 3
+                      },
+                      "display": {
+                        "enum": [
+                          "solid",
+                          "hidden_edges",
+                          "solid_with_hidden"
+                        ]
+                      },
+                      "width": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "height": {
+                        "type": "integer",
+                        "minimum": 64
+                      },
+                      "labels": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "sections_scan"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "axis"
+                    ],
+                    "properties": {
+                      "axis": {
+                        "enum": [
+                          "x",
+                          "y",
+                          "z"
+                        ]
+                      },
+                      "count": {
+                        "type": "integer",
+                        "minimum": 2
+                      },
+                      "step": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "sections_scan"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact",
+                      "axis"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "axis": {
+                        "enum": [
+                          "x",
+                          "y",
+                          "z"
+                        ]
+                      },
+                      "count": {
+                        "type": "integer",
+                        "minimum": 2
+                      },
+                      "step": {
+                        "type": "number",
+                        "exclusiveMinimum": 0
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "assembly"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "properties": {
+                      "output": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "assembly"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "interference"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "args": {
+                    "type": "object",
+                    "properties": {
+                      "output": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "args"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "interference"
+                  },
+                  "purpose": {
+                    "type": "string"
+                  },
+                  "args": {
+                    "type": "object",
+                    "required": [
+                      "artifact"
+                    ],
+                    "properties": {
+                      "artifact": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "output": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "preset",
+              "args"
+            ],
+            "properties": {
+              "preset": {
+                "type": "string",
+                "const": "compare"
+              },
+              "purpose": {
+                "type": "string"
+              },
+              "args": {
+                "type": "object",
+                "required": [
+                  "before",
+                  "after"
+                ],
+                "properties": {
+                  "before": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "after": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "metrics": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "transformBefore": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "transformAfter": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "output": {
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "preset",
+              "subject",
+              "purpose",
+              "code"
+            ],
+            "properties": {
+              "preset": {
+                "type": "string",
+                "const": "python"
+              },
+              "subject": {
+                "enum": [
+                  "current",
+                  "baseline"
+                ]
+              },
+              "purpose": {
+                "type": "string",
+                "minLength": 1
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "phases": [
+        "build",
+        "review",
+        "ready",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "run-owned observation storage only"
+      ],
+      "produces": [
+        "Immutable ObservationSnapshot"
+      ],
+      "lifecycle": "resolve subject → observe → inspect summary → recall details when needed",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/probe.md"
+    },
+    {
+      "name": "cad_recall_observation",
+      "category": "probe",
+      "purpose": "Recover an observation summary, visuals, or paged detail collection.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "observationId": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Immutable observation ID, e.g. obs-000001"
+          },
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Collection name from the observation catalog"
+          },
+          "where": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "op",
+                "value"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "op": {
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "lt",
+                    "lte",
+                    "gt",
+                    "gte",
+                    "contains"
+                  ]
+                },
+                "value": {}
+              },
+              "additionalProperties": false
+            }
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "orderBy": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "field",
+                "direction"
+              ],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "direction": {
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "cursor": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tool": {
+            "type": "string",
+            "description": "Filter by agent tool name, e.g. cad_probe"
+          },
+          "evidenceKind": {
+            "type": "string",
+            "description": "Filter by evidence kind, e.g. visual, geometry"
+          },
+          "artifactHash": {
+            "type": "string",
+            "description": "Filter by artifact hash binding"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "build",
+        "review",
+        "ready",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "run-owned observation storage only"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "resolve subject → observe → inspect summary → recall details when needed",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/probe.md"
+    },
+    {
+      "name": "cad_build_step",
+      "category": "model",
+      "purpose": "Execute deterministic build123d source without accepting Project Head.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Path to the build123d Python source to execute, relative to the project root"
+          },
+          "output": {
+            "type": "string",
+            "description": "Output STEP path. Defaults to build/<source-stem>.step"
+          },
+          "force": {
+            "type": "boolean",
+            "description": "Regenerate even if outputs exist"
+          }
+        }
+      },
+      "phases": [
+        "build",
+        "ready",
+        "modify",
+        "convert",
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/modeling.md"
+    },
+    {
+      "name": "cad_derive_analysis_model",
+      "category": "model",
+      "purpose": "Create a provenance-bound solver derivation.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "source",
+          "operations"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "description": "Authoritative design STEP this model derives from"
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "fused",
+                "bonded",
+                "simplified",
+                "defeatured",
+                "sectioned"
+              ]
+            },
+            "minItems": 1,
+            "description": "fused/bonded are executed by the harness; simplified/defeatured/sectioned record your authored model"
+          },
+          "output": {
+            "type": "string",
+            "description": "Output STEP. Required for authored operations; optional for fused/bonded (harness writes it)"
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "review",
+        "ready",
+        "baseline",
+        "investigate",
+        "explain",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "integration_review"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/modeling.md"
+    },
+    {
+      "name": "cad_simulate",
+      "category": "simulation",
+      "purpose": "Run a solver-native Recipe in a managed runtime; creates no Evidence.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "backend",
+          "runtime",
+          "recipe"
+        ],
+        "properties": {
+          "backend": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runtime": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recipe": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Directory containing pi-sim.toml; never pass the manifest file itself"
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "review",
+        "ready",
+        "baseline",
+        "investigate",
+        "explain",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "integration_review"
+      ],
+      "writes": [
+        "simulation/** and run-owned simulation storage"
+      ],
+      "produces": [
+        "SimulationRun",
+        "ObservationSnapshot"
+      ],
+      "lifecycle": "author Recipe → simulate → optional re-observe → inspect → commit",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/simulation-recipes.md"
+    },
+    {
+      "name": "cad_sim_observe",
+      "category": "simulation",
+      "purpose": "Re-run only the observer over a frozen SimulationRun.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "run"
+        ],
+        "properties": {
+          "run": {
+            "type": "string",
+            "minLength": 1
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "review",
+        "ready",
+        "baseline",
+        "investigate",
+        "explain",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "integration_review"
+      ],
+      "writes": [
+        "simulation/** and run-owned simulation storage"
+      ],
+      "produces": [
+        "ObservationSnapshot"
+      ],
+      "lifecycle": "author Recipe → simulate → optional re-observe → inspect → commit",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/simulation-recipes.md"
+    },
+    {
+      "name": "cad_optimize",
+      "category": "optimization",
+      "purpose": "Produce a managed torch-fem optimization artifact.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "designDomain",
+          "material",
+          "objective",
+          "constraints",
+          "optimizer"
+        ],
+        "properties": {
+          "mode": {
+            "type": "string",
+            "const": "topology_2d_rect_v0"
+          },
+          "runtime": {
+            "enum": [
+              "torch-fem-0.9-cu126",
+              "torch-fem-0.9-cpu"
+            ],
+            "description": "Managed torch-fem runtime; CUDA is the production default and never falls back to CPU"
+          },
+          "designDomain": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "array",
+                "additionalItems": false,
+                "items": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "minItems": 2
+              },
+              "y": {
+                "type": "array",
+                "additionalItems": false,
+                "items": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "minItems": 2
+              },
+              "nx": {
+                "type": "integer",
+                "minimum": 2
+              },
+              "ny": {
+                "type": "integer",
+                "minimum": 2
+              }
+            },
+            "additionalProperties": false
+          },
+          "material": {
+            "type": "object",
+            "required": [
+              "E",
+              "nu"
+            ],
+            "properties": {
+              "E": {
+                "type": "number"
+              },
+              "nu": {
+                "type": "number"
+              }
+            },
+            "additionalProperties": false
+          },
+          "objective": {
+            "type": "object",
+            "required": [
+              "type",
+              "sense"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "compliance"
+              },
+              "sense": {
+                "type": "string",
+                "const": "minimize"
+              }
+            },
+            "additionalProperties": false
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "type",
+                "max"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "volume_fraction"
+                },
+                "max": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "maximum": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "optimizer": {
+            "type": "object",
+            "required": [
+              "type",
+              "maxIterations"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "const": "mma"
+              },
+              "maxIterations": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "penalty": {
+                "type": "number",
+                "exclusiveMinimum": 1
+              },
+              "Emin": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "review",
+        "compare",
+        "gap_closure",
+        "package",
+        "integration_review"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/optimization.md"
+    },
+    {
+      "name": "cad_export",
+      "category": "deliverable",
+      "purpose": "Create geometry sidecars without changing Project Head.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "source",
+          "output",
+          "format"
+        ],
+        "properties": {
+          "source": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "step",
+              "stl",
+              "glb",
+              "brep"
+            ]
+          }
+        }
+      },
+      "phases": [
+        "build",
+        "ready",
+        "modify",
+        "convert",
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/deliverable.md"
+    },
+    {
+      "name": "cad_generate_drawing",
+      "category": "deliverable",
+      "purpose": "Generate a structured drawing from declared intent.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "stage",
+          "artifact",
+          "views"
+        ],
+        "properties": {
+          "stage": {
+            "enum": [
+              "validate",
+              "generate"
+            ]
+          },
+          "artifact": {
+            "type": "string",
+            "description": "STEP artifact the drawing documents"
+          },
+          "units": {
+            "type": "string",
+            "const": "mm"
+          },
+          "sheet": {
+            "type": "object",
+            "required": [
+              "width",
+              "height"
+            ],
+            "properties": {
+              "width": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "height": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "enum": [
+                    "iso",
+                    "front",
+                    "back",
+                    "left",
+                    "right",
+                    "top",
+                    "bottom"
+                  ]
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "dimensions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "p1",
+                "p2",
+                "text"
+              ],
+              "properties": {
+                "p1": {
+                  "type": "array",
+                  "additionalItems": false,
+                  "items": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "minItems": 2
+                },
+                "p2": {
+                  "type": "array",
+                  "additionalItems": false,
+                  "items": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "number"
+                    }
+                  ],
+                  "minItems": 2
+                },
+                "text": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "featureRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "tolerance": {
+                  "type": "object",
+                  "required": [
+                    "lower",
+                    "upper"
+                  ],
+                  "properties": {
+                    "lower": {
+                      "type": "number"
+                    },
+                    "upper": {
+                      "type": "number"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "inspectionMethod": {
+                  "type": "string"
+                },
+                "ctq": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "build",
+        "ready",
+        "modify",
+        "convert",
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/deliverable.md"
+    },
+    {
+      "name": "cad_render_scene",
+      "category": "deliverable",
+      "purpose": "Create presentation assets from an explicit scene specification.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "stage",
+          "artifact",
+          "directions",
+          "materials",
+          "lighting",
+          "camera"
+        ],
+        "properties": {
+          "stage": {
+            "enum": [
+              "validate",
+              "preview",
+              "generate",
+              "run"
+            ]
+          },
+          "artifact": {
+            "type": "string",
+            "description": "Artifact (STEP or GLB) the scene presents — the evidence subject"
+          },
+          "directions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "name",
+                "reference"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "reference": {
+                  "type": "string",
+                  "description": "Path to a reference image backing this direction"
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 2
+          },
+          "materials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "pattern",
+                "family"
+              ],
+              "properties": {
+                "pattern": {
+                  "type": "string"
+                },
+                "family": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "lighting": {
+            "type": "object",
+            "required": [
+              "key",
+              "fill",
+              "rim"
+            ],
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "fill": {
+                "type": "string"
+              },
+              "rim": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "camera": {
+            "type": "object",
+            "required": [
+              "lens",
+              "composition"
+            ],
+            "properties": {
+              "lens": {
+                "type": "string"
+              },
+              "composition": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "assemblyDefinition": {
+            "type": "object",
+            "required": [
+              "sequence"
+            ],
+            "properties": {
+              "sequence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "step",
+                    "installs"
+                  ],
+                  "properties": {
+                    "step": {
+                      "type": "number"
+                    },
+                    "installs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "description": "Install order from the committed assembly_design record"
+              },
+              "modules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "envelopeMm": {
+                      "type": "array",
+                      "additionalItems": false,
+                      "items": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "minItems": 3
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "explodeDirections": {
+                "type": "object",
+                "patternProperties": {
+                  "^.*$": {
+                    "type": "array",
+                    "additionalItems": false,
+                    "items": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "number"
+                      }
+                    ],
+                    "minItems": 3
+                  }
+                },
+                "description": "Module name -> unit-ish explode direction; unmatched objects explode radially"
+              }
+            },
+            "additionalProperties": false
+          },
+          "resolution": {
+            "type": "object",
+            "required": [
+              "width",
+              "height"
+            ],
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 16
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 16
+              }
+            },
+            "additionalProperties": false
+          },
+          "fps": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120
+          },
+          "outputs": {
+            "type": "object",
+            "properties": {
+              "hero": {
+                "type": "boolean"
+              },
+              "exploded": {
+                "type": "boolean"
+              },
+              "turntable": {
+                "type": "boolean"
+              },
+              "assembly": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "build",
+        "ready",
+        "modify",
+        "convert",
+        "audit",
+        "gap_closure",
+        "package"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/deliverable.md"
+    }
+  ],
+  "phases": [
+    {
+      "phase": "intake",
+      "purpose": "Choose the route before engineering work.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "route"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "cad_route"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "requirements",
+      "purpose": "Commit the authoritative mission and acceptance contract.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "commit_requirements",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_commit_requirements",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "build",
+      "purpose": "Author and propose greenfield or hybrid CAD.",
+      "mutationPolicy": "source_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_source",
+        "observe",
+        "observe_interference",
+        "model_build",
+        "deliverable",
+        "commit_candidate",
+        "transition",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_build_step",
+        "cad_export",
+        "cad_generate_drawing",
+        "cad_render_scene",
+        "cad_commit_candidate",
+        "cad_transition",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "review",
+      "purpose": "Interpret current part evidence and decide acceptance or regression.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_recipe",
+        "observe",
+        "observe_interference",
+        "observe_programmable",
+        "simulate",
+        "optimize",
+        "transition",
+        "wait_for_user",
+        "commit_plan"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_optimize",
+        "cad_transition",
+        "cad_wait_for_user",
+        "cad_commit_plan"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "revise",
+          "meaning": "Return to source work for a bounded CAD, sidecar, or analysis-input revision.",
+          "targets": [
+            "build",
+            "modify"
+          ]
+        },
+        {
+          "event": "local_geometry_issue",
+          "meaning": "A concrete local candidate-geometry defect needs source repair.",
+          "targets": [
+            "build",
+            "modify"
+          ]
+        },
+        {
+          "event": "interface_or_detail_issue",
+          "meaning": "Interface/detail contracts require redesign.",
+          "targets": [
+            "part_design"
+          ]
+        },
+        {
+          "event": "architecture_issue",
+          "meaning": "The part or assembly decomposition is wrong.",
+          "targets": [
+            "concept",
+            "part_design",
+            "plan"
+          ]
+        },
+        {
+          "event": "accepted",
+          "meaning": "Current evidence supports phase acceptance.",
+          "targets": [
+            "audit",
+            "ready"
+          ]
+        },
+        {
+          "event": "intent_issue",
+          "meaning": "The legacy modification plan misunderstood intent.",
+          "targets": [
+            "plan"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "ready",
+      "purpose": "Perform deterministic closure checks and finish.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "observe_interference",
+        "model_build",
+        "deliverable",
+        "file_edit_recipe",
+        "simulate",
+        "finish"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_build_step",
+        "cad_export",
+        "cad_generate_drawing",
+        "cad_render_scene",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_finish"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "done",
+      "purpose": "Terminal completed workflow.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "baseline",
+      "purpose": "Understand the existing design and its frame.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "commit_frame_context",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_commit_frame_context",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [
+        "frame_context"
+      ],
+      "events": [
+        {
+          "event": "baseline_understood",
+          "meaning": "The bound baseline and frame are understood.",
+          "targets": [
+            "assembly_design",
+            "concept",
+            "investigate",
+            "plan",
+            "system_concept"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "investigate",
+      "purpose": "Probe an artifact until the relevant cause is understood.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "more_probe",
+          "meaning": "Continue with another targeted observation.",
+          "targets": [
+            "investigate"
+          ]
+        },
+        {
+          "event": "cause_understood",
+          "meaning": "Evidence is sufficient to explain the condition.",
+          "targets": [
+            "explain"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "explain",
+      "purpose": "Deliver evidence-bound analysis findings.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "findings_delivered",
+          "meaning": "The evidence-bound analysis was delivered.",
+          "targets": [
+            "ready"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "plan",
+      "purpose": "Plan modifications to a legacy part.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "commit_plan",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "cad_commit_plan",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "modify",
+      "purpose": "Author and propose legacy CAD changes.",
+      "mutationPolicy": "source_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_source",
+        "observe",
+        "observe_interference",
+        "model_build",
+        "deliverable",
+        "commit_candidate",
+        "transition",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_build_step",
+        "cad_export",
+        "cad_generate_drawing",
+        "cad_render_scene",
+        "cad_commit_candidate",
+        "cad_transition",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "concept",
+      "purpose": "Select a coherent hybrid-part concept.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "domain_work_needed",
+          "meaning": "A bounded domain analysis is needed.",
+          "targets": [
+            "domain_analysis"
+          ]
+        },
+        {
+          "event": "explore_more",
+          "meaning": "Continue concept exploration.",
+          "targets": [
+            "concept"
+          ]
+        },
+        {
+          "event": "direction_selected",
+          "meaning": "The concept is ready for detailed design.",
+          "targets": [
+            "part_design"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "domain_analysis",
+      "purpose": "Resolve a bounded domain question before concept selection.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "domain_question_answered",
+          "meaning": "The bounded domain question is answered.",
+          "targets": [
+            "concept",
+            "system_concept"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "source_baseline",
+      "purpose": "Understand the source before conversion.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "commit_frame_context",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_commit_frame_context",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [
+        "frame_context"
+      ],
+      "events": [
+        {
+          "event": "baseline_understood",
+          "meaning": "The bound baseline and frame are understood.",
+          "targets": [
+            "transform_plan"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "transform_plan",
+      "purpose": "Plan deterministic conversion.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "commit_plan",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "cad_commit_plan",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "convert",
+      "purpose": "Produce and propose the converted artifact.",
+      "mutationPolicy": "source_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_source",
+        "observe",
+        "observe_interference",
+        "model_build",
+        "deliverable",
+        "commit_candidate",
+        "transition",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_build_step",
+        "cad_export",
+        "cad_generate_drawing",
+        "cad_render_scene",
+        "cad_commit_candidate",
+        "cad_transition",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": []
+    },
+    {
+      "phase": "compare",
+      "purpose": "Compare converted output to its source.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_recipe",
+        "observe",
+        "observe_interference",
+        "observe_programmable",
+        "simulate",
+        "optimize",
+        "transition",
+        "wait_for_user",
+        "commit_plan"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_optimize",
+        "cad_transition",
+        "cad_wait_for_user",
+        "cad_commit_plan"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "repair",
+          "meaning": "The converted output needs another conversion pass.",
+          "targets": [
+            "convert"
+          ]
+        },
+        {
+          "event": "accepted",
+          "meaning": "Current evidence supports phase acceptance.",
+          "targets": [
+            "ready"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "audit",
+      "purpose": "Audit release workstreams and identify gaps.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "observe_interference",
+        "model_build",
+        "deliverable",
+        "file_edit_recipe",
+        "simulate",
+        "commit_assembly_design",
+        "commit_interface_contracts",
+        "commit_plan",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "cad_build_step",
+        "cad_export",
+        "cad_generate_drawing",
+        "cad_render_scene",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_commit_assembly_design",
+        "cad_commit_interface_contracts",
+        "cad_commit_plan",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "audit_complete",
+          "meaning": "Release workstreams were audited and classified.",
+          "targets": [
+            "gap_closure"
+          ]
+        },
+        {
+          "event": "workstreams_structurally_closed",
+          "meaning": "Every release workstream has a non-open status.",
+          "targets": [
+            "package"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "gap_closure",
+      "purpose": "Author engineering changes that close release gaps.",
+      "mutationPolicy": "allowed",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_source",
+        "observe",
+        "observe_interference",
+        "model_build",
+        "deliverable",
+        "file_edit_recipe",
+        "simulate",
+        "optimize",
+        "commit_candidate",
+        "commit_plan",
+        "transition",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_build_step",
+        "cad_export",
+        "cad_generate_drawing",
+        "cad_render_scene",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_optimize",
+        "cad_commit_candidate",
+        "cad_commit_plan",
+        "cad_transition",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "workstreams_structurally_closed",
+          "meaning": "Every release workstream has a non-open status.",
+          "targets": [
+            "package"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "package",
+      "purpose": "Create closure deliverables without inventing engineering intent.",
+      "mutationPolicy": "allowed",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_source",
+        "observe",
+        "observe_interference",
+        "model_build",
+        "deliverable",
+        "file_edit_recipe",
+        "simulate",
+        "optimize",
+        "commit_plan",
+        "transition",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_build_step",
+        "cad_export",
+        "cad_generate_drawing",
+        "cad_render_scene",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_optimize",
+        "cad_commit_plan",
+        "cad_transition",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "package_prepared",
+          "meaning": "Closure deliverables are ready for review.",
+          "targets": [
+            "final_review"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "final_review",
+      "purpose": "Verify release evidence and deliverables.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "artifact_issue",
+          "meaning": "Closure packaging artifacts need repair.",
+          "targets": [
+            "package"
+          ]
+        },
+        {
+          "event": "engineering_issue",
+          "meaning": "Final review found an engineering gap.",
+          "targets": [
+            "gap_closure"
+          ]
+        },
+        {
+          "event": "accepted",
+          "meaning": "Current evidence supports phase acceptance.",
+          "targets": [
+            "ready"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "system_concept",
+      "purpose": "Select the assembly architecture.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "file_edit_recipe",
+        "simulate",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "edit",
+        "write",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "domain_work_needed",
+          "meaning": "A bounded domain analysis is needed.",
+          "targets": [
+            "domain_analysis"
+          ]
+        },
+        {
+          "event": "explore_more",
+          "meaning": "Continue concept exploration.",
+          "targets": [
+            "system_concept"
+          ]
+        },
+        {
+          "event": "direction_selected",
+          "meaning": "The concept is ready for detailed design.",
+          "targets": [
+            "assembly_design"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "assembly_design",
+      "purpose": "Commit module ownership, datums, and install sequence.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "commit_assembly_design",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "cad_commit_assembly_design",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [
+        "assembly_design"
+      ],
+      "events": [
+        {
+          "event": "assembly_design_committed",
+          "meaning": "The assembly record was committed.",
+          "targets": [
+            "interface_design"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "interface_design",
+      "purpose": "Commit explicit module interface contracts.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "commit_interface_contracts",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "cad_commit_interface_contracts",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [
+        "interface_contracts"
+      ],
+      "events": [
+        {
+          "event": "interface_contracts_committed",
+          "meaning": "The interface records were committed.",
+          "targets": [
+            "part_design"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "part_design",
+      "purpose": "Commit the part implementation plan.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "observe",
+        "transition",
+        "commit_plan",
+        "wait_for_user"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_transition",
+        "cad_commit_plan",
+        "cad_wait_for_user"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "plan_committed",
+          "meaning": "The plan record was committed by its dedicated tool.",
+          "targets": [
+            "build",
+            "modify"
+          ]
+        }
+      ]
+    },
+    {
+      "phase": "integration_review",
+      "purpose": "Verify the complete assembly, interfaces, interference, and simulations.",
+      "mutationPolicy": "read_only",
+      "grants": [
+        "file_read",
+        "shell",
+        "file_edit_recipe",
+        "observe",
+        "observe_interference",
+        "observe_programmable",
+        "simulate",
+        "optimize",
+        "transition",
+        "wait_for_user",
+        "commit_plan"
+      ],
+      "tools": [
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "bash",
+        "edit",
+        "write",
+        "cad_probe",
+        "cad_recall_observation",
+        "cad_simulate",
+        "cad_sim_observe",
+        "cad_commit_simulation",
+        "cad_derive_analysis_model",
+        "cad_optimize",
+        "cad_transition",
+        "cad_wait_for_user",
+        "cad_commit_plan"
+      ],
+      "requiredRecords": [],
+      "events": [
+        {
+          "event": "revise",
+          "meaning": "Return to source work for a bounded CAD, sidecar, or analysis-input revision.",
+          "targets": [
+            "build",
+            "modify"
+          ]
+        },
+        {
+          "event": "local_geometry_issue",
+          "meaning": "A concrete local candidate-geometry defect needs source repair.",
+          "targets": [
+            "build",
+            "modify"
+          ]
+        },
+        {
+          "event": "interface_or_detail_issue",
+          "meaning": "Interface/detail contracts require redesign.",
+          "targets": [
+            "interface_design"
+          ]
+        },
+        {
+          "event": "architecture_issue",
+          "meaning": "The part or assembly decomposition is wrong.",
+          "targets": [
+            "assembly_design"
+          ]
+        },
+        {
+          "event": "accepted",
+          "meaning": "Current evidence supports phase acceptance.",
+          "targets": [
+            "audit",
+            "ready"
+          ]
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "event": "accepted",
+      "meaning": "Current evidence supports phase acceptance.",
+      "useWhen": "All current-version obligations and guards are satisfied.",
+      "doNotUseWhen": "Final closure uses cad_submit_for_review when active.",
+      "occurrences": [
+        {
+          "route": "convert",
+          "phase": "compare",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/part/prototype",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/part/engineering",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/part/manufacturing",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "review",
+          "target": "audit"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "final_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "integration_review",
+          "target": "audit"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "final_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/part/prototype",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/part/engineering",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/part/manufacturing",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "review",
+          "target": "audit"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "final_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "integration_review",
+          "target": "audit"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "final_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "review",
+          "target": "audit"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "final_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "ready"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "integration_review",
+          "target": "audit"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "final_review",
+          "target": "ready"
+        }
+      ]
+    },
+    {
+      "event": "architecture_issue",
+      "meaning": "The part or assembly decomposition is wrong.",
+      "useWhen": "Module ownership or architecture must change.",
+      "doNotUseWhen": "Do not use for local geometry or solver failures.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/prototype",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/part/engineering",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/part/manufacturing",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/legacy/part/prototype",
+          "phase": "review",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/engineering",
+          "phase": "review",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/manufacturing",
+          "phase": "review",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "review",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "review",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "review",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "review",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "review",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "integration_review",
+          "target": "assembly_design"
+        }
+      ]
+    },
+    {
+      "event": "artifact_issue",
+      "meaning": "Closure packaging artifacts need repair.",
+      "useWhen": "Engineering is acceptable but package output is defective.",
+      "doNotUseWhen": "Do not use for an engineering defect.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "final_review",
+          "target": "package"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "final_review",
+          "target": "package"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "final_review",
+          "target": "package"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "final_review",
+          "target": "package"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "final_review",
+          "target": "package"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "final_review",
+          "target": "package"
+        }
+      ]
+    },
+    {
+      "event": "assembly_design_committed",
+      "meaning": "The assembly record was committed.",
+      "useWhen": "cad_commit_assembly_design emitted it.",
+      "doNotUseWhen": "Never call cad_transition with it.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "assembly_design",
+          "target": "interface_design"
+        }
+      ]
+    },
+    {
+      "event": "audit_complete",
+      "meaning": "Release workstreams were audited and classified.",
+      "useWhen": "Statuses are complete.",
+      "doNotUseWhen": "Workstreams remain unassessed.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "audit",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "audit",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "audit",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "audit",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "audit",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "audit",
+          "target": "gap_closure"
+        }
+      ]
+    },
+    {
+      "event": "baseline_understood",
+      "meaning": "The bound baseline and frame are understood.",
+      "useWhen": "Baseline observations and frame record are current.",
+      "doNotUseWhen": "Baseline, frame, or required observations are missing.",
+      "occurrences": [
+        {
+          "route": "analyze",
+          "phase": "baseline",
+          "target": "investigate"
+        },
+        {
+          "route": "convert",
+          "phase": "source_baseline",
+          "target": "transform_plan"
+        },
+        {
+          "route": "design/legacy/part/prototype",
+          "phase": "baseline",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/engineering",
+          "phase": "baseline",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/manufacturing",
+          "phase": "baseline",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "baseline",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "baseline",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "baseline",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "baseline",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "baseline",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "baseline",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "baseline",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "baseline",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "baseline",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "baseline",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "baseline",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "baseline",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "baseline",
+          "target": "system_concept"
+        }
+      ]
+    },
+    {
+      "event": "cause_understood",
+      "meaning": "Evidence is sufficient to explain the condition.",
+      "useWhen": "Cause and limits are supported.",
+      "doNotUseWhen": "Material hypotheses remain untested.",
+      "occurrences": [
+        {
+          "route": "analyze",
+          "phase": "investigate",
+          "target": "explain"
+        }
+      ]
+    },
+    {
+      "event": "direction_selected",
+      "meaning": "The concept is ready for detailed design.",
+      "useWhen": "Tradeoffs and assumptions are recorded.",
+      "doNotUseWhen": "A required domain question remains.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "concept",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "concept",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "concept",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "concept",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "system_concept",
+          "target": "assembly_design"
+        }
+      ]
+    },
+    {
+      "event": "domain_question_answered",
+      "meaning": "The bounded domain question is answered.",
+      "useWhen": "Analysis can inform concept selection.",
+      "doNotUseWhen": "The question is unresolved or externally blocked.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "domain_analysis",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "domain_analysis",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "domain_analysis",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "domain_analysis",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "domain_analysis",
+          "target": "system_concept"
+        }
+      ]
+    },
+    {
+      "event": "domain_work_needed",
+      "meaning": "A bounded domain analysis is needed.",
+      "useWhen": "A physical question changes the concept.",
+      "doNotUseWhen": "Do not use for ordinary implementation judgment.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "system_concept",
+          "target": "domain_analysis"
+        }
+      ]
+    },
+    {
+      "event": "engineering_issue",
+      "meaning": "Final review found an engineering gap.",
+      "useWhen": "Design or evidence must change.",
+      "doNotUseWhen": "Do not use for presentation-only defects.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "final_review",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "final_review",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "final_review",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "final_review",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "final_review",
+          "target": "gap_closure"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "final_review",
+          "target": "gap_closure"
+        }
+      ]
+    },
+    {
+      "event": "explore_more",
+      "meaning": "Continue concept exploration.",
+      "useWhen": "Material alternatives remain.",
+      "doNotUseWhen": "Do not loop without a discriminating question.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "system_concept",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "system_concept",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "system_concept",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "system_concept",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "concept",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "concept",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "concept",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "concept",
+          "target": "concept"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "system_concept",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "system_concept",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "system_concept",
+          "target": "system_concept"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "system_concept",
+          "target": "system_concept"
+        }
+      ]
+    },
+    {
+      "event": "findings_delivered",
+      "meaning": "The evidence-bound analysis was delivered.",
+      "useWhen": "Required evidence and cases are closed.",
+      "doNotUseWhen": "Do not bypass required simulation evidence.",
+      "occurrences": [
+        {
+          "route": "analyze",
+          "phase": "explain",
+          "target": "ready"
+        }
+      ]
+    },
+    {
+      "event": "intent_issue",
+      "meaning": "The legacy modification plan misunderstood intent.",
+      "useWhen": "The intended change must be replanned.",
+      "doNotUseWhen": "Do not use for local implementation defects.",
+      "occurrences": [
+        {
+          "route": "design/legacy/part/prototype",
+          "phase": "review",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/engineering",
+          "phase": "review",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/manufacturing",
+          "phase": "review",
+          "target": "plan"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "review",
+          "target": "plan"
+        }
+      ]
+    },
+    {
+      "event": "interface_contracts_committed",
+      "meaning": "The interface records were committed.",
+      "useWhen": "cad_commit_interface_contracts emitted it.",
+      "doNotUseWhen": "Never call cad_transition with it.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "interface_design",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "interface_design",
+          "target": "part_design"
+        }
+      ]
+    },
+    {
+      "event": "interface_or_detail_issue",
+      "meaning": "Interface/detail contracts require redesign.",
+      "useWhen": "Locating, fit, access, or fastening intent is wrong.",
+      "doNotUseWhen": "Do not use for local solid defects.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/prototype",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/part/engineering",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/part/manufacturing",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "review",
+          "target": "part_design"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "interface_design"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "integration_review",
+          "target": "interface_design"
+        }
+      ]
+    },
+    {
+      "event": "local_geometry_issue",
+      "meaning": "A concrete local candidate-geometry defect needs source repair.",
+      "useWhen": "Evidence identifies a real geometry defect.",
+      "doNotUseWhen": "Do not use for Recipe, environment, or external-input failures.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/prototype",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/engineering",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/manufacturing",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/legacy/part/prototype",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/part/engineering",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/part/manufacturing",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "integration_review",
+          "target": "build"
+        }
+      ]
+    },
+    {
+      "event": "more_probe",
+      "meaning": "Continue with another targeted observation.",
+      "useWhen": "A specific unresolved question remains.",
+      "doNotUseWhen": "Do not repeat an identical probe without a new question or subject.",
+      "occurrences": [
+        {
+          "route": "analyze",
+          "phase": "investigate",
+          "target": "investigate"
+        }
+      ]
+    },
+    {
+      "event": "package_prepared",
+      "meaning": "Closure deliverables are ready for review.",
+      "useWhen": "Package artifacts and provenance exist.",
+      "doNotUseWhen": "Package contents are missing or stale.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "package",
+          "target": "final_review"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "package",
+          "target": "final_review"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "package",
+          "target": "final_review"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "package",
+          "target": "final_review"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "package",
+          "target": "final_review"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "package",
+          "target": "final_review"
+        }
+      ]
+    },
+    {
+      "event": "plan_committed",
+      "meaning": "The plan record was committed by its dedicated tool.",
+      "useWhen": "cad_commit_plan emitted it.",
+      "doNotUseWhen": "Never call cad_transition with it.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/prototype",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/engineering",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/manufacturing",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "part_design",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "part_design",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "part_design",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "part_design",
+          "target": "modify"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "part_design",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "part_design",
+          "target": "build"
+        }
+      ]
+    },
+    {
+      "event": "repair",
+      "meaning": "The converted output needs another conversion pass.",
+      "useWhen": "Comparison found a conversion defect.",
+      "doNotUseWhen": "Do not use after verified equivalence.",
+      "occurrences": [
+        {
+          "route": "convert",
+          "phase": "compare",
+          "target": "convert"
+        }
+      ]
+    },
+    {
+      "event": "revise",
+      "meaning": "Return to source work for a bounded CAD, sidecar, or analysis-input revision.",
+      "useWhen": "Source-authored content must change without revisiting architecture.",
+      "doNotUseWhen": "Recipe/observer-only changes are allowed in simulation-capable review phases.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/prototype",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/engineering",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/manufacturing",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/prototype",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/engineering",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/legacy/part/prototype",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/part/engineering",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/part/manufacturing",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/prototype",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/engineering",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "integration_review",
+          "target": "modify"
+        },
+        {
+          "route": "design/hybrid/part/prototype",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/engineering",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/manufacturing",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/prototype",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/engineering",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/manufacturing",
+          "phase": "integration_review",
+          "target": "build"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "integration_review",
+          "target": "build"
+        }
+      ]
+    },
+    {
+      "event": "workstreams_structurally_closed",
+      "meaning": "Every release workstream has a non-open status.",
+      "useWhen": "Each is complete, not applicable, or blocked external.",
+      "doNotUseWhen": "Do not equate missing evidence with completion.",
+      "occurrences": [
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "audit",
+          "target": "package"
+        },
+        {
+          "route": "design/greenfield/part/release",
+          "phase": "gap_closure",
+          "target": "package"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "audit",
+          "target": "package"
+        },
+        {
+          "route": "design/greenfield/assembly/release",
+          "phase": "gap_closure",
+          "target": "package"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "audit",
+          "target": "package"
+        },
+        {
+          "route": "design/legacy/part/release",
+          "phase": "gap_closure",
+          "target": "package"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "audit",
+          "target": "package"
+        },
+        {
+          "route": "design/legacy/assembly/release",
+          "phase": "gap_closure",
+          "target": "package"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "audit",
+          "target": "package"
+        },
+        {
+          "route": "design/hybrid/part/release",
+          "phase": "gap_closure",
+          "target": "package"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "audit",
+          "target": "package"
+        },
+        {
+          "route": "design/hybrid/assembly/release",
+          "phase": "gap_closure",
+          "target": "package"
+        }
+      ]
+    }
+  ],
+  "obligations": [
+    {
+      "key": "evidence:assembly",
+      "closeWith": "The owning capability's evidence lifecycle.",
+      "invalidatedBy": "Artifact, requirements, input, case, or provenance change.",
+      "recovery": "Re-run against the current artifact and recommit when required."
+    },
+    {
+      "key": "evidence:drawing",
+      "closeWith": "The owning capability's evidence lifecycle.",
+      "invalidatedBy": "Artifact, requirements, input, case, or provenance change.",
+      "recovery": "Re-run against the current artifact and recommit when required."
+    },
+    {
+      "key": "evidence:interference",
+      "closeWith": "The owning capability's evidence lifecycle.",
+      "invalidatedBy": "Artifact, requirements, input, case, or provenance change.",
+      "recovery": "Re-run against the current artifact and recommit when required."
+    },
+    {
+      "key": "lineage:baseline",
+      "closeWith": "The current action card and owning cookbook.",
+      "invalidatedBy": "Authoritative state change.",
+      "recovery": "Return to the earliest owning phase."
+    },
+    {
+      "key": "lineage:continuity",
+      "closeWith": "The current action card and owning cookbook.",
+      "invalidatedBy": "Authoritative state change.",
+      "recovery": "Return to the earliest owning phase."
+    },
+    {
+      "key": "lineage:retained_interfaces",
+      "closeWith": "The current action card and owning cookbook.",
+      "invalidatedBy": "Authoritative state change.",
+      "recovery": "Return to the earliest owning phase."
+    },
+    {
+      "key": "presentation:assembly_animation",
+      "closeWith": "The current action card and owning cookbook.",
+      "invalidatedBy": "Authoritative state change.",
+      "recovery": "Return to the earliest owning phase."
+    },
+    {
+      "key": "presentation:exploded",
+      "closeWith": "The current action card and owning cookbook.",
+      "invalidatedBy": "Authoritative state change.",
+      "recovery": "Return to the earliest owning phase."
+    },
+    {
+      "key": "presentation:hero",
+      "closeWith": "The current action card and owning cookbook.",
+      "invalidatedBy": "Authoritative state change.",
+      "recovery": "Return to the earliest owning phase."
+    },
+    {
+      "key": "presentation:turntable",
+      "closeWith": "The current action card and owning cookbook.",
+      "invalidatedBy": "Authoritative state change.",
+      "recovery": "Return to the earliest owning phase."
+    },
+    {
+      "key": "record:assembly_design",
+      "closeWith": "The dedicated cad_commit_* tool.",
+      "invalidatedBy": "Requirements/reroute or review regression.",
+      "recovery": "Re-enter the owning phase and recommit the full record."
+    },
+    {
+      "key": "record:frame_context",
+      "closeWith": "The dedicated cad_commit_* tool.",
+      "invalidatedBy": "Requirements/reroute or review regression.",
+      "recovery": "Re-enter the owning phase and recommit the full record."
+    },
+    {
+      "key": "record:interface_contracts",
+      "closeWith": "The dedicated cad_commit_* tool.",
+      "invalidatedBy": "Requirements/reroute or review regression.",
+      "recovery": "Re-enter the owning phase and recommit the full record."
+    },
+    {
+      "key": "workstream:assembly_service",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:bom",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:configuration",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:design_definition",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:engineering_analysis",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:inspection_acceptance",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:manufacturing_definition",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:presentation",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    },
+    {
+      "key": "workstream:risk_quality",
+      "closeWith": "A truthful non-open release status.",
+      "invalidatedBy": "Requirements or release package change.",
+      "recovery": "Re-audit and regenerate affected outputs."
+    }
+  ]
+}

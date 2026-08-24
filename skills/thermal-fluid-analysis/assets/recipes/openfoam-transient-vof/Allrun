@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+test -f system/controlDict
+test -d 0
+test -d constant
+blockMesh > blockMesh.log 2>&1
+checkMesh -allTopology -allGeometry > checkMesh.log 2>&1
+foamRun 2>&1 | tee solver.log

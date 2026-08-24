@@ -92,7 +92,7 @@ test("baseline prompts mandate frame handling without fabricating headless confi
   assert.match(baseline, /HEADLESS mode no user turn exists/i);
   assert.match(baseline, /assumed_headless/);
   assert.match(baseline, /mandatory/i);
-  assert.match(baseline, /baseline_understood/);
+  assert.match(baseline, /frame-context record/);
   // The question must be grounded in visible evidence (views or features).
   assert.match(baseline, /views|features/i);
   // Silent assumption is never an escape.
@@ -101,7 +101,7 @@ test("baseline prompts mandate frame handling without fabricating headless confi
   const sourceBaseline = await loadPrompt("source_baseline");
   assert.match(sourceBaseline, /Establish the coordinate frame/i);
   assert.match(sourceBaseline, /assumed_headless/);
-  assert.match(sourceBaseline, /baseline_understood/);
+  assert.match(sourceBaseline, /phase completion/);
 
   // The requirements prompt defers the frame question to the baseline
   // phase instead of duplicating it.

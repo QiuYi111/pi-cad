@@ -25,14 +25,14 @@ brief.
 - Keep explicit assumptions reversible and visible.
 - Treat contradictory explicit numbers, competing geometric referents, and alternatives that change topology or the final envelope as material ambiguities, not ordinary implementation judgment.
 - In interactive mode, ask one focused clarification before committing such an ambiguity. In HEADLESS mode, do not pause: add a structured `deferredClarifications[]` entry with the question, reason, at least two alternatives, selected fallback, and impact; copy the fallback verbatim into `assumptions[]`; then proceed.
-- If the task is already fully specified (the V0 plate is an example), do not ask ceremonial questions: call cad_commit_requirements directly.
+- If the task is already fully specified (the V0 plate is an example), do not ask ceremonial questions: use the action card's requirements-commit operation directly.
 - For routes that start from supplied STEP/CAD (analyze, legacy, hybrid, convert), put every supplied artifact path in inputs[].
 - Do not debate the artifact's coordinate orientation here — the harness binds and auto-inspects the baseline right after this commit, and the BASELINE phase confirms the frame mapping with the user using those views.
 
 ## Requirement closure
 
 - Put every explicit acceptance constraint or requested deliverable-changing instruction into `must[]` as a separate item. Keep soft preferences in `preferences[]`.
-- In the same `cad_commit_requirements` call, preregister `assertions[]` that cover every Must via stable `mustRef` values (`M1`, `M2`, ...). Compound Musts may use multiple assertions.
+- In the same requirements commit, preregister `assertions[]` that cover every Must via stable `mustRef` values (`M1`, `M2`, ...). Compound Musts may use multiple assertions.
 - Assertions describe verification intent only: semantic subject, quantity, optional reference/direction, and exact/range/boolean/relation expectation. They must not contain candidate-specific selectors, probe code, or implementation choices.
 - Geometry Assertions must describe only facts observable on the completed deliverable. Never assert modeling order, feature history, a pre-cut/pre-boolean profile, temporary construction geometry, or geometry removed by a later operation.
 - Translate procedural geometry such as “first draw X, then cut Y” into final-state consequences. If a later feature truncates or removes a dimensioned entity, do not assert that the original full edge or face still exists. Bind instead to observable final dimensions, surviving boundaries, symmetry, angles, tangency/collinearity, or another relation that deterministic inspection of the final artifact can establish.
@@ -40,7 +40,7 @@ brief.
 - Use `canonicalCheck` only for an explicit, unambiguous global field (`bbox.x/y/z`, volume, surface area, or topology counts). Never infer a bbox axis merely because a sentence says width/height.
 - When requirements or a recorded coordinate assumption explicitly map a numeric extent to global X/Y/Z, put that axis in `binding.direction` and set the matching `canonicalCheck` (`bbox.x/y/z`). The commit is rejected if an explicit global-axis numeric assertion omits or contradicts that check.
 - Assertions are frozen before implementation. If later review finds that an Assertion misbinds its Must, revise the requirements contract explicitly; do not weaken the test after seeing the candidate.
-- `cad_commit_requirements` is initial-commit-only. If later authoritative information changes the task, call `cad_revise_requirements` with the complete replacement record and a documented Route assessment before rerouting or performing more engineering.
+- The initial requirements commit is one-time. If authoritative information later changes the task, use the card's requirements-revision operation with the complete replacement and documented Route assessment before rerouting or more engineering.
 - Record interpretation decisions in `assumptions[]`, including unit normalization, which geometric entity a dimension refers to, and any ambiguity you resolved: state the chosen reading and the reason.
 - Preserve the named geometric referent of every dimension. A polygon side length is not its circumradius or diameter; a profile corner radius is not a solid-edge fillet radius. If a CAD API uses a different parameterization, derive the API input explicitly and verify the originally named quantity.
 - Treat explicit final-state instructions such as rotate, align, orient, center, and position as separate `must[]` items — they are acceptance conditions, not style.
@@ -52,7 +52,7 @@ brief.
 - Identify whether the route maturity and explicit physics constraints require engineering simulation evidence.
 - Do not require simulation ceremonially.
 - If strength, stiffness, thermal, flow, dynamics, or another quantitative physical behavior materially determines acceptance, record evidenceObligations.simulation.disposition = required.
-- Declare opaque cases as evidenceObligations.simulation.cases = [{id, tool: "cad_simulate"}]. The Recipe owns solver semantics; the harness only checks an explicit commit for the exact case and current design. Historical tool names are migration data and are invalid for new obligations.
+- Declare opaque simulation cases through the live requirements schema. The Recipe owns solver semantics; the harness checks an explicit commit for the exact case and current design. Never guess or copy a historical tool value.
 - Name cases after the claim they support (for example "nozzle-outlet" for an outlet-Mach requirement, "hot-section" for a thermal requirement).
 - If the decision can be made without simulation at this maturity, use optional or not_applicable.
 - Missing external loads/materials/BCs should become blocked_external rather than invented.

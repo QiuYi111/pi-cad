@@ -9,6 +9,11 @@
       "activation": ". /opt/openfoam14/etc/bashrc >/dev/null 2>&1",
       "environment": { "PI_CAD_PYTHON_PROJECT": "/opt/pi-cad-runtime/python", "UV_NO_SYNC": "1" },
       "accelerator": "none",
+      "agentCapabilities": {
+        "pythonCommand": "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python",
+        "executables": ["checkMesh", "foamRun", "foamPostProcess"], "pythonModules": ["numpy", "matplotlib"],
+        "sandbox": "bubblewrap", "network": "none", "accelerator": "none", "cookbookTemplateId": "openfoam-14"
+      },
       "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
     },
     {
@@ -23,6 +28,11 @@
         "PI_CAD_PYTHON_PROJECT": "/opt/pi-cad-runtime/su2/8.5.0/project/python/runtimes/su2", "OMP_NUM_THREADS": "1", "UV_NO_SYNC": "1"
       },
       "accelerator": "none",
+      "agentCapabilities": {
+        "pythonCommand": "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python",
+        "executables": ["SU2_CFD"], "pythonModules": ["numpy", "matplotlib"],
+        "sandbox": "bubblewrap", "network": "none", "accelerator": "none", "cookbookTemplateId": "su2-8.5.0"
+      },
       "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
     },
     {
@@ -41,6 +51,11 @@
         "LD_LIBRARY_PATH": "/usr/lib/wsl/lib:/usr/lib/x86_64-linux-gnu", "UV_NO_SYNC": "1"
       },
       "accelerator": "cuda",
+      "agentCapabilities": {
+        "pythonCommand": "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python",
+        "executables": ["python"], "pythonModules": ["torch", "cupy", "torch_fem"],
+        "sandbox": "bubblewrap", "network": "none", "accelerator": "cuda", "cookbookTemplateId": "torch-fem-0.9-cuda"
+      },
       "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
     },
     {
@@ -58,6 +73,11 @@
         "PI_SIM_ACCELERATOR": "cpu", "UV_NO_SYNC": "1"
       },
       "accelerator": "cpu", "developmentOnly": true,
+      "agentCapabilities": {
+        "pythonCommand": "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python",
+        "executables": ["python"], "pythonModules": ["torch", "torch_fem"],
+        "sandbox": "bubblewrap", "network": "none", "accelerator": "cpu", "cookbookTemplateId": "torch-fem-0.9-cpu-development"
+      },
       "limits": { "cpu": 8, "memoryGiB": 24, "tasks": 1024, "wallHours": 12, "workspaceGiB": 100 }
     }
   ]

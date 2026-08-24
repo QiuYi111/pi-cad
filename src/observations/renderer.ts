@@ -108,7 +108,7 @@ export async function observeContent(
   return {
     content: await renderBundleContent(bundle, {
       ...options,
-      includeEnvelope: options.includeEnvelope ?? envelope,
+      includeEnvelope: options.includeEnvelope === undefined ? envelope : options.includeEnvelope,
     }),
     bundle,
   };

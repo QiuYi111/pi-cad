@@ -25,6 +25,8 @@
     ]
   },
   "scripts": {
+    "generate:agent-contract": "node scripts/generate-agent-contract.mjs",
+    "check:agent-contract": "node scripts/generate-agent-contract.mjs --check",
     "test": "bash scripts/test.sh",
     "test:py": "bash scripts/test.sh",
     "test:ts": "node tests/run-ts-tests.mjs",

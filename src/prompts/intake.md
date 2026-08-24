@@ -6,7 +6,7 @@ Understand the user's requested action and available artifacts.
 You may inspect files or existing CAD if that is needed to choose a route.
 Do not modify engineering artifacts in this state.
 
-Route the task by calling cad_route with its full hierarchical description,
+Route the task with the action card's route operation and its full hierarchical description,
 decided in one turn:
 
 - objective: analyze (read-only diagnosis) / convert (format or hierarchy

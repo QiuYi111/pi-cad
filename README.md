@@ -135,49 +135,36 @@ Two 0.8 rules matter more than the table:
   BUILDABLE, FUNCTIONAL. Maturity only *adds* obligations (manufacturing
   requires drawing evidence; release adds workstreams and presentation
   deliverables) — it never buys a shorter process.
-- **Obligations cannot be routed around.** Assembly routes owe
-  `cad_commit_assembly_design` and `cad_commit_interface_contracts`
-  records (they are the only exits from their phases) plus current-version
-  assembly-tree and interference evidence. A mid-process `cad_reroute`
+- **Obligations cannot be routed around.** Assembly routes owe their generated
+  assembly-design and interface-contract records (the only exits from those
+  phases) plus current-version assembly-tree and interference Evidence. A route change
   that only adds obligations applies autonomously and resumes at the
   earliest unmet phase; any downgrade requires a one-time authority token
   the harness issues only after a real user turn answers your question —
   an agent-claimed "user approved" never counts.
 
-## What the agent can actually do
+## The agent contract
 
-**Control** — `cad_route`, `cad_reroute`, `cad_commit_requirements`,
-`cad_revise_requirements`,
-`cad_commit_plan`, `cad_commit_assembly_design`,
-`cad_commit_interface_contracts`, `cad_commit_candidate`, `cad_transition`,
-`cad_wait_for_user`, `cad_finish`. `cad_commit_candidate` runs the automatic
-observation loop: build → seven visual views → geometry facts →
-assembly-tree + interference (assembly routes) → deterministic compare
-(legacy/release) → evidence bound to hashes → review.
+The installed package contains a schema-1 `AgentContract` generated from the
+active tool catalog, route compiler, phase contracts, events, and obligations.
+The same build generates architecture/workflow references and six categorized
+tool manuals. CI runs `generate-agent-contract --check`, so code/reference
+drift is a build failure. The machine contract is shipped as
+`assets/agent-contract.json`; `assets/cookbook-catalog.json` maps every public
+tool to its cookbook, optional executable asset, and qualification gate.
 
-`cad_commit_requirements` establishes the first canonical contract. Later
-authoritative changes use `cad_revise_requirements` before rerouting or CAD
-mutation. Each version is immutable and hash-selected; a changed Route places
-the run under a state-level reassessment lock. Missing external baseline files
-may block execution, but cannot keep an obsolete requirements version canonical.
+At runtime Pi-CAD injects a compact **Current Action Card** with authoritative
+route/phase/status, purpose, write scope, available tools, unmet records and
+Evidence obligations, current bindings, legal events, guards, recommended
+action, and only managed runtimes that probed ready. Normal operation depends
+on installed skills, live tool schemas, and this card—not on reading `src/**`.
+Illegal transitions return the same recovery information as structured data.
 
-**Model and probe** — `cad_build_step`, `cad_derive_analysis_model`, the
-single `cad_probe` entry point (`visual`, `geometry`, `surfaces`, `measure`,
-`section`, `sections_scan`, `compare`, `assembly`, `interference`, `python`),
-`cad_recall_observation`, and `cad_export`.
-
-**Engineering analysis** — Recipe-native `cad_simulate`,
-`cad_sim_observe`, `cad_commit_simulation`, plus `cad_optimize`,
-`cad_generate_drawing`, and `cad_render_scene`. Historical typed tool names
-are migration data only: they are neither registered, exposed by `cadctl`, nor
-valid for new cases. Solver compilers remain importable only as Recipe-owned
-implementation libraries.
-
-Simulation V2 takes only `backend`, `runtime`, a Recipe directory, and
-optional opaque output names. Physics, materials, boundaries, meshing, and
-project-specific metrics live in the solver-native Recipe, never in Pi-CAD's
-tool schema. Drawing, optimization, and presentation retain their own typed
-contracts.
+Probe results use immutable complete snapshots. The first screen is a bounded
+semantic projection, not a semantic hard limit: faces, occurrences,
+interference pairs, Python arrays/tables, and full failure logs are retained as
+collections and can be filtered, ordered, and paged to exhaustion. Quota
+exhaustion fails explicitly rather than silently dropping detail.
 
 ## Simulation, honestly scoped
 
@@ -185,9 +172,9 @@ Simulation V2 follows:
 
 ```text
 author solver-native Recipe
-→ cad_simulate
-→ optional cad_sim_observe
-→ cad_commit_simulation
+→ managed compute
+→ optional immutable re-observation
+→ explicit case-scoped Evidence commit
 ```
 
 Each Recipe contains a strict `pi-sim.toml`, an arbitrary managed entrypoint,
@@ -247,7 +234,7 @@ criteria remain ignored authoritative inputs; if absent, it reports
 
 ### Structural, thermal, and flow Recipes
 
-There are no public typed physics wrappers. `cad_probe` is the only probe
+There are no public typed physics wrappers. The unified Probe is the only probe
 entry point, and every new simulation uses the Recipe-native lifecycle.
 Physics, units, materials, loads, constraints, boundary conditions, meshing,
 solver controls, and project metrics live in the Recipe.
@@ -273,7 +260,7 @@ but require explicit surface mappings and physical inputs. SU2 is launched
 only from `/opt/pi-cad-runtime/su2/8.5.0`; host PATH and binary environment
 overrides are intentionally ignored.
 
-`cad_optimize` runs the differentiable 2D SIMP/MMA skeleton in the managed
+The optimization operation runs the differentiable 2D SIMP/MMA skeleton in the managed
 CUDA runtime by default. It produces optimization artifacts, not CAD and not
 Simulation Evidence. Selecting CPU is explicit and binds a different runtime
 identity.
@@ -311,7 +298,7 @@ allowed to reach the solver.
   Boundary heat rates are labeled `reconstructedHeatRateW` because they are
   integrated from the solution's element gradients, not SU2's own
   conservative face fluxes.
-- `cad_probe preset=surfaces` — deterministic boundary-surface facts (type, area,
+- The Probe's surfaces preset — deterministic boundary-surface facts (type, area,
   centroid, bbox, normal/axis) plus labeled views. Surface IDs are geometric
   selectors valid for one artifact hash, never semantic labels: deciding
   which face is an inlet is the agent's job.
@@ -331,13 +318,13 @@ provenance; engineering judgment remains outside Core.
   current visual and geometry evidence — plus simulation evidence when the
   requirements say it is required.
 - **Evidence is tamper-evident.** Every evidence artifact is sha256-hashed,
-  and the hashes are re-verified at `cad_transition(accepted)` and
-  `cad_finish`. A rewritten result file fails verification.
+  and the hashes are re-verified at acceptance and finish. A rewritten result
+  file fails verification.
 - **Simulation is explicit-commit only.** Solve and observe never create
   Evidence. Commit re-verifies the frozen Recipe, runtime identity, inputs,
   Observation, and authoritative artifact or derivation.
 - **Declared simulation cases must actually run.** When requirements declare
-  case-scoped obligations (e.g. `nozzle-outlet` via `cad_simulate`),
+  case-scoped obligations (for example `nozzle-outlet` through managed simulation),
   acceptance and finish stay blocked until each case produced current-version
   evidence from the declared tool — a structural FEA run cannot close a flow
   case. The harness compares opaque identities only; it never interprets the
@@ -382,7 +369,7 @@ provenance; engineering judgment remains outside Core.
 Blender remains a separate optional presentation runtime: a `blender` on
 PATH wins, the manifest-pinned 4.5 LTS archive is
 SHA256-verified, the download fails soft, and `cadctl doctor` reports the
-capability honestly. When no Blender is available, `cad_render_scene`
+capability honestly. When no Blender is available, the presentation renderer
 returns an explicit `unavailable` — an honest evidence state, never a
 substitute render.
 
@@ -416,7 +403,7 @@ activity is a short-lived **run**:
                       └── evidence/<kind>/<id>/   # spec.json + results + views
 ```
 
-`cad_route` creates a run when the project is idle; `cad_finish` and
+The generated route operation creates a run when the project is idle; finish and
 `/cad-abort` clear it. The design head survives aborts. Legacy single-state
 layouts are migrated automatically.
 
@@ -446,12 +433,12 @@ Control Plane (`src/control` phase contracts + `src/core` state machine)
 decides what is allowed and required. Capability modules decide how
 engineering computation runs: MODEL (`src/modules/model` — ModelBackend
 adapters, candidate finalizer), PROBE (`src/modules/probe` — preset
-registry behind the unified `cad_probe` tool), SIMULATE
+registry behind the unified Probe), SIMULATE
 (`src/modules/simulate-v2` — Recipe/input freeze → managed compute → immutable
 Observation snapshots → explicit Evidence commit). The Observation Layer (`src/observations`) normalizes every
 backend envelope into visual-first agent observations, and the context
 runtime (`src/core/observation-index.ts`) indexes them so post-compaction
-recall (`cad_recall_observation`) can rehydrate engineering visuals.
+observation recall can rehydrate engineering visuals and page complete detail.
 Adding a CAD backend means implementing `ModelBackend`; adding an
 observation means adding a probe preset — neither touches workflow code.
 

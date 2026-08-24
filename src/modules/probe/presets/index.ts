@@ -112,14 +112,22 @@ const surfacesPreset: ProbePreset<SurfacesProbeArgs> = {
       surfaces?: Array<{ id: string; type: string; area: number; centroid: number[] }>;
       views?: Array<{ name: string; path: string }>;
     };
+    const surfaces = payload.surfaces ?? [];
+    const byType = surfaces.reduce<Record<string, number>>((counts, surface) => {
+      counts[surface.type] = (counts[surface.type] ?? 0) + 1;
+      return counts;
+    }, {});
+    const areas = surfaces.map((surface) => surface.area).filter(Number.isFinite);
     return {
       envelope,
       kind: "surfaces",
       headline: `surface facts: ${payload.surfaces?.length ?? 0} boundary surfaces of ${args.artifact} (selectors, not semantics; valid for this artifact hash only)`,
-      facts: (payload.surfaces ?? []).map((s) => ({
-        key: s.id,
-        value: `${s.type} area=${s.area} centroid=[${s.centroid.map((v) => v.toFixed(3)).join(", ")}]`,
-      })),
+      facts: [
+        { key: "surfaceCount", value: String(surfaces.length) },
+        { key: "typeDistribution", value: JSON.stringify(byType) },
+        ...(areas.length ? [{ key: "areaRange", value: `${Math.min(...areas)}…${Math.max(...areas)}` }] : []),
+        { key: "detail", value: "page the surfaces collection with cad_recall_observation for selectors and centroids" },
+      ],
       visuals: (payload.views ?? []).map((v) => ({ name: v.name, path: v.path })),
       includeEnvelope: false,
       artifactPath: resolve(ctx.cwd, args.artifact),

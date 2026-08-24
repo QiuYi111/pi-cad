@@ -5,9 +5,10 @@ description: Control Pi-CAD mechanical-engineering workflows from requirements t
 
 # Pi-CAD
 
-Treat the harness state as authoritative for workflow phase, Project Head, permissions, obligations, and evidence. Do not replace controlled transitions with narrative claims.
+Treat the Current Action Card as authoritative for route, phase, Project Head, permissions, tools, obligations, and legal events. Normal operation must not inspect `src/**`.
 
-- Read [references/workflow.md](references/workflow.md) when routing, revising requirements, transitioning phases, waiting, blocking, or finishing.
+- Read [references/generated/architecture.md](references/generated/architecture.md) for the code-defined architecture and [references/generated/workflow.md](references/generated/workflow.md) for all possible phase/event semantics.
+- Read [references/cookbooks/workflow-records.md](references/cookbooks/workflow-records.md) when authoring records, review decisions, clarification, blockers, transitions, or Evidence commits.
 - Read [references/model-and-delivery.md](references/model-and-delivery.md) when creating CAD, managing analysis derivations, accepting a candidate, or packaging outputs.
 - Read [references/evidence.md](references/evidence.md) when probing, simulating, reviewing, or deciding whether an obligation is actually closed.
 - Use the `pi-cad-tools` skill when concrete tool selection or arguments matter.

@@ -24,6 +24,6 @@ the four architecture questions with numbers, not adjectives:
 
 ## Exit
 
-`cad_commit_assembly_design` writes the record (it is an obligation of
+The action card's assembly-record operation writes the record (it is an obligation of
 assembly routes — the harness will not let you build without it) and
 enters INTERFACE DESIGN.

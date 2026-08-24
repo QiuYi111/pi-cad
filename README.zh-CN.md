@@ -123,42 +123,31 @@ route = objective × lineage × structure × maturity
 - **Maturity 是现实底线,不是心情。** prototype 意味着 REAL / BUILDABLE /
   FUNCTIONAL。maturity 只*增加*义务(manufacturing 要求图纸证据;release
   增加工作流与演示交付物)——绝不会换来更短的流程。
-- **义务无法被绕过。** assembly 路由必须提交 `cad_commit_assembly_design`
-  与 `cad_commit_interface_contracts` 记录(它们是所处阶段的唯一出口),
-  并持有当前版本的装配树与干涉证据。过程中 `cad_reroute` 只增义务时自主
+- **义务无法被绕过。** assembly 路由必须提交生成合同声明的 assembly-design
+  与 interface-contract records(它们是所处阶段的唯一出口),并持有当前版本的
+  装配树与干涉 Evidence。过程中 route change 只增义务时自主
   生效并回到最早未满足的阶段;任何降级都需要 harness 签发的一次性授权
   token——而 token 只在你真实回复过智能体的提问后才签发,智能体自称
   "用户已同意"永远不算数。
 
-## 智能体到底能做什么
+## Agent Contract
 
-**流程控制** —— `cad_route`、`cad_reroute`、`cad_commit_requirements`、
-`cad_revise_requirements`、
-`cad_commit_plan`、`cad_commit_assembly_design`、
-`cad_commit_interface_contracts`、`cad_commit_candidate`、`cad_transition`、
-`cad_wait_for_user`、`cad_finish`。`cad_commit_candidate` 负责自动观测循环:
-构建 → 七张视图 → 几何事实 → 装配树 + 干涉(assembly 路由)→(legacy/
-release)确定性对比 → 按哈希绑定证据 → 进入评审。
+安装包内含 schema-1 `AgentContract`,由 active tool catalog、route compiler、
+phase contract、event 与 obligation 直接生成。同一过程生成架构/工作流 reference
+与六类工具手册;CI 执行 `generate-agent-contract --check`,任何代码/文档漂移都会
+失败。机器合同位于 `assets/agent-contract.json`;每个公开工具到 cookbook、
+可执行 asset 与 qualification 的映射位于 `assets/cookbook-catalog.json`。
 
-`cad_commit_requirements` 只建立首版 canonical contract。后续权威信息变化
-必须先调用 `cad_revise_requirements`,再 reroute 或修改 CAD。每个需求版本都
-按哈希不可变保存;Route 变化时进入 state-level reassessment lock。外部 baseline
-文件缺失可以阻塞执行,但不能让已过时的旧需求继续充当 canonical truth。
+运行时每轮注入紧凑且权威的 **Current Action Card**:route/phase/status、阶段目的、
+允许写入、当前可用工具、未满足 records/Evidence、artifact 绑定、合法事件、
+guards、下一动作,以及只有真实 probe ready 的 managed runtime。正常使用只依赖
+已安装 skills、实时 tool schema 与行动卡,不再读取 `src/**`;非法 transition 也会
+以机器可读形式返回同一组恢复信息。
 
-**模型与探测** —— `cad_build_step`、`cad_derive_analysis_model`、唯一入口
-`cad_probe`(`visual`、`geometry`、`surfaces`、`measure`、`section`、
-`sections_scan`、`compare`、`assembly`、`interference`、`python`)、
-`cad_recall_observation` 与 `cad_export`。
-
-**工程分析** —— Recipe-native 的 `cad_simulate`、`cad_sim_observe`、
-`cad_commit_simulation`,以及 `cad_optimize`、`cad_generate_drawing`、
-`cad_render_scene`。历史 typed 工具名只用于迁移读取,不再注册,也不能用于
-新 obligation;`cadctl` 也不再暴露旧 simulate 命令。solver compiler 只作为
-Recipe-owned 实现库保留。
-
-Simulation V2 只接收 backend、runtime、Recipe 目录和可选的不透明输出名。
-物理、材料、边界、网格与项目指标全部属于 solver-native Recipe,不进入
-Pi-CAD 的工具 schema。图纸、优化与 presentation 仍保留各自的 typed contract。
+Probe 使用不可变完整快照。首屏有上下文预算,但没有不可恢复的语义硬上限:
+faces、assembly occurrences、interference pairs、Python 数组/表格与完整失败日志
+都进入压缩 collection,可按 filter/order/cursor 分页读完。超出存储 quota 会明确
+失败,绝不静默丢数据。
 
 ## 仿真能力的诚实边界
 
@@ -166,9 +155,9 @@ Simulation V2 的正式链路是:
 
 ```text
 编写 solver-native Recipe
-→ cad_simulate
-→ 可选 cad_sim_observe
-→ cad_commit_simulation
+→ managed compute
+→ 可选 immutable re-observation
+→ 显式 case-scoped Evidence commit
 ```
 
 每个 Recipe 包含严格的 `pi-sim.toml`、可自由编程的 managed entrypoint、
@@ -216,7 +205,7 @@ generator、三阶段 solver runner、收敛/鲁棒性聚合和 Rev1 release gat
 
 ### 结构、热与流 Recipe
 
-公开接口不再注册 typed physics wrapper。`cad_probe` 是唯一探测入口;
+公开接口不再注册 typed physics wrapper。统一 Probe 是唯一探测入口;
 所有新仿真都走 Recipe-native 链路。物理、单位、材料、载荷、约束、边界、
 网格、求解控制和项目指标全部留在 Recipe,不进入 Core。
 
@@ -235,7 +224,7 @@ sparse solve。GPU、driver、CuPy 或架构不兼容时返回 `unavailable`,绝
 并说明何时应使用 OpenFOAM。SU2 只从 immutable
 `/opt/pi-cad-runtime/su2/8.5.0` 启动,不接受宿主 PATH 或环境变量绕过。
 
-`cad_optimize` 默认在同一个 managed CUDA runtime 内运行二维 SIMP/MMA
+optimization operation 默认在同一个 managed CUDA runtime 内运行二维 SIMP/MMA
 可微优化。它只生成 optimization artifact,不是 CAD 或 Simulation Evidence。
 
 Skill 分三层:`pi-cad` 负责 workflow/Evidence,`pi-cad-tools` 覆盖完整 active
@@ -265,7 +254,7 @@ CAD 几何按 `geometryUnits` 解释(默认 mm),所有物理量用显式 SI
   常导热系数。一维平板 fixture 在 CI 中与 `q = kAΔT/L` 解析解对比。
   边界热流率字段命名为 `reconstructedHeatRateW`,因为它由解的单元梯度
   重构积分而来,不是 SU2 自身的守恒面通量。
-- `cad_probe preset=surfaces` —— 确定性的边界面事实(类型、面积、质心、包围盒、
+- Probe 的 surfaces preset —— 确定性的边界面事实(类型、面积、质心、包围盒、
   法向/轴线)加带标注的视图。面 ID 只是对当前工件哈希有效的几何选择器,
   绝不是语义标签:哪个面是进口,由智能体自己判断。
 
@@ -280,18 +269,18 @@ Recipe 和 skill 必须明确与结论有关的非线性、多材料、CHT、燃
 - **验收需要证据。** 没有当前的视觉与几何证据,工件无法被验收;
   需求里要求仿真时,仿真证据同样不可或缺。
 - **证据防篡改。** 每个证据工件都有 sha256 哈希,并在
-  `cad_transition(accepted)` 与 `cad_finish` 时重新校验。
+  acceptance 与 finish 时重新校验。
   改写结果文件会直接校验失败。
 - **仿真绑定求解前的工件哈希。** 求解期间 STEP 被改动,结果会被丢弃,
   而不是绑到错误的版本上。
 - **证据输入同样会被重验。** 流/热证据携带哈希绑定的输入(canonical
-  spec、产品工件、流体域),`cad_transition(accepted)` 与 `cad_finish`
+  spec、产品工件、流体域),acceptance 与 finish
   会重新哈希;求解后改写流体域 STEP,和改写结果文件一样会使证据失效。
 - **未收敛的运行不是证据。** 收敛性由 interpreter 判定:未达到声明的
   残差目标(或未声明目标)的运行以 `status=not_converged` 返回原始场,
   harness 不会从中记录任何证据。
 - **声明的仿真工况必须真的跑过。** 需求里声明了按工况的义务
-  (如 `nozzle-outlet` 用 `cad_simulate`)时,验收与收尾会被一直挡住,
+  (如通过 managed simulation 验证 `nozzle-outlet`)时,验收与收尾会被一直挡住,
   直到每个工况都用声明的工具产生了当前版本的证据——跑一次结构 FEA
   关不掉一个流场工况。harness 只比对不透明标识,绝不理解物理。
 - **候选一变,旧证据自动过期。** 你无法拿上一版的仿真去验收新几何。
@@ -337,7 +326,7 @@ qualification。普通 CI 不伪造 GPU qualification。
                       └── evidence/<kind>/<id>/   # spec.json + 结果 + 视图
 ```
 
-项目空闲时 `cad_route` 创建 run;`cad_finish` 与 `/cad-abort` 清除它。
+项目空闲时由生成合同声明的 route operation 创建 run;finish 与 `/cad-abort` 清除它。
 中止 run 不影响设计头。旧的单状态布局会自动迁移。
 
 ## 仓库导航

@@ -1,0 +1,21 @@
+schema = 1
+entrypoint = "./Allrun"
+observe = "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python observe.py"
+nonvisual = false
+inputs = ["../../build/fluid-domain.step"]
+observation_files = ["observe.py"]
+
+[exports.interface_context]
+type = "image"
+primary = true
+
+[exports.continuity_error]
+type = "scalar"
+primary = true
+unit = "1"
+
+[exports.residual_history]
+type = "timeseries"
+
+[exports.solver_log]
+type = "artifact"

@@ -9,6 +9,7 @@ import { test } from "node:test";
 
 import {
   queryObservations,
+  queryObservationCollection,
   rehydrateVisuals,
   recordObservation,
   renderObservationIndex,
@@ -85,8 +86,8 @@ try {
     assert.ok(!text.includes("section failed"), "failed observations stay out of the prompt index");
   });
 
-  test("index: quota trims the head beyond the cap", async () => {
-    // Write a bulk index directly to exercise trimming without 400 awaits.
+  test("index: complete history is lossless and detail quota fails explicitly", async () => {
+    // Write a bulk legacy index directly; a new immutable snapshot must not trim it.
     const dir = join(cwd, ".pi-cad", "runs", runId, "context");
     mkdirSync(dir, { recursive: true });
     const bulk: ObservationRecord[] = Array.from({ length: 405 }, (_, i) => ({
@@ -104,13 +105,45 @@ try {
       join(dir, "observations.jsonl"),
       bulk.map((r) => JSON.stringify(r)).join("\n") + "\n",
     );
-    await recordObservation({
+    const latest = await recordObservation({
       cwd, runId, phase: "build", tool: "cad_probe", bundle: bundle(),
     });
     const lines = readFileSync(join(dir, "observations.jsonl"), "utf8").trim().split("\n");
-    assert.ok(lines.length <= 301, `index bounded: ${lines.length}`);
+    assert.equal(lines.length, 406, "summary history is not silently trimmed");
     const first = JSON.parse(lines[0]) as ObservationRecord;
-    assert.ok(first.id >= 405 - 300, "head trimmed, newest retained");
+    assert.equal(first.id, 1, "oldest summary remains discoverable");
+    assert.ok(existsSync(join(dir, "observations", latest.observationId!, "payload.json.gz")));
+
+    const previousQuota = process.env.PI_CAD_OBSERVATION_QUOTA_BYTES;
+    process.env.PI_CAD_OBSERVATION_QUOTA_BYTES = "1";
+    try {
+      await assert.rejects(recordObservation({ cwd, runId: "quota", phase: "review", tool: "cad_probe", bundle: bundle() }), /complete payload was not silently discarded/);
+    } finally {
+      if (previousQuota === undefined) delete process.env.PI_CAD_OBSERVATION_QUOTA_BYTES;
+      else process.env.PI_CAD_OBSERVATION_QUOTA_BYTES = previousQuota;
+    }
+  });
+
+  test("index: 444-item collection can be filtered, ordered, and paged without loss", async () => {
+    const record = await recordObservation({
+      cwd, runId: "many", phase: "review", tool: "cad_probe", bundle: bundle(),
+      rawPayload: { surfaces: Array.from({ length: 444 }, (_, index) => ({ id: `f${index}`, area: 444 - index, type: index % 2 ? "plane" : "cylinder" })) },
+    });
+    const first = await queryObservationCollection(cwd, "many", record.observationId!, "surfaces", { where: [{ field: "type", op: "eq", value: "plane" }], orderBy: [{ field: "area", direction: "asc" }], limit: 200 });
+    assert.equal(first.totalMatched, 222);
+    assert.equal(first.items.length, 200);
+    assert.ok(first.nextCursor);
+    const second = await queryObservationCollection(cwd, "many", record.observationId!, "surfaces", { where: [{ field: "type", op: "eq", value: "plane" }], orderBy: [{ field: "area", direction: "asc" }], cursor: first.nextCursor, limit: 200 });
+    assert.equal(second.items.length, 22);
+    assert.equal(second.nextCursor, undefined);
+
+    const pairsRecord = await recordObservation({
+      cwd, runId: "pairs", phase: "integration_review", tool: "cad_probe", bundle: bundle(),
+      rawPayload: { pairs: Array.from({ length: 231 }, (_, index) => ({ a: `p${index}`, b: `p${index + 1}`, classification: index % 3 === 0 ? "penetration" : "clearance", clearance: index / 100 })) },
+    });
+    const pairPage = await queryObservationCollection(cwd, "pairs", pairsRecord.observationId!, "pairs", { where: [{ field: "classification", op: "eq", value: "penetration" }], limit: 200 });
+    assert.equal(pairPage.totalMatched, 77);
+    assert.equal(pairPage.items.length, 77);
   });
 
   await test("cad_recall_observation: re-attaches recorded visuals", async () => {
@@ -147,7 +180,7 @@ try {
     const png = join(cwd, "evidence", "iso.png");
     mkdirSync(join(cwd, "evidence"), { recursive: true });
     writeFileSync(png, Buffer.from("89504e470d0a1a0a", "hex"));
-    await recordObservation({
+    const recorded = await recordObservation({
       cwd, runId, phase: "review", tool: "cad_probe",
       bundle: bundle({
         visuals: [{ name: "iso", path: png }],
@@ -158,7 +191,7 @@ try {
 
     const result = await recall.execute(
       "t1",
-      { evidenceKind: "visual", limit: 3 },
+      { observationId: recorded.observationId },
       undefined,
       undefined,
       { cwd },

@@ -30,7 +30,7 @@ export interface ProbeResult {
   facts?: ObservationFact[];
   /** Explicit visuals (override the profile projection). */
   visuals?: ObservationVisual[];
-  /** Raw envelope appended to agent output (default true for build-like presets). */
+  /** Opt in to appending the raw envelope to agent output. Full payload is always persisted. */
   includeEnvelope?: boolean;
   /** Artifact path used to backfill the artifact hash. */
   artifactPath?: string;
@@ -96,7 +96,7 @@ export async function renderProbeResult(
       ...(result.facts ? { facts: result.facts } : {}),
       ...(result.visuals ? { visuals: result.visuals } : {}),
     },
-    { includeEnvelope: result.includeEnvelope === false ? null : result.envelope },
+    { includeEnvelope: result.includeEnvelope === true ? result.envelope : null },
   );
 
   const artifactHash = await resolveArtifactHash(result);

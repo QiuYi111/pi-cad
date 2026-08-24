@@ -2,4 +2,4 @@
 
 Current state: FINAL_REVIEW.
 
-Review the complete package against requirements and evidence. Artifact issues return to package; engineering issues return to gap_closure. Call cad_transition(event="accepted") only when the release package is ready for delivery.
+Review the complete package against requirements and current Evidence. Classify presentation/package defects separately from engineering gaps. Use only the action card's corresponding legal event, and accept only when the release package is ready for delivery.

@@ -10,6 +10,21 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { Value } from "typebox/value";
+
+import { CadProbeParametersSchema } from "../src/modules/probe/tool.ts";
+
+test("cad_probe schema is preset-discriminated and fail-closed", () => {
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: "current" }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", args: { artifact: "part.step" } }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry" }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: "current", args: { artifact: "part.step" } }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "compare", args: { before: "a.step", after: "b.step" } }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "compare", args: { artifact: "a.step" } }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", code: "result = 1" }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", code: "result = 1", args: { artifact: "part.step" } }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "measure", subject: "current", args: { metric: "distance", a: "#c0", unknown: true } }), false);
+});
 
 const cwd = mkdtempSync(join(tmpdir(), "pi-cad-cadprobe-"));
 try {
@@ -53,7 +68,7 @@ try {
   const stateBefore = readFileSync(statePath, "utf8");
 
   await test("cad_probe: preset geometry resolves subject=current from run state", async () => {
-    const result = await probe.execute("t1", { preset: "geometry" }, undefined, undefined, { cwd });
+    const result = await probe.execute("t1", { preset: "geometry", subject: "current" }, undefined, undefined, { cwd });
     const text = result.content.find((c) => c.type === "text")?.text ?? "";
     assert.ok(result.details.envelope.ok, `envelope failed: ${text}`);
     assert.equal(result.details.kind, "geometry");
@@ -62,7 +77,7 @@ try {
   });
 
   await test("cad_probe: preset interference renders pair facts", async () => {
-    const result = await probe.execute("t2", { preset: "interference" }, undefined, undefined, { cwd });
+    const result = await probe.execute("t2", { preset: "interference", subject: "current" }, undefined, undefined, { cwd });
     assert.ok(result.details.envelope.ok);
     assert.match(
       result.content.find((c) => c.type === "text")?.text ?? "",
@@ -122,7 +137,7 @@ try {
         undefined,
         { cwd: empty },
       );
-      assert.match(result.content[0].text!, /no artifact in args/);
+      assert.match(result.content[0].text!, /provide exactly one target/);
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }

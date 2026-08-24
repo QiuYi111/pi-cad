@@ -32,5 +32,5 @@ A build plan for the part(s) you will author next:
 
 ## Exit
 
-`cad_commit_plan` enters the source phase (BUILD / MODIFY / GAP_CLOSURE)
+The action card's plan-commit operation enters the source phase (BUILD / MODIFY / GAP_CLOSURE)
 where you author build123d sources and commit a candidate.

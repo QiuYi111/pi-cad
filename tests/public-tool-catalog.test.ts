@@ -25,9 +25,9 @@ test("phase grants contain no historical tool and include analysis derivation wi
 
 test("pi-cad-tools references cover every active public tool", () => {
   const referenceDir = fileURLToPath(new URL("../skills/pi-cad-tools/references/", import.meta.url));
-  const corpus = readdirSync(referenceDir)
-    .filter((name) => name.endsWith(".md"))
-    .map((name) => readFileSync(join(referenceDir, name), "utf8"))
+  const markdown = (directory: string): string[] => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory() ? markdown(join(directory, entry.name)) : entry.name.endsWith(".md") ? [join(directory, entry.name)] : []);
+  const corpus = markdown(join(referenceDir, "generated"))
+    .map((path) => readFileSync(path, "utf8"))
     .join("\n");
   for (const name of ACTIVE_PUBLIC_TOOL_NAMES) {
     assert.match(corpus, new RegExp(`\\b${name}\\b`), `pi-cad-tools does not cover ${name}`);

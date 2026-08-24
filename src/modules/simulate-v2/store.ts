@@ -346,11 +346,12 @@ export async function createSimulationRun(input: {
   recipePath: string;
   outputs?: string[];
   runner: SimulationCommandRunner;
+  prepared?: { recipe: LoadedSimulationRecipe; selectedOutputs: string[]; runtimeIdentity: RuntimeIdentity };
 }): Promise<SimulationRunResult> {
   const workflowRunId = await currentWorkflowRun(input.cwd);
-  const recipe = await loadSimulationRecipe(input.cwd, input.recipePath);
-  const selectedOutputs = selectSimulationOutputs(recipe.manifest, input.outputs);
-  const runtimeIdentity = await input.runner.resolveRuntime(input.cwd, input.backend, input.runtime);
+  const recipe = input.prepared?.recipe ?? await loadSimulationRecipe(input.cwd, input.recipePath);
+  const selectedOutputs = input.prepared?.selectedOutputs ?? selectSimulationOutputs(recipe.manifest, input.outputs);
+  const runtimeIdentity = input.prepared?.runtimeIdentity ?? await input.runner.resolveRuntime(input.cwd, input.backend, input.runtime);
   const root = simulationRoot(input.cwd, workflowRunId);
   await mkdir(root, { recursive: true });
   const runId = await nextId(root, "sim");

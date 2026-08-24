@@ -176,7 +176,13 @@ const PROFILES: Record<string, ObservationProfile> = {
           facts.push({ key: `summary.${cls}`, value: String(count) });
         }
       }
-      for (const pair of Array.isArray(p.pairs) ? (p.pairs as Array<Record<string, unknown>>) : []) {
+      const pairs = Array.isArray(p.pairs) ? (p.pairs as Array<Record<string, unknown>>) : [];
+      const anomalies = pairs.filter((pair) => {
+        const classification = String(pair.classification ?? "").toLowerCase();
+        return classification.includes("penetr") || classification.includes("contact") || classification.includes("interference");
+      });
+      facts.push({ key: "pairDetail", value: `${pairs.length} complete pair records retained; ${anomalies.length} contact/penetration pair(s) prioritized below` });
+      for (const pair of anomalies.slice(0, 40)) {
         facts.push({
           key: `${String(pair.a ?? "?")}↔${String(pair.b ?? "?")}`,
           value: `${String(pair.classification ?? "?")}` +
@@ -186,6 +192,7 @@ const PROFILES: Record<string, ObservationProfile> = {
             (pair.clearance !== undefined ? ` clearance=${num(pair.clearance)}` : ""),
         });
       }
+      if (anomalies.length > 40) facts.push({ key: "morePairs", value: `${anomalies.length - 40} additional prioritized pairs; page the pairs collection via cad_recall_observation` });
       return facts;
     },
   },

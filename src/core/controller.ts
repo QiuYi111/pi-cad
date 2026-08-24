@@ -42,6 +42,7 @@ import {
   type StoredReviewVote,
 } from "../control/final-review/voting.ts";
 import { finalReviewerEnabled, finalSubmissionAllowed } from "./policies.ts";
+import { transitionFailureDetails } from "./agent-contract.ts";
 import {
   interactionModeFromEnvironment,
   isHeadless,
@@ -1374,7 +1375,14 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       }
 
       const result = transition(state, params.event, params.note);
-      if (!result.ok) return errTool(result.reason);
+      if (!result.ok) {
+        const details = transitionFailureDetails(state, params.event);
+        const choices = details.allowedEvents.map((entry) => `${entry.event}->${entry.target}`).join(", ") || "none";
+        return errTool(
+          `${result.reason}\nAllowed events now: ${choices}\nSuggested action: ${details.suggestedActions[0]}`,
+          details,
+        );
+      }
       // Head commits only when acceptance CLOSES the run (phase becomes
       // ready). A design-review accepted that hands into a release suffix
       // must not move the head: if the audit/gap_closure then fails or the

@@ -7,12 +7,18 @@ import { test } from "node:test";
 import { boundedFailure, classifyResourceFailure, managedLimitProperties, simulationRuntimeProjection, spawnLogged, validateRuntimeRegistry } from "../src/modules/simulate-v2/runtime.ts";
 
 test("runtime registry exposes exact production backends and an explicit development CPU runtime", async () => {
-  assert.deepEqual(await simulationRuntimeProjection(), [
+  const projection = await simulationRuntimeProjection();
+  assert.deepEqual(projection.map(({ backend, runtime, developmentOnly }) => ({ backend, runtime, ...(developmentOnly ? { developmentOnly } : {}) })), [
     { backend: "openfoam", runtime: "openfoam-14" },
     { backend: "su2", runtime: "su2-8.5.0" },
     { backend: "torch-fem", runtime: "torch-fem-0.9-cu126" },
     { backend: "torch-fem", runtime: "torch-fem-0.9-cpu", developmentOnly: true },
   ]);
+  for (const item of projection) {
+    assert.equal(item.agentCapabilities.pythonCommand, 'uv run --offline --frozen --project "$PI_CAD_PYTHON_PROJECT" python');
+    assert.equal(item.agentCapabilities.network, "none");
+    assert.ok(item.agentCapabilities.cookbookTemplateId);
+  }
   const registry = validateRuntimeRegistry(JSON.parse(await readFile(join(process.cwd(), "assets", "simulation-runtimes.json"), "utf8")));
   const su2 = registry.find((item) => item.backend === "su2");
   assert.equal(su2?.kind, "archive");
@@ -30,6 +36,7 @@ test("runtime registry fails closed on unknown fields and duplicate identities",
       immutableRoots: ["/opt/x"], pythonProject: "/opt/x/project", expectedVersion: "1", environment: {}, accelerator: "cpu",
       probe: { script: "scripts/example-runtime-probe.py", args: ["--require", "cpu"], expected: { actualDevice: "cpu" } },
       limits: { cpu: 1, memoryGiB: 1, tasks: 1, wallHours: 1, workspaceGiB: 1 },
+      agentCapabilities: { pythonCommand: 'uv run --offline --frozen --project "$PI_CAD_PYTHON_PROJECT" python', executables: ["python"], pythonModules: ["torch"], sandbox: "bubblewrap", network: "none", accelerator: "cpu", cookbookTemplateId: "test" },
     }],
   };
   assert.throws(() => validateRuntimeRegistry({ ...base, runtimes: [{ ...base.runtimes[0], typo: true }] }), /unknown runtime registration fields/);

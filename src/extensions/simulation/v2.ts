@@ -7,6 +7,9 @@ import { Type } from "typebox";
 import type { CadRunState, EvidenceRef } from "../../shared/protocol.ts";
 import { CadProjectStore, makeEvidenceId, nowIso, sha256File } from "../../shared/store.ts";
 import { renderSimulationObservation } from "../../modules/simulate-v2/observation.ts";
+import { recordObservation } from "../../core/observation-index.ts";
+import { renderSimulationFailure, recordSimulationFailure, simulationFailure, type SimulationFailure } from "../../modules/simulate-v2/failure.ts";
+import { preflightSimulation, SimulationPreflightError } from "../../modules/simulate-v2/preflight.ts";
 import { loadSimulationRecipe } from "../../modules/simulate-v2/protocol.ts";
 import { managedSimulationRunner } from "../../modules/simulate-v2/runtime.ts";
 import {
@@ -59,6 +62,66 @@ async function observationContent(run: SimulationRunRecord, snapshot: Observatio
     durationMs: (run.entrypoint?.durationMs ?? 0) + snapshot.observeResult.durationMs,
     observation: validated,
     diagnostics: [...(run.entrypoint?.diagnostics ?? []), ...snapshot.observeResult.diagnostics],
+  });
+}
+
+function failureForRun(run: SimulationRunRecord, observation?: ObservationSnapshotRecord): SimulationFailure | undefined {
+  if (run.status === "interrupted") return simulationFailure({ stage: "interrupted", code: "run_interrupted", retryable: false, likelyOwner: "harness", suggestedAction: "Create a new simulation run; interrupted runs are never committable.", message: `Simulation ${run.runId} was interrupted.`, runId: run.runId });
+  if (run.entrypoint?.exitCode !== 0) {
+    const quota = run.entrypoint?.exitCode === 122 || run.entrypoint?.diagnostics.some((line) => /quota/i.test(line));
+    return simulationFailure({
+      stage: quota ? "quota" : "compute",
+      code: quota ? "workspace_quota_exceeded" : `entrypoint_exit_${run.entrypoint?.exitCode ?? "unknown"}`,
+      retryable: true,
+      likelyOwner: quota ? "recipe" : "recipe",
+      suggestedAction: quota ? "Reduce generated workspace data or request a deliberately larger managed limit." : "Read the indexed stdout/stderr collections, repair the Recipe, and retry only after a relevant change.",
+      message: run.entrypoint?.diagnostics.join("\n") || `Simulation entrypoint failed for ${run.runId}.`,
+      runId: run.runId,
+      observationId: observation?.observationId,
+      logCollections: ["entrypoint.stdout", "entrypoint.stderr"],
+    });
+  }
+  if (observation && !observation.validForCommit) return simulationFailure({ stage: observation.observeResult.exitCode === 0 ? "validate" : "observe", code: observation.observeResult.exitCode === 0 ? "observation_invalid" : `observer_exit_${observation.observeResult.exitCode}`, retryable: true, likelyOwner: "recipe", suggestedAction: "Read observer stdout/stderr and validation diagnostics, then edit only declared observation_files or export declarations and call cad_sim_observe.", message: observation.warnings.join("\n") || observation.observeResult.diagnostics.join("\n") || "Observer output is not valid for commit.", runId: run.runId, observationId: observation.observationId, logCollections: ["observer.stdout", "observer.stderr"] });
+  return undefined;
+}
+
+async function indexSimulationObservation(cwd: string, state: CadRunState, result: Awaited<ReturnType<typeof createSimulationRun>>) {
+  const readLog = (path: string) => readFile(path, "utf-8").catch(() => "");
+  const [computeStdout, computeStderr, observeStdout, observeStderr] = await Promise.all([
+    readLog(join(result.runDirectory, "logs", "stdout.log")),
+    readLog(join(result.runDirectory, "logs", "stderr.log")),
+    result.observationDirectory ? readLog(join(result.observationDirectory, "logs", "stdout.log")) : Promise.resolve(""),
+    result.observationDirectory ? readLog(join(result.observationDirectory, "logs", "stderr.log")) : Promise.resolve(""),
+  ]);
+  const visuals = (result.observation?.exports ?? []).flatMap((item) => {
+    const paths = [] as Array<{ name: string; path: string }>;
+    if (item.type === "image" && item.path && result.observationDirectory) paths.push({ name: item.name, path: resolve(result.observationDirectory, item.path) });
+    if (item.plotPath && result.observationDirectory) paths.push({ name: `${item.name}_plot`, path: resolve(result.observationDirectory, item.plotPath) });
+    return paths;
+  });
+  return recordObservation({
+    cwd,
+    runId: state.runId,
+    phase: state.phase,
+    tool: "cad_simulate",
+    preset: "simulation",
+    artifactHash: state.route?.objective === "analyze" ? state.baselineArtifactHash : state.currentArtifactHash,
+    bundle: {
+      ok: result.run.status === "completed" && Boolean(result.observation?.validForCommit),
+      tool: "cad_simulate",
+      headline: `Simulation ${result.run.runId} ${result.run.status}; observation=${result.observation?.observationId ?? "none"}`,
+      facts: [
+        { key: "backend/runtime", value: `${result.run.backend}/${result.run.runtime}` },
+        { key: "computeIdentity", value: result.run.computeIdentity },
+        { key: "validForCommit", value: String(result.observation?.validForCommit ?? false) },
+      ],
+      visuals,
+      diagnostics: [...(result.run.entrypoint?.diagnostics ?? []), ...(result.observation?.observeResult.diagnostics ?? [])].map((message) => ({ level: "error" as const, message })),
+      provenance: { tool: "cad_simulate", toolVersion: "v2", backendVersion: result.run.runtimeIdentity.resolvedVersion, durationMs: (result.run.entrypoint?.durationMs ?? 0) + (result.observation?.observeResult.durationMs ?? 0), inputHashes: Object.fromEntries(result.run.inputs.map((item) => [item.projectPath, item.sha256])), outputHashes: Object.fromEntries((result.observation?.exports ?? []).flatMap((item) => item.path && item.sha256 ? [[item.path, item.sha256]] : [])) },
+      artifacts: [],
+    },
+    resolvedSubjects: result.run.inputs.map((item) => ({ source: "declaredInput", path: item.projectPath, sha256: item.sha256 })),
+    rawPayload: { entrypoint: { stdout: computeStdout, stderr: computeStderr }, observer: { stdout: observeStdout, stderr: observeStderr }, exports: result.observation?.exports ?? [] },
   });
 }
 
@@ -191,6 +254,10 @@ export async function commitSimulation(cwd: string, runId: string, observationId
   return evidence;
 }
 
+export const CadSimulateParametersSchema = Type.Object({ backend: Type.String({ minLength: 1 }), runtime: Type.String({ minLength: 1 }), recipe: Type.String({ minLength: 1, description: "Directory containing pi-sim.toml; never pass the manifest file itself" }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false });
+export const CadSimObserveParametersSchema = Type.Object({ run: Type.String({ minLength: 1 }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false });
+export const CadCommitSimulationParametersSchema = Type.Object({ run: Type.String({ minLength: 1 }), observation: Type.Optional(Type.String({ minLength: 1 })), caseId: Type.String({ minLength: 1 }) }, { additionalProperties: false });
+
 export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "cad_simulate",
@@ -198,14 +265,30 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     description: "Run an agent-authored solver-native Recipe in a managed backend/runtime and return a controlled multimodal Observation. The Recipe owns physics, configuration, meshing, execution, and project-specific postprocessing. Pi-CAD freezes the Recipe and every explicitly declared input, runs without implicit project access, validates generic exports, returns images before bounded quantitative context and diagnostics, and retains raw artifacts/logs. This creates an immutable SimulationRun and ObservationSnapshot but never Evidence; use cad_commit_simulation after inspection.",
     promptSnippet: "Execute a Recipe-native simulation and observe its declared exports",
     promptGuidelines: ["Author or revise solver-native Recipes only under simulation/**; never encode physics in tool arguments.", "Declare every external project input in pi-sim.toml and choose a backend/runtime advertised in context.", "Inspect the images-first Observation and quantitative health. A successful solve is not Evidence until cad_commit_simulation."],
-    parameters: Type.Object({ backend: Type.String({ minLength: 1 }), runtime: Type.String({ minLength: 1 }), recipe: Type.String({ minLength: 1 }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false }),
+    parameters: CadSimulateParametersSchema,
     async execute(_id, params, _signal, _update, ctx) {
-      const result = await createSimulationRun({ cwd: ctx.cwd, backend: params.backend, runtime: params.runtime, recipePath: params.recipe, outputs: params.outputs, runner: managedSimulationRunner });
-      const store = new CadProjectStore(ctx.cwd);
+      const { store, state, workflowRunId } = await currentWorkflow(ctx.cwd);
+      let prepared;
+      try {
+        prepared = await preflightSimulation({ cwd: ctx.cwd, state, backend: params.backend, runtime: params.runtime, recipePath: params.recipe, outputs: params.outputs, runner: managedSimulationRunner });
+      } catch (error) {
+        const base = error instanceof SimulationPreflightError ? error.failure : simulationFailure({ stage: "manifest", code: "preflight_exception", retryable: true, likelyOwner: "harness", suggestedAction: "Inspect the structured failure and correct the owning layer before retrying.", message: error instanceof Error ? error.message : String(error) });
+        const failure = await recordSimulationFailure(ctx.cwd, workflowRunId, base);
+        return { content: [{ type: "text", text: renderSimulationFailure(failure) }], details: { failure, validForCommit: false } };
+      }
+      const result = await createSimulationRun({ cwd: ctx.cwd, backend: params.backend, runtime: params.runtime, recipePath: params.recipe, outputs: params.outputs, runner: managedSimulationRunner, prepared });
       await store.appendEvent("SimulationRunCreated", { runId: result.run.runId, computeIdentity: result.run.computeIdentity, status: result.run.status });
       if (result.observation) await store.appendEvent("ObservationSnapshotCreated", { runId: result.run.runId, observationId: result.observation.observationId, validForCommit: result.observation.validForCommit });
+      let contextObservation: Awaited<ReturnType<typeof indexSimulationObservation>> | undefined;
+      let storageFailure: SimulationFailure | undefined;
+      try { contextObservation = await indexSimulationObservation(ctx.cwd, state, result); }
+      catch (error) { storageFailure = simulationFailure({ stage: /quota/i.test(String(error)) ? "quota" : "validate", code: "observation_index_failed", retryable: true, likelyOwner: "harness", suggestedAction: "Free or deliberately raise run observation storage quota; the SimulationRun remains the underlying fact source.", message: error instanceof Error ? error.message : String(error), runId: result.run.runId, observationId: result.observation?.observationId }); }
+      const runFailure = failureForRun(result.run, result.observation) ?? storageFailure;
+      const failure = runFailure ? await recordSimulationFailure(ctx.cwd, workflowRunId, runFailure) : undefined;
       const content = result.observation ? await observationContent(result.run, result.observation, result.validatedObservation) : [{ type: "text", text: `Simulation ${result.run.runId} failed before an observation was materialized.` }];
-      return { content, details: { simulationRunId: result.run.runId, observationId: result.observation?.observationId, computeIdentity: result.run.computeIdentity, validForCommit: result.observation?.validForCommit ?? false, requestedDevice: result.run.runtimeIdentity.accelerator?.requestedDevice, actualDevice: result.run.runtimeIdentity.accelerator?.actualDevice } };
+      if (failure) content.push({ type: "text", text: `${renderSimulationFailure(failure)}${contextObservation ? `\ncontextObservationId=${contextObservation.observationId}` : ""}` });
+      else content.push({ type: "text", text: `contextObservationId=${contextObservation!.observationId}; use cad_recall_observation to page complete logs/exports.` });
+      return { content, details: { simulationRunId: result.run.runId, observationId: result.observation?.observationId, ...(contextObservation ? { contextObservationId: contextObservation.observationId } : {}), computeIdentity: result.run.computeIdentity, validForCommit: result.observation?.validForCommit ?? false, requestedDevice: result.run.runtimeIdentity.accelerator?.requestedDevice, actualDevice: result.run.runtimeIdentity.accelerator?.actualDevice, ...(failure ? { failure } : {}), observationStored: Boolean(contextObservation) } };
     },
   });
 
@@ -215,12 +298,27 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     description: "Run only the observation program over one frozen SimulationRun and create a new immutable ObservationSnapshot without rerunning compute. Only the originally declared observation_files plus observe/export declarations may change; solver, mesh, entrypoint, inputs, runtime, and frozen raw state must still match.",
     promptSnippet: "Re-run a simulation Recipe's observation program",
     promptGuidelines: ["Use this after editing only declared observation_files.", "Changing solver, mesh, entrypoint, or inputs requires cad_simulate."],
-    parameters: Type.Object({ run: Type.String({ minLength: 1 }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true })) }, { additionalProperties: false }),
+    parameters: CadSimObserveParametersSchema,
     async execute(_id, params, _signal, _update, ctx) {
-      const { workflowRunId, store } = await currentWorkflow(ctx.cwd);
-      const result = await createObservationSnapshot({ cwd: ctx.cwd, workflowRunId, runId: params.run, outputs: params.outputs, runner: managedSimulationRunner });
+      const { workflowRunId, store, state } = await currentWorkflow(ctx.cwd);
+      let result;
+      try {
+        result = await createObservationSnapshot({ cwd: ctx.cwd, workflowRunId, runId: params.run, outputs: params.outputs, runner: managedSimulationRunner });
+      } catch (error) {
+        const base = simulationFailure({ stage: "observe", code: "reobserve_rejected", retryable: true, likelyOwner: "recipe", suggestedAction: /compute Recipe changed|declared simulation input changed|observation_files declaration changed/.test(String(error)) ? "A compute-affecting file changed; create a new cad_simulate run." : "Repair only declared observation_files/export declarations, then retry cad_sim_observe.", message: error instanceof Error ? error.message : String(error), runId: params.run });
+        const failure = await recordSimulationFailure(ctx.cwd, workflowRunId, base);
+        return { content: [{ type: "text", text: renderSimulationFailure(failure) }], details: { failure, validForCommit: false } };
+      }
       await store.appendEvent("ObservationSnapshotCreated", { runId: result.run.runId, observationId: result.observation!.observationId, validForCommit: result.observation!.validForCommit });
-      return { content: await observationContent(result.run, result.observation!, result.validatedObservation), details: { simulationRunId: result.run.runId, observationId: result.observation!.observationId, computeIdentity: result.run.computeIdentity, validForCommit: result.observation!.validForCommit, requestedDevice: result.run.runtimeIdentity.accelerator?.requestedDevice, actualDevice: result.run.runtimeIdentity.accelerator?.actualDevice } };
+      let contextObservation: Awaited<ReturnType<typeof indexSimulationObservation>> | undefined;
+      let storageFailure: SimulationFailure | undefined;
+      try { contextObservation = await indexSimulationObservation(ctx.cwd, state, result); }
+      catch (error) { storageFailure = simulationFailure({ stage: /quota/i.test(String(error)) ? "quota" : "validate", code: "observation_index_failed", retryable: true, likelyOwner: "harness", suggestedAction: "Free or deliberately raise run observation storage quota; the SimulationRun remains the underlying fact source.", message: error instanceof Error ? error.message : String(error), runId: result.run.runId, observationId: result.observation?.observationId }); }
+      const runFailure = failureForRun(result.run, result.observation) ?? storageFailure;
+      const failure = runFailure ? await recordSimulationFailure(ctx.cwd, workflowRunId, runFailure) : undefined;
+      const content = await observationContent(result.run, result.observation!, result.validatedObservation);
+      content.push({ type: "text", text: failure ? `${renderSimulationFailure(failure)}${contextObservation ? `\ncontextObservationId=${contextObservation.observationId}` : ""}` : `contextObservationId=${contextObservation!.observationId}; use cad_recall_observation to page complete observer logs/exports.` });
+      return { content, details: { simulationRunId: result.run.runId, observationId: result.observation!.observationId, ...(contextObservation ? { contextObservationId: contextObservation.observationId } : {}), computeIdentity: result.run.computeIdentity, validForCommit: result.observation!.validForCommit, requestedDevice: result.run.runtimeIdentity.accelerator?.requestedDevice, actualDevice: result.run.runtimeIdentity.accelerator?.actualDevice, ...(failure ? { failure } : {}), observationStored: Boolean(contextObservation) } };
     },
   });
 
@@ -230,10 +328,16 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     description: "Promote one successfully completed managed SimulationRun and one exact valid ObservationSnapshot into version-bound Evidence for an existing case whose declared tool is cad_simulate. Pi-CAD re-verifies the frozen raw state, Recipe, runtime identity, all declared inputs, observation artifacts/program, and authoritative design or verified derivation. This performs no solve or postprocessing and does not judge engineering PASS.",
     promptSnippet: "Commit a validated simulation Observation as case-scoped Evidence",
     promptGuidelines: ["Commit only after inspecting the Observation.", "Evidence records provenance; it does not imply an engineering PASS."],
-    parameters: Type.Object({ run: Type.String({ minLength: 1 }), observation: Type.Optional(Type.String({ minLength: 1 })), caseId: Type.String({ minLength: 1 }) }, { additionalProperties: false }),
+    parameters: CadCommitSimulationParametersSchema,
     async execute(_id, params, _signal, _update, ctx) {
-      const evidence = await commitSimulation(ctx.cwd, params.run, params.observation, params.caseId);
-      return { content: [{ type: "text", text: `Committed simulation Evidence ${evidence.id} for case ${params.caseId}. Evidence provenance is bound to ${evidence.simulationRunId}/${evidence.observationId}; existence does not imply engineering PASS.` }], details: { evidenceId: evidence.id, simulationRunId: evidence.simulationRunId, observationId: evidence.observationId, computeIdentity: evidence.computeIdentity } };
+      try {
+        const evidence = await commitSimulation(ctx.cwd, params.run, params.observation, params.caseId);
+        return { content: [{ type: "text", text: `Committed simulation Evidence ${evidence.id} for case ${params.caseId}. Evidence provenance is bound to ${evidence.simulationRunId}/${evidence.observationId}; existence does not imply engineering PASS.` }], details: { evidenceId: evidence.id, simulationRunId: evidence.simulationRunId, observationId: evidence.observationId, computeIdentity: evidence.computeIdentity } };
+      } catch (error) {
+        const { workflowRunId } = await currentWorkflow(ctx.cwd);
+        const failure = await recordSimulationFailure(ctx.cwd, workflowRunId, simulationFailure({ stage: "validate", code: "commit_rejected", retryable: false, likelyOwner: "input", suggestedAction: "Use the exact current case obligation and an immutable valid run/observation; rerun if Recipe, runtime, inputs, or authoritative artifact changed.", message: error instanceof Error ? error.message : String(error), runId: params.run, observationId: params.observation }));
+        return { content: [{ type: "text", text: renderSimulationFailure(failure) }], details: { failure, committed: false } };
+      }
     },
   });
 }

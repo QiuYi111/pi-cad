@@ -1,6 +1,6 @@
 # Boundary-condition discipline
 
-Inspect the authoritative solid or fluid domain with `cad_probe` before assigning semantics. Geometric surface identifiers are selectors, not labels.
+Inspect the authoritative solid or fluid domain with the unified Probe before assigning semantics. Geometric surface identifiers are selectors, not labels.
 
 Record operating state, reference pressure, fluid or solid properties, wall behavior, heat sources, symmetry, and initialization with units and source. Check that inlet/outlet choices are well posed for the selected solver.
 

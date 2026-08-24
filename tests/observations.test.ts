@@ -92,8 +92,9 @@ test("profiles: render/measure/interference projections", () => {
     }),
   );
   assert.match(interference.headline, /1 pairs/);
-  assert.match(interference.facts[0].value, /penetration/);
-  assert.match(interference.facts[0].value, /4000\.000/);
+  const pairFact = interference.facts.find((fact) => fact.key === "part1↔part2");
+  assert.match(pairFact?.value ?? "", /penetration/);
+  assert.match(pairFact?.value ?? "", /4000\.000/);
 });
 
 test("profiles: unknown tool falls back to bounded generic facts", () => {
@@ -166,4 +167,7 @@ test("observeContent: profile defaults, envelope appendix on by default", async 
   assert.equal(observed.bundle.ok, false);
   assert.match(observed.content[0].text!, /visual render failed: boom/);
   assert.match(observed.content[0].text!, /\[error\] boom/);
+
+  const withoutEnvelope = await observeContent(envelope({ payload: { volume: 12 } }), {}, { includeEnvelope: null });
+  assert.doesNotMatch(withoutEnvelope.content.find((item) => item.type === "text")?.text ?? "", /\"tool\":/);
 });

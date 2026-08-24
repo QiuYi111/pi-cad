@@ -7,9 +7,6 @@
  *     sections_scan / compare / assembly / interference;
  *   - programmable mode: python (read-only B-Rep computation).
  *
- * The legacy per-preset tools remain as deprecated wrappers until the
- * benchmark gate clears, then they retire.
- *
  * Design invariants:
  *   - the canonical design is immutable from here (read-only presets);
  *   - `subject` resolution (current/baseline) reads run state, never a
@@ -19,17 +16,16 @@
  *     plane, not here.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 
 import { readImageContents } from "../../shared/capability.ts";
-import { CadProbeParametersSchema, executeCadProbe } from "../../modules/probe/tool.ts";
+import { CadProbeParametersSchema, CadRecallObservationParametersSchema, executeCadProbe } from "../../modules/probe/tool.ts";
 
 export default function cadProbeExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "cad_probe",
     label: "CAD Probe",
     description:
-      "Unified read-only observation interface for design artifacts. preset mode: visual | geometry | surfaces | measure | section | sections_scan | compare | assembly | interference. Programmable mode: preset=python computes anything else over the B-Rep (read-only Python). args shape per preset — visual: {artifact, views?, width?, height?, labels?}; geometry: {artifact, output?}; surfaces: {artifact, labels?, views?}; measure: {artifact, metric, a, b?}; section: {artifact, origin:[x,y,z], normal:[x,y,z], display?, labels?}; sections_scan: {artifact, axis, count|step}; compare: {before, after, metrics?, output?}; assembly: {artifact, output?}; interference: {artifact, output?}. artifact may be omitted when subject=current|baseline is given (resolved from run state). The tool returns facts and images, never engineering judgment.",
+      "Unified read-only observation interface. Its discriminated TypeBox schema is authoritative: every preset accepts only applicable fields; ordinary presets require exactly one subject form, compare requires explicit before/after, and programmable mode accepts only a bound subject, purpose, and code. Results echo the resolved subject and persist complete immutable pageable detail.",
     promptSnippet: "Observe design artifacts: typed presets or programmable Python probes",
     promptGuidelines: [
       "One tool for all observation: pick the preset that answers the question; use preset=python only when no typed preset can express it.",
@@ -50,34 +46,74 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
     name: "cad_recall_observation",
     label: "CAD Recall Observation",
     description:
-      "Recover prior observations after context compaction: query the run's observation index by tool/evidence kind/artifact hash and re-attach the recorded engineering visuals (images are referenced from evidence storage, never re-rendered).",
-    promptSnippet: "Rehydrate prior observation visuals and facts from the run index",
+      "Discover immutable observations or page their complete detail collections. Without observationId, query summaries. With observationId, inspect its catalog; add collection/filter/order/cursor to read any page without re-running the probe.",
+    promptSnippet: "Discover observations and page complete immutable detail collections",
     promptGuidelines: [
-      "Use after compaction when the conversation lost the images/facts you reasoned about.",
-      "Narrow with tool/evidenceKind/artifactHash; limit defaults to 5 (newest first).",
+      "Start without observationId to discover summaries, then pass an observationId to inspect its collection catalog.",
+      "Collection pages default to 50 and max at 200. Continue with nextCursor until it is absent; page size is not a semantic result limit.",
+      "Filters and ordering are cursor-bound. Changing either invalidates the old cursor.",
       "Recall is read-only memory: it creates no new evidence and never replaces a fresh probe when geometry changed.",
     ],
-    parameters: Type.Object(
-      {
-        tool: Type.Optional(Type.String({ description: "Filter by agent tool name, e.g. cad_probe" })),
-        evidenceKind: Type.Optional(Type.String({ description: "Filter by evidence kind, e.g. visual, geometry" })),
-        artifactHash: Type.Optional(Type.String({ description: "Filter by artifact hash binding" })),
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, default: 5 })),
-      },
-      { additionalProperties: false },
-    ),
+    parameters: CadRecallObservationParametersSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { CadProjectStore } = await import("../../shared/store.ts");
-      const { queryObservations } = await import("../../core/observation-index.ts");
+      const { queryObservationCollection, queryObservations, readObservationSnapshot } = await import("../../core/observation-index.ts");
       const state = await new CadProjectStore(ctx.cwd).load();
       if (!state) {
         return { content: [{ type: "text", text: "cad_recall_observation failed: no active Pi-CAD workflow" }] };
+      }
+      if (params.collection && !params.observationId) {
+        return { content: [{ type: "text", text: "cad_recall_observation failed: collection requires observationId" }] };
+      }
+      if (params.observationId) {
+        const snapshot = await readObservationSnapshot(ctx.cwd, state.runId, params.observationId);
+        if (!snapshot) {
+          const legacy = (await queryObservations(ctx.cwd, state.runId, { limit: 200 })).find((item) => item.observationId === params.observationId);
+          return {
+            content: [{ type: "text", text: legacy
+              ? `cad_recall_observation: ${params.observationId} is a legacy summary; detailUnavailable=legacy`
+              : `cad_recall_observation failed: unknown observationId ${params.observationId}` }],
+          };
+        }
+        if (params.collection) {
+          try {
+            const page = await queryObservationCollection(ctx.cwd, state.runId, params.observationId, params.collection, {
+              where: params.where,
+              fields: params.fields,
+              orderBy: params.orderBy,
+              cursor: params.cursor,
+              limit: params.limit,
+            });
+            return {
+              content: [{ type: "text", text: JSON.stringify(page, null, 2) }],
+              details: { observationId: params.observationId, collection: params.collection, totalMatched: page.totalMatched, nextCursor: page.nextCursor },
+            };
+          } catch (error) {
+            return { content: [{ type: "text", text: `cad_recall_observation failed: ${error instanceof Error ? error.message : String(error)}` }] };
+          }
+        }
+        const lines = [
+          `cad_recall_observation: ${snapshot.observationId}`,
+          `${snapshot.tool}${snapshot.preset ? `/${snapshot.preset}` : ""}: ${snapshot.headline}`,
+          ...(snapshot.resolvedSubjects ?? []).map((item) => `resolvedSubject ${item.source}: ${item.path}${item.sha256 ? ` sha256=${item.sha256}` : ""}`),
+          ...((snapshot.facts ?? []).slice(0, 16).map((fact) => `${fact.key}: ${fact.value}`)),
+          "Collections:",
+          ...(snapshot.collections.length
+            ? snapshot.collections.map((item) => `- ${item.name}: ${item.count} item(s); fields=${item.fields.join(",") || "value"}`)
+            : ["- none"]),
+          "Use observationId + collection to page complete detail.",
+        ];
+        const images = snapshot.visuals?.length ? await readImageContents(snapshot.visuals.slice(0, 8).map((item) => item.path)) : [];
+        return {
+          content: [{ type: "text", text: lines.join("\n") }, ...images],
+          details: { observationId: snapshot.observationId, collections: snapshot.collections },
+        };
       }
       const records = await queryObservations(ctx.cwd, state.runId, {
         tool: params.tool,
         evidenceKind: params.evidenceKind,
         artifactHash: params.artifactHash,
-        limit: params.limit ?? 5,
+        limit: params.limit ?? 20,
       });
       if (records.length === 0) {
         return {
@@ -87,23 +123,18 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
           }],
         };
       }
-      const lines: string[] = [`cad_recall_observation: ${records.length} record(s), newest first.`];
-      const imagePaths: string[] = [];
+      const lines: string[] = [`cad_recall_observation: ${records.length} summary record(s), newest first.`];
       for (const record of records) {
         lines.push(
-          `#${record.id} [${record.phase}] ${record.tool}: ${record.headline}` +
+          `${record.observationId ?? `legacy-${record.id}`} [${record.phase}] ${record.tool}: ${record.headline}` +
             (record.artifactHash ? ` (artifact ${record.artifactHash.slice(0, 12)})` : ""),
         );
-        for (const fact of record.facts.slice(0, 12)) {
-          lines.push(`  ${fact.key}: ${fact.value}`);
-        }
-        imagePaths.push(...record.visuals.slice(0, 4).map((v) => v.path));
+        lines.push(`  collections=${record.collections?.map((item) => `${item.name}:${item.count}`).join(",") || "none"}; detailUnavailable=${record.detailAvailable === false || !record.observationId ? "legacy" : "false"}`);
       }
-      lines.push("Recalled images follow. They are historical observations — re-probe if the artifact changed since.");
-      const images = imagePaths.length > 0 ? await readImageContents(imagePaths) : [];
+      lines.push("Pass observationId to recover facts, visuals, provenance, and its collection catalog.");
       return {
-        content: [{ type: "text", text: lines.join("\n") }, ...images],
-        details: { recalled: records.map((r) => r.id) },
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { recalled: records.map((r) => r.observationId ?? `legacy-${r.id}`) },
       };
     },
   });

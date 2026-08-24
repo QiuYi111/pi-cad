@@ -21,6 +21,15 @@ interface RuntimeRegistrationBase {
   accelerator: "none" | "cpu" | "cuda";
   developmentOnly?: boolean;
   limits: { cpu: number; memoryGiB: number; tasks: number; wallHours: number; workspaceGiB: number };
+  agentCapabilities: {
+    pythonCommand: string;
+    executables: string[];
+    pythonModules: string[];
+    sandbox: "bubblewrap";
+    network: "none";
+    accelerator: "none" | "cpu" | "cuda";
+    cookbookTemplateId: string;
+  };
 }
 
 interface RuntimeProbeRegistration {
@@ -38,6 +47,7 @@ export type RuntimeRegistration = RuntimeRegistrationBase & (
 const COMMON_RUNTIME_KEYS = new Set([
   "backend", "runtime", "kind", "launcher", "bootstrap", "network", "immutableRoots",
   "expectedVersion", "activation", "environment", "accelerator", "developmentOnly", "limits",
+  "agentCapabilities",
 ]);
 const KIND_RUNTIME_KEYS: Record<RuntimeRegistration["kind"], Set<string>> = {
   apt: new Set(["package"]),
@@ -68,6 +78,18 @@ export function validateRuntimeRegistry(value: unknown): RuntimeRegistration[] {
     const limits = entry.limits as Record<string, unknown> | undefined;
     if (!limits || ["cpu", "memoryGiB", "tasks", "wallHours", "workspaceGiB"].some((key) => typeof limits[key] !== "number" || Number(limits[key]) <= 0)) {
       throw new Error(`runtime ${index} has invalid limits`);
+    }
+    const capabilities = entry.agentCapabilities as Record<string, unknown> | undefined;
+    if (!capabilities || Object.keys(capabilities).some((key) => !["pythonCommand", "executables", "pythonModules", "sandbox", "network", "accelerator", "cookbookTemplateId"].includes(key))) {
+      throw new Error(`runtime ${index} requires strict agentCapabilities`);
+    }
+    if (capabilities.pythonCommand !== 'uv run --offline --frozen --project "$PI_CAD_PYTHON_PROJECT" python') throw new Error(`runtime ${index} must advertise the locked Recipe Python command`);
+    if (!Array.isArray(capabilities.executables) || capabilities.executables.some((item) => typeof item !== "string")
+      || !Array.isArray(capabilities.pythonModules) || capabilities.pythonModules.some((item) => typeof item !== "string")
+      || capabilities.sandbox !== "bubblewrap" || capabilities.network !== "none"
+      || capabilities.accelerator !== entry.accelerator
+      || typeof capabilities.cookbookTemplateId !== "string" || !capabilities.cookbookTemplateId) {
+      throw new Error(`runtime ${index} has invalid agentCapabilities`);
     }
     const registration = entry as unknown as RuntimeRegistration;
     if (registration.kind === "apt" && typeof registration.package !== "string") throw new Error(`apt runtime ${index} requires package`);
@@ -103,10 +125,17 @@ async function runtimeRegistration(backend: string, runtime: string): Promise<Ru
   return found;
 }
 
-export async function simulationRuntimeProjection(): Promise<Array<{ backend: string; runtime: string; developmentOnly?: boolean }>> {
+export async function simulationRuntimeProjection(): Promise<Array<{
+  backend: string;
+  runtime: string;
+  kind: RuntimeRegistration["kind"];
+  developmentOnly?: boolean;
+  limits: RuntimeRegistration["limits"];
+  agentCapabilities: RuntimeRegistration["agentCapabilities"];
+}>> {
   registrations ??= readFile(fileURLToPath(new URL("../../../assets/simulation-runtimes.json", import.meta.url)), "utf-8")
     .then((text) => validateRuntimeRegistry(JSON.parse(text)));
-  return (await registrations).map(({ backend, runtime, developmentOnly }) => ({ backend, runtime, ...(developmentOnly ? { developmentOnly } : {}) }));
+  return (await registrations).map(({ backend, runtime, kind, developmentOnly, limits, agentCapabilities }) => ({ backend, runtime, kind, limits, agentCapabilities, ...(developmentOnly ? { developmentOnly } : {}) }));
 }
 
 function commandOutput(command: string, args: string[], cwd: string): Promise<string> {

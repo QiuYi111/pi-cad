@@ -4,6 +4,34 @@
 > follow `pi-cad-engineering-design-v2.md` (Phase 0-8). Where the two
 > documents disagree, the engineering design document wins.
 
+## Code-defined agent operation (2026-08 contract revision)
+
+Pi-CAD's agent-facing architecture is now an explicit pipeline:
+
+```text
+Code-defined Agent Contract
+→ generated skill references
+→ current-state action card
+→ cookbook-guided authoring
+→ immutable Observation
+→ indexed optional detail reads
+```
+
+Tool catalogs, phase grants, route transitions, and obligations are projected
+into a schema-1 `AgentContract`; generated references and the machine contract
+are checked for drift. Runtime state is not copied into prose: every turn gets
+an authoritative action card with current write scope, tools, obligations,
+bindings, legal events, recovery recommendation, and only genuinely ready
+managed runtimes. Normal operation does not inspect implementation source.
+
+Observation context is bounded while meaning is not. Each Probe or indexed
+Simulation result stores one immutable compressed payload and a summary/catalog
+snapshot. Large face, occurrence, interference, table, array, and log
+collections are pageable with query-bound cursors. Storage-quota failure is
+explicit; detail is never silently truncated. Backend/version-specific
+cookbooks and executable assets teach solver authoring while Core remains
+physics-agnostic and Simulation Evidence remains explicit-commit only.
+
 ## From CAD Agent Tool Collection to CAD Engineering Runtime
 
 ## 1. Motivation

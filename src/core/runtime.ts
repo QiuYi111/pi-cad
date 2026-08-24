@@ -77,6 +77,7 @@ function customToolDetails(event: ToolResultEvent) {
         artifactHash?: string;
         specHash?: string;
         caseId?: string;
+        observationStored?: boolean;
         observation?: {
           ok?: boolean;
           tool?: string;
@@ -107,8 +108,9 @@ async function handleToolResult(
   if (!state) return;
   const info = customToolDetails(event);
   // Phase 8: every observation bundle the agent saw enters the per-run
-  // observation index (bounded; powers post-compaction rehydration).
-  if (info?.observation) {
+  // observation index. Tools that persist their own full raw payload mark the
+  // result so this generic hook does not create a duplicate summary snapshot.
+  if (info?.observation && !info.observationStored) {
     await recordObservation({
       cwd: store.cwd,
       runId: state.runId,
@@ -190,19 +192,27 @@ async function unavailableCapabilities(pi: ExtensionAPI, cwd?: string): Promise<
 async function simulationCapabilityContext(cwd: string, enabled: boolean): Promise<string> {
   if (!enabled) return "";
   const configured = await simulationRuntimeProjection().catch(() => []);
-  const ready: Array<{ backend: string; runtime: string }> = [];
+  const ready: Array<(typeof configured)[number] & { actualAccelerator?: string }> = [];
   for (const entry of configured) {
     if (entry.developmentOnly && process.env.PI_CAD_ENABLE_DEV_RUNTIMES !== "1") continue;
     try {
-      await managedSimulationRunner.resolveRuntime(cwd, entry.backend, entry.runtime);
-      ready.push(entry);
+      const identity = await managedSimulationRunner.resolveRuntime(cwd, entry.backend, entry.runtime);
+      ready.push({ ...entry, ...(identity.accelerator?.actualDevice ? { actualAccelerator: String(identity.accelerator.actualDevice) } : {}) });
     } catch {
       // Unavailable runtimes are reported by tool execution and diagnostics;
       // they must not be advertised as usable in the model context.
     }
   }
   if (ready.length === 0) return "## Available simulation runtimes\n- none ready";
-  return ["## Available simulation runtimes", ...ready.map((entry) => `- backend=${entry.backend} runtime=${entry.runtime}`)].join("\n");
+  return [
+    "## Ready managed runtimes",
+    ...ready.map((entry) => [
+      `- backend=${entry.backend} runtime=${entry.runtime} kind=${entry.kind}`,
+      `  executable=${entry.agentCapabilities.executables.join(",") || "none"}; pythonModules=${entry.agentCapabilities.pythonModules.join(",") || "none"}`,
+      `  python=${entry.agentCapabilities.pythonCommand}; sandbox=${entry.agentCapabilities.sandbox}; network=${entry.agentCapabilities.network}`,
+      `  accelerator=requested:${entry.agentCapabilities.accelerator},actual:${entry.actualAccelerator ?? entry.agentCapabilities.accelerator}; limits=${entry.limits.cpu}CPU/${entry.limits.memoryGiB}GiB/${entry.limits.wallHours}h; template=${entry.agentCapabilities.cookbookTemplateId}`,
+    ].join("\n")),
+  ].join("\n");
 }
 
 export default function cadCore(pi: ExtensionAPI) {
