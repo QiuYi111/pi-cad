@@ -12,6 +12,8 @@ import {
   registerPiCadNestedToolBridge,
 } from "../src/integrations/codex-conversion.ts";
 import cadProbeExtension from "../src/extensions/probe/index.ts";
+import { registerKernelActionTool } from "../src/domains/mechanical/register-action.ts";
+import { CadStartParamsSchema } from "../src/harness/kernel.ts";
 
 test("conversion bridge projects active Pi-CAD tools and registers v7 preflight", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-code-mode-bridge-"));
@@ -50,11 +52,16 @@ test("conversion bridge projects active Pi-CAD tools and registers v7 preflight"
   try {
     process.env.PI_CAD_KERNEL = "v7";
     cadProbeExtension(probePi);
+    registerKernelActionTool(pi, {
+      name: "cad_start", label: "start", description: "start", parameters: CadStartParamsSchema,
+      async execute() { return { content: [{ type: "text" as const, text: "started" }] }; },
+    });
     const bridge = registerPiCadNestedToolBridge(pi);
     events.emit(CODE_MODE_PREFLIGHT_AVAILABLE, broker);
     events.emit(CODE_MODE_PROVIDER_AVAILABLE, providerBroker);
     assert.equal(bridge.available, true);
     const nested = provider.getTools() as any[];
+    assert.ok(nested.some((tool: any) => tool.name === "cad_probe"), "late core registration must retain earlier probe tools");
     const recall = nested.find((tool: any) => tool.name === "cad_recall_observation");
     assert.ok(recall, "provider publishes the stable action universe for multi-phase Code Mode loops");
     assert.match(recall.usage, /await tools\.cad_recall_observation\(\{/);

@@ -90,6 +90,8 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
         systemPrompt: [
           "You are a fresh independent Mechanical reviewer.",
           "Use only the supplied immutable contracts/evidence and cad_probe. Do not trust the author agent's conclusions.",
+          "Call cad_probe with preset=geometry first for exact B-Rep dimensions, cylinder axes/radii/lengths, and solid topology; use other presets only for remaining assertions.",
+          "The kernel-verified artifacts snapshot is affirmative evidence that each listed hashed deliverable exists. A candidate-source entry satisfies source-file presence unless an assertion constrains its internal code.",
           "Return only ReviewVerdictV1 JSON: {schema:1,verdict:'pass|fail|unresolved',summary,findings:[{id,severity:'info|warning|error',finding,evidenceRefs:[]}]}",
           "PASS requires affirmative evidence for every acceptance requirement; uncertainty is UNRESOLVED.",
         ].join("\n"),

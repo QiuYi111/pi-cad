@@ -11,13 +11,14 @@ type ToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0] & { name: Acti
 
 // Pi gives every extension module a distinct ExtensionAPI/event wrapper. The
 // modules still share this package instance, so the executable catalog must be
-// process-local rather than keyed by a wrapper object. cad_start is registered
-// first by the manifest and resets stale definitions on extension reload.
+// process-local rather than keyed by a wrapper object. Extension initialization
+// order is not a contract: late core registration must not erase tools already
+// registered by probe/model/simulation modules. Re-registration overwrites the
+// same public IDs, which is sufficient to refresh live definitions.
 const registeredTools = new Map<ActivePublicTool, ToolDefinition>();
 
 function rememberTool(pi: ExtensionAPI, tool: ToolDefinition): void {
   void pi;
-  if (tool.name === "cad_start") registeredTools.clear();
   registeredTools.set(tool.name, tool);
 }
 
