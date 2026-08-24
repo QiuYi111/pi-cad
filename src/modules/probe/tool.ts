@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { probePython } from "../../shared/capability.ts";
 import { CadProjectStore } from "../../shared/store.ts";
@@ -106,6 +107,14 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
     return { content: [{ type: "text" as const, text: `cad_probe failed: preset ${registryName} not registered` }] };
   }
   const args = { ...(params.args ?? {}) } as Record<string, unknown>;
+  if (await selectKernelEngine(cwd) === "v7" && typeof args.output === "string") {
+    const observationRoot = resolve(cwd, ".pi-cad");
+    const output = resolve(cwd, args.output);
+    const rel = relative(observationRoot, output);
+    if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) {
+      return { content: [{ type: "text" as const, text: "cad_probe failed: v7 explicit output must remain under harness-owned .pi-cad observation storage" }] };
+    }
+  }
   if (params.subject && args.artifact) {
     return { content: [{ type: "text" as const, text: "cad_probe failed: subject and args.artifact are mutually exclusive; choose one exact target" }] };
   }
@@ -232,14 +241,19 @@ async function persistProbeObservation(
         registries: mechanicalRegistries,
         tool: "cad_probe",
         headline: bundle.headline,
+        preset,
         ...(typeof rendered.details.artifactHash === "string" ? { subjectHash: rendered.details.artifactHash } : {}),
+        ...(typeof rendered.details.kind === "string" ? { evidenceKind: rendered.details.kind } : {}),
+        ...(Array.isArray(rendered.details.resolvedSubjects) ? { resolvedSubjects: rendered.details.resolvedSubjects as any } : {}),
         facts: bundle.facts.map((item) => ({ key: item.key, value: item.value })),
         visuals: bundle.visuals.flatMap((item) => artifacts.get(item.path) ? [{ name: item.name, path: item.path, sha256: artifacts.get(item.path)! }] : []),
         diagnostics: bundle.diagnostics,
         provenance: bundle.provenance as never,
+        payload: envelope?.payload ?? null,
       });
       const path = recorded.state.contextRefs!.latestObservation!;
-      const id = path.split("/").at(-1)!.replace(/\.json$/, "");
+      const parts = path.split("/");
+      const id = parts.at(-1) === "snapshot.json" ? parts.at(-2)! : parts.at(-1)!.replace(/\.json$/, "");
       const text = rendered.content.find((item) => item.type === "text");
       if (text) text.text = `${text.text ?? ""}\nobservationId=${id} immutablePath=${path}`;
       rendered.details.observationId = id;

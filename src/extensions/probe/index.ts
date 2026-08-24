@@ -20,6 +20,10 @@ import { registerMechanicalActionTool } from "../../domains/mechanical/register-
 
 import { readImageContents } from "../../shared/capability.ts";
 import { CadProbeParametersSchema, CadRecallObservationParametersSchema, executeCadProbe } from "../../modules/probe/tool.ts";
+import { selectKernelEngine } from "../../harness/engine-router.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../../harness/run-store.ts";
+import { queryObservationCollectionV7, readObservationV7, type ObservationIndexV1 } from "../../harness/observations.ts";
+import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
 
 export default function cadProbeExtension(pi: ExtensionAPI) {
   registerMechanicalActionTool(pi, {
@@ -57,6 +61,52 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
     ],
     parameters: CadRecallObservationParametersSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (await selectKernelEngine(ctx.cwd) === "v7") {
+        const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+        if (!loaded) return { content: [{ type: "text", text: "cad_recall_observation failed: no active Pi-CAD workflow" }] };
+        if (params.collection && !params.observationId) return { content: [{ type: "text", text: "cad_recall_observation failed: collection requires observationId" }] };
+        if (params.observationId) {
+          try {
+            const snapshot = await readObservationV7({ cwd: ctx.cwd, workflowRunId: loaded.state.runId, id: params.observationId, registries: mechanicalRegistries });
+            if (params.collection) {
+              const page = await queryObservationCollectionV7({
+                cwd: ctx.cwd, workflowRunId: loaded.state.runId, id: params.observationId, collection: params.collection,
+                query: { where: params.where, fields: params.fields, orderBy: params.orderBy, cursor: params.cursor, limit: params.limit },
+                registries: mechanicalRegistries,
+              });
+              return { content: [{ type: "text", text: JSON.stringify(page, null, 2) }], details: { observationId: params.observationId, collection: params.collection, totalMatched: page.totalMatched, nextCursor: page.nextCursor } };
+            }
+            const lines = [
+              `cad_recall_observation: ${snapshot.id}`,
+              `${snapshot.tool}${snapshot.preset ? `/${snapshot.preset}` : ""}: ${snapshot.headline}`,
+              ...(snapshot.resolvedSubjects ?? []).map((item) => `resolvedSubject ${item.source}: ${item.path}${item.sha256 ? ` sha256=${item.sha256}` : ""}`),
+              ...snapshot.facts.slice(0, 16).map((fact) => `${fact.key}: ${String(fact.value)}`),
+              "Collections:",
+              ...((snapshot.collections ?? []).length ? snapshot.collections!.map((item) => `- ${item.name}: ${item.count} item(s); fields=${item.fields.join(",") || "value"}`) : ["- none"]),
+              snapshot.payloadRef ? "Use observationId + collection to page complete immutable detail." : "detailUnavailable=legacy-v7-summary",
+            ];
+            const images = snapshot.visuals.length ? await readImageContents(snapshot.visuals.slice(0, 8).map((item) => item.path)) : [];
+            return { content: [{ type: "text", text: lines.join("\n") }, ...images], details: { observationId: snapshot.id, collections: snapshot.collections ?? [], payloadRef: snapshot.payloadRef } };
+          } catch (error) {
+            return { content: [{ type: "text", text: `cad_recall_observation failed: ${error instanceof Error ? error.message : String(error)}` }] };
+          }
+        }
+        const index = await new HarnessRunStoreV7(ctx.cwd, loaded.state.runId).transactions.readJson<ObservationIndexV1>("indexes/observations.json");
+        const entries = (index?.entries ?? []).filter((item) =>
+          (!params.tool || item.tool === params.tool)
+          && (!params.evidenceKind || item.evidenceKind === params.evidenceKind)
+          && (!params.artifactHash || item.subjectHash === params.artifactHash),
+        ).slice(0, params.limit ?? 20);
+        if (!entries.length) return { content: [{ type: "text", text: "cad_recall_observation: no matching observations in the v7 run index." }] };
+        return {
+          content: [{ type: "text", text: [
+            `cad_recall_observation: ${entries.length} v7 ObservationRef record(s), newest first.`,
+            ...entries.map((item) => `${item.id} [${item.phase}] ${item.tool}: ${item.headline}; payloadBytes=${item.payloadBytes ?? "legacy"}; collections=${item.collections.map((entry) => `${entry.name}:${entry.count}`).join(",") || "none"}`),
+            "Pass observationId to recover facts, visuals, provenance, and its collection catalog.",
+          ].join("\n") }],
+          details: { recalled: entries },
+        };
+      }
       const { CadProjectStore } = await import("../../shared/store.ts");
       const { queryObservationCollection, queryObservations, readObservationSnapshot } = await import("../../core/observation-index.ts");
       const state = await new CadProjectStore(ctx.cwd).load();

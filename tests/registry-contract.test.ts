@@ -40,9 +40,10 @@ test("Mechanical tools register their live schemas and produce a deterministic R
   const second = buildRegistryContract(mechanicalRegistries);
   assert.deepEqual(second, first);
   assert.equal(first.hash, registryContractHash(first));
-  // Seven host actions plus five internal generic reducer actions; cad_start
+  // Ten host actions (classic Pi plus Codex adapter aliases) plus five
+  // internal generic reducer actions; cad_start
   // is both public and Kernel-owned, so it is counted only once.
-  assert.equal(Object.keys(first.actions).length, ACTIVE_PUBLIC_TOOL_NAMES.length + 12);
+  assert.equal(Object.keys(first.actions).length, ACTIVE_PUBLIC_TOOL_NAMES.length + 15);
   assert.equal(Object.keys(first.runtimeProfiles).length, 5);
 });
 

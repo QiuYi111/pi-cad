@@ -35,11 +35,11 @@ for (const [id, meaning] of Object.entries(genericActions)) {
   ));
 }
 
-for (const id of ["read", "grep", "find", "ls", "bash", "edit", "write"]) {
+for (const id of ["read", "grep", "find", "ls", "bash", "edit", "write", "exec_command", "write_stdin", "apply_patch"]) {
   mechanicalRegistries.actions.registerIdempotent(staticRegistration(
     id,
     { input: { protocol: `pi-host-tool/${id}` }, output: { protocol: "pi-tool-result-v1" } },
-    { owner: "pi-host", mutation: ["edit", "write", "bash"].includes(id) ? "phase-guarded" : "read-only", meaning: `Host ${id} tool governed by Kernel grants and write scopes.` },
+    { owner: "pi-host", mutation: ["edit", "write", "bash", "exec_command", "write_stdin", "apply_patch"].includes(id) ? "phase-guarded" : "read-only", meaning: `Host ${id} tool governed by Kernel grants and write scopes.` },
   ));
 }
 

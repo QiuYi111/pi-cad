@@ -172,6 +172,17 @@ New work defaults to the transactional v7 Kernel. The generic start action freez
 
 Simulation, optimization, drawing, presentation, and analysis-model derivation share one strict `pi-recipe.yaml` protocol. MODEL build/export and typed PROBE operations remain primitives. Each Recipe selects a named argv-form action, declares its exact closure and inputs, runs in a pinned profile, and produces immutable observer snapshots. Evidence-producing runs bind an exact workflow obligation before compute; commit can close only that binding.
 
+### Code Mode compatibility and fast probes
+
+Pi-CAD actions can also be called from `@howaboua/pi-codex-conversion` Code Mode. Direct and nested calls pass through the same v7 Workflow/Registry permission check; `exec`, `wait`, and `notebook` are containers, not authority. Conversion 3.0.19 needs the provider bridge installed once after the conversion package:
+
+```bash
+pi install npm:@howaboua/pi-codex-conversion
+npm run setup:codex-conversion-compat
+```
+
+The setup is version-locked, idempotent, keeps a backup, and refuses unknown package layouts. Read-only `cadctl` observations reuse a bounded persistent Python worker by default, while mutations and Recipe compute remain one-shot/managed processes. Set `PI_CAD_PROBE_WORKER=0` only for diagnosis; compare local startup costs with `npm run benchmark:probe-worker`.
+
 ## Simulation, honestly scoped
 
 Simulation V2 follows:

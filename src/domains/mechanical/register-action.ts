@@ -9,6 +9,24 @@ export { mechanicalRegistries } from "./registries.ts";
 
 type ToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0] & { name: ActivePublicTool; parameters?: unknown };
 
+// Pi gives every extension module a distinct ExtensionAPI/event wrapper. The
+// modules still share this package instance, so the executable catalog must be
+// process-local rather than keyed by a wrapper object. cad_start is registered
+// first by the manifest and resets stale definitions on extension reload.
+const registeredTools = new Map<ActivePublicTool, ToolDefinition>();
+
+function rememberTool(pi: ExtensionAPI, tool: ToolDefinition): void {
+  void pi;
+  if (tool.name === "cad_start") registeredTools.clear();
+  registeredTools.set(tool.name, tool);
+}
+
+/** Return the executable definitions registered by this Pi-CAD extension instance. */
+export function registeredMechanicalActionTools(pi: ExtensionAPI): readonly ToolDefinition[] {
+  void pi;
+  return [...registeredTools.values()];
+}
+
 function groupOf(name: ActivePublicTool): PublicToolGroup {
   for (const [group, tools] of Object.entries(ACTIVE_PUBLIC_TOOLS) as Array<[PublicToolGroup, readonly ActivePublicTool[]]>) {
     if (tools.includes(name)) return group;
@@ -53,11 +71,13 @@ export function captureMechanicalAction(tool: ToolDefinition): void {
 /** Register the live Pi tool and pin its actual input schema in the Action Registry. */
 export function registerMechanicalActionTool(pi: ExtensionAPI, tool: ToolDefinition): void {
   captureMechanicalAction(tool);
+  rememberTool(pi, tool);
   pi.registerTool(tool);
 }
 
 /** Register a Kernel-owned public action whose pinned contract is installed by the Kernel registry bootstrap. */
 export function registerKernelActionTool(pi: ExtensionAPI, tool: ToolDefinition): void {
   if (tool.name !== "cad_start") throw new Error(`not a Kernel-owned public action: ${tool.name}`);
+  rememberTool(pi, tool);
   pi.registerTool(tool);
 }

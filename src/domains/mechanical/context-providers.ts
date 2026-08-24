@@ -21,7 +21,27 @@ export function mechanicalContextCompiler(registries: RegistrySet): ContextCompi
   });
   compiler.register({
     id: "mechanical.observations", version: "1.0.0", maxBytesRead: 524288, maxBytesEmitted: 32768,
-    async render(reader) { const index = await reader.readIndex("observations"); return { text: index ? `## Observation Index\n${JSON.stringify(index)}` : "" }; },
+    async render(reader) {
+      const index = object(await reader.readIndex("observations"));
+      const entries = Array.isArray(index.entries) ? index.entries.slice(0, 8).map((value: unknown) => {
+        const item = object(value);
+        return {
+          id: item.id,
+          tool: item.tool,
+          phase: item.phase,
+          headline: item.headline,
+          subjectHash: item.subjectHash,
+          payloadBytes: item.payloadBytes,
+          visualCount: item.visualCount,
+          collections: Array.isArray(item.collections) ? item.collections.map((entry: unknown) => {
+            const descriptor = object(entry);
+            return { name: descriptor.name, count: descriptor.count };
+          }) : [],
+        };
+      }) : [];
+      if (!entries.length) return { text: "" };
+      return { text: `## Observation Refs\n${JSON.stringify({ schema: 1, total: index.total, entries })}\nUse cad_recall_observation to materialize a snapshot, visuals, or a bounded collection page.` };
+    },
   });
   compiler.register({
     id: "mechanical.runtime-availability", version: "1.0.0", maxBytesRead: 131072, maxBytesEmitted: 16384,

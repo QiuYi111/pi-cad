@@ -15,7 +15,7 @@ import type {
 import { CadProjectStore, sha256File } from "./store.ts";
 import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
 import { assertLinuxRuntime } from "./platform.ts";
-import { runProcess } from "./process-runner.ts";
+import { PersistentProbeWorker, ProbeWorkerRejectedError, runProcess } from "./process-runner.ts";
 
 export const DEFAULT_VIEWS = ["iso", "front", "back", "left", "right", "top", "bottom"];
 
@@ -51,15 +51,36 @@ async function runCadctl(
   options: CadctlOptions,
 ): Promise<CadEventEnvelope> {
   const python = pythonInvocation(options.extra, options.cwd);
-  const result = await runProcess({
-    command: python.command,
-    args: [...python.prefixArgs, "-m", "cadctl", ...args],
-    cwd: options.cwd,
-    env: cadctlEnv(options.cwd),
-    timeoutMs: options.timeoutMs ?? 180_000,
-    maxStdoutBytes: 16 * 1024 * 1024,
-    maxStderrBytes: 1024 * 1024,
-  });
+  const timeoutMs = options.timeoutMs ?? 180_000;
+  let result;
+  if (!options.extra && probeWorkerEnabled() && READ_ONLY_CADCTL_COMMANDS.has(args[0] ?? "")) {
+    try {
+      result = await persistentProbeWorker().request({ cwd: options.cwd, args, timeoutMs });
+    } catch (error) {
+      if (error instanceof ProbeWorkerRejectedError) throw error;
+      // Transport/startup failure degrades to the established one-shot path.
+      // A valid worker response with a cadctl failure is not retried here.
+      result = await runProcess({
+        command: python.command,
+        args: [...python.prefixArgs, "-m", "cadctl", ...args],
+        cwd: options.cwd,
+        env: cadctlEnv(options.cwd),
+        timeoutMs,
+        maxStdoutBytes: 16 * 1024 * 1024,
+        maxStderrBytes: 1024 * 1024,
+      });
+    }
+  } else {
+    result = await runProcess({
+      command: python.command,
+      args: [...python.prefixArgs, "-m", "cadctl", ...args],
+      cwd: options.cwd,
+      env: cadctlEnv(options.cwd),
+      timeoutMs,
+      maxStdoutBytes: 16 * 1024 * 1024,
+      maxStderrBytes: 1024 * 1024,
+    });
+  }
   if (result.exitCode !== 0 || result.terminationReason) {
     throw new Error(
       `cadctl process failed${result.terminationDetail ? `: ${result.terminationDetail}` : ` with exit ${result.exitCode}`}: ${result.stderr.slice(-8192)}`,
@@ -76,6 +97,42 @@ async function runCadctl(
     throw new Error("cadctl returned an invalid envelope");
   }
   return parsed as CadEventEnvelope;
+}
+
+const READ_ONLY_CADCTL_COMMANDS = new Set(["inspect", "render", "probe", "measure", "section", "compare", "assembly-tree", "inspect-interference", "scan-sections", "inspect-surfaces"]);
+let sharedProbeWorker: PersistentProbeWorker | undefined;
+
+function probeWorkerEnabled(): boolean {
+  return !["0", "false", "off"].includes((process.env.PI_CAD_PROBE_WORKER ?? "1").trim().toLowerCase());
+}
+
+function positiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function persistentProbeWorker(): PersistentProbeWorker {
+  if (sharedProbeWorker) return sharedProbeWorker;
+  const python = pythonInvocation();
+  sharedProbeWorker = new PersistentProbeWorker({
+    command: python.command,
+    args: [...python.prefixArgs, "-m", "cadctl.probe_worker"],
+    env: cadctlEnv(),
+    idleMs: positiveIntegerEnv("PI_CAD_PROBE_WORKER_IDLE_MS", 10 * 60_000),
+    maxRequests: positiveIntegerEnv("PI_CAD_PROBE_WORKER_MAX_REQUESTS", 500),
+  });
+  return sharedProbeWorker;
+}
+
+export function persistentProbeWorkerStatus() {
+  return sharedProbeWorker?.snapshot ?? { running: false, requests: 0, queued: false };
+}
+
+export function stopPersistentProbeWorker(): void {
+  sharedProbeWorker?.stop();
+  sharedProbeWorker = undefined;
 }
 
 export interface CapabilityBuildInput {

@@ -21,18 +21,14 @@ import { isHeadless, isTerminalStatus } from "./interaction-mode.ts";
 import { readRuntimeAvailability, simulationRuntimeProjection } from "../modules/simulate-v2/runtime.ts";
 import { assertLinuxRuntime } from "../shared/platform.ts";
 import { selectKernelEngine } from "../harness/engine-router.ts";
-import { PermissionEngineV7, assertScopedWrite } from "../harness/permissions.ts";
+import { PermissionEngineV7 } from "../harness/permissions.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { mechanicalContextCompiler } from "../domains/mechanical/context-providers.ts";
 import { abortMechanicalRunV7, resumeMechanicalRunV7 } from "../domains/mechanical/control-actions-v7.ts";
 import { approveMechanicalRerouteV7 } from "../domains/mechanical/actions-v7.ts";
-
-const V7_WRITE_RULES = [
-  { scope: "project:source", roots: ["models", "src", "design"] },
-  { scope: "project:recipe", roots: ["recipes", "simulation"] },
-  { scope: "project:deliverable", roots: ["build", "drawings", "presentation", "exports"] },
-] as const;
+import { authorizeMechanicalToolV7 } from "../domains/mechanical/tool-policy-v7.ts";
+import { registerPiCadNestedToolBridge } from "../integrations/codex-conversion.ts";
 
 function applyV7ToolOverlay(pi: ExtensionAPI, enabled: readonly string[]): void {
   const available = new Set((pi.getAllTools?.() ?? []).map((tool) => tool.name));
@@ -228,6 +224,7 @@ async function simulationCapabilityContext(cwd: string, enabled: boolean): Promi
 }
 
 export default function cadCore(pi: ExtensionAPI) {
+  const codexBridge = registerPiCadNestedToolBridge(pi);
   assertLinuxRuntime("Pi-CAD extension");
   const deps: ControllerDeps = {
     pi,
@@ -375,6 +372,7 @@ export default function cadCore(pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (event, ctx) => {
     if (await selectKernelEngine(ctx.cwd) === "v7") {
+      await codexBridge.ensureProvider();
       const project = new HarnessProjectStoreV7(ctx.cwd);
       const loaded = await project.currentRun(mechanicalRegistries);
       if (!loaded || ["done", "aborted"].includes(loaded.state.status)) {
@@ -418,25 +416,7 @@ export default function cadCore(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, ctx) => {
     if (await selectKernelEngine(ctx.cwd) === "v7") {
-      const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
-      if (!loaded) {
-        if (PI_CAD_OWNED_TOOLS.has(event.toolName) && !["cad_start", "cad_route"].includes(event.toolName)) return { block: true, reason: "Pi-CAD v7 has no active run; call cad_route or cad_start first" };
-        return undefined;
-      }
-      const permissions = new PermissionEngineV7(mechanicalRegistries, loaded.registryContract);
-      if (PI_CAD_OWNED_TOOLS.has(event.toolName)) {
-        try { permissions.assertAction(loaded.state, loaded.workflow, event.toolName); }
-        catch (error) { return { block: true, reason: error instanceof Error ? error.message : String(error) }; }
-      }
-      if (event.toolName === "write" || event.toolName === "edit") {
-        const path = (event.input as { path?: string }).path;
-        if (path) {
-          try {
-            assertScopedWrite({ cwd: ctx.cwd, target: path, enabledScopes: loaded.workflow.phases[loaded.state.phase]!.writeScopes, rules: V7_WRITE_RULES.map((rule) => ({ scope: rule.scope, roots: [...rule.roots] })) });
-          } catch (error) { return { block: true, reason: error instanceof Error ? error.message : String(error) }; }
-        }
-      }
-      return undefined;
+      return authorizeMechanicalToolV7({ cwd: ctx.cwd, toolName: event.toolName, toolInput: event.input });
     }
     const store = new CadProjectStore(ctx.cwd);
     const state = await guardState(store);

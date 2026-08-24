@@ -155,6 +155,17 @@ faces、assembly occurrences、interference pairs、Python 数组/表格与完�
 
 Simulation、Optimization、Drawing、Presentation 与 analysis-model derivation 共用严格的 `pi-recipe.yaml` 协议；MODEL build/export 与 typed PROBE 继续作为 primitives。Recipe 选择命名的 argv action，声明精确 closure/input 和固定 runtime profile，并产生不可变 observer snapshot。会生成 Evidence 的 run 必须在 compute 前绑定精确 obligation，commit 只能关闭该 binding。
 
+### Code Mode 兼容与快速 Probe
+
+Pi-CAD action 也可从 `@howaboua/pi-codex-conversion` Code Mode 调用。直接调用与嵌套调用都经过同一套 v7 Workflow/Registry 权限检查；`exec`、`wait`、`notebook` 只是容器，不会自行获得权限。conversion 3.0.19 安装后需要执行一次 provider bridge 兼容安装：
+
+```bash
+pi install npm:@howaboua/pi-codex-conversion
+npm run setup:codex-conversion-compat
+```
+
+该脚本锁定版本、可重复执行、保留备份，并会拒绝未知包布局。只读 `cadctl` 观察默认复用有界的常驻 Python worker；mutation 与 Recipe compute 仍使用一次性或受管进程。仅在诊断时设置 `PI_CAD_PROBE_WORKER=0`；可用 `npm run benchmark:probe-worker` 比较本机启动开销。
+
 ## 仿真能力的诚实边界
 
 Simulation V2 的正式链路是:

@@ -1,7 +1,9 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import { createInterface, type Interface as ReadLineInterface } from "node:readline";
 
 import { assertLinuxRuntime } from "./platform.ts";
 
@@ -240,5 +242,157 @@ export async function runProcess(options: RunProcessOptions): Promise<ProcessRes
     });
   } finally {
     release();
+  }
+}
+
+const PROBE_WORKER_PROTOCOL = "pi-cad/probe-worker-v1";
+
+interface ProbeWorkerResponse {
+  protocol: typeof PROBE_WORKER_PROTOCOL;
+  id: string;
+  ok: boolean;
+  exitCode?: number;
+  stdout?: string;
+  stderr?: string;
+  workerPid?: number;
+  error?: string;
+}
+
+interface ProbeWorkerPending {
+  resolve(value: ProbeWorkerResponse): void;
+  reject(error: Error): void;
+}
+
+export interface ProbeWorkerOptions {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  idleMs?: number;
+  maxRequests?: number;
+}
+
+export class ProbeWorkerRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProbeWorkerRejectedError";
+  }
+}
+
+/** One sequential Python interpreter inside the repository's process boundary. */
+export class PersistentProbeWorker {
+  private child?: ChildProcessWithoutNullStreams;
+  private lines?: ReadLineInterface;
+  private pending = new Map<string, ProbeWorkerPending>();
+  private queue: Promise<void> = Promise.resolve();
+  private idleTimer?: NodeJS.Timeout;
+  private requests = 0;
+  private stderr = "";
+
+  constructor(private readonly options: ProbeWorkerOptions) {}
+
+  get snapshot(): { running: boolean; pid?: number; requests: number; queued: boolean } {
+    return { running: Boolean(this.child && this.child.exitCode === null && !this.child.killed), ...(this.child?.pid ? { pid: this.child.pid } : {}), requests: this.requests, queued: this.pending.size > 0 };
+  }
+
+  request(input: { cwd: string; args: string[]; timeoutMs: number; signal?: AbortSignal }): Promise<ProcessResult> {
+    const scheduled = this.queue.then(() => this.execute(input));
+    this.queue = scheduled.then(() => undefined, () => undefined);
+    return scheduled;
+  }
+
+  stop(): void {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = undefined;
+    const child = this.child;
+    this.child = undefined;
+    this.lines?.close();
+    this.lines = undefined;
+    if (child?.pid) {
+      try { process.kill(-child.pid, "SIGTERM"); }
+      catch { child.kill("SIGTERM"); }
+    }
+    const error = new Error("probe worker stopped");
+    for (const item of this.pending.values()) item.reject(error);
+    this.pending.clear();
+    this.requests = 0;
+  }
+
+  private ensureStarted(): ChildProcessWithoutNullStreams {
+    assertLinuxRuntime("Pi-CAD persistent probe worker");
+    if (this.child && !this.child.killed && this.child.exitCode === null) return this.child;
+    const child = spawn(this.options.command, this.options.args, { env: this.options.env, detached: true, stdio: ["pipe", "pipe", "pipe"] });
+    child.unref();
+    (child.stdin as any).unref?.();
+    (child.stdout as any).unref?.();
+    (child.stderr as any).unref?.();
+    this.child = child;
+    this.stderr = "";
+    this.lines = createInterface({ input: child.stdout });
+    this.lines.on("line", (line) => this.onLine(line));
+    child.stderr.on("data", (chunk: Buffer) => { this.stderr = `${this.stderr}${chunk.toString("utf-8")}`.slice(-256 * 1024); });
+    child.on("error", (error) => this.fail(error));
+    child.on("close", (code, signal) => this.fail(new Error(`probe worker exited (${code ?? signal ?? "unknown"}): ${this.stderr.slice(-8192)}`)));
+    return child;
+  }
+
+  private onLine(line: string): void {
+    if (Buffer.byteLength(line) > 20 * 1024 * 1024) {
+      this.fail(new Error("probe worker response exceeds 20 MiB protocol limit"));
+      return;
+    }
+    let response: ProbeWorkerResponse;
+    try { response = JSON.parse(line) as ProbeWorkerResponse; }
+    catch { this.fail(new Error(`probe worker emitted non-JSON protocol output: ${line.slice(0, 512)}`)); return; }
+    if (response.protocol !== PROBE_WORKER_PROTOCOL || typeof response.id !== "string") {
+      this.fail(new Error("probe worker protocol mismatch"));
+      return;
+    }
+    const pending = this.pending.get(response.id);
+    if (!pending) return;
+    this.pending.delete(response.id);
+    pending.resolve(response);
+  }
+
+  private fail(error: Error): void {
+    const pending = [...this.pending.values()];
+    this.pending.clear();
+    const child = this.child;
+    this.child = undefined;
+    this.lines?.close();
+    this.lines = undefined;
+    if (child?.pid && child.exitCode === null) {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); }
+    }
+    for (const item of pending) item.reject(error);
+  }
+
+  private async execute(input: { cwd: string; args: string[]; timeoutMs: number; signal?: AbortSignal }): Promise<ProcessResult> {
+    if (input.signal?.aborted) throw new Error("probe worker request aborted before dispatch");
+    if (!Number.isFinite(input.timeoutMs) || input.timeoutMs <= 0) throw new Error("probe worker timeoutMs must be positive");
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    const child = this.ensureStarted();
+    const id = randomUUID();
+    const started = Date.now();
+    const response = await new Promise<ProbeWorkerResponse>((resolve, reject) => {
+      const terminate = (reason: string) => {
+        if (!this.pending.delete(id)) return;
+        this.stop();
+        reject(new Error(reason));
+      };
+      const timeout = setTimeout(() => terminate(`probe worker timeout after ${input.timeoutMs}ms`), input.timeoutMs);
+      const abort = () => terminate("probe worker request aborted");
+      input.signal?.addEventListener("abort", abort, { once: true });
+      const clear = () => { clearTimeout(timeout); input.signal?.removeEventListener("abort", abort); };
+      this.pending.set(id, { resolve(value) { clear(); resolve(value); }, reject(error) { clear(); reject(error); } });
+      child.stdin.write(`${JSON.stringify({ protocol: PROBE_WORKER_PROTOCOL, id, cwd: input.cwd, args: input.args })}\n`, (error) => { if (error) terminate(`probe worker write failed: ${error.message}`); });
+    });
+    if (!response.ok) throw new ProbeWorkerRejectedError(response.error ?? "probe worker rejected request");
+    this.requests += 1;
+    if (this.requests >= (this.options.maxRequests ?? 500)) this.stop();
+    else {
+      this.idleTimer = setTimeout(() => this.stop(), this.options.idleMs ?? 10 * 60_000);
+      this.idleTimer.unref();
+    }
+    return { exitCode: response.exitCode ?? 1, signal: null, durationMs: Date.now() - started, stdout: response.stdout ?? "", stderr: response.stderr ?? "" };
   }
 }

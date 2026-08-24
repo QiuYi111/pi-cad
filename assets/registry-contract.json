@@ -2,6 +2,11 @@
   "schema": 1,
   "kernelProtocol": "pi-cad-harness/7.0",
   "actions": {
+    "apply_patch": {
+      "version": "1.0.0",
+      "schemaDigest": "1a1249aa4db4a003bf91e4c308643a35f30e5f70e3a721402ecc1e84a1b981ed",
+      "semanticsDigest": "07b7b459325c1754a8a9d1dffa781ab5c34a5e4092cc9a5fffae4ab915f65880"
+    },
     "bash": {
       "version": "1.0.0",
       "schemaDigest": "a4d0faccb0ae72cce72c30335fa8b488566ba21393b777c2f0db4c89b0a6375b",
@@ -157,6 +162,11 @@
       "schemaDigest": "c20ae01dfed4d9c3feb6c7e165d55c0e6b6d35e45ab39608cfef43b7127e8945",
       "semanticsDigest": "8883163acee40ab9217e8c1bbbc263b46f91b6a133c5a1cea540f625a624cfc0"
     },
+    "exec_command": {
+      "version": "1.0.0",
+      "schemaDigest": "91b7c2ea69090da193f44f0012881eb2bf031b47280da24e2aba2d1e4806ca5e",
+      "semanticsDigest": "ed750850c854c8c7619b7d90afc05200fa4e9d87e348d9f24ce02d3aef8c4368"
+    },
     "find": {
       "version": "1.0.0",
       "schemaDigest": "35a0f8e28f21f7efaa3a5e746535599472ab85e1646b462b9e004ce2c96ff398",
@@ -196,6 +206,11 @@
       "version": "1.0.0",
       "schemaDigest": "e04a69ef8e26e43bd9342be2ffa376b2be7d635b742ef8f3e690ac5ce52aa8f1",
       "semanticsDigest": "6bc51518dcb5d6ebec42bf41e6853284af45ae0494b2dbbcaa2c6cdf668fc733"
+    },
+    "write_stdin": {
+      "version": "1.0.0",
+      "schemaDigest": "60eb79f4955b1efa1c1ca226dc30306327be83e678d37a20a313b6ab3e738c01",
+      "semanticsDigest": "0f71462481ca05f3e614f494d072f91fda8eb52e8eea6a7164cb6c632fa2a8f2"
     }
   },
   "grants": {
@@ -514,5 +529,5 @@
       "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
     }
   },
-  "hash": "ab37e98dac3e7a70b1b9f77570e979ead339e1757353508f6fe07182051d0b84"
+  "hash": "f448ff2bd11f2c73c33cff3bf8879c8caece5f15768096a7d1aadd2b4d5177f3"
 }
