@@ -39,7 +39,7 @@ import {
   copyFileSync, existsSync, mkdirSync, readFileSync,
   readdirSync, rmSync, writeFileSync,
 } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = resolve(process.env.PI_CAD_BENCH_DIR ?? fileURLToPath(new URL(".", import.meta.url)));
@@ -114,7 +114,7 @@ function vaultEverything() {
     const tar = join(CACHE, `orig-${manifest.length}.tar.gz`);
     tarCreate(tar, parent, name);
     rmSync(p, { recursive: true, force: true });
-    manifest.push({ tar: tar.replace(HERE, ""), dest: p.replace(HERE, "") });
+    manifest.push({ tar: relative(HERE, tar), dest: relative(HERE, p) });
   }
   for (const d of ["staging", "archive", "tmp"]) mkdirSync(join(CACHE, d), { recursive: true });
   writeFileSync(join(CACHE, "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -135,9 +135,8 @@ function restoreVault() {
     console.log(`preserved ${readdirSync(archiveDir).length} archived sample(s) in results/.recovered/`);
   }
   for (const { tar, dest } of JSON.parse(readFileSync(mPath, "utf-8"))) {
-    // path.resolve(HERE, dest, "..") handles both relative and absolute dests
-    // (join(HERE, absolute) would concatenate into a doubled path)
-    tarExtract(vaultTarPath(tar), resolve(HERE, dest, ".."));
+    const normalizedDest = dest.startsWith("/") ? dest.slice(1) : dest;
+    tarExtract(vaultTarPath(tar), resolve(HERE, normalizedDest, ".."));
     console.log(`restored ${dest}`);
   }
   rmSync(CACHE, { recursive: true, force: true });
@@ -400,6 +399,7 @@ function evalSample(sampleId, evalRoot, dataDir) {
 if (args.includes("--restore-vault")) { restoreVault(); process.exit(0); }
 
 function vaultTarPath(tar) {
+  if (tar.startsWith("/results/")) return join(HERE, tar.slice(1));
   return tar.startsWith("/") ? tar : join(HERE, tar);
 }
 
