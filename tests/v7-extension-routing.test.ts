@@ -35,12 +35,24 @@ test("public cad_route and record tools dispatch new work to v7 without creating
     const context = { cwd, hasUI: false } as any;
     const routeResult = await pi.tools.get("cad_route").execute("call-1", { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype", reason: "new part" }, undefined, undefined, context);
     assert.match(routeResult.content[0].text, /v7/);
+    for (const handler of pi.handlers.get("tool_result") ?? []) {
+      await handler({ toolName: "cad_route", details: routeResult.details }, context);
+    }
+    assert.ok(pi.active.includes("cad_commit_requirements"), "route result must expose requirements tools in the same agent loop");
+    assert.ok(!pi.active.includes("cad_route"), "route result must remove the completed intake action");
     let loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
     assert.equal(loaded?.state.phase, "requirements");
     const requirementsResult = await pi.tools.get("cad_commit_requirements").execute("call-2", {
-      goal: "Make a bracket", deliverables: ["STEP"], must: ["fit"], assertions: [], preferences: [], assumptions: [], openUnknowns: [],
+      goal: "Make a bracket", deliverables: ["STEP"], must: ["fit"],
+      assertions: [{ id: "A1", mustRef: "M1", statement: "The completed bracket fits", binding: { subject: "completed bracket", quantity: "fit" }, expectation: { kind: "boolean", expected: true } }],
+      preferences: [], assumptions: [], openUnknowns: [],
     }, undefined, undefined, context);
     assert.match(requirementsResult.content[0].text, /v7/);
+    for (const handler of pi.handlers.get("tool_result") ?? []) {
+      await handler({ toolName: "cad_commit_requirements", details: requirementsResult.details }, context);
+    }
+    assert.ok(pi.active.includes("cad_commit_plan"), "requirements result must expose planning tools in the same agent loop");
+    assert.ok(!pi.active.includes("cad_commit_requirements"), "requirements action must leave the completed phase overlay");
     loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
     assert.ok(loaded?.state.records["record:requirements"]);
     assert.notEqual(loaded?.state.phase, "requirements");

@@ -55,8 +55,10 @@ test("conversion bridge projects active Pi-CAD tools and registers v7 preflight"
     events.emit(CODE_MODE_PROVIDER_AVAILABLE, providerBroker);
     assert.equal(bridge.available, true);
     const nested = provider.getTools() as any[];
-    assert.deepEqual(nested.map((tool: any) => tool.name), ["cad_recall_observation"]);
-    assert.match(await nested[0].invoke({}, { toolCallId: "nested-1", extensionContext: { cwd } }, new AbortController().signal), /no active Pi-CAD workflow/);
+    const recall = nested.find((tool: any) => tool.name === "cad_recall_observation");
+    assert.ok(recall, "provider publishes the stable action universe for multi-phase Code Mode loops");
+    assert.match(recall.usage, /await tools\.cad_recall_observation\(\{/);
+    assert.match(await recall.invoke({}, { toolCallId: "nested-1", extensionContext: { cwd } }, new AbortController().signal), /no active Pi-CAD workflow/);
     const denied = await preflight({ toolName: "cad_probe", input: {}, cwd });
     assert.equal(denied.block, true);
     assert.match(denied.reason, /no active run/);

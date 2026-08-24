@@ -47,6 +47,9 @@ function bboxFact(payload: Record<string, unknown>): string {
   }
   if (bbox && typeof bbox === "object") {
     const b = bbox as Record<string, unknown>;
+    if (["x", "y", "z"].every((key) => typeof b[key] === "number")) {
+      return `size=[${num(b.x, 6)}, ${num(b.y, 6)}, ${num(b.z, 6)}]`;
+    }
     const xyz = (key: string) =>
       b[key] && Array.isArray(b[key]) ? (b[key] as number[]).map((v) => num(v, 2)).join(", ") : "n/a";
     return `min=[${xyz("min")}] max=[${xyz("max")}]`;
@@ -86,7 +89,16 @@ const PROFILES: Record<string, ObservationProfile> = {
         ? [{ key: "labels", value: `${(p.labels as unknown[]).length} (#pN planar / #cN cylindrical)` }]
         : []),
       ...(Array.isArray(p.cylinders)
-        ? [{ key: "cylinders", value: `${(p.cylinders as unknown[]).length} cylindrical faces` }]
+        ? [
+            { key: "cylinders", value: `${(p.cylinders as unknown[]).length} cylindrical faces` },
+            ...((p.cylinders as Array<Record<string, unknown>>)
+              .filter((item) => typeof item.radius === "number")
+              .slice(0, 16)
+              .map((item, index) => ({
+                key: `cylinderRadius:${String(item.label ?? index)}`,
+                value: num(item.radius, 6),
+              }))),
+          ]
         : []),
     ],
   },

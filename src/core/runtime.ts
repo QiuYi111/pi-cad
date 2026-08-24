@@ -484,7 +484,21 @@ export default function cadCore(pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    if (await selectKernelEngine(ctx.cwd) === "v7") return;
+    if (await selectKernelEngine(ctx.cwd) === "v7") {
+      // before_agent_start runs once for the whole agent loop, not between
+      // successive tool calls. A v7 mutation can change the workflow phase,
+      // so refresh the overlay immediately after every result. Besides keeping
+      // direct Pi tools current, this lets Code Mode's live provider expose the
+      // next phase's nested tools in the very next exec cell.
+      const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+      if (!loaded || ["done", "aborted"].includes(loaded.state.status)) {
+        applyV7ToolOverlay(pi, ["cad_start", "cad_route"]);
+      } else {
+        const permissions = new PermissionEngineV7(mechanicalRegistries, loaded.registryContract);
+        applyV7ToolOverlay(pi, permissions.enabledActions(loaded.state, loaded.workflow));
+      }
+      return;
+    }
     const store = new CadProjectStore(ctx.cwd);
     await handleToolResult(pi, store, event);
   });

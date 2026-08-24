@@ -42,11 +42,22 @@ function unresolved(summary: string): ReviewVerdictV1 {
   return { schema: 1, verdict: "unresolved", summary, findings: [{ id: "reviewer-unresolved", severity: "error", finding: summary, evidenceRefs: [] }] };
 }
 
+export function selectReviewCandidate(
+  artifacts: Record<string, { id: string; path: string; sha256: string; role: string }>,
+) {
+  const values = Object.values(artifacts);
+  return values.find((artifact) => /authoritative/i.test(artifact.role))
+    ?? values.find((artifact) => /design|candidate/i.test(artifact.role) && !/source/i.test(artifact.role))
+    ?? values.find((artifact) => !/source/i.test(artifact.role));
+}
+
 /** A fresh, extension-free reviewer session with one read-only Mechanical probe tool. */
 export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewExecutorV1 {
   return {
     async execute(input) {
       if (input.allowedActions.length !== 1 || input.allowedActions[0] !== "cad_probe") throw new Error("Mechanical fresh reviewer action contract changed");
+      const candidate = selectReviewCandidate(input.artifacts);
+      if (!candidate) return unresolved("review subject has no immutable candidate artifact");
       const model = selectedModel(ctx);
       if (!model) return unresolved("reviewer model is unavailable");
       let probes = 0;
@@ -63,7 +74,14 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
           const args = params.args ?? {};
           if (["artifact", "before", "after", "output"].some((key) => key in args)) return { content: [{ type: "text" as const, text: "Reviewer may not override subject paths." }], isError: true };
           probes += 1;
-          return executeCadProbe(ctx.cwd, { ...params, subject: "current" });
+          if (params.preset === "python") {
+            return executeCadProbe(ctx.cwd, params, { persist: false, subjectArtifact: candidate.path });
+          }
+          return executeCadProbe(ctx.cwd, {
+            ...params,
+            subject: undefined,
+            args: { ...args, artifact: candidate.path },
+          }, { persist: false });
         },
       });
       const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: true, maxRetries: 1 } });

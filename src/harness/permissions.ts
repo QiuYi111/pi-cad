@@ -101,5 +101,9 @@ export function assertScopedWrite(input: {
     if (!input.enabledScopes.includes(rule.scope)) continue;
     if (rule.roots.some((root) => inside(resolve(project, root), target))) return;
   }
-  throw new Error(`write target is outside enabled scopes: ${input.target}`);
+  const allowedRoots = input.rules
+    .filter((rule) => input.enabledScopes.includes(rule.scope))
+    .flatMap((rule) => rule.roots)
+    .map((root) => `${root.replace(/[\\/]+$/, "")}/`);
+  throw new Error(`write target is outside enabled scopes: ${input.target}; allowed project roots: ${allowedRoots.join(", ") || "none"}`);
 }

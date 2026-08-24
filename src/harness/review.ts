@@ -20,7 +20,13 @@ export interface ReviewProfileImplementationV1 {
 }
 
 export interface FreshReviewExecutorV1 {
-  execute(input: { reviewId: string; profileId: string; prompt: string; allowedActions: string[] }): Promise<ReviewVerdictV1>;
+  execute(input: {
+    reviewId: string;
+    profileId: string;
+    prompt: string;
+    allowedActions: string[];
+    artifacts: Record<string, { id: string; path: string; sha256: string; role: string }>;
+  }): Promise<ReviewVerdictV1>;
 }
 
 function subject(loaded: LoadedHarnessRunV7): JsonValue {
@@ -60,7 +66,13 @@ export async function runFreshReviewV7(input: {
   if (issues.length) throw new Error(`review preflight failed: ${issues.join("; ")}`);
   const subjectHash = canonicalDigest(subject(loaded));
   const reviewId = `review-${Date.now()}-${randomUUID().slice(0, 8)}`;
-  const result = await input.executor.execute({ reviewId, profileId: input.profile.id, prompt: await input.profile.prompt(loaded, input.cwd), allowedActions: [...input.profile.allowedActions] });
+  const result = await input.executor.execute({
+    reviewId,
+    profileId: input.profile.id,
+    prompt: await input.profile.prompt(loaded, input.cwd),
+    allowedActions: [...input.profile.allowedActions],
+    artifacts: structuredClone(loaded.state.artifacts),
+  });
   validateVerdict(result);
   const path = `reviews/${reviewId}.json`;
   return store.mutate(input.registries, (current) => {

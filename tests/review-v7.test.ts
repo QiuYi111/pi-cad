@@ -8,11 +8,20 @@ import probe from "../src/extensions/probe/index.ts";
 import core from "../src/extensions/core/index.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { mechanicalReviewProfile } from "../src/domains/mechanical/review-profile.ts";
+import { selectReviewCandidate } from "../src/domains/mechanical/review-executor-v7.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { transitionRun } from "../src/harness/reducer.ts";
 import { runFreshReviewV7 } from "../src/harness/review.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+
+test("fresh Mechanical reviewer selects the authoritative shape instead of an earlier source artifact", () => {
+  const selected = selectReviewCandidate({
+    "candidate:source": { id: "candidate:source", path: "models/part.py", sha256: "source", role: "candidate-source" },
+    "candidate:authoritative": { id: "candidate:authoritative", path: "exports/part.step", sha256: "step", role: "candidate-authoritative" },
+  });
+  assert.equal(selected?.path, "exports/part.step");
+});
 
 test("Generic Review Runner pins a fresh Mechanical profile result before acceptance", async () => {
   const pi: any = { registerTool() {}, registerCommand() {}, on() {}, setActiveTools() {}, getActiveTools() { return []; }, getAllTools() { return []; }, appendEntry() {}, sendUserMessage() {}, setSessionName() {}, events: { emit() {}, on() {} } };

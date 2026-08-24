@@ -91,15 +91,19 @@ export interface CadProbeParams {
   code?: string;
 }
 
-export async function executeCadProbe(cwd: string, params: CadProbeParams) {
+export async function executeCadProbe(
+  cwd: string,
+  params: CadProbeParams,
+  options: { persist?: boolean; subjectArtifact?: string } = {},
+) {
   ensureProbePresets();
   if (params.preset === "python") {
     const rendered = await runPythonProbe(cwd, {
       subject: params.subject ?? "current",
       purpose: params.purpose ?? "",
       code: params.code ?? "",
-    });
-    return persistProbeObservation(cwd, params.preset, rendered);
+    }, options.subjectArtifact);
+    return options.persist === false ? rendered : persistProbeObservation(cwd, params.preset, rendered);
   }
   const registryName = params.preset;
   const preset = probePreset(registryName);
@@ -144,7 +148,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
     : [{ source: targetSource, path: String(args.artifact), sha256: result.envelope.inputHashes.artifact }];
   result.extraDetails = { ...(result.extraDetails ?? {}), resolvedSubjects, ...(resolvedSubjects.length === 1 ? { resolvedSubject: resolvedSubjects[0] } : {}) };
   const rendered = await renderProbeResult(result, `cad_probe/${registryName}`);
-  return persistProbeObservation(cwd, params.preset, rendered);
+  return options.persist === false ? rendered : persistProbeObservation(cwd, params.preset, rendered);
 }
 
 function applyPresetDefaults(preset: CadProbeParams["preset"], args: Record<string, unknown>): void {
@@ -175,8 +179,9 @@ async function resolveSubjectArtifact(
 async function runPythonProbe(
   cwd: string,
   params: { subject: "current" | "baseline"; purpose: string; code: string },
+  subjectArtifact?: string,
 ) {
-  const rel = await resolveSubjectArtifact(cwd, params.subject);
+  const rel = subjectArtifact ?? await resolveSubjectArtifact(cwd, params.subject);
   if (!rel) {
     return { content: [{ type: "text" as const, text: `cad_probe failed: no ${params.subject} artifact bound in run state` }] };
   }

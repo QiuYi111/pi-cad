@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Value } from "typebox/value";
 
 import { PI_CAD_OWNED_TOOLS } from "../core/policies.ts";
 import { registeredMechanicalActionTools } from "../domains/mechanical/register-action.ts";
@@ -50,11 +51,35 @@ function isProviderBroker(value: unknown): value is ProviderBroker {
     && "register" in value && typeof value.register === "function");
 }
 
+function schemaExample(schema: any, field = "value", depth = 0): string {
+  if (!schema || depth > 6) return "{}";
+  if (schema.const !== undefined) return JSON.stringify(schema.const);
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) return JSON.stringify(schema.enum[0]);
+  const alternative = schema.anyOf?.[0] ?? schema.oneOf?.[0];
+  if (alternative) return schemaExample(alternative, field, depth + 1);
+  if (schema.type === "string") return JSON.stringify(`<${field}>`);
+  if (schema.type === "number" || schema.type === "integer") return "0";
+  if (schema.type === "boolean") return "true";
+  if (schema.type === "array") {
+    const item = schemaExample(schema.items, field, depth + 1);
+    return schema.minItems > 0 ? `[${item}]` : `[] /* items: ${item} */`;
+  }
+  if (schema.default !== undefined) return JSON.stringify(schema.default);
+  if (schema.type === "object" || schema.properties) {
+    const required = new Set<string>(schema.required ?? []);
+    const entries = Object.entries(schema.properties ?? {})
+      .filter(([name]) => required.has(name))
+      .map(([name, child]) => `${JSON.stringify(name)}: ${schemaExample(child, name, depth + 1)}`);
+    return `{ ${entries.join(", ")} }`;
+  }
+  return "{}";
+}
+
 function usageFor(tool: any): string {
   const hint = typeof tool.promptSnippet === "string" && tool.promptSnippet.trim()
     ? ` // ${tool.promptSnippet.trim()}`
     : "";
-  return `await tools.${tool.name}({ ... })${hint}`;
+  return `await tools.${tool.name}(${schemaExample(tool.parameters)})${hint}`;
 }
 
 function compactResult(result: any): unknown {
@@ -69,9 +94,13 @@ function compactResult(result: any): unknown {
 }
 
 export function piCadNestedTools(pi: ExtensionAPI): unknown[] {
-  const active = new Set(pi.getActiveTools?.() ?? []);
   return registeredMechanicalActionTools(pi)
-    .filter((tool: any) => PI_CAD_OWNED_TOOLS.has(tool.name) && active.has(tool.name))
+    // Code Mode receives one system prompt for the whole agent loop. v7 can
+    // advance through several phases inside that loop, so a phase-filtered
+    // provider would make the next action executable but undocumented. Publish
+    // the stable Pi-CAD action universe here; the shared v7 preflight remains
+    // the authoritative, fail-closed phase and scope gate for every invocation.
+    .filter((tool: any) => PI_CAD_OWNED_TOOLS.has(tool.name))
     .map((tool: any) => ({
       name: tool.name,
       usage: usageFor(tool),
@@ -85,7 +114,14 @@ export function piCadNestedTools(pi: ExtensionAPI): unknown[] {
         if (signal.aborted) throw new Error(`${tool.name} aborted`);
         const extensionContext = context.extensionContext;
         if (!extensionContext) throw new Error("Pi-CAD nested tool context is unavailable");
-        const prepared = tool.prepareArguments ? tool.prepareArguments(input) : input;
+        const withDefaults = Value.Default(tool.parameters, structuredClone(input ?? {}));
+        const prepared = tool.prepareArguments ? tool.prepareArguments(withDefaults) : withDefaults;
+        if (!Value.Check(tool.parameters, prepared)) {
+          const errors = [...Value.Errors(tool.parameters, prepared)].slice(0, 3)
+            .map((error: any) => `${error.path || "/"}: ${error.message}`)
+            .join("; ");
+          throw new Error(`${tool.name} input does not match its registered schema: ${errors || "invalid input"}`);
+        }
         const result = await tool.execute(
           context.toolCallId ?? `code-mode-${tool.name}`,
           prepared,

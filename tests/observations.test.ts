@@ -75,6 +75,19 @@ test("profiles: render/measure/interference projections", () => {
   assert.ok(visual.facts.some((f) => f.key === "bbox" && f.value.includes("10.00")));
   assert.ok(visual.facts.some((f) => f.key === "solids" && f.value === "1"));
 
+  const geometry = profileProjection(
+    envelope({
+      tool: "cad_inspect_geometry",
+      payload: {
+        bbox: { x: 1.5, y: 1.5, z: 0.20923 },
+        cylinders: [{ label: "#c0", radius: 0.75 }],
+        solidCount: 1,
+      },
+    }),
+  );
+  assert.ok(geometry.facts.some((f) => f.key === "bbox" && f.value === "size=[1.500000, 1.500000, 0.209230]"));
+  assert.ok(geometry.facts.some((f) => f.key === "cylinderRadius:#c0" && f.value === "0.750000"));
+
   const measured = profileProjection(
     envelope({ tool: "cad_measure", payload: { metric: "distance", value: 32.5, units: "mm" } }),
   );

@@ -29,6 +29,7 @@ import {
   reviseRequirements,
   route,
   transition,
+  validateAcceptanceAssertions,
   validateRequirementsRecord,
   waitForUser,
 } from "./state-machine.ts";
@@ -709,6 +710,8 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (await selectKernelEngine(ctx.cwd) === "v7") {
+        const assertionFailure = validateAcceptanceAssertions(params.must, params.assertions);
+        if (assertionFailure) return errTool(`invalid requirements record: ${assertionFailure}`);
         const inputFailure = validateInputDeclarations(params as unknown as CadRequirements, ctx.cwd);
         if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
         try {
@@ -802,6 +805,8 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (await selectKernelEngine(ctx.cwd) === "v7") {
         const { reason, routeAssessment, ...record } = params;
+        const assertionFailure = validateAcceptanceAssertions(record.must, record.assertions);
+        if (assertionFailure) return errTool(`invalid requirements record: ${assertionFailure}`);
         const inputFailure = validateInputDeclarations(record as unknown as CadRequirements, ctx.cwd);
         if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
         try {
