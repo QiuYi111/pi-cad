@@ -42,8 +42,9 @@ import {
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const HERE = fileURLToPath(new URL(".", import.meta.url));
+const HERE = resolve(process.env.PI_CAD_BENCH_DIR ?? fileURLToPath(new URL(".", import.meta.url)));
 const REPO = process.env.PI_CAD_REPO ?? resolve(HERE, "..", "..");
+const PRODUCTION_EXTENSIONS = JSON.parse(readFileSync(join(REPO, "package.json"), "utf-8")).pi.extensions;
 const PROVIDER = process.env.PI_CAD_PROVIDER ?? "openai-codex";
 const MODEL = process.env.PI_CAD_MODEL ?? "gpt-5.6-luna";
 const THINKING = process.env.PI_CAD_THINKING ?? "max";
@@ -194,11 +195,10 @@ function auditSession(sessionPath, sid) {
 // ---------------------------------------------------------------- pi runner
 
 function piArgs(prompt, sessionId) {
-  const ext = (name) => join(REPO, "src", "extensions", name, "index.ts");
   return [
     "-p", "--provider", PROVIDER, "--model", MODEL, "--thinking", THINKING,
     "--no-skills", "--no-themes", "--session-id", sessionId,
-    "-e", ext("core"), "-e", ext("geometry"), "-e", ext("visual"), "-e", ext("ui"),
+    ...PRODUCTION_EXTENSIONS.flatMap((path) => ["-e", join(REPO, path.replace(/^\.\//, ""))]),
     prompt,
   ];
 }
@@ -298,6 +298,19 @@ function clarificationDebt(workdir) {
 
 function resolveArtifact(workdir) {
   try {
+    const project = JSON.parse(readFileSync(join(workdir, ".pi-cad", "v7-project", "state.json"), "utf-8"));
+    const artifacts = Object.values(project.head?.artifacts ?? {});
+    const artifact = artifacts.find((item) => item.id === "candidate:authoritative" || /authoritative.*candidate|candidate.*design/i.test(item.role)) ?? artifacts[0];
+    const source = artifacts.find((item) => item.id === "candidate:source" || item.role === "candidate-source");
+    if (artifact?.path) {
+      return {
+        path: resolve(workdir, artifact.path),
+        source: source?.path ? resolve(workdir, source.path) : null,
+        origin: "v7-project.head.artifacts",
+      };
+    }
+  } catch { /* fall through */ }
+  try {
     const project = JSON.parse(readFileSync(join(workdir, ".pi-cad", "project.json"), "utf-8"));
     if (project.head?.artifactPath) {
       return {
@@ -308,6 +321,18 @@ function resolveArtifact(workdir) {
     }
   } catch { /* fall through */ }
   const run = latestRun(workdir);
+  if (run?.state?.artifacts) {
+    const artifacts = Object.values(run.state.artifacts);
+    const artifact = run.state.artifacts["candidate:authoritative"] ?? artifacts.find((item) => /authoritative.*candidate|candidate.*design/i.test(item.role)) ?? artifacts[0];
+    const source = run.state.artifacts["candidate:source"] ?? artifacts.find((item) => item.role === "candidate-source");
+    if (artifact?.path) {
+      return {
+        path: resolve(workdir, artifact.path),
+        source: source?.path ? resolve(workdir, source.path) : null,
+        origin: `runs.${run.runId}.artifacts`,
+      };
+    }
+  }
   if (run?.state?.currentArtifactPath) {
     const ap = run.state.currentArtifactPath;
     const sp = run.state.currentSourcePath;
@@ -429,7 +454,7 @@ const experiment = {
   agent: { provider: PROVIDER, model: MODEL, thinking: THINKING },
   harness: { piCadCommit: gitHead, branch: sh(["git", "-C", REPO, "rev-parse", "--abbrev-ref", "HEAD"]).trim(),
     piAgentVersion: piVersion,
-    extensions: ["core", "geometry", "visual", "ui"],
+    extensions: [...PRODUCTION_EXTENSIONS],
     isolation: "L1 vault + L2 per-sample staging + L3 per-session audit gate" },
   execution: { timeoutMs: TIMEOUT_MS, retries: RETRIES },
   sampleIds: idList,
