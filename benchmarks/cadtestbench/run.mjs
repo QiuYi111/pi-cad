@@ -102,6 +102,13 @@ function sensitivePaths() {
       out.push(join(resultsDir, name));
     }
   }
+  const extra = (process.env.PI_CAD_EXTRA_SENSITIVE_PATHS ?? "")
+    .split(":")
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => resolve(p))
+    .filter((p) => existsSync(p));
+  out.push(...extra);
   return out;
 }
 
@@ -114,7 +121,9 @@ function vaultEverything() {
     const tar = join(CACHE, `orig-${manifest.length}.tar.gz`);
     tarCreate(tar, parent, name);
     rmSync(p, { recursive: true, force: true });
-    manifest.push({ tar: relative(HERE, tar), dest: relative(HERE, p) });
+    const dest = relative(HERE, p);
+    const absolute = dest === ".." || dest.startsWith("../");
+    manifest.push({ tar: relative(HERE, tar), dest: absolute ? p : dest, absolute });
   }
   for (const d of ["staging", "archive", "tmp"]) mkdirSync(join(CACHE, d), { recursive: true });
   writeFileSync(join(CACHE, "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -134,9 +143,12 @@ function restoreVault() {
     }
     console.log(`preserved ${readdirSync(archiveDir).length} archived sample(s) in results/.recovered/`);
   }
-  for (const { tar, dest } of JSON.parse(readFileSync(mPath, "utf-8"))) {
-    const normalizedDest = dest.startsWith("/") ? dest.slice(1) : dest;
-    tarExtract(vaultTarPath(tar), resolve(HERE, normalizedDest, ".."));
+  for (const { tar, dest, absolute = false } of JSON.parse(readFileSync(mPath, "utf-8"))) {
+    // Old manifests accidentally wrote HERE-relative paths with a leading
+    // slash. New manifests mark genuinely absolute external paths explicitly.
+    const normalizedDest = !absolute && dest.startsWith("/") ? dest.slice(1) : dest;
+    const target = absolute ? normalizedDest : resolve(HERE, normalizedDest);
+    tarExtract(vaultTarPath(tar), resolve(target, ".."));
     console.log(`restored ${dest}`);
   }
   rmSync(CACHE, { recursive: true, force: true });
@@ -145,7 +157,7 @@ function restoreVault() {
 
 // ---------------------------------------------------------------- audit (L3)
 
-const TOOLCHAIN_RX = /\/(src|node_modules|\.python|python|\.venv|ref|tests|scripts|assets|build)\//;
+const TOOLCHAIN_RX = /\/(src|node_modules|\.python|python|\.venv|ref|tests|scripts|assets|skills|recipes|build)\//;
 
 function auditSession(sessionPath, sid) {
   const flags = [];

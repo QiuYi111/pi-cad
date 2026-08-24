@@ -4,7 +4,15 @@ import { fileURLToPath } from "node:url";
 import { createRegistrySet, type Registration, type RegistrySet } from "../../harness/registry.ts";
 import { CadStartParamsSchema } from "../../harness/kernel.ts";
 
-export const mechanicalRegistries: RegistrySet = createRegistrySet();
+// Pi loads each configured extension independently. Some loaders therefore
+// evaluate this module more than once even though all extensions share one
+// process. Keep the registry on globalThis so every Mechanical Pack action
+// contributes to the same contract set before a workflow is compiled.
+const MECHANICAL_REGISTRIES_KEY = Symbol.for("pi-cad.mechanical-registries.v7");
+const sharedGlobal = globalThis as unknown as Record<PropertyKey, unknown>;
+export const mechanicalRegistries: RegistrySet =
+  (sharedGlobal[MECHANICAL_REGISTRIES_KEY] as RegistrySet | undefined) ?? createRegistrySet();
+sharedGlobal[MECHANICAL_REGISTRIES_KEY] = mechanicalRegistries;
 
 function staticRegistration(id: string, schema: unknown, semantics: unknown): Registration {
   return { id, contract: { version: "1.0.0", schema: schema as never, semantics: semantics as never } };
@@ -20,7 +28,7 @@ const genericActions = {
 } as const;
 
 for (const [id, meaning] of Object.entries(genericActions)) {
-  mechanicalRegistries.actions.register(staticRegistration(
+  mechanicalRegistries.actions.registerIdempotent(staticRegistration(
     id,
     { input: id === "cad_start" ? CadStartParamsSchema : { type: "object", additionalProperties: false }, output: id === "cad_start" ? { protocol: "pi-tool-result-v1", failClosed: true } : { protocol: "kernel-mutation-result-v1" } },
     { owner: "kernel", mutation: "transactional", meaning },
@@ -28,7 +36,7 @@ for (const [id, meaning] of Object.entries(genericActions)) {
 }
 
 for (const id of ["read", "grep", "find", "ls", "bash", "edit", "write"]) {
-  mechanicalRegistries.actions.register(staticRegistration(
+  mechanicalRegistries.actions.registerIdempotent(staticRegistration(
     id,
     { input: { protocol: `pi-host-tool/${id}` }, output: { protocol: "pi-tool-result-v1" } },
     { owner: "pi-host", mutation: ["edit", "write", "bash"].includes(id) ? "phase-guarded" : "read-only", meaning: `Host ${id} tool governed by Kernel grants and write scopes.` },
@@ -70,12 +78,12 @@ for (const [id, descriptor] of Object.entries(grants)) {
               : id === "route" || id === "reroute" || id === "transition" || id === "wait_for_user" ? ["run:state"]
                 : id === "finish" ? ["run:state", "project:head"]
                   : [];
-  mechanicalRegistries.grants.register(staticRegistration(id, { tools: descriptor.tools, maxWriteScopes }, descriptor));
+  mechanicalRegistries.grants.registerIdempotent(staticRegistration(id, { tools: descriptor.tools, maxWriteScopes }, descriptor));
 }
 
 const simple = (kind: keyof Pick<RegistrySet, "hooks" | "contextProviders" | "reviewProfiles" | "recordTypes" | "evidenceTypes" | "recipeKinds">, ids: Record<string, unknown>) => {
   for (const [id, semantics] of Object.entries(ids)) {
-    mechanicalRegistries[kind].register(staticRegistration(id, { protocol: `${kind}-v1` }, semantics));
+    mechanicalRegistries[kind].registerIdempotent(staticRegistration(id, { protocol: `${kind}-v1` }, semantics));
   }
 };
 
@@ -103,7 +111,7 @@ simple("recordTypes", {
 });
 
 for (const id of ["visual", "geometry", "surfaces", "build", "compare", "section", "drawing", "simulation", "presentation", "convert", "assembly", "interference", "sections", "optimization"]) {
-  mechanicalRegistries.evidenceTypes.register(staticRegistration(id, { protocol: "evidence-ref-v1" }, { freshness: "subject-and-declared-input-hashes", explicitCommit: id === "simulation" }));
+  mechanicalRegistries.evidenceTypes.registerIdempotent(staticRegistration(id, { protocol: "evidence-ref-v1" }, { freshness: "subject-and-declared-input-hashes", explicitCommit: id === "simulation" }));
 }
 
 simple("recipeKinds", {
@@ -117,13 +125,13 @@ simple("recipeKinds", {
 const runtimeRegistry = JSON.parse(readFileSync(fileURLToPath(new URL("../../../assets/simulation-runtimes.json", import.meta.url)), "utf-8")) as { schema: number; runtimes: Array<Record<string, unknown>> };
 for (const runtime of runtimeRegistry.runtimes) {
   const id = `${String(runtime.backend)}/${String(runtime.runtime)}`;
-  mechanicalRegistries.runtimeProfiles.register(staticRegistration(
+  mechanicalRegistries.runtimeProfiles.registerIdempotent(staticRegistration(
     id,
     { registrySchema: runtimeRegistry.schema, availabilityManifestSchema: 1, identityDigest: "sha256" },
     runtime,
   ));
 }
-mechanicalRegistries.runtimeProfiles.register(staticRegistration(
+mechanicalRegistries.runtimeProfiles.registerIdempotent(staticRegistration(
   "pi-cad/cadctl-0.9",
   { registrySchema: 1, identityDigest: "sha256" },
   { owner: "mechanical-pack", launcher: "bubblewrap", network: "none", runtime: "cadctl-0.9", limits: { cpu: 8, memoryGiB: 24, tasks: 1024, wallHours: 4, workspaceGiB: 16 } },
