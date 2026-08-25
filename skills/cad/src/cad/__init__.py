@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Prime-native Python surface for Pi-CAD Plan C."""
+
 from pathlib import Path
 from typing import Any
 

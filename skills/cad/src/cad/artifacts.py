@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Small artifact reference helpers for the Prime-facing CAD skill."""
+
 import hashlib
 from pathlib import Path
 

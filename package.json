@@ -29,11 +29,13 @@
     ]
   },
   "scripts": {
+    "prime:plan-c": "node scripts/prime-plan-c.mjs",
     "generate:agent-contract": "node scripts/generate-agent-contract.mjs",
     "check:agent-contract": "node scripts/generate-agent-contract.mjs --check",
     "test": "npm run check:agent-contract && bash scripts/test.sh",
     "test:py": "bash scripts/test.sh",
     "test:ts": "node tests/run-ts-tests.mjs",
+    "test:prime": "node tests/run-prime-tests.mjs",
     "test:openfoam14": "node scripts/qualify-openfoam14.mjs",
     "test:torch-fem-cuda": "node scripts/qualify-torch-fem-cuda.mjs",
     "test:su2": "node scripts/qualify-su2-8.5.0.mjs",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,13 +24,15 @@ class SimulationResult:
 
 @dataclass(frozen=True, repr=False)
 class SimulationJob:
-    _result: SimulationResult
+    _task: asyncio.Task[dict[str, Any]]
 
     def __repr__(self) -> str:
-        return f"SimulationJob(run_id={self._result.run_id!r}, status='completed')"
+        status = "completed" if self._task.done() and not self._task.cancelled() else "running"
+        return f"SimulationJob(status={status!r})"
 
     async def result(self) -> SimulationResult:
-        return self._result
+        payload = await self._task
+        return SimulationResult(payload["runId"], payload["recipeId"], payload["computeIdentity"], payload["observation"])
 
 
 async def run(*, subject: Any = None, recipe: str, obligation_ref: str | None = None, outputs: list[str] | None = None, action: str | None = None) -> SimulationJob:
@@ -37,5 +40,5 @@ async def run(*, subject: Any = None, recipe: str, obligation_ref: str | None = 
     # Agent API but must already be declared by the Recipe rather than patched
     # into it by this adapter.
     del subject
-    payload = await request("simulation-run", recipe=recipe, obligationRef=obligation_ref, outputs=outputs, action=action)
-    return SimulationJob(SimulationResult(payload["runId"], payload["recipeId"], payload["computeIdentity"], payload["observation"]))
+    task = asyncio.create_task(request("simulation-run", recipe=recipe, obligationRef=obligation_ref, outputs=outputs, action=action))
+    return SimulationJob(task)

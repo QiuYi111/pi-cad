@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Compact, provenance-bearing references returned to Prime IPython."""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +18,12 @@ class ArtifactRef:
         return f"ArtifactRef(id='{digest}', role={self.role!r}, path={str(self.path)!r})"
 
     def __cad_snapshot__(self) -> dict[str, Any]:
-        return {"kind": "artifact", "path": str(self.path), "sha256": self.sha256, "role": self.role}
+        return {
+            "kind": "artifact",
+            "path": str(self.path),
+            **({"sha256": self.sha256} if self.sha256 is not None else {}),
+            "role": self.role,
+        }
 
 
 @dataclass(frozen=True, repr=False)

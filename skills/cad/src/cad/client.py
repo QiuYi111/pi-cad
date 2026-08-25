@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Stateless JSON bridge used by the Prime kernel package."""
+
 import asyncio
 import json
 import os

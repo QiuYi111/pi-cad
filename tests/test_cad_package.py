@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import dataclasses
+import ast
+import asyncio
+import importlib
+import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 import cad
 from cad.snapshot import SnapshotError
@@ -27,11 +34,16 @@ class CadPackageTests(unittest.TestCase):
         self.assertEqual(encoded["codec"], "dataclass")
         self.assertEqual(cad.snapshot.registry.decode(encoded), {"name": "part", "count": 2})
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "spec.md"
+            root = Path(directory)
+            path = root / "spec.md"
             path.write_text("v1")
-            path_snapshot = cad.snapshot.registry.encode(path)
-            self.assertEqual(path_snapshot["codec"], "path")
-            self.assertEqual(len(path_snapshot["value"]["contentSha256"]), 64)
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}):
+                path_snapshot = cad.snapshot.registry.encode(Path("spec.md"))
+                self.assertEqual(path_snapshot["codec"], "path")
+                self.assertEqual(path_snapshot["value"]["path"], "spec.md")
+                self.assertEqual(len(path_snapshot["value"]["contentSha256"]), 64)
+                with self.assertRaisesRegex(SnapshotError, "escapes the project root"):
+                    cad.snapshot.registry.encode(root.parent / "outside.md")
         import numpy as np
         array = np.asarray([[1, 2], [3, 4]], dtype="int32")
         self.assertTrue((cad.snapshot.registry.decode(cad.snapshot.registry.encode(array)) == array).all())
@@ -79,6 +91,95 @@ class CadPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(TypeError, "does not capture closures"):
             import asyncio
             asyncio.run(closure_probe())
+
+    def test_probe_arguments_cross_as_json_literals(self) -> None:
+        probe_module = importlib.import_module("cad.probe")
+
+        @cad.probe(subject="current")
+        def literal_probe(shape, label):
+            return {"label": label, "solids": len(shape.solids())}
+
+        payload = '"; __import__("os").system("false") #'
+        mocked = AsyncMock(return_value={"value": {"label": payload}})
+        with patch.object(probe_module, "request", mocked):
+            asyncio.run(literal_probe(label=payload))
+        code = mocked.await_args.kwargs["code"]
+        assignment = ast.parse(code).body[-1]
+        self.assertIsInstance(assignment, ast.Assign)
+        keyword = assignment.value.keywords[-1]
+        self.assertIsInstance(keyword.value, ast.Constant)
+        self.assertEqual(keyword.value.value, payload)
+
+    def test_probe_accepts_artifact_ref_subject(self) -> None:
+        probe_module = importlib.import_module("cad.probe")
+        artifact = cad.ArtifactRef(Path("build/part.step"), "a" * 64, "candidate")
+
+        @cad.probe(subject=artifact, purpose="detached artifact")
+        def artifact_probe(shape):
+            return {"solids": len(shape.solids())}
+
+        mocked = AsyncMock(return_value={"value": {"solids": 1}})
+        with patch.object(probe_module, "request", mocked):
+            self.assertEqual(asyncio.run(artifact_probe()), {"solids": 1})
+        self.assertEqual(mocked.await_args.kwargs["subject"], {
+            "kind": "artifact", "path": "build/part.step", "sha256": "a" * 64, "role": "candidate",
+        })
+
+    def test_model_build_returns_hashed_artifact_ref(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "part.step"
+            output.write_bytes(b"STEP")
+            envelope = {
+                "ok": True,
+                "artifacts": [{"path": str(output), "kind": "step", "sha256": "b" * 64}],
+                "outputHashes": {str(output): "b" * 64},
+            }
+            with patch.object(model_module, "request", AsyncMock(return_value=envelope)):
+                artifact = asyncio.run(cad.model.build("part.py", output))
+            self.assertEqual(artifact.sha256, "b" * 64)
+            self.assertEqual(artifact.path, output)
+
+    def test_model_build_fails_on_inner_backend_error(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        envelope = {"ok": False, "artifacts": [], "payload": {"error": "No module named cadquery"}}
+        with patch.object(model_module, "request", AsyncMock(return_value=envelope)):
+            with self.assertRaisesRegex(cad.CadApiError, "No module named cadquery"):
+                asyncio.run(cad.model.build("part.py", "build/part.step"))
+
+    def test_review_submit_is_an_ordinary_rlm_template(self) -> None:
+        self.assertFalse(hasattr(cad.review, "current"))
+        fake_rlm = ModuleType("rlm")
+        handle = SimpleNamespace(rlm_child_id="child-1", name="reviewer")
+        fake_rlm.run = AsyncMock(return_value=handle)
+        commit_id = "commit-" + "a" * 32
+        with patch.dict(sys.modules, {"rlm": fake_rlm}):
+            returned = asyncio.run(cad.review.submit(commit_id))
+        self.assertIs(returned, handle)
+        prompt = fake_rlm.run.await_args.args[0]
+        self.assertIn(commit_id, prompt)
+        self.assertIn("await cad.load", prompt)
+        self.assertIn("agent_message", prompt)
+        self.assertNotIn("transcript import", prompt.lower())
+
+    def test_simulation_run_returns_a_real_pending_job(self) -> None:
+        simulation_module = importlib.import_module("cad.simulation")
+
+        async def scenario() -> None:
+            release = asyncio.Event()
+
+            async def fake_request(*_args, **_kwargs):
+                await release.wait()
+                return {"runId": "run-1", "recipeId": "thermal", "computeIdentity": "b" * 64, "observation": {"exports": []}}
+
+            with patch.object(simulation_module, "request", fake_request):
+                job = await cad.simulation.run(recipe="thermal.yaml")
+                self.assertIn("running", repr(job))
+                release.set()
+                result = await job.result()
+                self.assertEqual(result.run_id, "run-1")
+
+        asyncio.run(scenario())
 
 
 if __name__ == "__main__":

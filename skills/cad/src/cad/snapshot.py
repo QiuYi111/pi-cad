@@ -3,6 +3,8 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -72,10 +74,18 @@ class SnapshotRegistry:
         if _is_json(value):
             return "json", _json_value(value), None
         if isinstance(value, Path):
-            payload: dict[str, Any] = {"path": value.as_posix(), "exists": value.exists()}
-            if value.is_file():
-                payload["contentSha256"] = hashlib.sha256(value.read_bytes()).hexdigest()
-            elif value.exists():
+            root = Path(os.environ.get("PI_CAD_PROJECT_CWD", os.getcwd())).resolve()
+            if os.name == "nt" or re.match(r"^[A-Za-z]:[\\/]", str(value)):
+                raise SnapshotError("Path snapshots require Linux/WSL path semantics")
+            resolved = (value if value.is_absolute() else root / value).resolve()
+            try:
+                relative = resolved.relative_to(root)
+            except ValueError as error:
+                raise SnapshotError(f"Path snapshot escapes the project root: {value}") from error
+            payload: dict[str, Any] = {"path": relative.as_posix(), "exists": resolved.exists()}
+            if resolved.is_file():
+                payload["contentSha256"] = hashlib.sha256(resolved.read_bytes()).hexdigest()
+            elif resolved.exists():
                 raise SnapshotError("directory Path snapshots are not supported implicitly")
             return "path", payload, None
         if dataclasses.is_dataclass(value) and not isinstance(value, type):

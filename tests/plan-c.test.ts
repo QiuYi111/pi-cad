@@ -100,6 +100,36 @@ test("Python-facing probe bridge stays inside the existing fenced programmable b
     assert.equal((result as any).value.solids, 1);
     assert.match((result as any).artifactHash, /^[a-f0-9]{64}$/);
     assert.match((result as any).scriptHash, /^[a-f0-9]{64}$/);
+
+    const detached = "detached.step";
+    await copyFile(resolve(import.meta.dirname, "fixtures", "section_box.step"), join(cwd, detached));
+    const detachedBytes = await import("node:fs/promises").then(({ readFile }) => readFile(join(cwd, detached)));
+    const detachedHash = createHash("sha256").update(detachedBytes).digest("hex");
+    const direct = await handleAgentApi(cwd, {
+      schema: 1, op: "probe",
+      subject: { kind: "artifact", path: detached, sha256: detachedHash, role: "candidate" },
+      purpose: "probe an unbound ArtifactRef",
+      code: "result = {'solids': len(shape.solids())}",
+    });
+    assert.equal((direct as any).value.solids, 1);
+    assert.equal((direct as any).artifactHash, detachedHash);
+
+    await assert.rejects(
+      handleAgentApi(cwd, {
+        schema: 1, op: "probe",
+        subject: { kind: "artifact", path: detached, sha256: "0".repeat(64) },
+        purpose: "reject stale ref", code: "result = 1",
+      }),
+      /ArtifactRef hash mismatch/,
+    );
+    await assert.rejects(
+      handleAgentApi(cwd, {
+        schema: 1, op: "probe",
+        subject: { kind: "artifact", path: resolve(import.meta.dirname, "fixtures", "section_box.step") },
+        purpose: "reject escape", code: "result = 1",
+      }),
+      /escapes the project root/,
+    );
     await assert.rejects(
       handleAgentApi(cwd, { schema: 1, op: "probe", subject: "current", purpose: "blocked filesystem", code: "result = open('/tmp/nope')" }),
       /NameError|failed/i,

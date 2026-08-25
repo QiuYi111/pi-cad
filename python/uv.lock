@@ -604,6 +604,7 @@ dependencies = [
     { name = "build123d" },
     { name = "ezdxf" },
     { name = "numpy" },
+    { name = "pi-cad-prime-skill" },
     { name = "pillow" },
 ]
 
@@ -626,12 +627,18 @@ requires-dist = [
     { name = "meshio", marker = "extra == 'simulation'", specifier = ">=5.3" },
     { name = "nlopt", marker = "extra == 'simulation'", specifier = ">=2.7" },
     { name = "numpy", specifier = ">=2.0" },
+    { name = "pi-cad-prime-skill", directory = "../skills/cad" },
     { name = "pillow", specifier = ">=11" },
     { name = "pyvista", marker = "extra == 'simulation'", specifier = ">=0.44" },
     { name = "torch", marker = "extra == 'simulation'", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torch-fem", marker = "extra == 'simulation'", specifier = ">=0.7" },
 ]
 provides-extras = ["simulation"]
+
+[[package]]
+name = "pi-cad-prime-skill"
+version = "0.9.0"
+source = { directory = "../skills/cad" }
 
 [[package]]
 name = "pillow"

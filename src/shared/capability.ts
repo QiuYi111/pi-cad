@@ -37,7 +37,12 @@ export function pythonInvocation(extra?: "simulation", _cwd?: string): { command
 /** Minimal host environment for spawning the uv-managed cadctl process. */
 export function cadctlEnv(cwd?: string): NodeJS.ProcessEnv {
   assertLinuxRuntime("Pi-CAD cadctl capability");
-  return { ...process.env, ...(cwd ? { PI_CAD_INVOCATION_CWD: resolve(cwd) } : {}) };
+  const env = { ...process.env, NO_COLOR: "1", ...(cwd ? { PI_CAD_INVOCATION_CWD: resolve(cwd) } : {}) };
+  // cadctl stdout is a JSON transport. Prime and terminal hosts may set
+  // FORCE_COLOR globally, which lets dependency diagnostics inject ANSI
+  // bytes ahead of the envelope and makes the bridge unparsable.
+  delete env.FORCE_COLOR;
+  return env;
 }
 
 export interface CadctlOptions {

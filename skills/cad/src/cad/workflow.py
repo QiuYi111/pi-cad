@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Procedural workflow projection and transition helpers."""
+
 from typing import Any
 
 from .client import request

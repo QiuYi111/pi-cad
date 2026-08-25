@@ -33,6 +33,7 @@ test("runtime has one Linux process boundary and no Windows-host bridge", async 
         "src/shared/process-runner.ts",
         "scripts/postinstall.mjs",
         "scripts/install-blender.mjs",
+        "scripts/prime-plan-c.mjs",
       ]);
       const repositoryPath = relative(root, path).replaceAll("\\", "/");
       assert.ok(repositoryPath.startsWith("benchmarks/") || allowed.has(repositoryPath), `uncontrolled process API import: ${relative(root, path)}`);

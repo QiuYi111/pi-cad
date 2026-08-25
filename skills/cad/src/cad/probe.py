@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import textwrap
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from .client import request
-from .refs import ProbeResult
+from .refs import ArtifactRef, ProbeResult
 
 
 def _captured_source(function: Callable[..., Any]) -> str:
@@ -27,7 +28,7 @@ def _captured_source(function: Callable[..., Any]) -> str:
 @dataclass(frozen=True, repr=False)
 class ProbeProgram:
     function: Callable[..., Any]
-    subject: str
+    subject: str | ArtifactRef
     purpose: str
     source: str
 
@@ -49,18 +50,23 @@ class ProbeProgram:
             if name in preloaded:
                 call_items.append(f"{name}={name}")
             elif name in arguments:
-                call_items.append(f"{name}={arguments[name]!r}")
+                try:
+                    encoded = json.dumps(arguments[name], ensure_ascii=False, allow_nan=False)
+                except (TypeError, ValueError) as error:
+                    raise TypeError(f"probe argument {name!r} must be JSON-serializable") from error
+                call_items.append(f"{name}={encoded}")
         code = f"{self.source}\nresult = {self.function.__name__}({', '.join(call_items)})"
-        payload = await request("probe", subject=self.subject, purpose=self.purpose, code=code)
+        subject = self.subject.__cad_snapshot__() if isinstance(self.subject, ArtifactRef) else self.subject
+        payload = await request("probe", subject=subject, purpose=self.purpose, code=code)
         return ProbeResult(payload["value"], payload.get("artifactHash"), payload.get("scriptHash"), payload.get("observationId"))
 
     async def __call__(self, **arguments: Any) -> Any:
         return (await self.result(**arguments)).value
 
 
-def probe(*, subject: str = "current", purpose: str = "") -> Callable[[Callable[..., Any]], ProbeProgram]:
-    if subject not in {"current", "baseline"}:
-        raise ValueError("cad.probe subject must be 'current' or 'baseline' in the controlled v7 runtime")
+def probe(*, subject: str | ArtifactRef = "current", purpose: str = "") -> Callable[[Callable[..., Any]], ProbeProgram]:
+    if not isinstance(subject, ArtifactRef) and subject not in {"current", "baseline"}:
+        raise ValueError("cad.probe subject must be 'current', 'baseline', or an ArtifactRef")
 
     def decorate(function: Callable[..., Any]) -> ProbeProgram:
         return ProbeProgram(function, subject, purpose or function.__name__.replace("_", " "), _captured_source(function))

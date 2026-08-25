@@ -1,0 +1,71 @@
+schema: 1
+id: benchmark/prime-plan-c-cad-task
+version: 1.0.0
+parametersSchema: {}
+initialPhase: design
+phases:
+  design:
+    purpose: Build and verify the requested CAD artifact.
+    guidance: |
+      Work in the Prime IPython workspace through the small cad API.
+      Keep task-specific geometry checks in Python and commit only stable results.
+      Submit the immutable candidate commit for an independent ordinary-RLM review.
+    actions:
+      - cad_commit
+      - transition
+    grants:
+      - transition
+    writeScopes:
+      - run:state
+    recordObligations:
+      - ref: candidate
+        type: workspace_commit
+        closeWith: cad_commit
+    evidenceObligations: []
+    contextProviders:
+      - kernel.current-action
+    hooks: []
+    transitions:
+      submitted:
+        target: review
+        requiresPhaseObligations: true
+  review:
+    purpose: Obtain an independent review of the immutable candidate handoff.
+    guidance: |
+      The Fresh Reviewer is an ordinary Prime RLM child, not a special runtime.
+      Review the committed artifacts and affirmative task-specific evidence.
+      A missing or contradictory check cannot produce PASS.
+    actions:
+      - cad_commit
+      - transition
+    grants:
+      - transition
+    writeScopes:
+      - run:state
+    recordObligations:
+      - ref: independent-review
+        type: workspace_commit
+        closeWith: cad_commit
+    evidenceObligations: []
+    contextProviders:
+      - kernel.current-action
+    hooks: []
+    transitions:
+      accepted:
+        target: done
+        requiresPhaseObligations: true
+  done:
+    purpose: Report the reviewed CAD delivery.
+    guidance: Report only the committed source, STEP artifact, and checks that actually ran.
+    actions:
+      - read
+    grants:
+      - file_read
+    writeScopes: []
+    recordObligations: []
+    evidenceObligations: []
+    contextProviders:
+      - kernel.current-action
+    hooks: []
+    transitions: {}
+    terminal: true

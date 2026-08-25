@@ -3,6 +3,9 @@ import { createJiti } from "jiti";
 // Legacy behavior tests are explicit v6 compatibility gates. Individual v7
 // tests call the v7 services directly or override this variable.
 process.env.PI_CAD_KERNEL ??= "v6";
+// Python subprocesses import the canonical Plan C skill directly from its
+// source tree. Test execution must never leave bytecode inside a packaged skill.
+process.env.PYTHONDONTWRITEBYTECODE ??= "1";
 
 const jiti = createJiti(import.meta.url, { moduleCache: false });
 await jiti.import("./state-machine.test.ts", { default: true });

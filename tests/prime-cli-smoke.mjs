@@ -1,0 +1,116 @@
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+
+const project = resolve(import.meta.dirname, "..");
+const primeRoot = resolve(process.env.PRIME_AGENT_REPO ?? resolve(project, "../prime-agent-plan-c-upstream"));
+const tsx = join(primeRoot, "node_modules/.bin/tsx");
+const fixture = mkdtempSync(join(tmpdir(), "prime-plan-c-cli-"));
+try {
+  const setup = spawnSync(tsx, [join(project, "tests/setup-prime-plan-c-fixture.ts"), fixture], {
+    cwd: project,
+    encoding: "utf8",
+    env: { ...process.env, PI_CAD_REPO: project },
+  });
+  assert.equal(setup.status, 0, setup.stderr);
+
+  const capture = join(fixture, "provider-contexts.jsonl");
+  const primeEnv = { ...process.env };
+  delete primeEnv.HTTP_PROXY;
+  delete primeEnv.HTTPS_PROXY;
+  delete primeEnv.ALL_PROXY;
+  const run = spawnSync(process.execPath, [
+    join(project, "scripts/prime-plan-c.mjs"),
+    "--extension", join(project, "tests/fixtures/prime-faux-ipython-extension.ts"),
+    "--daemon-socket", join(fixture, "daemon.sock"),
+    "--provider", "faux",
+    "--model", "faux",
+    "--no-session",
+    "--mode", "json",
+    "--print", "Exercise the Plan C Prime kernel boundary.",
+  ], {
+    cwd: project,
+    encoding: "utf8",
+    timeout: 180_000,
+    env: {
+      ...primeEnv,
+      PRIME_AGENT_REPO: primeRoot,
+      PRIME_AGENT_CODING_AGENT_DIR: join(fixture, "prime-agent"),
+      PRIME_AGENT_SESSION_DIR: join(fixture, "sessions"),
+      PRIME_AGENT_KERNEL_VENV: process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(homedir(), ".prime-plan-c/test-kernel-venv"),
+      PRIME_PLAN_C_CAPTURE: capture,
+      PI_OFFLINE: "0",
+      NO_PROXY: "pypi.org,files.pythonhosted.org,registry.npmjs.org",
+      PI_CAD_PROJECT_CWD: fixture,
+      PI_CAD_REPO: project,
+    },
+  });
+  assert.equal(run.status, 0, `${run.stderr}\n${run.stdout}`);
+  const contexts = readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.match(JSON.stringify(contexts[0]), /<name>cad<\/name>/);
+  const events = run.stdout.trim().split("\n").map((line) => JSON.parse(line));
+  const toolEnds = events.filter((event) => event.type === "tool_execution_end");
+  const toolText = toolEnds.flatMap((event) => event.result?.content ?? []).filter((item) => item.type === "text").map((item) => item.text).join("\n");
+  assert.ok(toolEnds.every((event) => event.isError !== true), toolText);
+  assert.match(toolText, /CAD_IMPORT/);
+  assert.match(toolText, /CAD_COMMIT[^\n]*commit-[a-f0-9]{32}/);
+  assert.match(toolText, /CAD_LOAD[^\n]*41/);
+  assert.match(toolText, /CAD_PERSIST[^\n]*42/);
+  assert.ok(events.some((event) => event.type === "message_end" && JSON.stringify(event.message).includes("PRIME_PLAN_C_SMOKE_OK")));
+
+  assert.equal(contexts.length, 3);
+  const firstCard = JSON.stringify(contexts[0]);
+  const laterCards = contexts.slice(1).map((context) => JSON.stringify(context));
+  assert.match(firstCard, /commit\/evidence: provider-handoff/);
+  assert.doesNotMatch(firstCard, /commit\/record: provider-handoff@/);
+  for (const card of laterCards) {
+    assert.match(card, /commit\/record: provider-handoff@/);
+    assert.doesNotMatch(card, /commit\/evidence: provider-handoff/);
+  }
+  const imageBase64 = readFileSync(join(fixture, "mandatory.png")).toString("base64");
+  for (const context of contexts) {
+    const rendered = JSON.stringify(context);
+    assert.equal(rendered.split("DESIGN — Prime provider boundary").length - 1, 1);
+    assert.doesNotMatch(rendered, /PLAN_C_ORDINARY_CANARY_MUST_STAY_OUT/);
+    const images = context.messages.flatMap((message) => Array.isArray(message.content) ? message.content : []).filter((item) => item.type === "image");
+    assert.equal(images.length, 1, JSON.stringify(context.messages.map((message) => ({ role: message.role, content: Array.isArray(message.content) ? message.content.map((item) => item.type) : typeof message.content }))));
+    assert.equal(images[0].data, imageBase64);
+  }
+
+  const crossCapture = join(fixture, "provider-contexts-cross.jsonl");
+  const cross = spawnSync(process.execPath, [
+    join(project, "scripts/prime-plan-c.mjs"),
+    "--extension", join(project, "tests/fixtures/prime-faux-ipython-extension.ts"),
+    "--daemon-socket", join(fixture, "daemon-cross.sock"),
+    "--provider", "faux",
+    "--model", "faux",
+    "--no-session",
+    "--mode", "json",
+    "--print", "Load the existing Plan C commit in a new Prime session.",
+  ], {
+    cwd: project,
+    encoding: "utf8",
+    timeout: 180_000,
+    env: {
+      ...primeEnv,
+      PRIME_AGENT_REPO: primeRoot,
+      PRIME_AGENT_CODING_AGENT_DIR: join(fixture, "prime-agent-cross"),
+      PRIME_AGENT_SESSION_DIR: join(fixture, "sessions-cross"),
+      PRIME_AGENT_KERNEL_VENV: process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(homedir(), ".prime-plan-c/test-kernel-venv"),
+      PRIME_PLAN_C_CAPTURE: crossCapture,
+      PRIME_PLAN_C_FAUX_MODE: "load",
+      PI_OFFLINE: "0",
+      NO_PROXY: "pypi.org,files.pythonhosted.org,registry.npmjs.org",
+      PI_CAD_PROJECT_CWD: fixture,
+      PI_CAD_REPO: project,
+    },
+  });
+  assert.equal(cross.status, 0, `${cross.stderr}\n${cross.stdout}`);
+  const crossEvents = cross.stdout.trim().split("\n").map((line) => JSON.parse(line));
+  const crossToolText = crossEvents.filter((event) => event.type === "tool_execution_end").flatMap((event) => event.result?.content ?? []).filter((item) => item.type === "text").map((item) => item.text).join("\n");
+  assert.match(crossToolText, /CAD_CROSS_SESSION[^\n]*commit-[a-f0-9]{32}[^\n]*41/);
+} finally {
+  rmSync(fixture, { recursive: true, force: true });
+}

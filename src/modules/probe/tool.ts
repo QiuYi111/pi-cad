@@ -1,4 +1,7 @@
 import { Type } from "typebox";
+import { createHash } from "node:crypto";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { probePython } from "../../shared/capability.ts";
 import { CadProjectStore } from "../../shared/store.ts";
@@ -9,6 +12,7 @@ import { selectKernelEngine } from "../../harness/engine-router.ts";
 import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
 import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
 import { recordObservationV7 } from "../../harness/observations.ts";
+import type { AgentArtifactSubject } from "../../agent-api/protocol.ts";
 
 export const CAD_PROBE_PRESET_NAMES = {
   visual: "visual",
@@ -85,7 +89,7 @@ export const CadRecallObservationParametersSchema = Type.Object(
 export interface CadProbeParams {
   preset: (typeof CAD_PROBE_PRESET_NAMES)[keyof typeof CAD_PROBE_PRESET_NAMES];
   args?: Record<string, unknown>;
-  subject?: "current" | "baseline";
+  subject?: "current" | "baseline" | AgentArtifactSubject;
   purpose?: string;
   code?: string;
 }
@@ -112,9 +116,10 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
   if (!params.subject && !args.artifact && params.preset !== "compare") {
     return { content: [{ type: "text" as const, text: "cad_probe failed: provide exactly one target via subject=current|baseline or args.artifact" }] };
   }
-  const targetSource = typeof args.artifact === "string" ? "explicit" : params.subject ?? "current";
+  const direct = params.subject && typeof params.subject !== "string" ? await resolveArtifactSubject(cwd, params.subject) : null;
+  const targetSource = typeof args.artifact === "string" ? "explicit" : direct ? "artifact-ref" : params.subject ?? "current";
   if (!args.artifact && params.subject) {
-    const resolved = await resolveSubjectArtifact(cwd, params.subject);
+    const resolved = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline");
     if (resolved) args.artifact = resolved;
   }
   if (!args.artifact && !args.before) {
@@ -127,6 +132,12 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
   }
   applyPresetDefaults(params.preset, args);
   const result = await preset.run(args as never, { cwd });
+  if (direct?.expectedHash && result.envelope.inputHashes.artifact !== direct.expectedHash) {
+    return {
+      content: [{ type: "text" as const, text: `cad_probe failed: ArtifactRef changed while probing ${params.subject && typeof params.subject !== "string" ? params.subject.path : args.artifact}` }],
+      details: { presetFailed: true, envelope: result.envelope },
+    };
+  }
   const resolvedSubjects = params.preset === "compare"
     ? [
         { source: "before", path: String(args.before), sha256: result.envelope.inputHashes.before },
@@ -163,29 +174,61 @@ async function resolveSubjectArtifact(
   return (subject ?? "current") === "current" ? state.currentArtifactPath ?? null : state.baselineArtifactPath ?? null;
 }
 
+function inside(root: string, candidate: string): boolean {
+  const path = relative(resolve(root), resolve(candidate));
+  return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+}
+
+async function resolveArtifactSubject(cwd: string, subject: AgentArtifactSubject): Promise<{ path: string; expectedHash?: string }> {
+  if (subject.kind !== "artifact" || typeof subject.path !== "string" || !subject.path.trim()) {
+    throw new Error("cad.probe ArtifactRef subject requires a non-empty path");
+  }
+  if (/^[a-zA-Z]:[\\/]/.test(subject.path)) throw new Error("cad.probe ArtifactRef uses Linux/WSL paths; Windows paths are rejected");
+  if (subject.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(subject.sha256)) {
+    throw new Error("cad.probe ArtifactRef sha256 must be 64 lowercase hexadecimal characters");
+  }
+  const root = await realpath(cwd);
+  const requested = isAbsolute(subject.path) ? subject.path : resolve(root, subject.path);
+  const path = await realpath(requested);
+  if (!inside(root, path)) throw new Error(`cad.probe ArtifactRef escapes the project root: ${subject.path}`);
+  if (subject.sha256) {
+    const actual = createHash("sha256").update(await readFile(path)).digest("hex");
+    if (actual !== subject.sha256) throw new Error(`cad.probe ArtifactRef hash mismatch for ${subject.path}`);
+  }
+  return { path: relative(root, path).replaceAll("\\", "/"), ...(subject.sha256 ? { expectedHash: subject.sha256 } : {}) };
+}
+
 async function runPythonProbe(
   cwd: string,
-  params: { subject: "current" | "baseline"; purpose: string; code: string },
+  params: { subject: "current" | "baseline" | AgentArtifactSubject; purpose: string; code: string },
 ) {
-  const rel = await resolveSubjectArtifact(cwd, params.subject);
+  const direct = typeof params.subject === "string" ? null : await resolveArtifactSubject(cwd, params.subject);
+  const rel = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline");
+  const label = typeof params.subject === "string" ? params.subject : params.subject.path;
   if (!rel) {
-    return { content: [{ type: "text" as const, text: `cad_probe failed: no ${params.subject} artifact bound in run state` }] };
+    return { content: [{ type: "text" as const, text: `cad_probe failed: no ${label} artifact bound in run state` }] };
   }
   if (!params.code.trim()) {
     return { content: [{ type: "text" as const, text: "cad_probe failed: preset=python requires code" }] };
   }
   const envelope = await probePython(cwd, rel, params.code);
+  if (direct?.expectedHash && envelope.inputHashes.artifact !== direct.expectedHash) {
+    return {
+      content: [{ type: "text" as const, text: `cad_probe failed: ArtifactRef changed while probing ${params.subject.path}` }],
+      details: { presetFailed: true, envelope },
+    };
+  }
   const payload = envelope.payload as { result?: unknown };
   return renderProbeResult(
     {
       envelope,
-      headline: `cad_probe/python completed for ${params.subject}${params.purpose ? `: ${params.purpose}` : ""}`,
+      headline: `cad_probe/python completed for ${label}${params.purpose ? `: ${params.purpose}` : ""}`,
       facts: summarizePythonResult(payload.result),
       includeEnvelope: false,
       extraDetails: {
         subjectArtifactHash: envelope.inputHashes.artifact,
         scriptHash: envelope.inputHashes.script,
-        resolvedSubjects: [{ source: params.subject, path: rel, sha256: envelope.inputHashes.artifact }],
+        resolvedSubjects: [{ source: typeof params.subject === "string" ? params.subject : "artifact-ref", path: rel, sha256: envelope.inputHashes.artifact }],
       },
     },
     "cad_probe/python",

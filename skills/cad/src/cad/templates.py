@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Optional, extensible working templates; never workflow schema."""
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
