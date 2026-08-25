@@ -19,9 +19,11 @@ const args = [
   "--no-prompt-templates",
   "--no-themes",
   "--no-context-files",
-  "--tools", "ipython",
+  "--tools", "ipython,codex_generate_image",
   "--extension", resolve(repository, "src/integrations/prime/extension.ts"),
+  "--extension", resolve(repository, "packages/prime-codex-image-gen/index.ts"),
   "--skill", resolve(repository, "skills/cad/SKILL.md"),
+  "--skill", resolve(repository, "packages/prime-codex-image-gen/skills/imagegen/SKILL.md"),
   ...process.argv.slice(2),
 ];
 

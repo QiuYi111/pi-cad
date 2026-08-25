@@ -16,6 +16,7 @@
   "pi": {
     "extensions": [
       "./src/integrations/prime/extension.ts",
+      "./packages/prime-codex-image-gen/index.ts",
       "./src/extensions/core/index.ts",
       "./src/extensions/probe/index.ts",
       "./src/extensions/geometry/index.ts",
@@ -25,7 +26,8 @@
       "./src/extensions/presentation/index.ts"
     ],
     "skills": [
-      "./skills"
+      "./skills",
+      "./packages/prime-codex-image-gen/skills"
     ]
   },
   "scripts": {
@@ -36,6 +38,8 @@
     "test:py": "bash scripts/test.sh",
     "test:ts": "node tests/run-ts-tests.mjs",
     "test:prime": "node tests/run-prime-tests.mjs",
+    "test:prime-imagegen": "npm --prefix packages/prime-codex-image-gen test",
+    "check:prime-imagegen": "npm --prefix packages/prime-codex-image-gen run check",
     "test:openfoam14": "node scripts/qualify-openfoam14.mjs",
     "test:torch-fem-cuda": "node scripts/qualify-torch-fem-cuda.mjs",
     "test:su2": "node scripts/qualify-su2-8.5.0.mjs",
@@ -52,10 +56,12 @@
   },
   "devDependencies": {
     "jiti": "^2.7.0",
-    "typebox": "^1.3.15"
+    "typebox": "^1.3.15",
+    "typescript": "^5.9.3"
   },
   "files": [
     "src",
+    "packages/prime-codex-image-gen",
     "skills",
     "python",
     "assets",

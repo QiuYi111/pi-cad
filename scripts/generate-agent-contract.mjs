@@ -21,7 +21,11 @@ for (const extension of pkg.pi.extensions) {
   register(mockPi);
 }
 const { captureMechanicalAction, mechanicalRegistries } = await jiti.import(join(root, "src/domains/mechanical/register-action.ts"), { default: true });
-for (const tool of Object.values(registeredTools)) captureMechanicalAction(tool);
+const { ACTIVE_PUBLIC_TOOL_NAMES } = await jiti.import(join(root, "src/shared/public-tools.ts"), { default: true });
+const mechanicalToolNames = new Set(ACTIVE_PUBLIC_TOOL_NAMES);
+for (const tool of Object.values(registeredTools)) {
+  if (mechanicalToolNames.has(tool.name)) captureMechanicalAction(tool);
+}
 const contract = buildAgentContract(registeredSchemas);
 const registryContract = buildRegistryContract(mechanicalRegistries);
 const unresolvedSchemas = contract.tools.filter((tool) => tool.inputSchema?.schemaSource).map((tool) => tool.name);
