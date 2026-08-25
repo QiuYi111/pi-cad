@@ -77,8 +77,8 @@ engineering capability surface.
 
   This `final_commit` must be created while still in the build-capable PARTS or
   ASSEMBLY phase, after its required phase-obligation commit and before calling
-  the transition into FINAL_REVIEW. The order is strictly build -> probe ->
-  phase obligation -> review-candidate commit -> transition -> review.submit.
+  the transition into FINAL_REVIEW. The order is strictly phase obligation ->
+  build -> probe -> review-candidate commit -> transition -> review.submit.
   FINAL_REVIEW intentionally cannot create or repair workspace commits.
   The first artifact must be the latest returned `ArtifactRef`, not its string
   path. `review.submit()` accepts the returned `Commit`, never an `ArtifactRef`,
