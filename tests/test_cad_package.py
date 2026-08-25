@@ -9,10 +9,9 @@ import os
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import cad
 from cad.snapshot import SnapshotError
@@ -178,18 +177,17 @@ class CadPackageTests(unittest.TestCase):
             self.assertEqual(artifact.path, Path("build/part.step"))
             attach.assert_awaited_once_with(response["images"])
 
-    def test_model_build_uses_prime_prepared_attach_image_binding(self) -> None:
+    def test_model_build_emits_prime_rich_image_output(self) -> None:
         model_module = importlib.import_module("cad.model")
-        attach = AsyncMock()
+        attach = Mock()
         images = [
             {"data": base64.b64encode(b"first").decode(), "mimeType": "image/png"},
             {"data": base64.b64encode(b"second").decode(), "mimeType": "image/png"},
         ]
-        with patch("IPython.get_ipython", return_value=SimpleNamespace(user_ns={"attach_image": attach})):
+        with patch("IPython.display.display", attach):
             asyncio.run(model_module._attach_images(images))
-        attached_paths = attach.await_args.args
-        self.assertEqual(len(attached_paths), 2)
-        self.assertTrue(all(not Path(path).exists() for path in attached_paths))
+        self.assertEqual(attach.call_count, 2)
+        self.assertTrue(all(call.args[0].data for call in attach.call_args_list))
 
     def test_model_build_fails_on_inner_backend_error(self) -> None:
         model_module = importlib.import_module("cad.model")

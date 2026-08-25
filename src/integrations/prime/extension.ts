@@ -14,17 +14,24 @@ interface SidecarPhaseCard {
 
 /** The entire Prime integration: inject one current, non-persisted card per call. */
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
+  type ReviewHandle = { reviewId: string; subjectCommit: string; status: string };
   let reviewWatch: Promise<void> | null = null;
+  const notifiedReviews = new Set<string>();
+  const notifyReview = async (ctx: any, review: ReviewHandle) => {
+    if (review.status === "running" || notifiedReviews.has(review.reviewId)) return;
+    await ctx.sendMessage({
+      customType: "pi-cad.review-completed", display: true,
+      content: `Pi-CAD independent review ${review.reviewId} completed with ${review.status.toUpperCase()} for ${review.subjectCommit}. Inspect cad.review.current(handle) and take a legal workflow transition.`,
+      details: review,
+    }, { triggerTurn: true, deliverAs: "followUp" });
+    notifiedReviews.add(review.reviewId);
+  };
   const watchReview = (ctx: any) => {
     if (reviewWatch) return reviewWatch;
-    reviewWatch = requestAuthority<null | { reviewId: string; subjectCommit: string; status: string }>({ op: "review-watch" }, { timeoutMs: 145_000 })
+    reviewWatch = requestAuthority<null | ReviewHandle>({ op: "review-watch" }, { timeoutMs: 145_000 })
       .then(async (review) => {
         if (!review) return;
-        await ctx.sendMessage({
-          customType: "pi-cad.review-completed", display: true,
-          content: `Pi-CAD independent review ${review.reviewId} completed with ${review.status.toUpperCase()} for ${review.subjectCommit}. Inspect cad.review.current(handle) and take a legal workflow transition.`,
-          details: review,
-        }, { triggerTurn: true, deliverAs: "followUp" });
+        await notifyReview(ctx, review);
       })
       .catch(() => undefined)
       .finally(() => { reviewWatch = null; });
@@ -36,8 +43,9 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   // review; the sidecar completion event then queues the sole follow-up turn.
   pi.on("message_end", async (event, ctx) => {
     if (event.message.role !== "assistant") return undefined;
-    const current = await requestAuthority<null | { status: string }>({ op: "review-current" }).catch(() => null);
+    const current = await requestAuthority<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
     if (current?.status === "running") await watchReview(ctx);
+    else if (current) await notifyReview(ctx, current);
     return undefined;
   });
   pi.on("tool_call", async (event, ctx) => {

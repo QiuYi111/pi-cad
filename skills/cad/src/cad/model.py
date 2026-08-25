@@ -3,8 +3,6 @@ from __future__ import annotations
 """Thin model handles over the existing Pi-CAD build capability."""
 
 import base64
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -20,31 +18,16 @@ async def _attach_images(images: list[dict[str, str]]) -> None:
     if not images:
         raise CadApiError("Pi-CAD model build produced no mandatory visual observations", error_type="ModelBuildError")
     try:
-        from IPython import get_ipython
-
-        shell = get_ipython()
-        attach_images = shell.user_ns.get("attach_image") if shell is not None else None
+        from IPython.display import Image, display
     except Exception as error:
         raise CadApiError("Prime image attachment capability is unavailable", error_type="ModelBuildError") from error
-    if not callable(attach_images):
-        raise CadApiError("Prime image attachment capability is unavailable", error_type="ModelBuildError")
-    paths: list[str] = []
     try:
         for image in images:
             if image.get("mimeType") != "image/png" or not image.get("data"):
                 raise ValueError("mandatory build image is not an inline PNG")
-            with tempfile.NamedTemporaryFile(prefix="prime-cad-build-", suffix=".png", delete=False) as handle:
-                handle.write(base64.b64decode(image["data"], validate=True))
-                paths.append(handle.name)
-        await attach_images(*paths)
+            display(Image(data=base64.b64decode(image["data"], validate=True), format="png"))
     except Exception as error:
         raise CadApiError(f"Pi-CAD could not inject mandatory build images into Prime: {error}", error_type="ModelBuildError") from error
-    finally:
-        for path in paths:
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                pass
 
 
 async def build(source: str | Path, output: str | Path | None = None, *, force: bool = False) -> ArtifactRef:
