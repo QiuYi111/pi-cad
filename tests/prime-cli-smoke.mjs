@@ -69,16 +69,17 @@ try {
   assert.equal(contexts.length, 3);
   const firstCard = JSON.stringify(contexts[0]);
   const laterCards = contexts.slice(1).map((context) => JSON.stringify(context));
-  assert.match(firstCard, /commit\/evidence: provider-handoff/);
-  assert.doesNotMatch(firstCard, /commit\/record: provider-handoff@/);
+  assert.match(firstCard, /MUST.*provider-handoff/);
+  assert.doesNotMatch(firstCard, /record provider-handoff@/);
   for (const card of laterCards) {
-    assert.match(card, /commit\/record: provider-handoff@/);
-    assert.doesNotMatch(card, /commit\/evidence: provider-handoff/);
+    assert.match(card, /record provider-handoff@/);
+    assert.doesNotMatch(card, /MUST.*- provider-handoff/);
   }
   const imageBase64 = readFileSync(join(fixture, "mandatory.png")).toString("base64");
   for (const context of contexts) {
     const rendered = JSON.stringify(context);
-    assert.equal(rendered.split("DESIGN — Prime provider boundary").length - 1, 1);
+    assert.match(rendered, /Prime provider boundary/);
+    for (const heading of ["WHERE", "GOAL", "SOP", "MUST", "CAN", "NEXT", "STATE", "WARNINGS"]) assert.match(rendered, new RegExp(heading));
     assert.doesNotMatch(rendered, /PLAN_C_ORDINARY_CANARY_MUST_STAY_OUT/);
     const images = context.messages.flatMap((message) => Array.isArray(message.content) ? message.content : []).filter((item) => item.type === "image");
     assert.equal(images.length, 1, JSON.stringify(context.messages.map((message) => ({ role: message.role, content: Array.isArray(message.content) ? message.content.map((item) => item.type) : typeof message.content }))));

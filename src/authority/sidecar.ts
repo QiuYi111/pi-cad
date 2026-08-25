@@ -3,6 +3,7 @@ import { chmod, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { currentAuthorization } from "../agent-api/authorization.ts";
+import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
 import { handleAgentApi } from "../agent-api/handlers.ts";
 import type { AgentApiRequest, AgentApiResponse } from "../agent-api/protocol.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
@@ -67,7 +68,8 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
     let result: unknown;
     if (value.op === "phase-card") {
       if (role !== "author") throw new Error("phase-card is author-scoped");
-      result = await compilePhaseCard(cwd);
+      bootstrapAgentApiContracts();
+      result = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     } else if (value.op === "authorize") {
       if (role !== "author") throw new Error("authorization query is author-scoped");
       const decision = await currentAuthorization(cwd, value.operation, "author");

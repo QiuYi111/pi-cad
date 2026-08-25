@@ -23,6 +23,14 @@ function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
 }
 
+function cardSection(text: string, heading: string): string[] {
+  const lines = text.split("\n");
+  const start = lines.indexOf(heading);
+  assert.notEqual(start, -1, `missing Phase Card section ${heading}`);
+  const end = lines.findIndex((line, index) => index > start && ["WHERE", "GOAL", "SOP", "MUST", "CAN", "NEXT", "STATE", "WARNINGS"].includes(line));
+  return lines.slice(start + 1, end < 0 ? undefined : end).filter((line) => line.startsWith("- ")).map((line) => line.slice(2));
+}
+
 function workflow() {
   return compileWorkflowDefinition({
     schema: 1, id: "test/plan-c", version: "1.0.0", parametersSchema: {}, initialPhase: "design",
@@ -36,7 +44,11 @@ function workflow() {
         transitions: { integrated: { target: "review", requiresPhaseObligations: true } },
       },
       review: {
-        purpose: "Review the committed handoff", actions: ["read"], grants: ["file_read"], writeScopes: [],
+        purpose: "Review the committed handoff", actions: ["read", "transition"], grants: ["file_read", "transition"], writeScopes: [],
+        recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [], transitions: { completed: { target: "done" } },
+      },
+      done: {
+        purpose: "Preserve the terminal handoff", actions: [], grants: ["file_read"], writeScopes: [],
         recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [], transitions: {}, terminal: true,
       },
     },
@@ -74,25 +86,33 @@ test("Plan C discovers and pins a workflow package before mutation", async () =>
     assert.deepEqual((await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any).unmet, []);
     const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "clarified" }) as any;
     assert.equal(advanced.phase, "spec");
-    assert.match((await compilePhaseCard(cwd))?.text ?? "", /SPEC/);
+    assert.match((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.text ?? "", /phase spec/);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
 test("Plan C workflow metadata is optional, hashed, and rendered as a bounded stable Phase Card", async () => {
   const { cwd, loaded } = await projectFixture();
   try {
-    const first = await compilePhaseCard(cwd);
+    const first = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     assert.ok(first);
-    assert.match(first.text, /DESIGN — Freeze a generic design handoff/);
+    const headings = first.text.split("\n").filter((line) => ["WHERE", "GOAL", "SOP", "MUST", "CAN", "NEXT", "STATE", "WARNINGS"].includes(line));
+    assert.deepEqual(headings, ["WHERE", "GOAL", "SOP", "MUST", "CAN", "NEXT", "STATE", "WARNINGS"]);
+    assert.match(first.text, /phase design/);
+    assert.match(first.text, /Freeze a generic design handoff/);
     assert.match(first.text, /Use Python for bulk work/);
-    assert.match(first.text, /commit\/evidence: system-design/);
-    assert.match(first.text, /template: mechanical.part-work/);
-    assert.ok(first.metrics.bytesEmitted <= 6 * 1024);
-    assert.deepEqual((await compilePhaseCard(cwd))?.digest, first.digest);
+    assert.deepEqual(first.unmetObligations, ["system-design"]);
+    assert.deepEqual(first.legalTransitions, ["integrated -> review"]);
+    assert.ok(first.effectiveCapabilities.includes("cad_build_step"));
+    assert.deepEqual(cardSection(first.text, "MUST"), first.unmetObligations);
+    assert.deepEqual(cardSection(first.text, "CAN"), first.effectiveCapabilities);
+    assert.deepEqual(cardSection(first.text, "NEXT"), first.legalTransitions);
+    assert.ok(first.metrics.estimatedTokens >= 300 && first.metrics.estimatedTokens <= 800, `unexpected Phase Card token estimate: ${first.metrics.estimatedTokens}`);
+    assert.ok(first.metrics.bytesEmitted <= 3200);
+    assert.deepEqual((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.digest, first.digest);
     const durations: number[] = [];
     for (let index = 0; index < 20; index += 1) {
       const started = performance.now();
-      await compilePhaseCard(cwd);
+      await compilePhaseCard(cwd, { registries: mechanicalRegistries });
       durations.push(performance.now() - started);
     }
     durations.sort((a, b) => a - b);
@@ -105,11 +125,13 @@ test("Plan C workflow metadata is optional, hashed, and rendered as a bounded st
       state: { ...current.state, contextRefs: { mandatoryImageIso: "mandatory.png" } },
       event: { type: "MandatoryImageSelected" },
     }));
-    const withImage = await compilePhaseCard(cwd);
+    const withImage = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     assert.equal(withImage?.images.length, 1);
     assert.equal(withImage?.images[0]?.sha256, createHash("sha256").update(image).digest("hex"));
-    const tiny = await compilePhaseCard(cwd, { maxTextBytes: 256 });
-    assert.ok(tiny?.metrics.truncated);
+    await assert.rejects(
+      compilePhaseCard(cwd, { registries: mechanicalRegistries, maxTextBytes: 1199 }),
+      /at least 1200 bytes/,
+    );
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
@@ -125,7 +147,7 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
     assert.equal(result.geometry.ok, true);
     assert.deepEqual(result.visual.payload.views.map((view: any) => view.name), ["iso", "front", "back", "left", "right", "top", "bottom"]);
     assert.equal(result.images.length, 7);
-    const card = await compilePhaseCard(cwd);
+    const card = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     assert.deepEqual(card?.images.map((image) => image.path), [
       `.pi-cad/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,
       `.pi-cad/runs/${loaded.state.runId}/evidence/visual/plate/front.png`,
@@ -283,11 +305,15 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   assert.equal(first.messages.length, 2);
   assert.equal(first.messages[1].customType, PHASE_CARD_CUSTOM_TYPE);
   assert.equal(first.messages[1].display, false);
+  await handleAgentApi(cwd, { schema: 1, op: "commit", name: "system-design" });
+  await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "integrated" });
   const second = await context({ messages: [...original, first.messages[1]] }, { cwd });
   assert.equal(second.messages.filter((item: any) => item.customType === PHASE_CARD_CUSTOM_TYPE).length, 1);
+  assert.match(second.messages.at(-1).content[0].text, /phase review/);
+  assert.doesNotMatch(second.messages.at(-1).content[0].text, /phase design/);
   const deniedImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });
   assert.equal(deniedImage.block, true);
-  assert.match(deniedImage.reason, /image\.generate is not granted in workflow phase design/);
+  assert.match(deniedImage.reason, /image\.generate is not granted in workflow phase review/);
 
   await sidecar.close();
   const unavailableImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });

@@ -27,9 +27,7 @@ const OPERATION_ACTIONS: Readonly<Record<Operation, readonly string[]>> = Object
   "simulation.run": ["cad_simulate"],
   "image.generate": ["codex_generate_image"],
   "review.submit": ["cad_submit_for_review"],
-  // Route is a temporary compatibility action until Workflow Packages remove
-  // the factorized intake protocol. It still passes through this one boundary.
-  "workflow.transition": ["transition", "cad_transition", "cad_route"],
+  "workflow.transition": ["transition", "cad_transition"],
 });
 
 const OPERATION_AUTHORITIES: Readonly<Partial<Record<Operation, readonly OperationAuthority[]>>> = Object.freeze({
@@ -55,10 +53,19 @@ function legalNextActions(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1
 }
 
 export function renderAuthorizationDenied(value: Extract<Authorization, { allowed: false }>): string {
-  const next = value.legalNextActions.length
-    ? `\n\nLegal next actions:\n${value.legalNextActions.map((item) => `- ${item}`).join("\n")}`
-    : "";
-  return `${value.operation} is unavailable.\n\nReason:\n${value.reason}${next}`;
+  return `${value.operation} is unavailable.\n\n${renderReasonAndLegalNextActions(value.reason, value.legalNextActions)}`;
+}
+
+/** Shared renderer for denied operations and the corresponding Phase Card sections. */
+export function renderReasonAndLegalNextActions(reason: string | null, legalNextActions: readonly string[]): string {
+  const reasonLines = reason ? ["Reason", `- ${reason}`] : [];
+  const renderedActions = renderLegalNextActionLines(legalNextActions);
+  const nextLines = ["Legal next actions", ...(renderedActions.length ? renderedActions : ["- none"] )];
+  return [...reasonLines, ...(reasonLines.length ? [""] : []), ...nextLines].join("\n");
+}
+
+export function renderLegalNextActionLines(legalNextActions: readonly string[]): string[] {
+  return legalNextActions.map((item) => `- ${item}`);
 }
 
 export class AuthorizationDeniedError extends Error {

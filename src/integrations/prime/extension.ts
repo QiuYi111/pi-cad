@@ -38,7 +38,16 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
       return {
         messages: [...messages, {
           role: "custom", customType: PHASE_CARD_CUSTOM_TYPE, display: false,
-          content: `[Pi-CAD]\n\nWarnings\n- Phase Card unavailable: ${warning}`,
+          content: [
+            "WHERE", "- authority sidecar unavailable", "",
+            "GOAL", "- preserve fail-closed workflow behavior", "",
+            "SOP", "- restore the Pi-CAD authority sidecar before engineering mutations", "",
+            "MUST", "- reconnect canonical workflow authority", "",
+            "CAN", "- none", "",
+            "NEXT", "- none", "",
+            "STATE", "- canonical state could not be read; workspace projections have no authority", "",
+            "WARNINGS", `- Phase Card unavailable: ${warning}`,
+          ].join("\n"),
           details: { warning: true }, timestamp: Date.now(),
         }],
       };
