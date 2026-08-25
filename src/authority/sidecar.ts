@@ -3,6 +3,7 @@ import { chmod, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import { canonicalDigest } from "../harness/canonical.ts";
+import { loadWorkspaceCommit } from "../harness/commit.ts";
 import { currentAuthorization } from "../agent-api/authorization.ts";
 import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
 import { handleAgentApi } from "../agent-api/handlers.ts";
@@ -209,9 +210,12 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
   }
   const review = loaded.state.latestReview;
   let releaseMatchesReview = review?.subjectHash === release.sha256;
-  if (review?.artifactHash) {
-    const manifest = await new HarnessRunStoreV7(cwd, loaded.state.runId).transactions.readJson<{ artifacts?: Array<{ path: string; sha256: string; role: string }> }>(release.path);
-    releaseMatchesReview = Boolean(manifest?.artifacts) && canonicalArtifactHash(manifest!.artifacts!) === review.artifactHash;
+  if (review?.artifactHash && review.subjectCommit) {
+    const releaseManifest = await new HarnessRunStoreV7(cwd, loaded.state.runId).transactions.readJson<{ parent?: string | null; artifacts?: Array<{ path: string; sha256: string; role: string }> }>(release.path);
+    const reviewedManifest = await loadWorkspaceCommit(cwd, mechanicalRegistries, review.subjectCommit);
+    releaseMatchesReview = releaseManifest?.parent === review.subjectCommit
+      && Boolean(releaseManifest.artifacts)
+      && canonicalArtifactContentHash(releaseManifest.artifacts!) === canonicalArtifactContentHash(reviewedManifest.manifest.artifacts);
   }
   if (!review || review.verdict.toLowerCase() !== "pass" || review.workflowHash !== loaded.workflow.hash
     || review.registryContractHash !== loaded.registryContract.hash || !releaseMatchesReview) {
@@ -220,6 +224,6 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
   return { complete: true, reason: "terminal workflow, final PASS, and release commit are valid", runId: loaded.state.runId };
 }
 
-function canonicalArtifactHash(artifacts: Array<{ path: string; sha256: string; role: string }>): string {
-  return canonicalDigest(artifacts.map(({ path, sha256, role }) => ({ path, sha256, role })));
+function canonicalArtifactContentHash(artifacts: Array<{ path: string; sha256: string }>): string {
+  return canonicalDigest(artifacts.map(({ path, sha256 }) => ({ path, sha256 })));
 }

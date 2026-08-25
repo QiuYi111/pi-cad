@@ -14,22 +14,32 @@ interface SidecarPhaseCard {
 
 /** The entire Prime integration: inject one current, non-persisted card per call. */
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
-  let watchingReview = false;
+  let reviewWatch: Promise<void> | null = null;
   const watchReview = (ctx: any) => {
-    if (watchingReview) return;
-    watchingReview = true;
-    void requestAuthority<null | { reviewId: string; subjectCommit: string; status: string }>({ op: "review-watch" }, { timeoutMs: 145_000 })
+    if (reviewWatch) return reviewWatch;
+    reviewWatch = requestAuthority<null | { reviewId: string; subjectCommit: string; status: string }>({ op: "review-watch" }, { timeoutMs: 145_000 })
       .then(async (review) => {
         if (!review) return;
         await ctx.sendMessage({
           customType: "pi-cad.review-completed", display: true,
           content: `Pi-CAD independent review ${review.reviewId} completed with ${review.status.toUpperCase()} for ${review.subjectCommit}. Inspect cad.review.current(handle) and take a legal workflow transition.`,
           details: review,
-        }, { triggerTurn: true, deliverAs: "nextTurn" });
+        }, { triggerTurn: true, deliverAs: "followUp" });
       })
       .catch(() => undefined)
-      .finally(() => { watchingReview = false; });
+      .finally(() => { reviewWatch = null; });
+    return reviewWatch;
   };
+
+  // Print/headless Prime would otherwise exit as soon as the author says it is
+  // waiting. Hold the final assistant message only for an admitted, running
+  // review; the sidecar completion event then queues the sole follow-up turn.
+  pi.on("message_end", async (event, ctx) => {
+    if (event.message.role !== "assistant") return undefined;
+    const current = await requestAuthority<null | { status: string }>({ op: "review-current" }).catch(() => null);
+    if (current?.status === "running") await watchReview(ctx);
+    return undefined;
+  });
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "codex_generate_image") return undefined;
     try {

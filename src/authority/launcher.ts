@@ -119,6 +119,14 @@ function isOneShot(args: string[]): boolean {
   return mode >= 0 && ["text", "json"].includes(args[mode + 1] ?? "");
 }
 
+function withHeadlessEventContinuation(args: string[]): string[] {
+  if (!isOneShot(args) || args.includes("--autonomous")) return args;
+  // Prime print mode disposes the session after the first provider action.
+  // A small continuation budget lets an extension-delivered review event
+  // become a provider turn; the completion gate remains the success authority.
+  return ["--autonomous", "--autonomous-max-continuations", "2", ...args];
+}
+
 async function copyPrimeBootstrap(source: string, destination: string): Promise<void> {
   await mkdir(destination, { recursive: true, mode: 0o700 });
   for (const name of ["auth.json", "settings.json", "telemetry.json"]) {
@@ -172,6 +180,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   if (primeArgs.some((value) => value === "--cwd" || value.startsWith("--cwd="))) {
     throw new Error("prime-cad owns --cwd so the sandbox cannot escape its project root");
   }
+  primeArgs = withHeadlessEventContinuation(primeArgs);
   const repository = realpathSync(resolve(process.env.PI_CAD_REPO ?? resolve(import.meta.dirname, "..", "..")));
   const project = await realpath(resolve(process.env.PI_CAD_PROJECT_CWD ?? process.cwd()));
   const primeRoot = realpathSync(resolve(process.env.PRIME_AGENT_REPO ?? resolve(repository, "../prime-agent-plan-c-upstream")));
@@ -230,13 +239,11 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     if (result.signal) {
       return 128;
     }
-    if (result.code !== 0 || !isOneShot(primeArgs)) return result.code;
+    if (!isOneShot(primeArgs)) return result.code;
     const gate = await completionGate(project);
-    if (!gate.complete) {
-      process.stderr.write(`WORKFLOW_INCOMPLETE: ${gate.reason}\n`);
-      return WORKFLOW_INCOMPLETE_EXIT_CODE;
-    }
-    return 0;
+    if (gate.complete) return 0;
+    process.stderr.write(`WORKFLOW_INCOMPLETE: ${gate.reason}\n`);
+    return WORKFLOW_INCOMPLETE_EXIT_CODE;
   } finally {
     await sidecar.close();
     await rm(runtimeDirectory, { recursive: true, force: true });
