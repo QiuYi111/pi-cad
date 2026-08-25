@@ -74,7 +74,8 @@ class SnapshotRegistry:
         if _is_json(value):
             return "json", _json_value(value), None
         if isinstance(value, Path):
-            root = Path(os.environ.get("PI_CAD_PROJECT_CWD", os.getcwd())).resolve()
+            configured = os.environ.get("PI_CAD_PROJECT_CWD")
+            root = Path(os.getcwd() if os.environ.get("PRIME_AGENT_INTERNAL_DAEMON_WORKER") else (configured or os.getcwd())).resolve()
             if os.name == "nt" or re.match(r"^[A-Za-z]:[\\/]", str(value)):
                 raise SnapshotError("Path snapshots require Linux/WSL path semantics")
             resolved = (value if value.is_absolute() else root / value).resolve()

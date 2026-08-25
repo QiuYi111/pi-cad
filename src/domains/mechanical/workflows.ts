@@ -145,6 +145,57 @@ export function mechanicalWorkflowDefinition(route: Route): WorkflowDefinitionV1
   };
 }
 
+function workspaceCommitLabel(ref: string): string {
+  return ref.replace(/^record:/, "").replaceAll(":", "-").replaceAll("_", "-");
+}
+
+/**
+ * Prime/Plan C projection of the Mechanical process. The route and transition
+ * graph stay identical, while semantic record tools become generic workspace
+ * commits and candidate evidence is closed by the managed model build.
+ */
+export function mechanicalPlanCWorkflowDefinition(route: Route): WorkflowDefinitionV1 {
+  const source = mechanicalWorkflowDefinition(route);
+  const labels = new Map<string, string>();
+  for (const phase of Object.values(source.phases)) {
+    for (const obligation of phase.recordObligations) labels.set(obligation.ref, workspaceCommitLabel(obligation.ref));
+  }
+  const dependency = (ref: string) => labels.get(ref) ?? ref;
+  return {
+    ...source,
+    id: `${source.id}/plan-c`,
+    phases: Object.fromEntries(Object.entries(source.phases).map(([phaseId, phase]) => {
+      const candidatePhase = phase.actions.includes("cad_commit_candidate");
+      const records = phase.recordObligations.map((obligation) => ({
+        ...obligation,
+        ref: labels.get(obligation.ref)!,
+        type: "workspace_commit",
+        closeWith: "cad_commit",
+        ...(obligation.dependsOn ? { dependsOn: obligation.dependsOn.map(dependency) } : {}),
+      }));
+      if (candidatePhase) records.push({
+        ref: `candidate-${phaseId.replaceAll("_", "-")}`,
+        type: "workspace_commit",
+        closeWith: "cad_commit",
+        dependsOn: labels.has("record:requirements") ? [labels.get("record:requirements")!] : [],
+      });
+      const actions = [...new Set(phase.actions.map((action) =>
+        Object.values(RECORD_CLOSERS).includes(action) || action === "cad_commit_candidate" ? "cad_commit" : action,
+      ).concat(candidatePhase ? ["cad_build_step"] : []))];
+      return [phaseId, {
+        ...phase,
+        actions,
+        recordObligations: records,
+        evidenceObligations: phase.evidenceObligations.map((obligation) => ({
+          ...obligation,
+          ...(obligation.closeWith === "cad_commit_candidate" && ["visual", "geometry"].includes(obligation.type) ? { closeWith: "cad_build_step" } : {}),
+          ...(obligation.dependsOn ? { dependsOn: obligation.dependsOn.map(dependency) } : {}),
+        })),
+      }];
+    })),
+  };
+}
+
 export function mechanicalIntakeWorkflow(): WorkflowDefinitionV1 {
   return {
     schema: 1,

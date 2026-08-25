@@ -21,7 +21,11 @@ def package_root() -> Path:
 
 
 def project_cwd() -> Path:
-    cwd = Path(os.environ.get("PI_CAD_PROJECT_CWD", os.getcwd())).resolve()
+    # Daemon workers may outlive the launcher that created them.  In Prime the
+    # kernel cwd is the authoritative per-session workspace; a launcher-level
+    # PI_CAD_PROJECT_CWD can otherwise leak into a later session.
+    configured = os.environ.get("PI_CAD_PROJECT_CWD")
+    cwd = Path(os.getcwd() if os.environ.get("PRIME_AGENT_INTERNAL_DAEMON_WORKER") else (configured or os.getcwd())).resolve()
     if os.name == "nt" or ":\\" in str(cwd):
         raise CadApiError("cad requires Linux/WSL path semantics; Windows paths are rejected")
     return cwd

@@ -128,24 +128,79 @@ class CadPackageTests(unittest.TestCase):
     def test_model_build_returns_hashed_artifact_ref(self) -> None:
         model_module = importlib.import_module("cad.model")
         with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / "part.step"
+            output = Path(directory) / "build" / "part.step"
+            output.parent.mkdir()
             output.write_bytes(b"STEP")
             envelope = {
                 "ok": True,
                 "artifacts": [{"path": str(output), "kind": "step", "sha256": "b" * 64}],
                 "outputHashes": {str(output): "b" * 64},
             }
-            with patch.object(model_module, "request", AsyncMock(return_value=envelope)):
-                artifact = asyncio.run(cad.model.build("part.py", output))
+            response = {"build": envelope, "images": [str(Path(directory) / "iso.png")]}
+            attach = AsyncMock()
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), \
+                    patch.object(model_module, "request", AsyncMock(return_value=response)), \
+                    patch.object(model_module, "_attach_images", attach):
+                artifact = asyncio.run(cad.model.build("part.py", "build/part.step"))
             self.assertEqual(artifact.sha256, "b" * 64)
-            self.assertEqual(artifact.path, output)
+            self.assertEqual(artifact.path, Path("build/part.step"))
+            attach.assert_awaited_once_with([str(Path(directory) / "iso.png")])
 
     def test_model_build_fails_on_inner_backend_error(self) -> None:
         model_module = importlib.import_module("cad.model")
         envelope = {"ok": False, "artifacts": [], "payload": {"error": "No module named cadquery"}}
-        with patch.object(model_module, "request", AsyncMock(return_value=envelope)):
-            with self.assertRaisesRegex(cad.CadApiError, "No module named cadquery"):
-                asyncio.run(cad.model.build("part.py", "build/part.step"))
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), \
+                    patch.object(model_module, "request", AsyncMock(return_value={"build": envelope, "images": []})):
+                with self.assertRaisesRegex(cad.CadApiError, "No module named cadquery"):
+                    asyncio.run(cad.model.build("part.py", "build/part.step"))
+
+    def test_model_build_rejects_paths_outside_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}):
+                with self.assertRaisesRegex(cad.CadApiError, "escapes the project root"):
+                    asyncio.run(cad.model.build(Path(directory).parent / "part.py"))
+
+    def test_model_build_requires_prime_image_injection(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "build" / "part.step"
+            output.parent.mkdir()
+            output.write_bytes(b"STEP")
+            response = {"build": {"ok": True, "artifacts": [{"kind": "step", "sha256": "b" * 64}]}, "images": []}
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), \
+                    patch.object(model_module, "request", AsyncMock(return_value=response)):
+                with self.assertRaisesRegex(cad.CadApiError, "no mandatory visual observations"):
+                    asyncio.run(cad.model.build("part.py", "build/part.step"))
+
+    def test_commit_accepts_explicit_parent_handle(self) -> None:
+        cad_module = importlib.import_module("cad")
+        parent = cad.Commit("commit-" + "a" * 32, "task", None, "b" * 64, "design", {}, (), "now")
+        mocked = AsyncMock(return_value={
+            "id": "commit-" + "c" * 32, "name": "delivery", "parent": parent.id,
+            "workflowHash": "b" * 64, "phase": "design", "variables": {}, "artifacts": [], "createdAt": "now",
+        })
+        with patch.object(cad_module, "request", mocked):
+            asyncio.run(cad.commit("delivery", parent=parent))
+        self.assertEqual(mocked.await_args.kwargs["parent"], parent.id)
+
+    def test_workflow_start_and_route_use_the_generic_bridge(self) -> None:
+        workflow_module = importlib.import_module("cad.workflow")
+        mocked = AsyncMock(side_effect=[{"workflowId": "mechanical/intake"}, {"phase": "requirements"}])
+        with patch.object(workflow_module, "request", mocked):
+            started = asyncio.run(cad.workflow.start("CAD task"))
+            routed = asyncio.run(cad.workflow.route(
+                "design", lineage="greenfield", structure="part", maturity="prototype", reason="single part"
+            ))
+        self.assertEqual(started["workflowId"], "mechanical/intake")
+        self.assertEqual(routed["phase"], "requirements")
+        self.assertEqual(mocked.await_args_list[1].kwargs["route"], {
+            "objective": "design", "lineage": "greenfield", "structure": "part", "maturity": "prototype",
+        })
+
+    def test_workflow_route_rejects_incomplete_design(self) -> None:
+        with self.assertRaisesRegex(ValueError, "require lineage"):
+            asyncio.run(cad.workflow.route("design", lineage="greenfield", reason="incomplete"))
 
     def test_review_submit_is_an_ordinary_rlm_template(self) -> None:
         self.assertFalse(hasattr(cad.review, "current"))

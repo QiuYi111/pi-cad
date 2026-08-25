@@ -29,7 +29,7 @@ function workflow() {
       design: {
         purpose: "Freeze a generic design handoff", guidance: "Use Python for bulk work.\nCommit only stable values.",
         recommendedTemplates: ["mechanical.part-work"], recommendedSkills: ["mechanical.interface-check"],
-        actions: ["cad_commit", "transition"], grants: ["transition"], writeScopes: ["run:state"],
+        actions: ["cad_commit", "cad_build_step", "transition"], grants: ["model_build", "transition"], writeScopes: ["run:state"],
         recordObligations: [{ ref: "system-design", type: "workspace_commit", closeWith: "cad_commit" }],
         evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [],
         transitions: { integrated: { target: "review", requiresPhaseObligations: true } },
@@ -48,6 +48,36 @@ async function projectFixture() {
   const loaded = await project.startRun({ workflow: workflow(), registryContract: buildRegistryContract(mechanicalRegistries) });
   return { cwd, loaded };
 }
+
+test("Plan C exposes explicit workflow start and complete Mechanical routing before mutation", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-start-"));
+  try {
+    assert.equal(await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }), null);
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }),
+      /cad\.workflow\.start/,
+    );
+    const intake = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", reason: "Prime CAD task" }) as any;
+    assert.equal(intake.workflowId, "mechanical/intake");
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }),
+      /cad\.workflow\.route/,
+    );
+    const routed = await handleAgentApi(cwd, {
+      schema: 1, op: "workflow-route", reason: "greenfield single part",
+      route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype" },
+    }) as any;
+    assert.equal(routed.workflowId, "mechanical/design/greenfield/part/prototype/plan-c");
+    assert.equal(routed.phase, "requirements");
+    assert.deepEqual(routed.unmet, ["requirements"]);
+    const requirementCommit = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "requirements" }) as any;
+    assert.equal(requirementCommit.name, "requirements");
+    assert.deepEqual((await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any).unmet, []);
+    const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "requirements_committed" }) as any;
+    assert.equal(advanced.phase, "part_design");
+    assert.match((await compilePhaseCard(cwd))?.text ?? "", /PART_DESIGN/);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
 
 test("Plan C workflow metadata is optional, hashed, and rendered as a bounded stable Phase Card", async () => {
   const { cwd, loaded } = await projectFixture();
@@ -81,6 +111,26 @@ test("Plan C workflow metadata is optional, hashed, and rendered as a bounded st
     assert.equal(withImage?.images[0]?.sha256, createHash("sha256").update(image).digest("hex"));
     const tiny = await compilePhaseCard(cwd, { maxTextBytes: 256 });
     assert.ok(tiny?.metrics.truncated);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Card images", async () => {
+  const { cwd, loaded } = await projectFixture();
+  try {
+    await copyFile(resolve(import.meta.dirname, "fixtures", "plate.py"), join(cwd, "plate.py"));
+    const result = await handleAgentApi(cwd, {
+      schema: 1, op: "model-build", source: "plate.py", output: "build/plate.step", force: true,
+    }) as any;
+    assert.equal(result.build.ok, true);
+    assert.equal(result.visual.ok, true);
+    assert.equal(result.geometry.ok, true);
+    assert.deepEqual(result.visual.payload.views.map((view: any) => view.name), ["iso", "front", "back", "left", "right", "top", "bottom"]);
+    assert.equal(result.images.length, 7);
+    const card = await compilePhaseCard(cwd);
+    assert.deepEqual(card?.images.map((image) => image.path), [
+      `.pi-cad/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,
+      `.pi-cad/runs/${loaded.state.runId}/evidence/visual/plate/front.png`,
+    ]);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
@@ -157,6 +207,13 @@ test("generic workspace commits hash variables and artifacts, chain parents, loa
     assert.equal(second.parent, first.id);
     assert.notEqual(second.artifacts[0]?.sha256, first.artifacts[0]?.sha256);
     assert.deepEqual((await workspaceHistory(cwd, mechanicalRegistries)).map((item) => item.id), [first.id, second.id]);
+
+    const sibling = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "parallel-delivery", parent: first.id });
+    assert.equal(sibling.parent, first.id);
+    await assert.rejects(
+      commitWorkspace({ cwd, registries: mechanicalRegistries, name: "orphan", parent: `commit-${"0".repeat(32)}` }),
+      /parent not found/,
+    );
 
     const repo = resolve(import.meta.dirname, "..");
     const python = spawnSync("uv", ["run", "--offline", "--frozen", "--project", join(repo, "python"), "python", "-c",

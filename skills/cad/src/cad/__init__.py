@@ -19,7 +19,7 @@ def _commit_from_payload(manifest: dict[str, Any], variables: dict[str, Any]) ->
     )
 
 
-async def commit(name: str, *, variables: dict[str, Any] | None = None, artifacts: list[str | Path | ArtifactRef] | None = None) -> Commit:
+async def commit(name: str, *, parent: str | Commit | None = None, variables: dict[str, Any] | None = None, artifacts: list[str | Path | ArtifactRef] | None = None) -> Commit:
     encoded = {key: snapshot.registry.encode(value) for key, value in (variables or {}).items()}
     artifact_payload: list[dict[str, str]] = []
     for item in artifacts or []:
@@ -27,7 +27,8 @@ async def commit(name: str, *, variables: dict[str, Any] | None = None, artifact
             artifact_payload.append({"path": item.path.as_posix(), "role": item.role})
         else:
             artifact_payload.append({"path": Path(item).as_posix(), "role": "workspace-commit-artifact"})
-    manifest = await request("commit", name=name, variables=encoded, artifacts=artifact_payload)
+    parent_id = parent.id if isinstance(parent, Commit) else parent
+    manifest = await request("commit", name=name, parent=parent_id, variables=encoded, artifacts=artifact_payload)
     return _commit_from_payload(manifest, dict(variables or {}))
 
 

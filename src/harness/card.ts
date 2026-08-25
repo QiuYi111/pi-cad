@@ -104,6 +104,7 @@ export async function compilePhaseCard(cwd: string, options: { maxTextBytes?: nu
   if (!current.length) current.push("no committed phase state yet");
   const expected = unmetPhaseObligations(loaded.state, loaded.workflow).map((ref) => `commit/evidence: ${ref}`);
   if (phase.reviewProfile) expected.push(`independent review: ${phase.reviewProfile}`);
+  expected.push(...Object.entries(phase.transitions).map(([event, transition]) => `transition: ${event} → ${transition.target}`));
   const recommended = [
     ...(phase.recommendedTemplates ?? []).map((name) => `template: ${name}`),
     ...(phase.recommendedSkills ?? []).map((name) => `skill: ${name}`),

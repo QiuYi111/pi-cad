@@ -8,15 +8,26 @@ description: Use Pi-CAD's Python API in Prime's persistent IPython workspace for
 Use ordinary Python variables as working state and `import cad` as the small
 engineering capability surface.
 
-- Read `await cad.workflow.current()` before acting.
+- Read `await cad.workflow.current()` before acting. If it is `None`, call
+  `await cad.workflow.start(reason)`; when that returns `workflowId ==
+  "mechanical/intake"`, immediately choose the complete route with
+  `await cad.workflow.route(...)` before building. A greenfield single-part
+  concept is normally `objective="design", lineage="greenfield",
+  structure="part", maturity="prototype"`. Never bypass an unstarted or
+  unrouted workflow.
+- Treat `current()["unmet"]` as exact process-level commit/evidence labels.
+  Close them in the current phase, then use one of the returned
+  `transitions` events with `await cad.workflow.advance(event)`; do not guess
+  legacy semantic commit APIs or inspect Pi-CAD source to discover events.
 - Freeze stable handoffs with `await cad.commit(name, variables=..., artifacts=...)`.
 - Load handoffs by ID with `await cad.load(id)`; do not copy child transcripts.
 - Use `cad.templates` only as optional conveniences. Workflow never requires
   their schema unless a project workflow says so explicitly.
-- Author model source with build123d and expose a build123d `Shape` as
+- Author project-local model source with build123d and expose a build123d `Shape` as
   `result`; `await cad.model.build(source, output)` exports the STEP artifact
-  and fails if source execution or export fails. CadQuery source is not a
-  supported model backend.
+  only after the v7 visual inspection chain has produced and attached all
+  standard views to Prime. Missing visual output or attachment is a failed
+  build. CadQuery source is not a supported model backend.
 - Use `@cad.probe(subject=artifact_ref)` for Agent-authored, read-only B-Rep
   calculations on any project-local `ArtifactRef`. The legacy `"current"` and
   `"baseline"` subjects remain available for state-bound v7 runs. Pass all

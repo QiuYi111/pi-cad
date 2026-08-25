@@ -5,7 +5,7 @@ import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } fro
 import { compileWorkflowDefinition } from "../../harness/workflow/compiler.ts";
 import { isRoute, obligationsOf, routeKey, type Route } from "../../shared/route.ts";
 import { mechanicalRegistries } from "./registries.ts";
-import { mechanicalWorkflowDefinition } from "./workflows.ts";
+import { mechanicalPlanCWorkflowDefinition, mechanicalWorkflowDefinition } from "./workflows.ts";
 
 function routeFromState(loaded: LoadedHarnessRunV7): Route | null {
   const route = loaded.state.domainMetadata?.route;
@@ -17,13 +17,14 @@ function isMonotoneReroute(before: Route, after: Route): boolean {
   return [...obligationsOf(before)].every((obligation) => next.has(obligation));
 }
 
-export async function cadRouteV7(input: { cwd: string; route: Route; reason: string }): Promise<LoadedHarnessRunV7> {
+export async function cadRouteV7(input: { cwd: string; route: Route; reason: string; commitStyle?: "semantic" | "workspace" }): Promise<LoadedHarnessRunV7> {
   if (!isRoute(input.route)) throw new Error("invalid Mechanical route");
   const project = new HarnessProjectStoreV7(input.cwd);
   const loaded = await project.currentRun(mechanicalRegistries);
   if (!loaded) throw new Error("cad_route requires an active v7 intake run");
   if (loaded.workflow.id !== "mechanical/intake" || loaded.state.phase !== "intake") throw new Error("cad_route is legal only in Mechanical intake");
-  const successor = compileWorkflowDefinition(mechanicalWorkflowDefinition(input.route), mechanicalRegistries);
+  const definition = input.commitStyle === "workspace" ? mechanicalPlanCWorkflowDefinition(input.route) : mechanicalWorkflowDefinition(input.route);
+  const successor = compileWorkflowDefinition(definition, mechanicalRegistries);
   const contract = buildRegistryContract(mechanicalRegistries);
   const state = replaceWorkflowSnapshot({ state: loaded.state, predecessor: loaded.workflow, successor, registryContract: contract, reason: input.reason });
   state.domainMetadata = { ...(state.domainMetadata ?? {}), route: input.route as never };

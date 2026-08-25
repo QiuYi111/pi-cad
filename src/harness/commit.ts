@@ -65,6 +65,7 @@ export async function commitWorkspace(input: {
   cwd: string;
   registries: RegistrySet;
   name: string;
+  parent?: string | null;
   variables?: Record<string, EncodedVariable>;
   artifacts?: Array<string | { path: string; role?: string }>;
   session?: string;
@@ -80,7 +81,8 @@ export async function commitWorkspace(input: {
   let result: WorkspaceCommitManifestV1 | null = null;
   await run.mutate(input.registries, async (loaded) => {
     const index = await run.transactions.readJson<CommitIndexV1>("workspace/commits/index.json") ?? { schema: 1, commits: [] };
-    const parent = index.commits.at(-1) ?? null;
+    const parent = input.parent === undefined ? (index.commits.at(-1) ?? null) : input.parent;
+    if (parent !== null && !index.commits.includes(parent)) throw new Error(`workspace commit parent not found: ${parent}`);
     const variableRefs: WorkspaceCommitManifestV1["variables"] = {};
     const payloads: Record<string, string | Buffer | JsonValue> = {};
     for (const [key, encoded] of Object.entries(variables).sort(([a], [b]) => a.localeCompare(b))) {
