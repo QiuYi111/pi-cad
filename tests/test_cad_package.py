@@ -247,6 +247,7 @@ class CadPackageTests(unittest.TestCase):
             {"path": "build/table.step", "role": "candidate"},
             {"path": "table.py", "role": "workspace-commit-artifact"},
         ])
+        self.assertNotIn("parent", mocked.await_args.kwargs)
 
     def test_commit_rejects_artifacts_outside_the_project(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

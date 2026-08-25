@@ -275,7 +275,8 @@ test("Python cad.commit crosses the real bridge with float snapshots and project
       `root = Path(${JSON.stringify(cwd)})`,
       "artifact = cad.ArtifactRef(Path('part.step'), role='candidate')",
       "commit = asyncio.run(cad.commit('system-design', variables={'placement': {'bottom': 0.0, 'top': -0.0}}, artifacts=[artifact, root / 'source.py']))",
-      "print(commit.id)",
+      "child = asyncio.run(cad.commit('review-candidate', artifacts=[artifact, root / 'source.py']))",
+      "print(commit.id, child.id)",
     ].join("; ");
     const python = spawnSync("uv", ["run", "--offline", "--frozen", "--project", join(repo, "python"), "python", "-c", code], {
       cwd,
@@ -289,11 +290,14 @@ test("Python cad.commit crosses the real bridge with float snapshots and project
       },
     });
     assert.equal(python.status, 0, python.stderr);
-    const id = python.stdout.trim();
-    assert.match(id, /^commit-[a-f0-9]{32}$/);
-    const restored = await loadWorkspaceCommit(cwd, mechanicalRegistries, id);
+    const [id, childId] = python.stdout.trim().split(/\s+/);
+    assert.match(id!, /^commit-[a-f0-9]{32}$/);
+    assert.match(childId!, /^commit-[a-f0-9]{32}$/);
+    const restored = await loadWorkspaceCommit(cwd, mechanicalRegistries, id!);
     assert.deepEqual((restored.variables.placement as any).value, { bottom: 0, top: 0 });
     assert.deepEqual(restored.manifest.artifacts.map((item) => item.path), ["part.step", "source.py"]);
+    const child = await loadWorkspaceCommit(cwd, mechanicalRegistries, childId!);
+    assert.equal(child.manifest.parent, id);
     assert.deepEqual((await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any).unmet, []);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });

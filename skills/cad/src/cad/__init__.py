@@ -30,7 +30,13 @@ async def commit(name: str, *, parent: str | Commit | None = None, variables: di
             _, relative = project_path(item, error_type="CommitError")
             artifact_payload.append({"path": relative.as_posix(), "role": "workspace-commit-artifact"})
     parent_id = parent.id if isinstance(parent, Commit) else parent
-    manifest = await request("commit", name=name, parent=parent_id, variables=encoded, artifacts=artifact_payload)
+    commit_payload: dict[str, Any] = {"name": name, "variables": encoded, "artifacts": artifact_payload}
+    # Omitting parent means "chain from the current workspace head". Sending
+    # JSON null here instead would explicitly create a new root commit and
+    # breaks the reviewed-candidate -> release authority chain.
+    if parent_id is not None:
+        commit_payload["parent"] = parent_id
+    manifest = await request("commit", **commit_payload)
     return _commit_from_payload(manifest, dict(variables or {}))
 
 
