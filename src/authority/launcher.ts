@@ -160,11 +160,11 @@ function boundedChildExit(command: string, args: string[], env: NodeJS.ProcessEn
 
 function reviewerModelArgs(primeArgs: string[]): string[] {
   const selected: string[] = [];
-  for (const name of ["--provider", "--model", "--thinking"]) {
+  for (const name of ["--provider", "--model"]) {
     const index = primeArgs.indexOf(name);
     if (index >= 0 && primeArgs[index + 1] && !primeArgs[index + 1]!.startsWith("-")) selected.push(name, primeArgs[index + 1]!);
   }
-  return selected;
+  return [...selected, "--thinking", "medium"];
 }
 
 export async function main(primeArgs = process.argv.slice(2)): Promise<number> {

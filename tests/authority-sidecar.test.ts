@@ -164,12 +164,12 @@ test("reviewer bwrap is subject-scoped and cannot see the author workspace or en
   };
   const joined = buildReviewerBwrapArgs(paths, {
     reviewId: "review-123", reviewerAgentDir: "/run/private/reviewer-agent", reviewerWorkspace: "/run/private/reviewer-workspace",
-    reviewerSocketDirectory: "/run/private/reviewer", prompt: "review exactly one commit", modelArgs: ["--provider", "openai-codex", "--model", "gpt-5.6-luna", "--thinking", "max"],
+    reviewerSocketDirectory: "/run/private/reviewer", prompt: "review exactly one commit", modelArgs: ["--provider", "openai-codex", "--model", "gpt-5.6-luna", "--thinking", "medium"],
   }).join("\n");
   assert.match(joined, /PI_CAD_REVIEW_ID\nreview-123/);
   assert.match(joined, /--ro-bind\n\/run\/private\/reviewer\n\/run\/pi-cad\/reviewer/);
   assert.match(joined, /--autonomous-max-turns\n16/);
-  assert.match(joined, /--provider\nopenai-codex\n--model\ngpt-5\.6-luna\n--thinking\nmax/);
+  assert.match(joined, /--provider\nopenai-codex\n--model\ngpt-5\.6-luna\n--thinking\nmedium/);
   assert.match(joined, /PI_OFFLINE\n1/);
   assert.match(joined, /--no-session/);
   assert.doesNotMatch(joined, /\/author-project|\/run\/private\/author|PI_CAD_AUTHOR_SOCKET/);
