@@ -79,6 +79,11 @@ engineering capability surface.
   path. `review.submit()` accepts the returned `Commit`, never an `ArtifactRef`,
   record ID, guessed ID, or earlier phase-obligation commit. Retain these Python
   objects directly; do not rediscover or guess commit identifiers.
+  After the host review-complete event reports PASS, take the legal PASS
+  transition, then create the `release` obligation with
+  `parent=final_commit` and `artifacts=list(final_commit.artifacts)`. This exact
+  parent and artifact identity is required by the completion gate; do not
+  reconstruct the list from paths or omit the deterministic source.
 - Write task-specific engineering checks in Python. There is no `cad.verify`.
 - Keep large payloads in variables/files and print only selected summaries.
 

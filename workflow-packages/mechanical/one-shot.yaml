@@ -69,7 +69,7 @@ workflow:
       transitions: {allocated: {target: parts, requiresPhaseObligations: true}}
     parts:
       purpose: Author deterministic part geometry and inspect the built candidate.
-      guidance: Root may use ordinary Prime RLM fan-out, but every result must return through one authoritative workspace commit and managed build.
+      guidance: Root may use ordinary Prime RLM fan-out, but every result must return through one authoritative workspace commit and managed build. Rebuilds overwrite the same artifact variable and output; the handoff preserves the latest returned ArtifactRef plus deterministic source, never a string path or stale build.
       actions: [cad_build_step, cad_commit, transition]
       grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
       writeScopes: [project:deliverable, project:source, run:observation]
@@ -97,7 +97,7 @@ workflow:
       transitions: {assembled: {target: final_review, requiresPhaseObligations: true}}
     final_review:
       purpose: Obtain an independent evidence-backed verdict on the immutable candidate.
-      guidance: Submit exactly one immutable candidate; author activity cannot manufacture or substitute reviewer authority.
+      guidance: Submit exactly once using the review-candidate Commit object returned by cad.commit; do not submit an ArtifactRef, phase record, guessed ID, or stale commit. Wait for the host review-complete event before reading the verdict or transitioning.
       actions: [cad_submit_for_review, transition]
       grants: [file_read, observe, observe_programmable, transition]
       writeScopes: [run:observation]
@@ -109,7 +109,7 @@ workflow:
       transitions: {accepted: {target: release}}
     release:
       purpose: Freeze the reviewed release commit and close the workflow.
-      guidance: Commit the exact reviewed artifact set as release; do not substitute newer unreviewed files.
+      guidance: Commit release with the reviewed subject Commit as explicit parent and the exact reviewed artifact set with roles and hashes preserved; do not substitute, omit, or add files.
       actions: [cad_commit, transition]
       grants: [file_read, transition]
       writeScopes: []
