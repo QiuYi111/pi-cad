@@ -56,10 +56,12 @@ export class ReviewRuntime {
     }));
     const prompt = [
       "You are a fresh independent Pi-CAD reviewer running as an ordinary Prime template.",
-      `Load exactly ${subjectCommit} with await cad.load(...).`,
-      "Use await cad.probe.run(...) for affirmative checks. Do not inspect author transcripts or source-generation history.",
+      "Do not read skills, source files, author transcripts, or source-generation history.",
+      `In IPython run import cad; subject = await cad.load(${JSON.stringify(subjectCommit)}).`,
+      "Select the authoritative STEP ArtifactRef from subject.artifacts, then use await cad.probe.run(subject=artifact, purpose=..., code=\"bb=shape.bounding_box(); result={'solids': len(shape.solids()), 'size': [bb.size.X, bb.size.Y, bb.size.Z]}\") for affirmative checks.",
+      "The fenced probe binds shape and artifact_path; result is output-only. Compare the probe value with the immutable subject variables and artifact identity.",
       `Finish exactly once with await cad.review.resolve(${JSON.stringify(reviewId)}, verdict=..., summary=..., findings=[...]).`,
-      "PASS requires evidenceRefs from successful probes. Missing evidence, timeout, crash, or uncertainty is unresolved.",
+      "For evidenceRefs use the successful ProbeResult observation_id, or its script_hash/artifact_hash when observation_id is absent. PASS requires affirmative evidence. Missing evidence, timeout, crash, or uncertainty is unresolved.",
       "Budgets: maxProbeCalls=12, maxTurns=16, wallTimeout=120s, noCompaction=true.",
     ].join("\n");
     const task = this.executor({ reviewId, subjectCommit, prompt }).then(async () => {
