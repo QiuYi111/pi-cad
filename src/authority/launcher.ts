@@ -204,6 +204,11 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const sidecar = await startAuthoritySidecar({
     cwd: project, runtimeDirectory,
     reviewerExecutor: async ({ reviewId, prompt }) => {
+      // OAuth providers may rotate the refresh token while the author is
+      // running. Snapshot the live isolated author bootstrap at admission so
+      // a late reviewer never starts with the stale launch-time copy.
+      await copyPrimeBootstrap(ephemeralAgentDir, reviewerAgentDir);
+      await disableReviewerCompaction(reviewerAgentDir);
       const result = await boundedChildExit("/usr/bin/bwrap", buildReviewerBwrapArgs(launchPaths, { reviewId, reviewerAgentDir, reviewerWorkspace, reviewerSocketDirectory, prompt, modelArgs: reviewerModelArgs(primeArgs) }), { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, 120_000);
       if (result.code !== 0) {
         const detail = result.diagnostic.trim().split("\n").slice(-3).join(" | ").replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]");
