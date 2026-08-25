@@ -21,6 +21,7 @@ function staticRegistration(id: string, schema: unknown, semantics: unknown): Re
 const genericActions = {
   cad_start: "Compile and atomically start the selected immutable workflow.",
   cad_commit: "Freeze selected Python values and artifacts as a generic workspace commit.",
+  codex_generate_image: "Generate a bounded conceptual raster image through Prime Codex OAuth.",
   workflow_replace: "Replace a workflow snapshot without mutating its predecessor.",
   transition: "Apply a legal workflow event through the generic reducer.",
   commit_record: "Close one predeclared record obligation with a typed immutable record.",
@@ -53,6 +54,7 @@ const grants: Record<string, { meaning: string; tools: string[]; writeBoundary: 
   observe_interference: { meaning: "Observe pairwise solid interference facts.", tools: ["cad_probe"], writeBoundary: "run-owned-observation-storage", safetyCap: "no-project-source-write" },
   observe_programmable: { meaning: "Run fenced read-only B-Rep calculations.", tools: ["cad_probe"], writeBoundary: "run-owned-observation-storage", safetyCap: "no-project-source-write" },
   model_build: { meaning: "Execute deterministic MODEL primitives.", tools: ["cad_build_step"], writeBoundary: "declared-model-output", safetyCap: "no-head-promotion" },
+  image_generate: { meaning: "Generate a conceptual raster image without creating geometry authority.", tools: ["codex_generate_image"], writeBoundary: "declared-image-output", safetyCap: "concept-hypothesis-only" },
   deliverable: { meaning: "Generate declared export, drawing, or presentation artifacts.", tools: ["cad_export", "cad_generate_drawing", "cad_render_scene"], writeBoundary: "declared-deliverable-output", safetyCap: "no-head-promotion" },
   simulate: { meaning: "Prepare, execute, observe, and explicitly commit simulation Recipes.", tools: ["cad_simulate", "cad_sim_observe", "cad_commit_simulation", "cad_derive_analysis_model"], writeBoundary: "recipe-and-run-storage", safetyCap: "managed-runtime-no-network" },
   optimize: { meaning: "Execute an optimization Recipe without implicit acceptance.", tools: ["cad_optimize"], writeBoundary: "recipe-and-run-storage", safetyCap: "managed-runtime-no-network" },
@@ -73,7 +75,7 @@ for (const [id, descriptor] of Object.entries(grants)) {
   const maxWriteScopes = id === "file_edit_source" ? ["project:source", "project:recipe", "project:deliverable"]
     : id === "file_edit_recipe" ? ["project:recipe"]
       : id === "observe" || id.startsWith("observe_") ? ["run:observation"]
-        : id === "model_build" || id === "deliverable" ? ["project:deliverable"]
+        : id === "model_build" || id === "deliverable" || id === "image_generate" ? ["project:deliverable"]
           : id === "simulate" || id === "optimize" ? ["project:recipe", "run:observation", "run:evidence"]
             : id.startsWith("commit_") ? ["run:record", "run:state"]
               : id === "route" || id === "reroute" || id === "transition" || id === "wait_for_user" ? ["run:state"]

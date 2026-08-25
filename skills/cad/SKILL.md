@@ -31,11 +31,12 @@ engineering capability surface.
   only after the v7 visual inspection chain has produced and attached all
   standard views to Prime. Missing visual output or attachment is a failed
   build. CadQuery source is not a supported model backend.
-- Use `@cad.probe(subject=artifact_ref)` for Agent-authored, read-only B-Rep
-  calculations on any project-local `ArtifactRef`. The legacy `"current"` and
-  `"baseline"` subjects remain available for state-bound v7 runs. Pass all
-  values explicitly; closures and unrestricted imports do not cross the effect
-  fence.
+- In live IPython, use `await cad.probe.run(subject=artifact_ref, purpose=...,
+  code="result = ...")` for Agent-authored, read-only B-Rep calculations on any
+  project-local `ArtifactRef`. Use `@cad.probe(...)` only for a synchronous
+  function defined in a real source file, where Python can capture its source.
+  The legacy `"current"` and `"baseline"` subjects remain available for
+  state-bound v7 runs; unrestricted imports do not cross the effect fence.
 - Submit an immutable final handoff with `await cad.review.submit(commit)`. This
   expands the Fresh Reviewer prompt and calls Prime's ordinary `rlm()` runtime;
   the returned value is only Prime's admission handle, not a completed review.

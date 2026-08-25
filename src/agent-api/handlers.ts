@@ -12,6 +12,22 @@ import { mechanicalBuiltinWorkflows } from "../domains/mechanical/workflows.ts";
 import { cadStart } from "../harness/kernel.ts";
 import type { AgentApiRequest } from "./protocol.ts";
 import { bootstrapAgentApiContracts } from "./bootstrap.ts";
+import { requireCurrentAuthorization } from "./authorization.ts";
+import type { Operation } from "../harness/permissions.ts";
+
+/**
+ * Every Agent API operation that can mutate an active run is admitted here,
+ * before its handler is selected. workflow-start is the sole bootstrap
+ * exception because no workflow state exists yet to authorize it.
+ */
+export const AGENT_API_MUTATION_OPERATIONS = {
+  "workflow-route": "workflow.transition",
+  "workflow-advance": "workflow.transition",
+  commit: "workspace.commit",
+  probe: "probe.run",
+  "model-build": "model.build",
+  "simulation-run": "simulation.run",
+} as const satisfies Partial<Record<AgentApiRequest["op"], Operation>>;
 
 async function current(cwd: string) {
   const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
@@ -36,12 +52,7 @@ function projectRelativePath(cwd: string, path: string): string {
 
 async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
   const activeBeforeBuild = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
-  if (!activeBeforeBuild) throw new Error("cad.model.build requires an active workflow; call cad.workflow.start() and route Mechanical intake first");
-  if (activeBeforeBuild.workflow.id === "mechanical/intake") throw new Error("cad.model.build requires a routed Mechanical workflow; call cad.workflow.route(...) first");
-  const phase = activeBeforeBuild.workflow.phases[activeBeforeBuild.state.phase]!;
-  if (!phase.actions.includes("cad_build_step") && !phase.grants.includes("model_build")) {
-    throw new Error(`cad.model.build is not enabled in workflow phase ${activeBeforeBuild.state.phase}; close the Phase Card obligations and advance first`);
-  }
+  if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
   const build = await buildStep(cwd, { source: request.source, output: request.output, force: request.force });
   if (!build.ok) return { build, visual: null, images: [] };
 
@@ -106,6 +117,8 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
 export async function handleAgentApi(cwd: string, request: AgentApiRequest) {
   bootstrapAgentApiContracts();
   if (!request || request.schema !== 1 || typeof request.op !== "string") throw new Error("invalid Agent API request");
+  const guardedOperation = AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS];
+  if (guardedOperation) await requireCurrentAuthorization(cwd, guardedOperation);
   switch (request.op) {
     case "workflow-current": return jsonValue(await current(cwd));
     case "workflow-start": {
@@ -127,7 +140,9 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest) {
       const next = await store.mutate(mechanicalRegistries, (loaded) => ({ state: transitionRun(loaded.state, loaded.workflow, request.event), event: { type: "WorkflowAdvancedByAgentApi", data: { event: request.event } } }));
       return jsonValue({ phase: next.state.phase, status: next.state.status });
     }
-    case "commit": return jsonValue(await commitWorkspace({ cwd, registries: mechanicalRegistries, name: request.name, ...(request.parent === undefined ? {} : { parent: request.parent }), variables: request.variables, artifacts: request.artifacts, session: request.session }));
+    case "commit": {
+      return jsonValue(await commitWorkspace({ cwd, registries: mechanicalRegistries, name: request.name, ...(request.parent === undefined ? {} : { parent: request.parent }), variables: request.variables, artifacts: request.artifacts, session: request.session }));
+    }
     case "load": return jsonValue(await loadWorkspaceCommit(cwd, mechanicalRegistries, request.id));
     case "history": return jsonValue(await workspaceHistory(cwd, mechanicalRegistries));
     case "probe": {
@@ -137,7 +152,9 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest) {
       if (details?.presetFailed || result === undefined) throw new Error(rendered.content.map((item) => item.type === "text" ? item.text : "").join("\n") || "programmable probe failed");
       return jsonValue({ value: result, artifactHash: details.artifactHash ?? details.envelope?.inputHashes?.artifact, scriptHash: details.envelope?.inputHashes?.script, observationId: details.observationId });
     }
-    case "model-build": return jsonValue(await buildAndObserve(cwd, request));
+    case "model-build": {
+      return jsonValue(await buildAndObserve(cwd, request));
+    }
     case "simulation-run": {
       const executed = await executeMechanicalRecipeV7({ cwd, kind: "simulation", recipe: request.recipe, action: request.action, obligationRef: request.obligationRef, outputs: request.outputs });
       return jsonValue({

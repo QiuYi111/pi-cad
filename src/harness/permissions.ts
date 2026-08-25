@@ -5,6 +5,72 @@ import type { RegistrySet } from "./registry.ts";
 import type { HarnessRunStateV7 } from "./state.ts";
 import type { WorkflowSnapshotV1 } from "./workflow/types.ts";
 
+export type Operation =
+  | "workspace.commit"
+  | "model.build"
+  | "probe.run"
+  | "simulation.run"
+  | "image.generate"
+  | "review.submit"
+  | "workflow.transition";
+
+export type OperationAuthority = "author" | "reviewer" | "system";
+
+export type Authorization =
+  | { allowed: true; operation: Operation; effectiveCapabilities: string[] }
+  | { allowed: false; operation: Operation; reason: string; legalNextActions: string[] };
+
+const OPERATION_ACTIONS: Readonly<Record<Operation, readonly string[]>> = Object.freeze({
+  "workspace.commit": ["cad_commit"],
+  "model.build": ["cad_build_step"],
+  "probe.run": ["cad_probe"],
+  "simulation.run": ["cad_simulate"],
+  "image.generate": ["codex_generate_image"],
+  "review.submit": ["cad_submit_for_review"],
+  // Route is a temporary compatibility action until Workflow Packages remove
+  // the factorized intake protocol. It still passes through this one boundary.
+  "workflow.transition": ["transition", "cad_transition", "cad_route"],
+});
+
+const OPERATION_AUTHORITIES: Readonly<Partial<Record<Operation, readonly OperationAuthority[]>>> = Object.freeze({
+  "workspace.commit": ["author", "system"],
+  "model.build": ["author", "system"],
+  "probe.run": ["author", "reviewer", "system"],
+  "simulation.run": ["author", "system"],
+  "image.generate": ["author", "system"],
+  "review.submit": ["author", "system"],
+  "workflow.transition": ["author", "system"],
+});
+
+function legalNextActions(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1): string[] {
+  const phase = phaseOf(state, workflow);
+  const missingRecords = phase.recordObligations
+    .filter((item) => item.required !== false && !state.records[item.ref])
+    .map((item) => `${item.closeWith}: ${item.ref}`);
+  const missingEvidence = phase.evidenceObligations
+    .filter((item) => item.required !== false && !state.evidence.some((value) => value.obligationRef === item.ref))
+    .map((item) => `${item.closeWith}: ${item.ref}`);
+  const transitions = Object.entries(phase.transitions).map(([event, value]) => `transition ${event} -> ${value.target}`);
+  return [...missingRecords, ...missingEvidence, ...transitions];
+}
+
+export function renderAuthorizationDenied(value: Extract<Authorization, { allowed: false }>): string {
+  const next = value.legalNextActions.length
+    ? `\n\nLegal next actions:\n${value.legalNextActions.map((item) => `- ${item}`).join("\n")}`
+    : "";
+  return `${value.operation} is unavailable.\n\nReason:\n${value.reason}${next}`;
+}
+
+export class AuthorizationDeniedError extends Error {
+  readonly authorization: Extract<Authorization, { allowed: false }>;
+
+  constructor(authorization: Extract<Authorization, { allowed: false }>) {
+    super(renderAuthorizationDenied(authorization));
+    this.name = "AuthorizationDeniedError";
+    this.authorization = authorization;
+  }
+}
+
 export interface ActionCardV1 {
   schema: 1;
   phase: string;
@@ -75,6 +141,48 @@ export class PermissionEngineV7 {
     const phase = phaseOf(state, workflow);
     if (!phase.writeScopes.includes(scope)) throw new Error(`write scope is not enabled in phase ${state.phase}: ${scope}`);
   }
+}
+
+/** The authoritative workflow capability decision used by every Agent-facing operation. */
+export function authorize(
+  operation: Operation,
+  state: HarnessRunStateV7,
+  workflow: WorkflowSnapshotV1,
+  permissions: PermissionEngineV7,
+  authority: OperationAuthority = "author",
+): Authorization {
+  if (state.status !== "active" && state.status !== "ready") {
+    return {
+      allowed: false,
+      operation,
+      reason: `workflow ${state.workflow.id} is ${state.status}, not active`,
+      legalNextActions: [],
+    };
+  }
+  const authorities = OPERATION_AUTHORITIES[operation] ?? ["author"];
+  if (!authorities.includes(authority)) {
+    return {
+      allowed: false,
+      operation,
+      reason: `${authority} authority cannot perform ${operation}`,
+      legalNextActions: legalNextActions(state, workflow),
+    };
+  }
+  const effectiveCapabilities = permissions.enabledActions(state, workflow);
+  const required = OPERATION_ACTIONS[operation];
+  if (!required.some((action) => effectiveCapabilities.includes(action))) {
+    return {
+      allowed: false,
+      operation,
+      reason: `${operation} is not granted in workflow phase ${state.phase}`,
+      legalNextActions: legalNextActions(state, workflow),
+    };
+  }
+  return { allowed: true, operation, effectiveCapabilities };
+}
+
+export function requireAuthorization(value: Authorization): asserts value is Extract<Authorization, { allowed: true }> {
+  if (!value.allowed) throw new AuthorizationDeniedError(value);
 }
 
 export interface WriteScopeRule {

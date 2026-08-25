@@ -125,6 +125,25 @@ class CadPackageTests(unittest.TestCase):
             "kind": "artifact", "path": "build/part.step", "sha256": "a" * 64, "role": "candidate",
         })
 
+    def test_probe_run_is_canonical_for_live_ipython_code(self) -> None:
+        probe_module = importlib.import_module("cad.probe")
+        artifact = cad.ArtifactRef(Path("build/part.step"), "a" * 64, "candidate")
+        mocked = AsyncMock(return_value={
+            "value": {"solids": 1}, "artifactHash": "a" * 64,
+            "scriptHash": "b" * 64, "observationId": "observation-1",
+        })
+        with patch.object(probe_module, "request", mocked):
+            result = asyncio.run(cad.probe.run(
+                subject=artifact,
+                purpose="count solids",
+                code="result = {'solids': len(shape.solids())}",
+            ))
+        self.assertEqual(result.value, {"solids": 1})
+        self.assertEqual(result.artifact_hash, "a" * 64)
+        self.assertEqual(mocked.await_args.kwargs["subject"], {
+            "kind": "artifact", "path": "build/part.step", "sha256": "a" * 64, "role": "candidate",
+        })
+
     def test_model_build_returns_hashed_artifact_ref(self) -> None:
         model_module = importlib.import_module("cad.model")
         with tempfile.TemporaryDirectory() as directory:

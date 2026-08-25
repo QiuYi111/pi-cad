@@ -29,7 +29,7 @@ function workflow() {
       design: {
         purpose: "Freeze a generic design handoff", guidance: "Use Python for bulk work.\nCommit only stable values.",
         recommendedTemplates: ["mechanical.part-work"], recommendedSkills: ["mechanical.interface-check"],
-        actions: ["cad_commit", "cad_build_step", "transition"], grants: ["model_build", "transition"], writeScopes: ["run:state"],
+        actions: ["cad_commit", "cad_build_step", "transition"], grants: ["model_build", "observe", "transition"], writeScopes: ["run:state"],
         recordObligations: [{ ref: "system-design", type: "workspace_commit", closeWith: "cad_commit" }],
         evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [],
         transitions: { integrated: { target: "review", requiresPhaseObligations: true } },
@@ -61,7 +61,7 @@ test("Plan C exposes explicit workflow start and complete Mechanical routing bef
     assert.equal(intake.workflowId, "mechanical/intake");
     await assert.rejects(
       handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }),
-      /cad\.workflow\.route/,
+      /model\.build is not granted in workflow phase intake/,
     );
     const routed = await handleAgentApi(cwd, {
       schema: 1, op: "workflow-route", reason: "greenfield single part",
@@ -274,6 +274,7 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   const pi = { on(name: string, handler: Function) { handlers.set(name, handler); } } as any;
   primeExtension(pi);
   const context = handlers.get("context")!;
+  const toolCall = handlers.get("tool_call")!;
   const original = [{ role: "user", content: "hello", timestamp: 1 }];
   const first = await context({ messages: original }, { cwd });
   assert.equal(first.messages.length, 2);
@@ -281,9 +282,15 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   assert.equal(first.messages[1].display, false);
   const second = await context({ messages: [...original, first.messages[1]] }, { cwd });
   assert.equal(second.messages.filter((item: any) => item.customType === PHASE_CARD_CUSTOM_TYPE).length, 1);
+  const deniedImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });
+  assert.equal(deniedImage.block, true);
+  assert.match(deniedImage.reason, /image\.generate is not granted in workflow phase design/);
 
   const empty = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-empty-"));
-  try { assert.equal(await context({ messages: original }, { cwd: empty }), undefined); }
+  try {
+    assert.equal(await context({ messages: original }, { cwd: empty }), undefined);
+    assert.equal(await toolCall({ toolName: "codex_generate_image", input: { prompt: "ordinary image" } }, { cwd: empty }), undefined);
+  }
   finally { await rm(empty, { recursive: true, force: true }); }
   await rm(cwd, { recursive: true, force: true });
 });

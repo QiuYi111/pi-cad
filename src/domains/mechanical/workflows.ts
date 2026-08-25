@@ -181,9 +181,12 @@ export function mechanicalPlanCWorkflowDefinition(route: Route): WorkflowDefinit
       });
       const actions = [...new Set(phase.actions.map((action) =>
         Object.values(RECORD_CLOSERS).includes(action) || action === "cad_commit_candidate" ? "cad_commit" : action,
-      ).concat(candidatePhase ? ["cad_build_step"] : []))];
+      ).concat(candidatePhase ? ["cad_build_step"] : [], Object.keys(phase.transitions).length ? ["transition"] : []))];
       return [phaseId, {
         ...phase,
+        ...(["concept", "system_concept"].includes(phaseId)
+          ? { grants: [...new Set([...phase.grants, "image_generate"])] }
+          : {}),
         actions,
         recordObligations: records,
         evidenceObligations: phase.evidenceObligations.map((obligation) => ({

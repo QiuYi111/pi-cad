@@ -147,6 +147,11 @@
       "schemaDigest": "ebd2241a8fa7e144676d821ff6144790b78296ea3e7482000c611089ebcce56c",
       "semanticsDigest": "9421504ecc8c2a619ac38942af639a892107cf6b6075e6130fb99efd7eec5495"
     },
+    "codex_generate_image": {
+      "version": "1.0.0",
+      "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
+      "semanticsDigest": "408f9420cd590efc3fb2bbb950a7ca7c601bb864c8d022eedfeac4fa1b1cc3db"
+    },
     "commit_evidence": {
       "version": "1.0.0",
       "schemaDigest": "3e783c8c8e7d36e4fcf3ef8c5ca2b27f7df6414629bfe119b63f8342e94175a5",
@@ -258,6 +263,11 @@
       "version": "1.0.0",
       "schemaDigest": "2fedbeb65d82092dad4873e8020ccd21058f410f33155712b92e68b6fe763f82",
       "semanticsDigest": "afd55c980bc390001bdf6136830870dde35fd6f0d5688f558d033c6c45178711"
+    },
+    "image_generate": {
+      "version": "1.0.0",
+      "schemaDigest": "1755050ffcbf086b04a7eada6a2fa2500ac2b9075f28d69fd8eff0b7635e784a",
+      "semanticsDigest": "dcd39cd7a53d0ea5391e1023cb6efbd667d1f87896942a199ae1f8df162bec15"
     },
     "model_build": {
       "version": "1.0.0",
@@ -524,5 +534,5 @@
       "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
     }
   },
-  "hash": "18702088a62667109e3fd20b2f06e8d194b859ef4c29803d1fd0d2c8c1411c69"
+  "hash": "f84f5fb716c05a6ed76264bf17fba9db824d72e2ccab11fe0ba6b474c9ce8679"
 }
