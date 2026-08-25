@@ -53,12 +53,23 @@ async function hashArtifact(cwd: string, requested: string, role?: string) {
   return { path: relative(root, path).replaceAll("\\", "/"), sha256: sha256(content), role: role?.trim() || "workspace-commit-artifact" };
 }
 
-function assertEncodedVariable(name: string, value: EncodedVariable): void {
+function normalizeEncodedVariable(name: string, value: EncodedVariable): EncodedVariable {
   if (!/^[a-zA-Z_][a-zA-Z0-9_.-]{0,127}$/.test(name)) throw new Error(`invalid variable name: ${name}`);
   if (!value || typeof value !== "object" || typeof value.codec !== "string" || !value.codec) throw new Error(`variable ${name} lacks an explicit snapshot codec`);
   if (!/^[a-f0-9]{64}$/.test(value.sha256)) throw new Error(`variable ${name} lacks a stable snapshot hash`);
-  const canonical = canonicalJson({ codec: value.codec, value: jsonValue(value.value), ...(value.metadata === undefined ? {} : { metadata: jsonValue(value.metadata) }) });
-  if (sha256(canonical) !== value.sha256) throw new Error(`variable ${name} snapshot hash mismatch`);
+  const normalizedValue = jsonValue(value.value);
+  const normalizedMetadata = value.metadata === undefined ? undefined : jsonValue(value.metadata);
+  const canonical = canonicalJson({ codec: value.codec, value: normalizedValue, ...(normalizedMetadata === undefined ? {} : { metadata: normalizedMetadata }) });
+  // The Node boundary owns the persisted content hash. JSON number spelling is
+  // not stable across runtimes (for example Python emits 0.0 while
+  // JSON.parse/JSON.stringify normalizes it to 0), so a client hash is only a
+  // transport preflight and must never reject semantically identical content.
+  return {
+    codec: value.codec,
+    value: normalizedValue,
+    sha256: sha256(canonical),
+    ...(normalizedMetadata === undefined ? {} : { metadata: normalizedMetadata }),
+  };
 }
 
 export async function commitWorkspace(input: {
@@ -74,8 +85,9 @@ export async function commitWorkspace(input: {
   const project = new HarnessProjectStoreV7(input.cwd);
   const active = await project.currentRun(input.registries);
   if (!active) throw new Error("cad.commit requires an active Pi-CAD v7 run");
-  const variables = input.variables ?? {};
-  for (const [key, value] of Object.entries(variables)) assertEncodedVariable(key, value);
+  const variables = Object.fromEntries(
+    Object.entries(input.variables ?? {}).map(([key, value]) => [key, normalizeEncodedVariable(key, value)]),
+  );
   const artifacts = await Promise.all((input.artifacts ?? []).map((item) => typeof item === "string" ? hashArtifact(input.cwd, item) : hashArtifact(input.cwd, item.path, item.role)));
   const run = new HarnessRunStoreV7(input.cwd, active.state.runId);
   let result: WorkspaceCommitManifestV1 | null = null;

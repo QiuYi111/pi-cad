@@ -184,6 +184,33 @@ class CadPackageTests(unittest.TestCase):
             asyncio.run(cad.commit("delivery", parent=parent))
         self.assertEqual(mocked.await_args.kwargs["parent"], parent.id)
 
+    def test_commit_normalizes_safe_project_paths_before_the_wire_boundary(self) -> None:
+        cad_module = importlib.import_module("cad")
+        mocked = AsyncMock(return_value={
+            "id": "commit-" + "c" * 32, "name": "candidate-build", "parent": None,
+            "workflowHash": "b" * 64, "phase": "build", "variables": {}, "artifacts": [], "createdAt": "now",
+        })
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "table.py"
+            source.write_text("result = None")
+            artifact = root / "build" / "table.step"
+            artifact.parent.mkdir()
+            artifact.write_bytes(b"STEP")
+            ref = cad.ArtifactRef(Path("build/table.step"), "a" * 64, "candidate")
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), patch.object(cad_module, "request", mocked):
+                asyncio.run(cad.commit("candidate-build", artifacts=[ref, source]))
+        self.assertEqual(mocked.await_args.kwargs["artifacts"], [
+            {"path": "build/table.step", "role": "candidate"},
+            {"path": "table.py", "role": "workspace-commit-artifact"},
+        ])
+
+    def test_commit_rejects_artifacts_outside_the_project(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}):
+                with self.assertRaisesRegex(cad.CadApiError, "escapes the project root"):
+                    asyncio.run(cad.commit("candidate-build", artifacts=[Path(directory).parent / "outside.py"]))
+
     def test_workflow_start_and_route_use_the_generic_bridge(self) -> None:
         workflow_module = importlib.import_module("cad.workflow")
         mocked = AsyncMock(side_effect=[{"workflowId": "mechanical/intake"}, {"phase": "requirements"}])
@@ -201,6 +228,13 @@ class CadPackageTests(unittest.TestCase):
     def test_workflow_route_rejects_incomplete_design(self) -> None:
         with self.assertRaisesRegex(ValueError, "require lineage"):
             asyncio.run(cad.workflow.route("design", lineage="greenfield", reason="incomplete"))
+
+    def test_workflow_route_supplies_a_safe_default_reason(self) -> None:
+        workflow_module = importlib.import_module("cad.workflow")
+        mocked = AsyncMock(return_value={"phase": "requirements"})
+        with patch.object(workflow_module, "request", mocked):
+            asyncio.run(cad.workflow.route("design", lineage="greenfield", structure="part", maturity="prototype"))
+        self.assertEqual(mocked.await_args.kwargs["reason"], "Select CAD workflow route: design/greenfield/part/prototype")
 
     def test_review_submit_is_an_ordinary_rlm_template(self) -> None:
         self.assertFalse(hasattr(cad.review, "current"))

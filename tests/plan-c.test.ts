@@ -192,15 +192,23 @@ test("generic workspace commits hash variables and artifacts, chain parents, loa
   try {
     await writeFile(join(cwd, "part.step"), "first");
     const encodedBody = { codec: "json", value: { width: 20, tags: ["stable"] } };
+    const pythonFloatBody = { codec: "json", value: { bottom: 0 } };
+    const pythonSpellingHash = createHash("sha256").update('{"codec":"json","value":{"bottom":0.0}}').digest("hex");
     const first = await commitWorkspace({
       cwd, registries: mechanicalRegistries, name: "system-design",
-      variables: { project: { ...encodedBody, sha256: sha256(encodedBody) } }, artifacts: ["part.step"],
+      variables: {
+        project: { ...encodedBody, sha256: sha256(encodedBody) },
+        placement: { ...pythonFloatBody, sha256: pythonSpellingHash },
+      },
+      artifacts: ["part.step"],
     });
     assert.equal(first.parent, null);
     assert.match(first.id, /^commit-[a-f0-9]{32}$/);
     assert.equal((await new HarnessRunStoreV7(cwd, loaded.state.runId).load(mechanicalRegistries))?.state.records["system-design"]?.type, "workspace_commit");
     const restored = await loadWorkspaceCommit(cwd, mechanicalRegistries, first.id);
     assert.deepEqual((restored.variables.project as any).value, encodedBody.value);
+    assert.deepEqual((restored.variables.placement as any).value, { bottom: 0 });
+    assert.equal(first.variables.placement?.sha256, sha256(pythonFloatBody));
 
     await writeFile(join(cwd, "part.step"), "second");
     const second = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "part-v2", artifacts: ["part.step"] });
@@ -221,6 +229,42 @@ test("generic workspace commits hash variables and artifacts, chain parents, loa
       { cwd, encoding: "utf-8", env: { ...process.env, PI_CAD_REPO: repo, PI_CAD_PROJECT_CWD: cwd } });
     assert.equal(python.status, 0, python.stderr);
     assert.match(python.stdout, new RegExp(`${first.id} 20`));
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("Python cad.commit crosses the real bridge with float snapshots and project-local absolute paths", async () => {
+  const { cwd } = await projectFixture();
+  try {
+    await writeFile(join(cwd, "part.step"), "STEP");
+    await writeFile(join(cwd, "source.py"), "result = None\n");
+    const repo = resolve(import.meta.dirname, "..");
+    const code = [
+      "import asyncio",
+      "from pathlib import Path",
+      "import cad",
+      `root = Path(${JSON.stringify(cwd)})`,
+      "artifact = cad.ArtifactRef(Path('part.step'), role='candidate')",
+      "commit = asyncio.run(cad.commit('system-design', variables={'placement': {'bottom': 0.0, 'top': -0.0}}, artifacts=[artifact, root / 'source.py']))",
+      "print(commit.id)",
+    ].join("; ");
+    const python = spawnSync("uv", ["run", "--offline", "--frozen", "--project", join(repo, "python"), "python", "-c", code], {
+      cwd,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        PYTHONDONTWRITEBYTECODE: "1",
+        PYTHONPATH: join(repo, "skills", "cad", "src"),
+        PI_CAD_REPO: repo,
+        PI_CAD_PROJECT_CWD: cwd,
+      },
+    });
+    assert.equal(python.status, 0, python.stderr);
+    const id = python.stdout.trim();
+    assert.match(id, /^commit-[a-f0-9]{32}$/);
+    const restored = await loadWorkspaceCommit(cwd, mechanicalRegistries, id);
+    assert.deepEqual((restored.variables.placement as any).value, { bottom: 0, top: 0 });
+    assert.deepEqual(restored.manifest.artifacts.map((item) => item.path), ["part.step", "source.py"]);
+    assert.deepEqual((await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any).unmet, []);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 

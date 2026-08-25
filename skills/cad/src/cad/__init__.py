@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from . import artifacts, model, review, simulation, snapshot, templates, workflow
-from .client import CadApiError, request
+from .client import CadApiError, project_path, request
 from .probe import probe
 from .refs import ArtifactRef, Commit
 
@@ -24,9 +24,11 @@ async def commit(name: str, *, parent: str | Commit | None = None, variables: di
     artifact_payload: list[dict[str, str]] = []
     for item in artifacts or []:
         if isinstance(item, ArtifactRef):
-            artifact_payload.append({"path": item.path.as_posix(), "role": item.role})
+            _, relative = project_path(item.path, error_type="CommitError")
+            artifact_payload.append({"path": relative.as_posix(), "role": item.role})
         else:
-            artifact_payload.append({"path": Path(item).as_posix(), "role": "workspace-commit-artifact"})
+            _, relative = project_path(item, error_type="CommitError")
+            artifact_payload.append({"path": relative.as_posix(), "role": "workspace-commit-artifact"})
     parent_id = parent.id if isinstance(parent, Commit) else parent
     manifest = await request("commit", name=name, parent=parent_id, variables=encoded, artifacts=artifact_payload)
     return _commit_from_payload(manifest, dict(variables or {}))

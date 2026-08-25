@@ -5,19 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .client import CadApiError, project_cwd, request
+from .client import CadApiError, project_path, request
 from .refs import ArtifactRef
 
 
 def _project_path(value: str | Path) -> tuple[Path, Path]:
-    root = project_cwd()
-    path = Path(value)
-    absolute = (path if path.is_absolute() else root / path).resolve()
-    try:
-        relative = absolute.relative_to(root)
-    except ValueError as error:
-        raise CadApiError(f"managed CAD path escapes the project root: {path.as_posix()}", error_type="ModelBuildError") from error
-    return absolute, relative
+    return project_path(value, error_type="ModelBuildError")
 
 
 async def _attach_images(paths: list[str]) -> None:

@@ -22,7 +22,7 @@ async def route(
     lineage: str | None = None,
     structure: str | None = None,
     maturity: str | None = None,
-    reason: str,
+    reason: str | None = None,
 ) -> dict[str, Any]:
     """Replace Mechanical intake with the fully specified task workflow."""
     if objective in {"analyze", "convert"}:
@@ -35,7 +35,8 @@ async def route(
         selected = {"objective": objective, "lineage": lineage, "structure": structure, "maturity": maturity}  # type: ignore[dict-item]
     else:
         raise ValueError(f"unsupported CAD objective: {objective}")
-    return await request("workflow-route", route=selected, reason=reason)
+    route_reason = reason or "Select CAD workflow route: " + "/".join(selected.values())
+    return await request("workflow-route", route=selected, reason=route_reason)
 
 
 async def advance(event: str) -> dict[str, Any]:

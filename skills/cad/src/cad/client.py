@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,20 @@ def project_cwd() -> Path:
     if os.name == "nt" or ":\\" in str(cwd):
         raise CadApiError("cad requires Linux/WSL path semantics; Windows paths are rejected")
     return cwd
+
+
+def project_path(value: str | Path, *, error_type: str = "CadApiError") -> tuple[Path, Path]:
+    """Resolve a project-local path and return its absolute and wire forms."""
+    root = project_cwd()
+    path = Path(value)
+    if os.name == "nt" or re.match(r"^[A-Za-z]:[\\/]", str(path)):
+        raise CadApiError("cad requires Linux/WSL path semantics; Windows paths are rejected", error_type=error_type)
+    absolute = (path if path.is_absolute() else root / path).resolve()
+    try:
+        relative = absolute.relative_to(root)
+    except ValueError as error:
+        raise CadApiError(f"managed CAD path escapes the project root: {path.as_posix()}", error_type=error_type) from error
+    return absolute, relative
 
 
 async def request(op: str, **payload: Any) -> Any:
