@@ -206,9 +206,10 @@ function auditSession(sessionPath, sid) {
 // ---------------------------------------------------------------- pi runner
 
 function piArgs(prompt, sessionId) {
+  const disableSkills = /^(?:0|false|no)$/i.test(process.env.PI_CAD_BENCH_SKILLS?.trim() ?? "");
   return [
     "-p", "--provider", PROVIDER, "--model", MODEL, "--thinking", THINKING,
-    "--no-skills", "--no-themes", "--session-id", sessionId,
+    ...(disableSkills ? ["--no-skills"] : ["--skill", join(REPO, "skills")]), "--no-themes", "--session-id", sessionId,
     ...PRODUCTION_EXTENSIONS.flatMap((path) => ["-e", join(REPO, path.replace(/^\.\//, ""))]),
     prompt,
   ];

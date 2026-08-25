@@ -4,6 +4,9 @@ import { TOOL_PURPOSES } from "../../core/agent-contract.ts";
 import { ACTIVE_PUBLIC_TOOLS, type ActivePublicTool, type PublicToolGroup } from "../../shared/public-tools.ts";
 import { mechanicalRegistries } from "./registries.ts";
 import { canonicalJson } from "../../harness/canonical.ts";
+import { selectKernelEngine } from "../../harness/engine-router.ts";
+import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
+import { mechanicalActionRecoveryV7, renderMechanicalActionRecoveryV7 } from "./action-recovery-v7.ts";
 
 export { mechanicalRegistries } from "./registries.ts";
 
@@ -71,9 +74,23 @@ export function captureMechanicalAction(tool: ToolDefinition): void {
 
 /** Register the live Pi tool and pin its actual input schema in the Action Registry. */
 export function registerMechanicalActionTool(pi: ExtensionAPI, tool: ToolDefinition): void {
-  captureMechanicalAction(tool);
-  rememberTool(pi, tool);
-  pi.registerTool(tool);
+  const execute = tool.execute;
+  const wrapped = {
+    ...tool,
+    async execute(...args: Parameters<NonNullable<typeof execute>>) {
+      const result = await execute!.apply(tool, args);
+      const ctx = args[4] as { cwd?: string } | undefined;
+      if (!ctx?.cwd || await selectKernelEngine(ctx.cwd) !== "v7") return result;
+      const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+      if (!loaded || !result || typeof result !== "object") return result;
+      const content = Array.isArray((result as any).content) ? [...(result as any).content] : [];
+      content.push({ type: "text", text: renderMechanicalActionRecoveryV7(loaded) });
+      return { ...(result as any), content, details: { ...((result as any).details ?? {}), nextAction: mechanicalActionRecoveryV7(loaded) } };
+    },
+  } as ToolDefinition;
+  captureMechanicalAction(wrapped);
+  rememberTool(pi, wrapped);
+  pi.registerTool(wrapped);
 }
 
 /** Register a Kernel-owned public action whose pinned contract is installed by the Kernel registry bootstrap. */

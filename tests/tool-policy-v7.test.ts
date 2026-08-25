@@ -34,6 +34,9 @@ test("v7 unified policy blocks nested shell and mutation aliases in read-only ph
     const shell = await authorizeMechanicalToolV7({ cwd, toolName: "exec_command", toolInput: { cmd: "touch escaped" } });
     assert.equal(shell?.block, true);
     assert.match(shell?.reason ?? "", /read_only/);
+    const recovery = JSON.parse(shell!.reason!);
+    assert.equal(recovery.code, "READ_ONLY_ACTION");
+    assert.deepEqual(recovery.nextAction.allowedTransitions, [{ event: "done", target: "end" }]);
     const patch = await authorizeMechanicalToolV7({ cwd, toolName: "apply_patch", toolInput: "*** Begin Patch\n*** Add File: recipes/x.py\n+x\n*** End Patch" });
     assert.equal(patch?.block, true);
     assert.match(patch?.reason ?? "", /not enabled/);

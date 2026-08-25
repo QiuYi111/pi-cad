@@ -10,6 +10,7 @@ import {
 
 import type { FreshReviewExecutorV1, ReviewVerdictV1 } from "../../harness/review.ts";
 import { CadProbeParametersSchema, executeCadProbe, type CadProbeParams } from "../../modules/probe/tool.ts";
+import { canonicalDigest, jsonValue } from "../../harness/canonical.ts";
 
 function modelLabel(model: unknown): string {
   if (!model || typeof model !== "object") return "unavailable";
@@ -62,10 +63,36 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
       if (!model) return unresolved("reviewer model is unavailable");
       let probes = 0;
       const maxProbes = Number(process.env.PI_CAD_REVIEWER_MAX_PROBES ?? 12);
+      const replayed = [] as Array<Record<string, unknown>>;
+      for (const observation of input.programmableObservations.filter((item) => item.subjectHash === candidate.sha256).slice(0, maxProbes)) {
+        const replay = await executeCadProbe(ctx.cwd, {
+          preset: "python",
+          subject: "current",
+          purpose: observation.purpose,
+          code: observation.code,
+        }, { persist: false, subjectArtifact: candidate.path });
+        const details = (replay as any).details;
+        const payload = details?.envelope?.payload;
+        const actualResult = payload && typeof payload === "object" && "result" in payload ? payload.result : payload;
+        const actualDigest = canonicalDigest(jsonValue(actualResult ?? null));
+        const verified = details?.scriptHash === observation.scriptHash && actualDigest === observation.expectedResultDigest;
+        replayed.push({
+          observationId: observation.observationId,
+          purpose: observation.purpose,
+          scriptHash: observation.scriptHash,
+          expectedResultDigest: observation.expectedResultDigest,
+          actualResultDigest: actualDigest,
+          verified,
+          ...(verified ? { result: actualResult } : { error: "replay did not reproduce the bound code/result" }),
+        });
+      }
       const probe = defineTool({
         name: "cad_probe",
         label: "CAD Probe (v7 Fresh Reviewer)",
-        description: "Read-only deterministic observation of the current immutable candidate.",
+        description: [
+          "Read-only deterministic observation of the current immutable candidate.",
+          "For exact feature-level assertions use preset=python with purpose and code. The sandbox preloads shape (CadQuery), bd (build123d), np, math, statistics, and result; assign a JSON-compatible value to result. Imports and file/process/network access are blocked.",
+        ].join("\n"),
         parameters: CadProbeParametersSchema,
         execute: async (_toolCallId, raw) => {
           const params = raw as CadProbeParams;
@@ -90,6 +117,7 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
         systemPrompt: [
           "You are a fresh independent Mechanical reviewer.",
           "Use only the supplied immutable contracts/evidence and cad_probe. Do not trust the author agent's conclusions.",
+          "Kernel-replayed programmable observations are affirmative evidence only when verified=true. Their code/result is bound to the immutable candidate and independently re-executed immediately before this review.",
           "Call cad_probe with preset=geometry first for exact B-Rep dimensions, cylinder axes/radii/lengths, and solid topology; use other presets only for remaining assertions.",
           "The kernel-verified artifacts snapshot is affirmative evidence that each listed hashed deliverable exists. A candidate-source entry satisfies source-file presence unless an assertion constrains its internal code.",
           "Return only ReviewVerdictV1 JSON: {schema:1,verdict:'pass|fail|unresolved',summary,findings:[{id,severity:'info|warning|error',finding,evidenceRefs:[]}]}",
@@ -109,7 +137,7 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
       const abort = () => void created.session.abort();
       ctx.signal?.addEventListener("abort", abort, { once: true });
       try {
-        await created.session.prompt(input.prompt, { expandPromptTemplates: false });
+        await created.session.prompt(`${input.prompt}\n\nKernel-replayed programmable observations:\n${JSON.stringify(replayed)}`, { expandPromptTemplates: false });
         if (timedOut) return unresolved(`reviewer timed out (${modelLabel(model)})`);
         return parseVerdict(created.session.messages as unknown[]) ?? unresolved("reviewer returned malformed or incomplete JSON");
       } catch (error) {

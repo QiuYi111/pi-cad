@@ -12,7 +12,14 @@ export function mechanicalContextCompiler(registries: RegistrySet): ContextCompi
       const state = object(stateValue); const workflow = object(workflowValue); const phase = object(object(workflow.phases)[String(state.phase)]);
       if (!state.phase) return { text: "" };
       const transitions = Object.entries(object(phase.transitions)).map(([event, value]) => `${event}→${String(object(value).target)}`);
-      return { text: ["## Current Action", `phase=${state.phase} status=${state.status}`, `actions=${(phase.actions ?? []).join(",") || "none"}`, `recordObligations=${(phase.recordObligations ?? []).map((item: any) => item.ref).join(",") || "none"}`, `evidenceObligations=${(phase.evidenceObligations ?? []).map((item: any) => item.ref).join(",") || "none"}`, `transitions=${transitions.join(",") || "none"}`].join("\n") };
+      const records = object(state.records);
+      const evidence = Array.isArray(state.evidence) ? state.evidence : [];
+      const unmet = [
+        ...(Array.isArray(phase.recordObligations) ? phase.recordObligations : []).filter((item: any) => !records[item.ref]),
+        ...(Array.isArray(phase.evidenceObligations) ? phase.evidenceObligations : []).filter((item: any) => !evidence.some((entry: any) => entry?.obligationRef === item.ref)),
+      ].map((item: any) => item.ref);
+      const roots = (phase.writeScopes ?? []).flatMap((scope: string) => scope === "project:source" ? ["models/", "src/", "design/"] : scope === "project:recipe" ? ["recipes/", "simulation/"] : scope === "project:deliverable" ? ["build/", "drawings/", "presentation/", "exports/"] : []);
+      return { text: ["## Current Action", `phase=${state.phase} status=${state.status}`, `purpose=${phase.purpose ?? ""}`, `actions=${(phase.actions ?? []).join(",") || "none"}`, `unmetObligations=${unmet.join(",") || "none"}`, `writeRoots=${roots.join(",") || "none"}`, `transitions=${transitions.join(",") || "none"}`, "Every mutation result refreshes this card; never use a transition or action absent from the latest result."].join("\n") };
     },
   });
   compiler.register({

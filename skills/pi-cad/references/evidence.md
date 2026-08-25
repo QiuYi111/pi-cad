@@ -1,3 +1,5 @@
 # Evidence principles
 
 Observations are read-only, immutable, and bound to exact artifact/input hashes. Selectors expire when the artifact changes. Simulation facts become case-scoped Evidence only through explicit commit after inspection. Evidence records provenance; review still decides whether an engineering assertion passes. Use the generated tool contract for exact operations and the workflow/Probe/Simulation cookbooks for lifecycle details.
+
+For an exact feature-level acceptance assertion that fixed presets cannot expose, call `cad_probe` with `preset=python`, `subject=current`, a concise purpose, and deterministic code that assigns the smallest sufficient JSON-compatible value to `result`. The Kernel stores the code and result against the candidate hash; the fresh reviewer independently replays that program and accepts it as affirmative evidence only when both script and result digests reproduce. Do not use imports, filesystem/process/network access, or an author-written prose claim as a substitute.

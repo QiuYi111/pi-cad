@@ -43,6 +43,7 @@ export interface ObservationRefV1 {
   id: string;
   tool: string;
   phase: string;
+  preset?: string;
   headline: string;
   subjectHash?: string;
   evidenceKind?: string;
@@ -119,6 +120,7 @@ export function observationRef(snapshot: ObservationSnapshotV7, snapshotRef?: st
     id: snapshot.id,
     tool: snapshot.tool,
     phase: snapshot.phase,
+    ...(snapshot.preset ? { preset: snapshot.preset } : {}),
     headline: snapshot.headline,
     ...(snapshot.subjectHash ? { subjectHash: snapshot.subjectHash } : {}),
     ...(snapshot.evidenceKind ? { evidenceKind: snapshot.evidenceKind } : {}),

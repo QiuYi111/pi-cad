@@ -3,6 +3,17 @@ import { randomUUID } from "node:crypto";
 import { canonicalDigest, jsonValue, type JsonValue } from "./canonical.ts";
 import type { RegistrySet } from "./registry.ts";
 import { HarnessRunStoreV7, type LoadedHarnessRunV7 } from "./run-store.ts";
+import { readObservationPayloadV7, readObservationV7, type ObservationIndexV1 } from "./observations.ts";
+
+export interface ProgrammableObservationV1 {
+  observationId: string;
+  subjectHash: string;
+  purpose: string;
+  code: string;
+  scriptHash: string;
+  expectedResult: JsonValue;
+  expectedResultDigest: string;
+}
 
 export interface ReviewVerdictV1 {
   schema: 1;
@@ -26,6 +37,7 @@ export interface FreshReviewExecutorV1 {
     prompt: string;
     allowedActions: string[];
     artifacts: Record<string, { id: string; path: string; sha256: string; role: string }>;
+    programmableObservations: ProgrammableObservationV1[];
   }): Promise<ReviewVerdictV1>;
 }
 
@@ -37,7 +49,36 @@ function subject(loaded: LoadedHarnessRunV7): JsonValue {
     records: loaded.state.records,
     artifacts: loaded.state.artifacts,
     evidence: loaded.state.evidence,
+    latestObservation: loaded.state.contextRefs?.latestObservation ?? null,
   });
+}
+
+async function programmableObservations(
+  cwd: string,
+  loaded: LoadedHarnessRunV7,
+  store: HarnessRunStoreV7,
+): Promise<ProgrammableObservationV1[]> {
+  const candidateHashes = new Set(Object.values(loaded.state.artifacts).map((item) => item.sha256));
+  const index = await store.transactions.readJson<ObservationIndexV1>("indexes/observations.json");
+  if (!index || index.schema !== 1) return [];
+  const result: ProgrammableObservationV1[] = [];
+  for (const ref of index.entries) {
+    if (result.length >= 32 || (ref.preset && ref.preset !== "python") || !ref.subjectHash || !candidateHashes.has(ref.subjectHash)) continue;
+    const snapshot = await readObservationV7({ cwd, workflowRunId: loaded.state.runId, id: ref.id });
+    if (snapshot.preset !== "python") continue;
+    const provenance = snapshot.provenance && typeof snapshot.provenance === "object" && !Array.isArray(snapshot.provenance)
+      ? (snapshot.provenance as Record<string, JsonValue>).programmableProbe
+      : undefined;
+    if (!provenance || typeof provenance !== "object" || Array.isArray(provenance)) continue;
+    const contract = provenance as Record<string, JsonValue>;
+    if (contract.protocol !== "pi-cad/programmable-probe/v1" || typeof contract.code !== "string" || typeof contract.purpose !== "string" || typeof contract.scriptHash !== "string") continue;
+    const payload = await readObservationPayloadV7({ cwd, workflowRunId: loaded.state.runId, id: ref.id });
+    const expectedResult = payload && typeof payload === "object" && !Array.isArray(payload) && "result" in payload
+      ? (payload as Record<string, JsonValue>).result ?? null
+      : payload;
+    result.push({ observationId: ref.id, subjectHash: ref.subjectHash, purpose: contract.purpose, code: contract.code, scriptHash: contract.scriptHash, expectedResult, expectedResultDigest: canonicalDigest(expectedResult) });
+  }
+  return result;
 }
 
 function validateVerdict(value: ReviewVerdictV1): void {
@@ -64,7 +105,9 @@ export async function runFreshReviewV7(input: {
   for (const action of input.profile.allowedActions) input.registries.actions.require(action);
   const issues = input.profile.preflight(loaded);
   if (issues.length) throw new Error(`review preflight failed: ${issues.join("; ")}`);
+  const observations = await programmableObservations(input.cwd, loaded, store);
   const subjectHash = canonicalDigest(subject(loaded));
+  if (loaded.state.latestReview?.subjectHash === subjectHash) return loaded;
   const reviewId = `review-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const result = await input.executor.execute({
     reviewId,
@@ -72,10 +115,11 @@ export async function runFreshReviewV7(input: {
     prompt: await input.profile.prompt(loaded, input.cwd),
     allowedActions: [...input.profile.allowedActions],
     artifacts: structuredClone(loaded.state.artifacts),
+    programmableObservations: observations,
   });
   validateVerdict(result);
   const path = `reviews/${reviewId}.json`;
-  return store.mutate(input.registries, (current) => {
+  return store.mutate(input.registries, async (current) => {
     if (canonicalDigest(subject(current)) !== subjectHash) throw new Error("review subject changed while fresh reviewer was running");
     return {
       state: {

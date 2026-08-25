@@ -4,6 +4,8 @@ import { PI_CAD_OWNED_TOOLS } from "../../core/policies.ts";
 import { PermissionEngineV7, assertScopedWrite, type WriteScopeRule } from "../../harness/permissions.ts";
 import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
 import { mechanicalRegistries } from "./registries.ts";
+import { mechanicalActionRecoveryV7 } from "./action-recovery-v7.ts";
+import type { LoadedHarnessRunV7 } from "../../harness/run-store.ts";
 
 export const MECHANICAL_V7_WRITE_RULES: readonly WriteScopeRule[] = [
   { scope: "project:source", roots: ["models", "src", "design"] },
@@ -25,8 +27,18 @@ const ADAPTER_ACTIONS: Readonly<Record<string, string>> = {
   apply_patch: "edit",
 };
 
-function blocked(error: unknown): ToolPolicyDecision {
-  return { block: true, reason: error instanceof Error ? error.message : String(error) };
+function recoverableBlocked(loaded: LoadedHarnessRunV7, code: string, error: unknown, details: Record<string, unknown> = {}): ToolPolicyDecision {
+  return {
+    block: true,
+    reason: JSON.stringify({
+      schema: 1,
+      ok: false,
+      code,
+      message: error instanceof Error ? error.message : String(error),
+      ...details,
+      nextAction: mechanicalActionRecoveryV7(loaded),
+    }),
+  };
 }
 
 function inside(root: string, candidate: string): boolean {
@@ -81,7 +93,7 @@ export async function authorizeMechanicalToolV7(input: {
       new PermissionEngineV7(mechanicalRegistries, loaded.registryContract)
         .assertAction(loaded.state, loaded.workflow, authorizationAction);
     } catch (error) {
-      return blocked(error);
+      return recoverableBlocked(loaded, "ACTION_NOT_ENABLED", error, { attemptedAction: input.toolName });
     }
   } else if (PI_CAD_OWNED_TOOLS.has(input.toolName)) {
     return { block: true, reason: `Pi-CAD v7 action is not registered: ${input.toolName}` };
@@ -98,7 +110,7 @@ export async function authorizeMechanicalToolV7(input: {
     try {
       assertScopedWrite({ cwd: input.cwd, target: path, enabledScopes: phase.writeScopes, rules: MECHANICAL_V7_WRITE_RULES });
     } catch (error) {
-      return blocked(error);
+      return recoverableBlocked(loaded, "WRITE_SCOPE_VIOLATION", error, { attemptedAction: input.toolName, attemptedPath: path });
     }
   }
   if (input.toolName === "apply_patch") {
@@ -107,7 +119,7 @@ export async function authorizeMechanicalToolV7(input: {
         assertScopedWrite({ cwd: input.cwd, target, enabledScopes: phase.writeScopes, rules: MECHANICAL_V7_WRITE_RULES });
       }
     } catch (error) {
-      return blocked(error);
+      return recoverableBlocked(loaded, "WRITE_SCOPE_VIOLATION", error, { attemptedAction: input.toolName });
     }
   }
   if (SHELL_ACTIONS.has(input.toolName)) {
@@ -115,12 +127,12 @@ export async function authorizeMechanicalToolV7(input: {
     // proven read-only by string matching. Read-only workflow phases therefore
     // get no raw shell, even if a legacy grant still projects its name.
     if (phase.writeScopes.length === 0) {
-      return { block: true, reason: `Pi-CAD v7 read_only: ${input.toolName} is disabled; use bounded read tools or cad_probe` };
+      return recoverableBlocked(loaded, "READ_ONLY_ACTION", `Pi-CAD v7 read_only: ${input.toolName} is disabled; use bounded read tools or cad_probe`, { attemptedAction: input.toolName });
     }
     if (input.toolName === "exec_command" && input.toolInput && typeof input.toolInput === "object" && "workdir" in input.toolInput) {
       const workdir = input.toolInput.workdir;
       if (typeof workdir !== "string" || !inside(input.cwd, resolve(input.cwd, workdir))) {
-        return { block: true, reason: "exec_command workdir escapes the project root" };
+        return recoverableBlocked(loaded, "WORKDIR_ESCAPE", "exec_command workdir escapes the project root", { attemptedAction: input.toolName });
       }
     }
   }

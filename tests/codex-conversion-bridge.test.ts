@@ -62,6 +62,9 @@ test("conversion bridge projects active Pi-CAD tools and registers v7 preflight"
     assert.equal(bridge.available, true);
     const nested = provider.getTools() as any[];
     assert.ok(nested.some((tool: any) => tool.name === "cad_probe"), "late core registration must retain earlier probe tools");
+    const nestedProbe = nested.find((tool: any) => tool.name === "cad_probe");
+    assert.match(nestedProbe.description, /scope preloads shape, bd, np, math, statistics/);
+    assert.match(nestedProbe.usage, /preset=python needs subject=current\|baseline/);
     const recall = nested.find((tool: any) => tool.name === "cad_recall_observation");
     assert.ok(recall, "provider publishes the stable action universe for multi-phase Code Mode loops");
     assert.match(recall.usage, /await tools\.cad_recall_observation\(\{/);

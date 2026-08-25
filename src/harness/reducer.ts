@@ -59,7 +59,7 @@ export function transitionRun(state: HarnessRunStateV7, workflow: WorkflowSnapsh
   }
   if (event === "accepted" && phase.reviewProfile) {
     const review = state.latestReview;
-    const subjectHash = canonicalDigest({ workflowHash: workflow.hash, registryContractHash: state.workflow.registryContractHash, phase: state.phase, records: state.records, artifacts: state.artifacts, evidence: state.evidence });
+    const subjectHash = canonicalDigest({ workflowHash: workflow.hash, registryContractHash: state.workflow.registryContractHash, phase: state.phase, records: state.records, artifacts: state.artifacts, evidence: state.evidence, latestObservation: state.contextRefs?.latestObservation ?? null });
     if (!review || review.verdict !== "pass" || review.profileId !== phase.reviewProfile || review.workflowHash !== workflow.hash || review.registryContractHash !== state.workflow.registryContractHash || review.subjectHash !== subjectHash) throw new Error(`transition requires a current ${phase.reviewProfile} PASS`);
   }
   let authorities = state.authorities;

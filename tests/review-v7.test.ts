@@ -15,6 +15,7 @@ import { transitionRun } from "../src/harness/reducer.ts";
 import { runFreshReviewV7 } from "../src/harness/review.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+import { recordObservationV7 } from "../src/harness/observations.ts";
 
 test("fresh Mechanical reviewer selects the authoritative shape instead of an earlier source artifact", () => {
   const selected = selectReviewCandidate({
@@ -51,5 +52,39 @@ test("Generic Review Runner pins a fresh Mechanical profile result before accept
     const closed = await new HarnessRunStoreV7(cwd, loaded.state.runId).mutate(mechanicalRegistries, ({ state }) => ({ state: transitionRun(state, workflow, "accepted"), event: { type: "Accepted" } }));
     assert.equal(closed.state.status, "done");
     assert.equal(reviewed.state.latestReview?.profileId, "mechanical.design-review");
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("fresh review receives candidate-bound programmable probes and caches the identical subject", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-review-programmable-v7-"));
+  try {
+    const workflow = compileWorkflowDefinition({ schema: 1, id: "test/replay-review", version: "1.0.0", parametersSchema: {}, initialPhase: "review", phases: {
+      review: { purpose: "Review", actions: ["cad_probe", "cad_submit_for_review", "transition"], grants: ["observe", "transition"], writeScopes: ["run:observation", "run:state"], recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [], reviewProfile: "mechanical.design-review", transitions: { accepted: { target: "done" } } },
+      done: { purpose: "Done", actions: ["read"], grants: ["file_read"], writeScopes: [], recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [], transitions: {}, terminal: true },
+    } }, mechanicalRegistries);
+    const started = await new HarnessProjectStoreV7(cwd).startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
+    const store = new HarnessRunStoreV7(cwd, started.state.runId);
+    await store.mutate(mechanicalRegistries, ({ state }) => ({
+      state: { ...state, artifacts: { candidate: { id: "candidate", path: "exports/part.step", sha256: "a".repeat(64), role: "candidate-authoritative" } } },
+      event: { type: "CandidateBound" },
+    }));
+    await recordObservationV7({
+      cwd, workflowRunId: started.state.runId, registries: mechanicalRegistries, tool: "cad_probe", preset: "python",
+      headline: "four holes", subjectHash: "a".repeat(64), facts: [], visuals: [], diagnostics: [],
+      provenance: { programmableProbe: { protocol: "pi-cad/programmable-probe/v1", purpose: "count holes", code: "result = {'holeCount': 4}", scriptHash: "b".repeat(64) } },
+      payload: { result: { holeCount: 4 } },
+    });
+    let calls = 0;
+    let replayInput: any;
+    const executor = { async execute(input: any) { calls += 1; replayInput = input; return { schema: 1 as const, verdict: "pass" as const, summary: "verified", findings: [] }; } };
+    const profile = mechanicalReviewProfile("mechanical.design-review");
+    const reviewed = await runFreshReviewV7({ cwd, workflowRunId: started.state.runId, registries: mechanicalRegistries, profile, executor });
+    await runFreshReviewV7({ cwd, workflowRunId: started.state.runId, registries: mechanicalRegistries, profile, executor });
+    assert.equal(calls, 1);
+    assert.equal(replayInput.programmableObservations[0].purpose, "count holes");
+    assert.deepEqual(replayInput.programmableObservations[0].expectedResult, { holeCount: 4 });
+    const closed = await store.mutate(mechanicalRegistries, ({ state }) => ({ state: transitionRun(state, workflow, "accepted"), event: { type: "Accepted" } }));
+    assert.equal(reviewed.state.latestReview?.verdict, "pass");
+    assert.equal(closed.state.status, "done");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });

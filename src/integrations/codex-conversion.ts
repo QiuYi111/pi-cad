@@ -76,9 +76,10 @@ function schemaExample(schema: any, field = "value", depth = 0): string {
 }
 
 function usageFor(tool: any): string {
-  const hint = typeof tool.promptSnippet === "string" && tool.promptSnippet.trim()
-    ? ` // ${tool.promptSnippet.trim()}`
-    : "";
+  const guidance = [tool.promptSnippet, ...(Array.isArray(tool.promptGuidelines) ? tool.promptGuidelines : [])]
+    .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+    .map((item) => item.trim());
+  const hint = guidance.length ? ` // ${guidance.join(" ")}` : "";
   return `await tools.${tool.name}(${schemaExample(tool.parameters)})${hint}`;
 }
 
@@ -104,7 +105,9 @@ export function piCadNestedTools(pi: ExtensionAPI): unknown[] {
     .map((tool: any) => ({
       name: tool.name,
       usage: usageFor(tool),
-      description: tool.description,
+      description: [tool.description, ...(Array.isArray(tool.promptGuidelines) ? tool.promptGuidelines : [])]
+        .filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+        .join("\n"),
       deferLoading: false,
       kind: "function" as const,
       inputSchema: tool.parameters,
