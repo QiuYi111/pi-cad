@@ -120,6 +120,7 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
           "Kernel-replayed programmable observations are affirmative evidence only when verified=true. Their code/result is bound to the immutable candidate and independently re-executed immediately before this review.",
           "Call cad_probe with preset=geometry first for exact B-Rep dimensions, cylinder axes/radii/lengths, and solid topology; use other presets only for remaining assertions.",
           "The kernel-verified artifacts snapshot is affirmative evidence that each listed hashed deliverable exists. A candidate-source entry satisfies source-file presence unless an assertion constrains its internal code.",
+          "A candidate-authoritative artifact and candidate-source artifacts in the same snapshot were atomically produced and bound by the Kernel's candidate build. Treat that binding as affirmative source-to-deliverable regeneration provenance; inspect source internals only when an assertion explicitly constrains code content.",
           "Return only ReviewVerdictV1 JSON: {schema:1,verdict:'pass|fail|unresolved',summary,findings:[{id,severity:'info|warning|error',finding,evidenceRefs:[]}]}",
           "PASS requires affirmative evidence for every acceptance requirement; uncertainty is UNRESOLVED.",
         ].join("\n"),

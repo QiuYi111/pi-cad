@@ -1222,12 +1222,18 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
           const reviewed = await runFreshReviewV7({ cwd: ctx.cwd, workflowRunId: active.state.runId, registries: mechanicalRegistries, profile: mechanicalReviewProfile(profileId), executor: mechanicalReviewExecutorV7(ctx) });
           if (reviewed.state.latestReview?.verdict !== "pass") {
             const verdict = reviewed.state.latestReview?.verdict ?? "unresolved";
+            const reviewPayload = reviewed.state.latestReview?.path
+              ? await new (await import("../harness/run-store.ts")).HarnessRunStoreV7(ctx.cwd, active.state.runId).transactions.readJson<any>(reviewed.state.latestReview.path)
+              : null;
+            const findings = Array.isArray(reviewPayload?.result?.findings) ? reviewPayload.result.findings : [];
             const regressed = await regressMechanicalReviewV7({ cwd: ctx.cwd, note: `fresh independent review ${verdict}` });
             return errTool(
-              regressed
+              `${regressed
                 ? `Independent v7 review ${verdict}; returned to editable phase ${regressed.state.phase}.`
-                : `Independent v7 review ${verdict}; no editable regression edge exists from ${reviewed.state.phase}.`,
-              { state: regressed?.state ?? reviewed.state, review: reviewed.state.latestReview },
+                : `Independent v7 review ${verdict}; no editable regression edge exists from ${reviewed.state.phase}.`}
+Review findings=${JSON.stringify(findings)}
+Repair the candidate only for a real geometry defect. When a finding asks for exact feature/component facts not exposed by fixed presets, record a deterministic cad_probe preset=python observation against subject=current, then resubmit; do not revise requirements merely to silence missing evidence.`,
+              { state: regressed?.state ?? reviewed.state, review: reviewed.state.latestReview, reviewResult: reviewPayload?.result },
             );
           }
           const advanced = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: "accepted", note: params.summary ?? "fresh independent review PASS" });

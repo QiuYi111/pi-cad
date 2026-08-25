@@ -57,6 +57,8 @@ test("v7 unified policy validates every apply_patch target and exec workdir", as
     assert.equal(workdir?.block, true);
     assert.match(workdir?.reason ?? "", /escapes/);
     assert.equal(await authorizeMechanicalToolV7({ cwd, toolName: "exec_command", toolInput: { cmd: "pwd", workdir: "recipes" } }), undefined);
+    const siblingRead = await authorizeMechanicalToolV7({ cwd, toolName: "exec_command", toolInput: { cmd: "cat /home/jingyi/another-plan/notes.md", workdir: "recipes" } });
+    assert.equal(JSON.parse(siblingRead!.reason!).code, "READ_SCOPE_VIOLATION");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 

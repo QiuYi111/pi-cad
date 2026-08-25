@@ -135,6 +135,15 @@ export async function authorizeMechanicalToolV7(input: {
         return recoverableBlocked(loaded, "WORKDIR_ESCAPE", "exec_command workdir escapes the project root", { attemptedAction: input.toolName });
       }
     }
+    if (input.toolName === "exec_command" && input.toolInput && typeof input.toolInput === "object" && "cmd" in input.toolInput && typeof input.toolInput.cmd === "string") {
+      const packageRoot = process.env.PI_CAD_REPO ? resolve(process.env.PI_CAD_REPO) : null;
+      const externalHomePath = [...input.toolInput.cmd.matchAll(/\/home\/[A-Za-z0-9._/-]+/g)]
+        .map((match) => match[0])
+        .find((path) => !inside(input.cwd, path) && (!packageRoot || !inside(packageRoot, path)));
+      if (externalHomePath) {
+        return recoverableBlocked(loaded, "READ_SCOPE_VIOLATION", `exec_command references a path outside the project/package roots: ${externalHomePath}`, { attemptedAction: input.toolName, attemptedPath: externalHomePath });
+      }
+    }
   }
   return undefined;
 }
