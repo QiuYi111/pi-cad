@@ -1205,7 +1205,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptGuidelines: [
       "Use only when the current accepted transition targets READY; intermediate engineering handoffs still use cad_transition.",
       "Do not provide self-authored checks or justification. The reviewer receives canonical Mission, preregistered Assertions, current visuals/digest/evidence, and cad_probe only.",
-      "FAIL or UNRESOLVED leaves the phase unchanged; revise the candidate or explicitly revise a suspect requirements contract before submitting again.",
+      "UNRESOLVED stays in review so missing evidence can be added. FAIL returns to the workflow's editable phase for a real candidate repair.",
     ],
     parameters: Type.Object(
       { summary: Type.Optional(Type.String({ description: "Optional terse submission label; not acceptance evidence" })) },
@@ -1226,11 +1226,15 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
               ? await new (await import("../harness/run-store.ts")).HarnessRunStoreV7(ctx.cwd, active.state.runId).transactions.readJson<any>(reviewed.state.latestReview.path)
               : null;
             const findings = Array.isArray(reviewPayload?.result?.findings) ? reviewPayload.result.findings : [];
-            const regressed = await regressMechanicalReviewV7({ cwd: ctx.cwd, note: `fresh independent review ${verdict}` });
+            const regressed = verdict === "fail"
+              ? await regressMechanicalReviewV7({ cwd: ctx.cwd, note: `fresh independent review ${verdict}` })
+              : null;
             return errTool(
-              `${regressed
-                ? `Independent v7 review ${verdict}; returned to editable phase ${regressed.state.phase}.`
-                : `Independent v7 review ${verdict}; no editable regression edge exists from ${reviewed.state.phase}.`}
+              `${verdict === "unresolved"
+                ? `Independent v7 review unresolved; remaining in review phase ${reviewed.state.phase} so evidence can be added.`
+                : regressed
+                  ? `Independent v7 review fail; returned to editable phase ${regressed.state.phase}.`
+                  : `Independent v7 review fail; no editable regression edge exists from ${reviewed.state.phase}.`}
 Review findings=${JSON.stringify(findings)}
 Repair the candidate only for a real geometry defect. When a finding asks for exact feature/component facts not exposed by fixed presets, record a deterministic cad_probe preset=python observation against subject=current, then resubmit; do not revise requirements merely to silence missing evidence.`,
               { state: regressed?.state ?? reviewed.state, review: reviewed.state.latestReview, reviewResult: reviewPayload?.result },
