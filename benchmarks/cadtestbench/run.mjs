@@ -179,7 +179,7 @@ function auditSession(sessionPath, sid) {
       const argv = JSON.stringify(part.arguments ?? part.input ?? {});
       const paths = argv.match(/(?:\\?")(\/[^"\\]{4,}|\.?\.\/[^"\\]{2,})/g) ?? [];
       for (let raw of paths) {
-        raw = raw.slice(1).replace(/\\\\/g, "\\");
+        raw = raw.replace(/^\\?"/, "").replace(/\\\\/g, "\\");
         if (raw.startsWith("./") || raw === ".") continue;
         if (raw === ownStaging || raw.startsWith(ownStaging + "/")) continue;
         if (raw.includes("/.cache/") || raw.includes("/.cache")) {
