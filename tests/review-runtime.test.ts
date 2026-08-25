@@ -63,8 +63,10 @@ test("review runtime rejects an evidence-free PASS and converts executor crashes
     } }, mechanicalRegistries);
     await new HarnessProjectStoreV7(cwd).startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
     await writeFile(join(cwd, "candidate.step"), "candidate");
+    const empty = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "empty-candidate" });
     const commit = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "candidate", artifacts: ["candidate.step"] });
     const runtime = new ReviewRuntime(cwd, async () => { throw new Error("crash"); });
+    await assert.rejects(runtime.submit(empty.id), /no immutable artifacts/);
     const handle = await runtime.submit(commit.id);
     await assert.rejects(runtime.complete(handle.reviewId, { verdict: "pass", summary: "empty", findings: [] }), /PASS without affirmative evidence/);
     await runtime.waitForIdle(handle.reviewId);

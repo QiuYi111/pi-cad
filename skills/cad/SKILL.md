@@ -41,6 +41,12 @@ engineering capability surface.
   The legacy `"current"` and `"baseline"` subjects remain available for
   state-bound v7 runs; unrestricted imports do not cross the effect fence.
 - Submit an immutable final handoff with `handle = await cad.review.submit(commit)`.
+  After the managed build and probes, create this handoff as a separate commit
+  whose `artifacts` include the returned STEP `ArtifactRef` and its deterministic
+  source (for example `final_commit = await cad.commit("review-candidate",
+  artifacts=[artifact, "part.py"], variables=checks)`). Never submit an earlier
+  phase-obligation commit or an empty commit; design review admission requires
+  the exact canonical candidate path and hash.
   This returns immediately and is idempotent for the same workflow, contract,
   and artifact identity. Do not poll: the sidecar notifies Prime and triggers a
   new parent turn when the ordinary Fresh Reviewer template completes. On that

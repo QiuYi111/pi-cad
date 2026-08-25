@@ -38,6 +38,11 @@ export class ReviewRuntime {
     if (!profileId) throw new Error(`review.submit is unavailable in phase ${active.state.phase}`);
     const { manifest } = await loadWorkspaceCommit(this.cwd, mechanicalRegistries, subjectCommit);
     if (manifest.workflowHash !== active.workflow.hash) throw new Error("review subject commit belongs to another workflow snapshot");
+    if (!manifest.artifacts.length) throw new Error("review subject commit has no immutable artifacts");
+    const canonicalCandidate = active.state.artifacts["candidate:authoritative"];
+    if (canonicalCandidate && !manifest.artifacts.some((item) => item.path === canonicalCandidate.path && item.sha256 === canonicalCandidate.sha256)) {
+      throw new Error("review subject commit does not contain the canonical candidate artifact");
+    }
     const artifactHash = canonicalDigest(manifest.artifacts.map(({ path, sha256, role }) => ({ path, sha256, role })));
     const contractHash = canonicalDigest({
       registryContractHash: active.registryContract.hash,

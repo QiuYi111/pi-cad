@@ -125,7 +125,7 @@ function withHeadlessEventContinuation(args: string[]): string[] {
   // A small continuation budget lets an extension-delivered review event
   // become a provider turn; the completion gate remains the success authority.
   return [
-    "--autonomous", "--autonomous-max-continuations", "2",
+    "--autonomous", "--autonomous-max-continuations", "16",
     "--autonomous-max-turns", "64", "--autonomous-max-tokens", "500000",
     ...args,
   ];
