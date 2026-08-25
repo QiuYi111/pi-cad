@@ -150,6 +150,7 @@ export interface AuthoritySidecar {
 }
 
 export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor }): Promise<AuthoritySidecar> {
+  bootstrapAgentApiContracts();
   const cwd = resolve(input.cwd);
   const authorDirectory = join(resolve(input.runtimeDirectory), "author");
   const reviewerDirectory = join(resolve(input.runtimeDirectory), "reviewer");
