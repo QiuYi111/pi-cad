@@ -59,6 +59,26 @@ engineering capability surface.
   new parent turn when the ordinary Fresh Reviewer template completes. On that
   turn inspect `await cad.review.current(handle)` and apply the matching legal
   review transition. Never treat admission as completion or import transcripts.
+- Keep one current candidate variable. Every rebuild must overwrite both the
+  same project output and that variable: `artifact = await cad.model.build(
+  "part.py", "part.step")`. A successful rebuild invalidates every older
+  `ArtifactRef`; never retain alternate `artifact_fixed`/`artifact_step`
+  variables or submit a prior build. Use this exact final handoff shape:
+
+  ```python
+  checks = await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")
+  final_commit = await cad.commit(
+      "review-candidate",
+      artifacts=[artifact, "part.py"],
+      variables={"checks": checks.value},
+  )
+  handle = await cad.review.submit(final_commit)
+  ```
+
+  The first artifact must be the latest returned `ArtifactRef`, not its string
+  path. `review.submit()` accepts the returned `Commit`, never an `ArtifactRef`,
+  record ID, guessed ID, or earlier phase-obligation commit. Retain these Python
+  objects directly; do not rediscover or guess commit identifiers.
 - Write task-specific engineering checks in Python. There is no `cad.verify`.
 - Keep large payloads in variables/files and print only selected summaries.
 

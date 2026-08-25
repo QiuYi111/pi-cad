@@ -44,6 +44,9 @@ test("Prime CAD skill forbids nested Python adaptation and maps CadQuery tasks t
   assert.match(skill, /Never launch a nested[\s\S]*`python`\/`python3`/i);
   assert.match(skill, /CadQuery[\s\S]*implement the managed candidate with build123d/i);
   assert.match(skill, /never use a subprocess as an API-adaptation fallback/i);
+  assert.match(skill, /Every rebuild must overwrite[\s\S]*artifact = await cad\.model\.build/i);
+  assert.match(skill, /review\.submit\(\).*accepts the returned `Commit`/i);
+  assert.match(skill, /do not rediscover or guess commit identifiers/i);
 });
 
 test("Prime review completion uses ExtensionAPI messaging rather than event context", async () => {
