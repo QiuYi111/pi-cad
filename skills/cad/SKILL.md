@@ -29,7 +29,14 @@ engineering capability surface.
   `result`; `await cad.model.build(source, output)` exports the STEP artifact
   only after the v7 visual inspection chain has produced and attached all
   standard views to Prime. Missing visual output or attachment is a failed
-  build. CadQuery source is not a supported model backend.
+  build. CadQuery source is not a supported model backend. When a benchmark or
+  legacy task asks for CadQuery, preserve its requested geometry and dimensions
+  but implement the managed candidate with build123d; do not probe for or try
+  to install CadQuery.
+- Prime's persistent IPython kernel is the Python runtime. Import packages and
+  call the documented `cad` API directly in that kernel. Never launch a nested
+  `python`/`python3`, `pip`, or `uv` subprocess to inspect the environment or
+  perform CAD work, and never use a subprocess as an API-adaptation fallback.
 - In live IPython, use `await cad.probe.run(subject=artifact_ref, purpose=...,
   code="result = {'solids': len(shape.solids())}")` for Agent-authored,
   read-only B-Rep calculations on any project-local `ArtifactRef`. The fenced

@@ -38,3 +38,10 @@ test("installed contract/skills/action cards drive representative decisions with
   assert.match(review, /actual=cuda/);
   assert.doesNotMatch(review, /read src\//i);
 });
+
+test("Prime CAD skill forbids nested Python adaptation and maps CadQuery tasks to the managed backend", async () => {
+  const skill = await readFile(join(process.cwd(), "skills", "cad", "SKILL.md"), "utf-8");
+  assert.match(skill, /Never launch a nested[\s\S]*`python`\/`python3`/i);
+  assert.match(skill, /CadQuery[\s\S]*implement the managed candidate with build123d/i);
+  assert.match(skill, /never use a subprocess as an API-adaptation fallback/i);
+});
