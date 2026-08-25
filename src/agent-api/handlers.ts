@@ -1,4 +1,5 @@
 import { canonicalDigest, jsonValue, type JsonValue } from "../harness/canonical.ts";
+import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { commitWorkspace, loadWorkspaceCommit, workspaceHistory } from "../harness/commit.ts";
 import { commitEvidenceRef, transitionRun, unmetPhaseObligations } from "../harness/reducer.ts";
@@ -121,7 +122,11 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
       event: { type: "ModelBuildObserved", data: { artifact: projectRelativePath(cwd, artifact), images: Object.values(contextRefs), evidence: [...envelopes.keys()] } },
     };
   });
-  return { build, visual, geometry, images };
+  const inlineImages = await Promise.all(selected.map(async (path) => ({
+    data: (await readFile(path)).toString("base64"),
+    mimeType: "image/png",
+  })));
+  return { build, visual, geometry, images: inlineImages };
 }
 
 export async function handleAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {

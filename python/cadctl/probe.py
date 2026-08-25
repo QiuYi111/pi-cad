@@ -59,6 +59,7 @@ def run_probe(artifact: Path, code: str, timeout_s: int = 25) -> dict[str, Any]:
     scope: dict[str, Any] = {
         "__builtins__": SAFE_BUILTINS,
         "shape": shape,
+        "artifact_path": str(artifact),
         "bd": bd,
         "math": math,
         "statistics": statistics,

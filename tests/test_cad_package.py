@@ -3,11 +3,13 @@ from __future__ import annotations
 import dataclasses
 import ast
 import asyncio
+import base64
 import importlib
 import os
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -166,7 +168,7 @@ class CadPackageTests(unittest.TestCase):
                 "artifacts": [{"path": str(output), "kind": "step", "sha256": "b" * 64}],
                 "outputHashes": {str(output): "b" * 64},
             }
-            response = {"build": envelope, "images": [str(Path(directory) / "iso.png")]}
+            response = {"build": envelope, "images": [{"data": base64.b64encode(b"PNG").decode(), "mimeType": "image/png"}]}
             attach = AsyncMock()
             with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), \
                     patch.object(model_module, "request", AsyncMock(return_value=response)), \
@@ -174,7 +176,20 @@ class CadPackageTests(unittest.TestCase):
                 artifact = asyncio.run(cad.model.build("part.py", "build/part.step"))
             self.assertEqual(artifact.sha256, "b" * 64)
             self.assertEqual(artifact.path, Path("build/part.step"))
-            attach.assert_awaited_once_with([str(Path(directory) / "iso.png")])
+            attach.assert_awaited_once_with(response["images"])
+
+    def test_model_build_uses_prime_prepared_attach_image_binding(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        attach = AsyncMock()
+        images = [
+            {"data": base64.b64encode(b"first").decode(), "mimeType": "image/png"},
+            {"data": base64.b64encode(b"second").decode(), "mimeType": "image/png"},
+        ]
+        with patch("IPython.get_ipython", return_value=SimpleNamespace(user_ns={"attach_image": attach})):
+            asyncio.run(model_module._attach_images(images))
+        attached_paths = attach.await_args.args
+        self.assertEqual(len(attached_paths), 2)
+        self.assertTrue(all(not Path(path).exists() for path in attached_paths))
 
     def test_model_build_fails_on_inner_backend_error(self) -> None:
         model_module = importlib.import_module("cad.model")

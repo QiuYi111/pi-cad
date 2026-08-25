@@ -2,6 +2,9 @@ from __future__ import annotations
 
 """Thin model handles over the existing Pi-CAD build capability."""
 
+import base64
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -13,17 +16,35 @@ def _project_path(value: str | Path) -> tuple[Path, Path]:
     return project_path(value, error_type="ModelBuildError")
 
 
-async def _attach_images(paths: list[str]) -> None:
-    if not paths:
+async def _attach_images(images: list[dict[str, str]]) -> None:
+    if not images:
         raise CadApiError("Pi-CAD model build produced no mandatory visual observations", error_type="ModelBuildError")
     try:
-        from attach_image import run as attach_images
-    except ImportError as error:
+        from IPython import get_ipython
+
+        shell = get_ipython()
+        attach_images = shell.user_ns.get("attach_image") if shell is not None else None
+    except Exception as error:
         raise CadApiError("Prime image attachment capability is unavailable", error_type="ModelBuildError") from error
+    if not callable(attach_images):
+        raise CadApiError("Prime image attachment capability is unavailable", error_type="ModelBuildError")
+    paths: list[str] = []
     try:
+        for image in images:
+            if image.get("mimeType") != "image/png" or not image.get("data"):
+                raise ValueError("mandatory build image is not an inline PNG")
+            with tempfile.NamedTemporaryFile(prefix="prime-cad-build-", suffix=".png", delete=False) as handle:
+                handle.write(base64.b64decode(image["data"], validate=True))
+                paths.append(handle.name)
         await attach_images(*paths)
     except Exception as error:
         raise CadApiError(f"Pi-CAD could not inject mandatory build images into Prime: {error}", error_type="ModelBuildError") from error
+    finally:
+        for path in paths:
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
 
 
 async def build(source: str | Path, output: str | Path | None = None, *, force: bool = False) -> ArtifactRef:
@@ -41,6 +62,6 @@ async def build(source: str | Path, output: str | Path | None = None, *, force: 
     artifact = next((item for item in artifacts if item.get("kind") == "step"), artifacts[0] if artifacts else None)
     if not artifact or not output_path.is_file():
         raise CadApiError(f"Pi-CAD model build did not create {output_relative.as_posix()}", error_type="ModelBuildError")
-    await _attach_images([str(path) for path in response.get("images") or []])
+    await _attach_images(response.get("images") or [])
     digest = artifact.get("sha256") if artifact else None
     return ArtifactRef(output_relative, digest, "candidate")

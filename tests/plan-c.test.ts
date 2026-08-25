@@ -149,7 +149,8 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
     assert.equal(result.visual.ok, true);
     assert.equal(result.geometry.ok, true);
     assert.deepEqual(result.visual.payload.views.map((view: any) => view.name), ["iso", "front", "back", "left", "right", "top", "bottom"]);
-    assert.equal(result.images.length, 7);
+    assert.equal(result.images.length, 2);
+    assert.ok(result.images.every((image: any) => image.mimeType === "image/png" && Buffer.from(image.data, "base64").subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))));
     const card = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     assert.deepEqual(card?.images.map((image) => image.path), [
       `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,

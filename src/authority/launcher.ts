@@ -124,7 +124,11 @@ function withHeadlessEventContinuation(args: string[]): string[] {
   // Prime print mode disposes the session after the first provider action.
   // A small continuation budget lets an extension-delivered review event
   // become a provider turn; the completion gate remains the success authority.
-  return ["--autonomous", "--autonomous-max-continuations", "2", ...args];
+  return [
+    "--autonomous", "--autonomous-max-continuations", "2",
+    "--autonomous-max-turns", "64", "--autonomous-max-tokens", "500000",
+    ...args,
+  ];
 }
 
 async function copyPrimeBootstrap(source: string, destination: string): Promise<void> {

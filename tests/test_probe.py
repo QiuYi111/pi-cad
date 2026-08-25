@@ -72,6 +72,11 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("artifact", env["inputHashes"])
         self.assertIn("script", env["inputHashes"])
 
+    def test_artifact_path_is_a_read_only_runtime_binding(self) -> None:
+        env = run_probe("result = {'artifact_path': artifact_path}")
+        self.assertTrue(env["ok"], env)
+        self.assertEqual(Path(env["payload"]["result"]["artifact_path"]).resolve(), STEP_FIXTURE.resolve())
+
     def test_open_is_unavailable(self) -> None:
         env = run_probe('result = open("/etc/passwd")')
         self.assertFalse(env["ok"])
