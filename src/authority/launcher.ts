@@ -25,7 +25,7 @@ export interface LaunchPaths {
   authorSocketDirectory: string;
 }
 
-export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string }): string[] {
+export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string; modelArgs?: string[] }): string[] {
   const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/home/prime", "--dir", "/home/prime/.prime", "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad"];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
   args.push(
@@ -46,9 +46,10 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PYTHONPATH", `/opt/prime-kernel-venv/${paths.kernelSitePackages}:/opt/pi-cad/cad-skill/src`,
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime", "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
     "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
+    "--setenv", "PI_OFFLINE", "1",
   );
   for (const name of ["TERM", "LANG", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) passEnvironment(args, name, process.env[name]);
-  args.push("--", "/opt/prime/prime-agent.sh", "--cwd", "/workspace", "--no-extensions", "--no-prompt-templates", "--no-themes", "--no-context-files", "--tools", "ipython", "--skill", "/opt/pi-cad/cad-skill/SKILL.md", "--autonomous-max-turns", "16", "--no-session", "--mode", "json", "--print", input.prompt);
+  args.push("--", "/opt/prime/prime-agent.sh", "--cwd", "/workspace", "--no-extensions", "--no-prompt-templates", "--no-themes", "--no-context-files", "--tools", "ipython", "--skill", "/opt/pi-cad/cad-skill/SKILL.md", ...(input.modelArgs ?? []), "--autonomous", "--autonomous-max-turns", "16", "--autonomous-timeout-ms", "115000", "--no-session", "--mode", "json", "--print", input.prompt);
   return args;
 }
 
@@ -143,14 +144,27 @@ function childExit(command: string, args: string[], env: NodeJS.ProcessEnv): Pro
   });
 }
 
-function boundedChildExit(command: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs: number): Promise<{ code: number; signal: NodeJS.Signals | null }> {
+function boundedChildExit(command: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs: number): Promise<{ code: number; signal: NodeJS.Signals | null; diagnostic: string }> {
   return new Promise((accept, reject) => {
-    const child = spawn(command, args, { stdio: "ignore", env });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env });
+    let diagnostic = "";
+    const append = (chunk: Buffer) => { diagnostic = `${diagnostic}${chunk.toString("utf8")}`.slice(-8192); };
+    child.stdout.on("data", append);
+    child.stderr.on("data", append);
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
     child.once("error", (error) => { clearTimeout(timer); reject(error); });
-    child.once("exit", (code, signal) => { clearTimeout(timer); accept({ code: timedOut ? 124 : (code ?? 1), signal }); });
+    child.once("exit", (code, signal) => { clearTimeout(timer); accept({ code: timedOut ? 124 : (code ?? 1), signal, diagnostic }); });
   });
+}
+
+function reviewerModelArgs(primeArgs: string[]): string[] {
+  const selected: string[] = [];
+  for (const name of ["--provider", "--model", "--thinking"]) {
+    const index = primeArgs.indexOf(name);
+    if (index >= 0 && primeArgs[index + 1] && !primeArgs[index + 1]!.startsWith("-")) selected.push(name, primeArgs[index + 1]!);
+  }
+  return selected;
 }
 
 export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
@@ -190,8 +204,11 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const sidecar = await startAuthoritySidecar({
     cwd: project, runtimeDirectory,
     reviewerExecutor: async ({ reviewId, prompt }) => {
-      const result = await boundedChildExit("/usr/bin/bwrap", buildReviewerBwrapArgs(launchPaths, { reviewId, reviewerAgentDir, reviewerWorkspace, reviewerSocketDirectory, prompt }), { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, 120_000);
-      if (result.code !== 0) throw new Error(result.code === 124 ? "reviewer wall timeout (120s)" : `reviewer exited with code ${result.code}`);
+      const result = await boundedChildExit("/usr/bin/bwrap", buildReviewerBwrapArgs(launchPaths, { reviewId, reviewerAgentDir, reviewerWorkspace, reviewerSocketDirectory, prompt, modelArgs: reviewerModelArgs(primeArgs) }), { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, 120_000);
+      if (result.code !== 0) {
+        const detail = result.diagnostic.trim().split("\n").slice(-3).join(" | ").replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]");
+        throw new Error(`${result.code === 124 ? "reviewer wall timeout (120s)" : `reviewer exited with code ${result.code}`}${detail ? `: ${detail}` : ""}`);
+      }
     },
   });
   const paths: LaunchPaths = {
