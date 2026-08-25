@@ -17,21 +17,21 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   type ReviewHandle = { reviewId: string; subjectCommit: string; status: string };
   let reviewWatch: Promise<void> | null = null;
   const notifiedReviews = new Set<string>();
-  const notifyReview = async (ctx: any, review: ReviewHandle) => {
+  const notifyReview = async (review: ReviewHandle) => {
     if (review.status === "running" || notifiedReviews.has(review.reviewId)) return;
-    await ctx.sendMessage({
+    pi.sendMessage({
       customType: "pi-cad.review-completed", display: true,
       content: `Pi-CAD independent review ${review.reviewId} completed with ${review.status.toUpperCase()} for ${review.subjectCommit}. Inspect cad.review.current(handle) and take a legal workflow transition.`,
       details: review,
     }, { triggerTurn: true, deliverAs: "followUp" });
     notifiedReviews.add(review.reviewId);
   };
-  const watchReview = (ctx: any) => {
+  const watchReview = () => {
     if (reviewWatch) return reviewWatch;
     reviewWatch = requestAuthority<null | ReviewHandle>({ op: "review-watch" }, { timeoutMs: 145_000 })
       .then(async (review) => {
         if (!review) return;
-        await notifyReview(ctx, review);
+        await notifyReview(review);
       })
       .catch(() => undefined)
       .finally(() => { reviewWatch = null; });
@@ -44,8 +44,8 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   pi.on("message_end", async (event, ctx) => {
     if (event.message.role !== "assistant") return undefined;
     const current = await requestAuthority<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
-    if (current?.status === "running") await watchReview(ctx);
-    else if (current) await notifyReview(ctx, current);
+    if (current?.status === "running") await watchReview();
+    else if (current) await notifyReview(current);
     return undefined;
   });
   pi.on("tool_call", async (event, ctx) => {
@@ -66,7 +66,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     try {
       const card = await requestAuthority<SidecarPhaseCard | null>({ op: "phase-card" });
       if (!card) return messages.length === event.messages.length ? undefined : { messages };
-      if (card.effectiveCapabilities?.includes("cad_submit_for_review")) watchReview(ctx);
+      if (card.effectiveCapabilities?.includes("cad_submit_for_review")) watchReview();
       return { messages: [...messages, makeEphemeralPhaseCardMessage(card)] };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
