@@ -69,7 +69,7 @@ workflow:
       transitions: {allocated: {target: parts, requiresPhaseObligations: true}}
     parts:
       purpose: Author deterministic part geometry and inspect the built candidate.
-      guidance: Root may use ordinary Prime RLM fan-out, but every result must return through one authoritative workspace commit and managed build. Rebuilds overwrite the same artifact variable and output; the handoff preserves the latest returned ArtifactRef plus deterministic source, never a string path or stale build.
+      guidance: Root may use ordinary Prime RLM fan-out, but every result must return through one authoritative workspace commit and managed build. Rebuilds overwrite the same artifact variable and output. Before transitioning out of PARTS, finish build and probe, close the parts obligation, then create review-candidate from the latest returned ArtifactRef plus deterministic source; FINAL_REVIEW cannot create commits.
       actions: [cad_build_step, cad_commit, transition]
       grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
       writeScopes: [project:deliverable, project:source, run:observation]
