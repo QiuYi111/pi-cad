@@ -8,13 +8,12 @@ description: Use Pi-CAD's Python API in Prime's persistent IPython workspace for
 Use ordinary Python variables as working state and `import cad` as the small
 engineering capability surface.
 
-- Read `await cad.workflow.current()` before acting. If it is `None`, call
-  `await cad.workflow.start(reason)`; when that returns `workflowId ==
-  "mechanical/intake"`, immediately choose the complete route with
-  `await cad.workflow.route("design", lineage="greenfield", structure="part",
-  maturity="prototype", reason="greenfield single-part task")` before
-  building. `reason` is optional, but an explicit task-specific reason is
-  preferred. Never bypass an unstarted or unrouted workflow.
+- Read `await cad.workflow.current()` before acting. If it is `None`, inspect
+  `await cad.workflow.list()` and start exactly one installed package, normally
+  `await cad.workflow.start("mechanical.one-shot")` for greenfield design,
+  `mechanical.modify` for an existing design change, or `mechanical.analysis`
+  for a bounded investigation. `start()` pins the current compiled package;
+  never invent phase names or use a separate route protocol.
 - Treat `current()["unmet"]` as exact process-level commit/evidence labels.
   For a workspace-commit obligation, use that exact label as the commit name:
   `await cad.commit((await cad.workflow.current())["unmet"][0], ...)`. Close

@@ -50,7 +50,7 @@ async function projectFixture() {
   return { cwd, loaded };
 }
 
-test("Plan C exposes explicit workflow start and complete Mechanical routing before mutation", async () => {
+test("Plan C discovers and pins a workflow package before mutation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-start-"));
   try {
     assert.equal(await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }), null);
@@ -58,25 +58,23 @@ test("Plan C exposes explicit workflow start and complete Mechanical routing bef
       handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }),
       /cad\.workflow\.start/,
     );
-    const intake = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", reason: "Prime CAD task" }) as any;
-    assert.equal(intake.workflowId, "mechanical/intake");
+    const packages = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
+    assert.deepEqual(packages.map((item) => item.id), ["mechanical.analysis", "mechanical.modify", "mechanical.one-shot"]);
+    assert.deepEqual(Object.keys(packages[0]).sort(), ["description", "id", "tags", "version"]);
+    const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" }) as any;
+    assert.equal(started.workflowId, "mechanical.one-shot");
+    assert.equal(started.phase, "grill");
+    assert.deepEqual(started.unmet, ["grill"]);
     await assert.rejects(
       handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }),
-      /model\.build is not granted in workflow phase intake/,
+      /model\.build is not granted in workflow phase grill/,
     );
-    const routed = await handleAgentApi(cwd, {
-      schema: 1, op: "workflow-route", reason: "greenfield single part",
-      route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype" },
-    }) as any;
-    assert.equal(routed.workflowId, "mechanical/design/greenfield/part/prototype/plan-c");
-    assert.equal(routed.phase, "requirements");
-    assert.deepEqual(routed.unmet, ["requirements"]);
-    const requirementCommit = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "requirements" }) as any;
-    assert.equal(requirementCommit.name, "requirements");
+    const grillCommit = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "grill" }) as any;
+    assert.equal(grillCommit.name, "grill");
     assert.deepEqual((await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any).unmet, []);
-    const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "requirements_committed" }) as any;
-    assert.equal(advanced.phase, "part_design");
-    assert.match((await compilePhaseCard(cwd))?.text ?? "", /PART_DESIGN/);
+    const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "clarified" }) as any;
+    assert.equal(advanced.phase, "spec");
+    assert.match((await compilePhaseCard(cwd))?.text ?? "", /SPEC/);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 

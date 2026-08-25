@@ -18,7 +18,7 @@ export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "authorize"; operation: Operation };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-start", "workflow-route", "workflow-advance", "commit", "model-build", "simulation-run", "phase-card", "authorize"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "phase-card", "authorize"]);
 const REVIEWER_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current"]);
 
 function errorResponse(error: unknown): AgentApiResponse {

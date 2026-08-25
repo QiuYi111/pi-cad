@@ -22,23 +22,23 @@ test("authority sidecar owns canonical state and rewrites a non-authoritative wo
     assert.notEqual(sidecar.authorSocket, sidecar.reviewerSocket);
     assert.equal((await stat(sidecar.authorSocket)).mode & 0o777, 0o600);
     assert.equal((await stat(sidecar.reviewerSocket)).mode & 0o777, 0o600);
-    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", reason: "sidecar test" });
+    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
     assert.equal(started.ok, true);
     assert.ok((await readdir(canonical)).includes("v7-project"));
     assert.deepEqual(await readdir(join(cwd, ".pi-cad")), ["status.json"]);
     const statusPath = join(cwd, ".pi-cad", "status.json");
     const projection = JSON.parse(await readFile(statusPath, "utf-8"));
     assert.equal(projection.authoritative, false);
-    assert.equal(projection.run.phase, "intake");
+    assert.equal(projection.run.phase, "grill");
 
     await chmod(statusPath, 0o644);
     await writeFile(statusPath, '{"authoritative":true,"run":{"phase":"release"}}\n');
     const current = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-current" });
     assert.equal(current.ok, true);
-    assert.equal((current.result as any).phase, "intake");
+    assert.equal((current.result as any).phase, "grill");
     assert.equal(JSON.parse(await readFile(statusPath, "utf-8")).authoritative, false);
 
-    const denied = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "workflow-start", reason: "forged" });
+    const denied = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
     assert.equal(denied.ok, false);
     assert.match(denied.error?.message ?? "", /reviewer endpoint does not expose/);
     const malformed = await dispatchSidecarRequest("author", cwd, { schema: 2, op: "workflow-current" });
@@ -63,7 +63,7 @@ test("workspace projection symlinks cannot redirect sidecar writes", async () =>
   await symlink(outside, join(cwd, ".pi-cad"));
   const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
   try {
-    const response = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", reason: "symlink projection" });
+    const response = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
     assert.equal(response.ok, true);
     assert.deepEqual(await readdir(outside), []);
     assert.ok((await readdir(canonical)).includes("v7-project"));

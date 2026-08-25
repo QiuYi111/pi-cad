@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-"""Procedural workflow projection and transition helpers."""
+"""Discover, pin, inspect, and advance compiled workflow packages."""
 
+import builtins
 from typing import Any
 
 from .client import request
@@ -11,32 +12,16 @@ async def current() -> dict[str, Any] | None:
     return await request("workflow-current")
 
 
-async def start(reason: str, *, interaction_mode: str = "interactive") -> dict[str, Any]:
-    """Start the project-selected immutable workflow explicitly."""
-    return await request("workflow-start", reason=reason, interactionMode=interaction_mode)
+async def list() -> builtins.list[dict[str, Any]]:
+    """Return bounded metadata for the newest installed version of each package."""
+    return await request("workflow-list")
 
 
-async def route(
-    objective: str,
-    *,
-    lineage: str | None = None,
-    structure: str | None = None,
-    maturity: str | None = None,
-    reason: str | None = None,
-) -> dict[str, Any]:
-    """Replace Mechanical intake with the fully specified task workflow."""
-    if objective in {"analyze", "convert"}:
-        if any(value is not None for value in (lineage, structure, maturity)):
-            raise ValueError(f"{objective} routes accept only objective")
-        selected: dict[str, str] = {"objective": objective}
-    elif objective == "design":
-        if None in {lineage, structure, maturity}:
-            raise ValueError("design routes require lineage, structure, and maturity")
-        selected = {"objective": objective, "lineage": lineage, "structure": structure, "maturity": maturity}  # type: ignore[dict-item]
-    else:
-        raise ValueError(f"unsupported CAD objective: {objective}")
-    route_reason = reason or "Select CAD workflow route: " + "/".join(selected.values())
-    return await request("workflow-route", route=selected, reason=route_reason)
+async def start(workflow_id: str, *, interaction_mode: str = "interactive") -> dict[str, Any]:
+    """Compile and pin the currently installed version of ``workflow_id``."""
+    if not workflow_id.strip():
+        raise ValueError("workflow_id is required")
+    return await request("workflow-start", id=workflow_id, interactionMode=interaction_mode)
 
 
 async def advance(event: str) -> dict[str, Any]:

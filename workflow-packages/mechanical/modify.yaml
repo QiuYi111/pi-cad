@@ -1,0 +1,92 @@
+schema: 1
+id: mechanical.modify
+description: Modify an existing mechanical design while preserving baseline traceability and independent release review.
+tags: [cad, mechanical, modify, release]
+version: 1.0.0
+workflow:
+  schema: 1
+  id: mechanical.modify
+  version: 1.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: grill
+  phases:
+    grill:
+      purpose: Resolve requested changes and user-owned decisions.
+      guidance: Separate requested deltas from assumptions and unchanged baseline behavior.
+      actions: [cad_commit, transition]
+      grants: [file_read, transition]
+      writeScopes: []
+      recordObligations: [{ref: grill, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {clarified: {target: spec, requiresPhaseObligations: true}}
+    spec:
+      purpose: Freeze delta requirements and regression criteria.
+      guidance: State what changes, what must remain invariant, and how both will be checked.
+      actions: [cad_commit, transition]
+      grants: [file_read, transition]
+      writeScopes: []
+      recordObligations: [{ref: spec, type: workspace_commit, closeWith: cad_commit, dependsOn: [grill]}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {specified: {target: baseline, requiresPhaseObligations: true}}
+    baseline:
+      purpose: Bind the immutable source design and measure relevant baseline facts.
+      guidance: Commit the imported artifact identity and observations before editing source.
+      actions: [cad_commit, transition]
+      grants: [file_read, observe, observe_programmable, transition]
+      writeScopes: [run:observation]
+      recordObligations: [{ref: baseline, type: workspace_commit, closeWith: cad_commit, dependsOn: [spec]}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: []
+      transitions: {captured: {target: modify, requiresPhaseObligations: true}}
+    modify:
+      purpose: Author and inspect the changed deterministic candidate.
+      guidance: Change only the committed delta and retain explicit baseline comparison evidence.
+      actions: [cad_build_step, cad_commit, transition]
+      grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: [{ref: candidate, type: workspace_commit, closeWith: cad_commit, dependsOn: [baseline]}]
+      evidenceObligations:
+        - {ref: candidate-visual, type: visual, closeWith: cad_build_step, dependsOn: [candidate]}
+        - {ref: candidate-geometry, type: geometry, closeWith: cad_build_step, dependsOn: [candidate]}
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions: {modified: {target: final_review, requiresPhaseObligations: true}}
+    final_review:
+      purpose: Independently verify the delta and regression contract.
+      guidance: Review the immutable baseline, candidate, and evidence without author authority.
+      actions: [transition]
+      grants: [file_read, observe, observe_programmable, transition]
+      writeScopes: [run:observation]
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: []
+      reviewProfile: mechanical.final-review
+      transitions: {accepted: {target: release}}
+    release:
+      purpose: Freeze the reviewed modified release.
+      guidance: Commit the exact reviewed artifact set, then close the workflow.
+      actions: [cad_commit, transition]
+      grants: [file_read, transition]
+      writeScopes: []
+      recordObligations: [{ref: release, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {released: {target: done, requiresPhaseObligations: true}}
+    done:
+      purpose: Preserve the immutable terminal release state.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

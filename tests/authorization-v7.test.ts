@@ -103,7 +103,6 @@ test("authority roles and terminal status fail closed", () => {
 
 test("every active-run Agent API mutation is assigned to the unified authorization boundary", () => {
   assert.deepEqual(AGENT_API_MUTATION_OPERATIONS, {
-    "workflow-route": "workflow.transition",
     "workflow-advance": "workflow.transition",
     commit: "workspace.commit",
     probe: "probe.run",

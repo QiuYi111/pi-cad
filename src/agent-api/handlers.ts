@@ -7,9 +7,8 @@ import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { executeCadProbe } from "../modules/probe/tool.ts";
 import { artifactPathForKind, buildStep, envelopeArtifactHash, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
 import { executeMechanicalRecipeV7 } from "../domains/mechanical/recipe-actions-v7.ts";
-import { cadRouteV7 } from "../domains/mechanical/actions-v7.ts";
-import { mechanicalBuiltinWorkflows } from "../domains/mechanical/workflows.ts";
-import { cadStart } from "../harness/kernel.ts";
+import { cadStartSnapshot } from "../harness/kernel.ts";
+import { discoverWorkflowPackages, resolveWorkflowPackage } from "../harness/workflow/packages.ts";
 import type { AgentApiRequest } from "./protocol.ts";
 import { bootstrapAgentApiContracts } from "./bootstrap.ts";
 import { requireCurrentAuthorization } from "./authorization.ts";
@@ -21,7 +20,6 @@ import type { Operation, OperationAuthority } from "../harness/permissions.ts";
  * exception because no workflow state exists yet to authorize it.
  */
 export const AGENT_API_MUTATION_OPERATIONS = {
-  "workflow-route": "workflow.transition",
   "workflow-advance": "workflow.transition",
   commit: "workspace.commit",
   probe: "probe.run",
@@ -120,16 +118,17 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
   const guardedOperation = AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS];
   if (guardedOperation) await requireCurrentAuthorization(cwd, guardedOperation, authority);
   switch (request.op) {
+    case "workflow-list": {
+      const packages = await discoverWorkflowPackages(cwd, mechanicalRegistries);
+      return jsonValue(packages.map(({ id, description, tags, version }) => ({ id, description, tags, version })));
+    }
     case "workflow-current": return jsonValue(await current(cwd));
     case "workflow-start": {
-      await cadStart({
-        cwd, registries: mechanicalRegistries, builtins: mechanicalBuiltinWorkflows(), reason: request.reason,
+      const selected = await resolveWorkflowPackage(cwd, request.id, mechanicalRegistries);
+      await cadStartSnapshot({
+        cwd, registries: mechanicalRegistries, workflow: selected.workflow,
         interactionMode: request.interactionMode ?? "interactive",
       });
-      return jsonValue(await current(cwd));
-    }
-    case "workflow-route": {
-      await cadRouteV7({ cwd, route: request.route, reason: request.reason, commitStyle: "workspace" });
       return jsonValue(await current(cwd));
     }
     case "workflow-advance": {

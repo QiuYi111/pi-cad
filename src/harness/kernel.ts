@@ -4,6 +4,7 @@ import { buildRegistryContract } from "./registry-contract.ts";
 import type { RegistrySet } from "./registry.ts";
 import { HarnessProjectStoreV7, type LoadedHarnessRunV7 } from "./run-store.ts";
 import { loadProjectWorkflowSelection, loadWorkflowSnapshot, type BuiltinWorkflowResolver } from "./workflow/loader.ts";
+import type { WorkflowSnapshotV1 } from "./workflow/types.ts";
 
 export const CadStartParamsSchema = Type.Object({
   reason: Type.String({ minLength: 1 }),
@@ -20,6 +21,21 @@ export async function cadStart(input: {
   if (!input.reason.trim()) throw new Error("cad_start.reason is required");
   const selection = await loadProjectWorkflowSelection(input.cwd);
   const workflow = await loadWorkflowSnapshot({ cwd: input.cwd, selection, builtins: input.builtins, registries: input.registries });
+  return cadStartSnapshot({
+    cwd: input.cwd, registries: input.registries, workflow,
+    parameters: selection.workflow.parameters as Record<string, JsonValue>,
+    interactionMode: input.interactionMode,
+  });
+}
+
+/** Start one already compiled package snapshot; source files are never consulted again by the run. */
+export async function cadStartSnapshot(input: {
+  cwd: string;
+  registries: RegistrySet;
+  workflow: WorkflowSnapshotV1;
+  parameters?: Record<string, JsonValue>;
+  interactionMode?: "interactive" | "headless";
+}): Promise<LoadedHarnessRunV7> {
   const registryContract = buildRegistryContract(input.registries);
   const project = new HarnessProjectStoreV7(input.cwd);
   // cad_start is an explicit mutation/maintenance boundary; prompt context
@@ -29,9 +45,9 @@ export async function cadStart(input: {
   const existing = await project.currentRun(input.registries);
   if (existing && !["done", "aborted", "blocked_user", "blocked_external", "budget_exhausted"].includes(existing.state.status)) throw new Error(`cad_start cannot replace active v7 run ${existing.state.runId}`);
   return project.startRun({
-    workflow,
+    workflow: input.workflow,
     registryContract,
-    parameters: selection.workflow.parameters as Record<string, JsonValue>,
+    parameters: input.parameters ?? {},
     interactionMode: input.interactionMode,
   });
 }

@@ -1,0 +1,90 @@
+schema: 1
+id: mechanical.analysis
+description: Analyze an immutable mechanical artifact and release an independently reviewed evidence-backed conclusion.
+tags: [analysis, cad, mechanical, review]
+version: 1.0.0
+workflow:
+  schema: 1
+  id: mechanical.analysis
+  version: 1.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: grill
+  phases:
+    grill:
+      purpose: Resolve the analysis question and decisions that affect interpretation.
+      guidance: Turn the request into a bounded falsifiable question.
+      actions: [cad_commit, transition]
+      grants: [file_read, transition]
+      writeScopes: []
+      recordObligations: [{ref: grill, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {clarified: {target: spec, requiresPhaseObligations: true}}
+    spec:
+      purpose: Freeze the analysis contract, quantities, assumptions, and verdict criteria.
+      guidance: Commit inputs, units, calculation method, and what would disprove the conclusion.
+      actions: [cad_commit, transition]
+      grants: [file_read, transition]
+      writeScopes: []
+      recordObligations: [{ref: spec, type: workspace_commit, closeWith: cad_commit, dependsOn: [grill]}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {specified: {target: baseline, requiresPhaseObligations: true}}
+    baseline:
+      purpose: Bind the exact immutable artifact under analysis.
+      guidance: Commit artifact identity and provenance before running probes.
+      actions: [cad_commit, transition]
+      grants: [file_read, observe, observe_programmable, transition]
+      writeScopes: [run:observation]
+      recordObligations: [{ref: baseline, type: workspace_commit, closeWith: cad_commit, dependsOn: [spec]}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: []
+      transitions: {captured: {target: analyze, requiresPhaseObligations: true}}
+    analyze:
+      purpose: Produce traceable calculations and an evidence-backed conclusion.
+      guidance: Use canonical programmable probes against ArtifactRef subjects; commit the conclusion and cited evidence.
+      actions: [cad_commit, transition]
+      grants: [file_read, observe, observe_programmable, transition]
+      writeScopes: [run:observation]
+      recordObligations: [{ref: analysis, type: workspace_commit, closeWith: cad_commit, dependsOn: [baseline]}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: []
+      transitions: {concluded: {target: final_review, requiresPhaseObligations: true}}
+    final_review:
+      purpose: Independently verify evidence coverage and the conclusion.
+      guidance: Recompute decisive facts from the immutable artifact and reject unsupported certainty.
+      actions: [transition]
+      grants: [file_read, observe, observe_programmable, transition]
+      writeScopes: [run:observation]
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: []
+      reviewProfile: mechanical.final-review
+      transitions: {accepted: {target: release}}
+    release:
+      purpose: Freeze the reviewed analysis report and close the workflow.
+      guidance: Commit the exact reviewed report and cited artifact identities.
+      actions: [cad_commit, transition]
+      grants: [file_read, transition]
+      writeScopes: []
+      recordObligations: [{ref: release, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {released: {target: done, requiresPhaseObligations: true}}
+    done:
+      purpose: Preserve the immutable terminal analysis release.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

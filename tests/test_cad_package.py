@@ -241,30 +241,27 @@ class CadPackageTests(unittest.TestCase):
                 with self.assertRaisesRegex(cad.CadApiError, "escapes the project root"):
                     asyncio.run(cad.commit("candidate-build", artifacts=[Path(directory).parent / "outside.py"]))
 
-    def test_workflow_start_and_route_use_the_generic_bridge(self) -> None:
+    def test_workflow_discovery_start_and_advance_use_the_generic_bridge(self) -> None:
         workflow_module = importlib.import_module("cad.workflow")
-        mocked = AsyncMock(side_effect=[{"workflowId": "mechanical/intake"}, {"phase": "requirements"}])
+        mocked = AsyncMock(side_effect=[
+            [{"id": "mechanical.one-shot", "description": "Design", "tags": ["cad"], "version": "1.0.0"}],
+            {"workflowId": "mechanical.one-shot", "phase": "grill"},
+            {"phase": "spec"},
+        ])
         with patch.object(workflow_module, "request", mocked):
-            started = asyncio.run(cad.workflow.start("CAD task"))
-            routed = asyncio.run(cad.workflow.route(
-                "design", lineage="greenfield", structure="part", maturity="prototype", reason="single part"
-            ))
-        self.assertEqual(started["workflowId"], "mechanical/intake")
-        self.assertEqual(routed["phase"], "requirements")
-        self.assertEqual(mocked.await_args_list[1].kwargs["route"], {
-            "objective": "design", "lineage": "greenfield", "structure": "part", "maturity": "prototype",
-        })
+            packages = asyncio.run(cad.workflow.list())
+            started = asyncio.run(cad.workflow.start("mechanical.one-shot"))
+            advanced = asyncio.run(cad.workflow.advance("clarified"))
+        self.assertEqual(packages[0]["id"], "mechanical.one-shot")
+        self.assertEqual(started["workflowId"], "mechanical.one-shot")
+        self.assertEqual(advanced["phase"], "spec")
+        self.assertEqual(mocked.await_args_list[0].args, ("workflow-list",))
+        self.assertEqual(mocked.await_args_list[1].kwargs["id"], "mechanical.one-shot")
+        self.assertFalse(hasattr(cad.workflow, "route"))
 
-    def test_workflow_route_rejects_incomplete_design(self) -> None:
-        with self.assertRaisesRegex(ValueError, "require lineage"):
-            asyncio.run(cad.workflow.route("design", lineage="greenfield", reason="incomplete"))
-
-    def test_workflow_route_supplies_a_safe_default_reason(self) -> None:
-        workflow_module = importlib.import_module("cad.workflow")
-        mocked = AsyncMock(return_value={"phase": "requirements"})
-        with patch.object(workflow_module, "request", mocked):
-            asyncio.run(cad.workflow.route("design", lineage="greenfield", structure="part", maturity="prototype"))
-        self.assertEqual(mocked.await_args.kwargs["reason"], "Select CAD workflow route: design/greenfield/part/prototype")
+    def test_workflow_start_rejects_an_empty_package_id(self) -> None:
+        with self.assertRaisesRegex(ValueError, "workflow_id is required"):
+            asyncio.run(cad.workflow.start("  "))
 
     def test_review_submit_is_an_ordinary_rlm_template(self) -> None:
         self.assertFalse(hasattr(cad.review, "current"))

@@ -1,6 +1,5 @@
 import type { JsonValue } from "../harness/canonical.ts";
 import type { EncodedVariable } from "../harness/commit.ts";
-import type { Route } from "../shared/route.ts";
 
 export interface AgentArtifactSubject {
   kind: "artifact";
@@ -10,9 +9,9 @@ export interface AgentArtifactSubject {
 }
 
 export type AgentApiRequest =
+  | { schema: 1; op: "workflow-list" }
   | { schema: 1; op: "workflow-current" }
-  | { schema: 1; op: "workflow-start"; reason: string; interactionMode?: "interactive" | "headless" }
-  | { schema: 1; op: "workflow-route"; route: Route; reason: string }
+  | { schema: 1; op: "workflow-start"; id: string; interactionMode?: "interactive" | "headless" }
   | { schema: 1; op: "workflow-advance"; event: string }
   | { schema: 1; op: "commit"; name: string; parent?: string | null; variables?: Record<string, EncodedVariable>; artifacts?: Array<string | { path: string; role?: string }>; session?: string }
   | { schema: 1; op: "load"; id: string }
