@@ -31,8 +31,12 @@ engineering capability surface.
   standard views to Prime. Missing visual output or attachment is a failed
   build. CadQuery source is not a supported model backend.
 - In live IPython, use `await cad.probe.run(subject=artifact_ref, purpose=...,
-  code="result = ...")` for Agent-authored, read-only B-Rep calculations on any
-  project-local `ArtifactRef`. Use `@cad.probe(...)` only for a synchronous
+  code="result = {'solids': len(shape.solids())}")` for Agent-authored,
+  read-only B-Rep calculations on any project-local `ArtifactRef`. The fenced
+  program starts with `shape` (the imported build123d B-Rep) and
+  `artifact_path` bound; it must assign a JSON-serializable value to `result`.
+  `result` is an output name, not a pre-bound input—never read it before the
+  assignment. Use `@cad.probe(...)` only for a synchronous
   function defined in a real source file, where Python can capture its source.
   The legacy `"current"` and `"baseline"` subjects remain available for
   state-bound v7 runs; unrestricted imports do not cross the effect fence.

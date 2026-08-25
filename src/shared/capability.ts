@@ -67,8 +67,9 @@ async function runCadctl(
     maxStderrBytes: 1024 * 1024,
   });
   if (result.exitCode !== 0 || result.terminationReason) {
+    const diagnostic = [result.stderr, result.stdout].filter(Boolean).join("\n").slice(-8192);
     throw new Error(
-      `cadctl process failed${result.terminationDetail ? `: ${result.terminationDetail}` : ` with exit ${result.exitCode}`}: ${result.stderr.slice(-8192)}`,
+      `cadctl process failed${result.terminationDetail ? `: ${result.terminationDetail}` : ` with exit ${result.exitCode}`}: ${diagnostic}`,
     );
   }
 
