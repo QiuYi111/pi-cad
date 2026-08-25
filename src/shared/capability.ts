@@ -16,6 +16,7 @@ import { CadProjectStore, sha256File } from "./store.ts";
 import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
 import { assertLinuxRuntime } from "./platform.ts";
 import { runProcess } from "./process-runner.ts";
+import { harnessRunDirectory, harnessStorageRoot } from "../authority/storage.ts";
 
 export const DEFAULT_VIEWS = ["iso", "front", "back", "left", "right", "top", "bottom"];
 
@@ -290,7 +291,7 @@ export async function probePython(
   code: string,
   timeoutMs = 30_000,
 ): Promise<CadEventEnvelope> {
-  const tmpDir = join(cwd, ".pi-cad", "tmp");
+  const tmpDir = join(harnessStorageRoot(cwd), "tmp");
   mkdirSync(tmpDir, { recursive: true });
   const codeFile = join(tmpDir, `probe-${randomUUID().slice(0, 8)}.py`);
   writeFileSync(codeFile, code, "utf-8");
@@ -553,7 +554,7 @@ export function defaultGeometryEvidencePath(cwd: string, artifact: string): stri
 }
 
 export function runEvidenceRoot(cwd: string, runId: string): string {
-  return join(cwd, ".pi-cad", "runs", runId, "evidence");
+  return join(harnessRunDirectory(cwd, runId), "evidence");
 }
 
 export function runVisualEvidenceDir(cwd: string, runId: string, artifact: string): string {

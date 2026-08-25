@@ -13,7 +13,7 @@ import { cadStart } from "../harness/kernel.ts";
 import type { AgentApiRequest } from "./protocol.ts";
 import { bootstrapAgentApiContracts } from "./bootstrap.ts";
 import { requireCurrentAuthorization } from "./authorization.ts";
-import type { Operation } from "../harness/permissions.ts";
+import type { Operation, OperationAuthority } from "../harness/permissions.ts";
 
 /**
  * Every Agent API operation that can mutate an active run is admitted here,
@@ -114,11 +114,11 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   return { build, visual, geometry, images };
 }
 
-export async function handleAgentApi(cwd: string, request: AgentApiRequest) {
+export async function handleAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {
   bootstrapAgentApiContracts();
   if (!request || request.schema !== 1 || typeof request.op !== "string") throw new Error("invalid Agent API request");
   const guardedOperation = AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS];
-  if (guardedOperation) await requireCurrentAuthorization(cwd, guardedOperation);
+  if (guardedOperation) await requireCurrentAuthorization(cwd, guardedOperation, authority);
   switch (request.op) {
     case "workflow-current": return jsonValue(await current(cwd));
     case "workflow-start": {

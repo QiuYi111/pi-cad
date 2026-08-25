@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,12 +10,16 @@ const primeRoot = resolve(process.env.PRIME_AGENT_REPO ?? resolve(project, "../p
 const tsx = join(primeRoot, "node_modules/.bin/tsx");
 const fixture = mkdtempSync(join(tmpdir(), "prime-plan-c-cli-"));
 try {
+  const dataHome = join(fixture, "authority-data");
+  const projectKey = createHash("sha256").update(realpathSync(fixture)).digest("hex");
+  const canonicalProject = join(dataHome, "pi-cad", projectKey);
   const setup = spawnSync(tsx, [join(project, "tests/setup-prime-plan-c-fixture.ts"), fixture], {
     cwd: project,
     encoding: "utf8",
-    env: { ...process.env, PI_CAD_REPO: project },
+    env: { ...process.env, PI_CAD_REPO: project, PI_CAD_CANONICAL_PROJECT_DIR: canonicalProject },
   });
   assert.equal(setup.status, 0, setup.stderr);
+  copyFileSync(join(project, "tests/fixtures/prime-faux-ipython-extension.ts"), join(fixture, "prime-faux-ipython-extension.ts"));
 
   const capture = join(fixture, "provider-contexts.jsonl");
   const primeEnv = { ...process.env };
@@ -22,9 +27,9 @@ try {
   delete primeEnv.HTTPS_PROXY;
   delete primeEnv.ALL_PROXY;
   const run = spawnSync(process.execPath, [
-    join(project, "scripts/prime-plan-c.mjs"),
-    "--extension", join(project, "tests/fixtures/prime-faux-ipython-extension.ts"),
-    "--daemon-socket", join(fixture, "daemon.sock"),
+    join(project, "scripts/prime-cad-sidecar.mjs"),
+    "--extension", "/workspace/prime-faux-ipython-extension.ts",
+    "--daemon-socket", "/workspace/daemon.sock",
     "--provider", "faux",
     "--model", "faux",
     "--no-session",
@@ -40,14 +45,15 @@ try {
       PRIME_AGENT_CODING_AGENT_DIR: join(fixture, "prime-agent"),
       PRIME_AGENT_SESSION_DIR: join(fixture, "sessions"),
       PRIME_AGENT_KERNEL_VENV: process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(homedir(), ".prime-plan-c/test-kernel-venv"),
-      PRIME_PLAN_C_CAPTURE: capture,
       PI_OFFLINE: "0",
       NO_PROXY: "pypi.org,files.pythonhosted.org,registry.npmjs.org",
       PI_CAD_PROJECT_CWD: fixture,
       PI_CAD_REPO: project,
+      XDG_DATA_HOME: dataHome,
     },
   });
-  assert.equal(run.status, 0, `${run.stderr}\n${run.stdout}`);
+  assert.equal(run.status, 42, `${run.stderr}\n${run.stdout}`);
+  assert.match(run.stderr, /WORKFLOW_INCOMPLETE/);
   const contexts = readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert.match(JSON.stringify(contexts[0]), /<name>cad<\/name>/);
   const events = run.stdout.trim().split("\n").map((line) => JSON.parse(line));
@@ -80,10 +86,11 @@ try {
   }
 
   const crossCapture = join(fixture, "provider-contexts-cross.jsonl");
+  writeFileSync(join(fixture, ".prime-plan-c-load-mode"), "1\n");
   const cross = spawnSync(process.execPath, [
-    join(project, "scripts/prime-plan-c.mjs"),
-    "--extension", join(project, "tests/fixtures/prime-faux-ipython-extension.ts"),
-    "--daemon-socket", join(fixture, "daemon-cross.sock"),
+    join(project, "scripts/prime-cad-sidecar.mjs"),
+    "--extension", "/workspace/prime-faux-ipython-extension.ts",
+    "--daemon-socket", "/workspace/daemon-cross.sock",
     "--provider", "faux",
     "--model", "faux",
     "--no-session",
@@ -99,15 +106,15 @@ try {
       PRIME_AGENT_CODING_AGENT_DIR: join(fixture, "prime-agent-cross"),
       PRIME_AGENT_SESSION_DIR: join(fixture, "sessions-cross"),
       PRIME_AGENT_KERNEL_VENV: process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(homedir(), ".prime-plan-c/test-kernel-venv"),
-      PRIME_PLAN_C_CAPTURE: crossCapture,
-      PRIME_PLAN_C_FAUX_MODE: "load",
       PI_OFFLINE: "0",
       NO_PROXY: "pypi.org,files.pythonhosted.org,registry.npmjs.org",
       PI_CAD_PROJECT_CWD: fixture,
       PI_CAD_REPO: project,
+      XDG_DATA_HOME: dataHome,
     },
   });
-  assert.equal(cross.status, 0, `${cross.stderr}\n${cross.stdout}`);
+  assert.equal(cross.status, 42, `${cross.stderr}\n${cross.stdout}`);
+  assert.match(cross.stderr, /WORKFLOW_INCOMPLETE/);
   const crossEvents = cross.stdout.trim().split("\n").map((line) => JSON.parse(line));
   const crossToolText = crossEvents.filter((event) => event.type === "tool_execution_end").flatMap((event) => event.result?.content ?? []).filter((item) => item.type === "text").map((item) => item.text).join("\n");
   assert.match(crossToolText, /CAD_CROSS_SESSION[^\n]*commit-[a-f0-9]{32}[^\n]*41/);

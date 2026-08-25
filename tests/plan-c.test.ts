@@ -17,6 +17,7 @@ import primeExtension from "../src/integrations/prime/extension.ts";
 import { PHASE_CARD_CUSTOM_TYPE } from "../src/integrations/prime/phase-card-message.ts";
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
 import probeExtension from "../src/extensions/probe/index.ts";
+import { startAuthoritySidecar } from "../src/authority/sidecar.ts";
 
 function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
@@ -270,6 +271,10 @@ test("Python cad.commit crosses the real bridge with float snapshots and project
 
 test("thin Prime extension injects exactly one ephemeral current card and is silent without a run", async () => {
   const { cwd } = await projectFixture();
+  const runtime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-test-"));
+  const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
+  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const handlers = new Map<string, Function>();
   const pi = { on(name: string, handler: Function) { handlers.set(name, handler); } } as any;
   primeExtension(pi);
@@ -286,11 +291,25 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   assert.equal(deniedImage.block, true);
   assert.match(deniedImage.reason, /image\.generate is not granted in workflow phase design/);
 
+  await sidecar.close();
+  const unavailableImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });
+  assert.equal(unavailableImage.block, true);
+  assert.match(unavailableImage.reason, /authority sidecar unavailable/i);
   const empty = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-empty-"));
+  const emptyRuntime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-empty-"));
+  const emptySidecar = await startAuthoritySidecar({ cwd: empty, runtimeDirectory: emptyRuntime });
+  process.env.PI_CAD_AUTHOR_SOCKET = emptySidecar.authorSocket;
   try {
     assert.equal(await context({ messages: original }, { cwd: empty }), undefined);
     assert.equal(await toolCall({ toolName: "codex_generate_image", input: { prompt: "ordinary image" } }, { cwd: empty }), undefined);
   }
-  finally { await rm(empty, { recursive: true, force: true }); }
+  finally {
+    await emptySidecar.close();
+    if (previousSocket === undefined) delete process.env.PI_CAD_AUTHOR_SOCKET;
+    else process.env.PI_CAD_AUTHOR_SOCKET = previousSocket;
+    await rm(empty, { recursive: true, force: true });
+    await rm(emptyRuntime, { recursive: true, force: true });
+    await rm(runtime, { recursive: true, force: true });
+  }
   await rm(cwd, { recursive: true, force: true });
 });

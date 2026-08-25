@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { RuntimeIdentity, SimulationCommandResult, SimulationCommandRunner } from "./store.ts";
 import { assertLinuxRuntime } from "../../shared/platform.ts";
 import { runProcess } from "../../shared/process-runner.ts";
+import { harnessStorageRoot } from "../../authority/storage.ts";
 
 interface RuntimeRegistrationBase {
   backend: string;
@@ -148,7 +149,7 @@ function registrationHash(registration: RuntimeRegistration): string {
 
 function availabilityPath(cwd: string, backend: string, runtime: string): string {
   const name = createHash("sha256").update(`${backend}\0${runtime}`).digest("hex");
-  return resolve(cwd, ".pi-cad", "cache", "runtimes", `${name}.json`);
+  return resolve(harnessStorageRoot(cwd), "cache", "runtimes", `${name}.json`);
 }
 
 export async function readRuntimeAvailability(

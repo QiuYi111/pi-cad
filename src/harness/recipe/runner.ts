@@ -4,6 +4,7 @@ import { cp, lstat, mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { canonicalDigest, canonicalJson, jsonValue } from "../canonical.ts";
+import { harnessRunDirectory } from "../../authority/storage.ts";
 import { prepareRecipeObligation } from "../reducer.ts";
 import type { LoadedHarnessRunV7 } from "../run-store.ts";
 import type { RegistrySet } from "../registry.ts";
@@ -75,7 +76,7 @@ export async function prepareAndRunRecipe(input: {
   const binding = input.obligationRef ? prepareRecipeObligation({ state: input.harness.state, workflow: input.harness.workflow, registryContract: input.harness.registryContract, obligationRef: input.obligationRef, recipeKind: source.definition.kind, requestedOutputs }) : undefined;
   const runtimeBefore = await input.runtime.qualify(input.cwd, source.definition.runtimeProfile);
   if (runtimeBefore.profileId !== source.definition.runtimeProfile || !/^[a-f0-9]{64}$/.test(runtimeBefore.digest)) throw new Error("Recipe runtime returned an invalid identity");
-  const root = join(input.cwd, ".pi-cad", "runs", input.harness.state.runId, "recipe-runs");
+  const root = join(harnessRunDirectory(input.cwd, input.harness.state.runId), "recipe-runs");
   await mkdir(root, { recursive: true });
   const runId = `recipe-${Date.now()}-${randomUUID().slice(0, 8)}`;
   const directory = join(root, runId);

@@ -9,6 +9,7 @@ import { createHarnessRunState } from "./reducer.ts";
 import type { HarnessRunStateV7 } from "./state.ts";
 import { TransactionConflictError, TransactionStore, type HeadPointerV1, type TransactionEventV1 } from "./transaction-store.ts";
 import type { WorkflowSnapshotV1 } from "./workflow/types.ts";
+import { harnessProjectDirectory, harnessRunDirectory, harnessStorageRoot } from "../authority/storage.ts";
 
 export interface LoadedHarnessRunV7 {
   head: HeadPointerV1;
@@ -38,7 +39,7 @@ export class HarnessRunStoreV7 {
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(runId)) throw new Error(`invalid v7 run ID: ${runId}`);
     this.cwd = resolve(cwd);
     this.runId = runId;
-    this.runDirectory = join(this.cwd, ".pi-cad", "runs", runId);
+    this.runDirectory = harnessRunDirectory(this.cwd, runId);
     this.transactions = new TransactionStore(this.runDirectory);
   }
 
@@ -155,7 +156,7 @@ export class HarnessProjectStoreV7 {
 
   constructor(cwd: string) {
     this.cwd = resolve(cwd);
-    this.directory = join(this.cwd, ".pi-cad", "v7-project");
+    this.directory = harnessProjectDirectory(this.cwd);
     this.transactions = new TransactionStore(this.directory);
   }
 
@@ -264,7 +265,7 @@ export class HarnessProjectStoreV7 {
   }
 
   async listRunIds(): Promise<string[]> {
-    try { return (await readdir(join(this.cwd, ".pi-cad", "runs"))).filter((name) => name.startsWith("v7-")).sort(); }
+    try { return (await readdir(join(harnessStorageRoot(this.cwd), "runs"))).filter((name) => name.startsWith("v7-")).sort(); }
     catch { return []; }
   }
 }

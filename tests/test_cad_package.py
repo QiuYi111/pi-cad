@@ -28,6 +28,17 @@ class Example:
 
 
 class CadPackageTests(unittest.TestCase):
+    def test_configured_sidecar_failure_never_falls_back_to_local_engine(self) -> None:
+        client = importlib.import_module("cad.client")
+        with (
+            patch.dict(os.environ, {"PI_CAD_AUTHOR_SOCKET": "/missing/authority.sock"}),
+            patch.object(client.asyncio, "open_unix_connection", AsyncMock(side_effect=FileNotFoundError("missing"))),
+            patch.object(client.asyncio, "create_subprocess_exec", AsyncMock()) as local_engine,
+        ):
+            with self.assertRaisesRegex(client.CadApiError, "failed closed"):
+                asyncio.run(client.request("workflow-current"))
+        local_engine.assert_not_awaited()
+
     def test_json_dataclass_path_and_numpy_codecs_are_explicit(self) -> None:
         self.assertEqual(cad.snapshot.registry.decode(cad.snapshot.registry.encode({"a": [1, 2]})), {"a": [1, 2]})
         encoded = cad.snapshot.registry.encode(Example("part", 2))

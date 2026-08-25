@@ -81,6 +81,7 @@ test("authority roles and terminal status fail closed", () => {
   const reviewerCommit = authorize("workspace.commit", state, workflow, permissions, "reviewer");
   assert.equal(reviewerCommit.allowed, false);
   if (!reviewerCommit.allowed) assert.match(reviewerCommit.reason, /reviewer authority/);
+  assert.equal(authorize("probe.run", state, workflow, permissions, "reviewer").allowed, true);
 
   const closedConcept = {
     ...state,

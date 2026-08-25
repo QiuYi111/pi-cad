@@ -1,0 +1,161 @@
+import { spawn } from "node:child_process";
+import { copyFile, mkdir, realpath, rm } from "node:fs/promises";
+import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { homedir, tmpdir, userInfo } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+
+import { assertLinuxRuntime } from "../shared/platform.ts";
+import { completionGate, startAuthoritySidecar } from "./sidecar.ts";
+import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
+
+export const WORKFLOW_INCOMPLETE_EXIT_CODE = 42;
+
+export interface LaunchPaths {
+  repository: string;
+  project: string;
+  primeRoot: string;
+  nodeRoot: string;
+  primeAgentDir: string;
+  primeKernelVenv: string;
+  kernelPythonRoot: string;
+  kernelPythonExecutable: string;
+  kernelSitePackages: string;
+  runtimeDirectory: string;
+  ephemeralAgentDir: string;
+  authorSocketDirectory: string;
+}
+
+function systemBind(args: string[], path: string): void {
+  if (existsSync(path)) args.push("--ro-bind", path, path);
+}
+
+function passEnvironment(args: string[], name: string, value: string | undefined): void {
+  if (value !== undefined) args.push("--setenv", name, value);
+}
+
+export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[]): string[] {
+  const args = [
+    "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
+    "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+    "--dir", "/home", "--dir", "/home/prime", "--dir", "/home/prime/.prime",
+    "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad",
+  ];
+  for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  args.push(
+    "--bind", paths.project, "/workspace",
+    "--ro-bind", paths.primeRoot, "/opt/prime",
+    "--ro-bind", paths.nodeRoot, "/opt/node",
+    "--ro-bind", join(paths.repository, "src", "integrations", "prime"), "/opt/pi-cad/prime-extension",
+    "--ro-bind", join(paths.repository, "skills", "cad"), "/opt/pi-cad/cad-skill",
+    "--ro-bind", join(paths.repository, "packages", "prime-codex-image-gen"), "/opt/pi-cad/imagegen",
+    "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
+    "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
+    "--ro-bind", paths.kernelPythonRoot, "/opt/python",
+    "--bind", paths.ephemeralAgentDir, "/home/prime/.prime/agent",
+    "--ro-bind", paths.authorSocketDirectory, "/run/pi-cad/author",
+    "--chdir", "/workspace",
+    "--setenv", "HOME", "/home/prime",
+    "--setenv", "TMPDIR", "/tmp",
+    "--setenv", "PATH", "/opt/node/bin:/opt/prime:/opt/prime/node_modules/.bin:/usr/local/bin:/usr/bin:/bin",
+    "--setenv", "PI_CAD_AUTHOR_SOCKET", "/run/pi-cad/author/authority.sock",
+    "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
+    "--setenv", "PI_CAD_REPO", "/opt/pi-cad",
+    "--setenv", "PYTHONPATH", `/opt/prime-kernel-venv/${paths.kernelSitePackages}:/opt/pi-cad/cad-skill/src`,
+    "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
+    "--setenv", "PRIME_AGENT_REPO", "/opt/prime",
+    "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
+    "--setenv", "PRIME_AGENT_SESSION_DIR", "/workspace/.prime-sessions",
+    "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
+    "--setenv", "PI_OFFLINE", process.env.PI_OFFLINE ?? "1",
+  );
+  for (const name of ["TERM", "COLORTERM", "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) {
+    passEnvironment(args, name, process.env[name]);
+  }
+  args.push(
+    "--", "/opt/prime/prime-agent.sh",
+    "--cwd", "/workspace",
+    "--no-extensions", "--no-prompt-templates", "--no-themes", "--no-context-files",
+    "--tools", "ipython,codex_generate_image",
+    "--extension", "/opt/pi-cad/prime-extension/extension.ts",
+    "--extension", "/opt/pi-cad/imagegen/index.ts",
+    "--skill", "/opt/pi-cad/cad-skill/SKILL.md",
+    "--skill", "/opt/pi-cad/imagegen/skills/imagegen/SKILL.md",
+    ...primeArgs,
+  );
+  return args;
+}
+
+function isOneShot(args: string[]): boolean {
+  if (args.includes("--print") || args.includes("-p")) return true;
+  const mode = args.findIndex((value) => value === "--mode");
+  return mode >= 0 && ["text", "json"].includes(args[mode + 1] ?? "");
+}
+
+async function copyPrimeBootstrap(source: string, destination: string): Promise<void> {
+  await mkdir(destination, { recursive: true, mode: 0o700 });
+  for (const name of ["auth.json", "settings.json", "telemetry.json"]) {
+    try { await copyFile(join(source, name), join(destination, name)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
+}
+
+function childExit(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; signal: NodeJS.Signals | null }> {
+  return new Promise((accept, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", env });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => accept({ code: code ?? 1, signal }));
+  });
+}
+
+export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
+  assertLinuxRuntime("Pi-CAD authority sidecar");
+  if (primeArgs.some((value) => value === "--cwd" || value.startsWith("--cwd="))) {
+    throw new Error("prime-cad owns --cwd so the sandbox cannot escape its project root");
+  }
+  const repository = realpathSync(resolve(process.env.PI_CAD_REPO ?? resolve(import.meta.dirname, "..", "..")));
+  const project = await realpath(resolve(process.env.PI_CAD_PROJECT_CWD ?? process.cwd()));
+  const primeRoot = realpathSync(resolve(process.env.PRIME_AGENT_REPO ?? resolve(repository, "../prime-agent-plan-c-upstream")));
+  const nodeRoot = dirname(dirname(realpathSync(process.execPath)));
+  const primeAgentDir = resolve(process.env.PRIME_AGENT_CODING_AGENT_DIR ?? join(homedir(), ".prime-plan-c", "agent"));
+  const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(homedir(), ".prime-plan-c", "kernel-venv"));
+  const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
+  const kernelPythonRoot = dirname(dirname(kernelPython));
+  const kernelPythonExecutable = basename(kernelPython);
+  const kernelPythonLibrary = readdirSync(join(primeKernelVenv, "lib"), { withFileTypes: true })
+    .find((entry) => entry.isDirectory() && entry.name.startsWith("python") && existsSync(join(primeKernelVenv, "lib", entry.name, "site-packages")));
+  if (!kernelPythonLibrary) throw new Error(`Prime kernel venv has no site-packages: ${primeKernelVenv}`);
+  const kernelSitePackages = join("lib", kernelPythonLibrary.name, "site-packages");
+  const runtimeBase = process.env.XDG_RUNTIME_DIR && existsSync(process.env.XDG_RUNTIME_DIR)
+    ? resolve(process.env.XDG_RUNTIME_DIR, "pi-cad")
+    : resolve(tmpdir(), `pi-cad-${userInfo().uid}`);
+  const runtimeDirectory = join(runtimeBase, `${canonicalProjectKey(project).slice(0, 20)}-${process.pid}`);
+  const ephemeralAgentDir = join(runtimeDirectory, "prime-agent");
+  await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
+  await copyPrimeBootstrap(primeAgentDir, ephemeralAgentDir);
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = defaultCanonicalProjectDirectory(project);
+  await mkdir(process.env.PI_CAD_CANONICAL_PROJECT_DIR, { recursive: true, mode: 0o700 });
+  const sidecar = await startAuthoritySidecar({ cwd: project, runtimeDirectory });
+  const paths: LaunchPaths = {
+    repository, project, primeRoot, nodeRoot, primeAgentDir, primeKernelVenv, runtimeDirectory,
+    kernelPythonRoot, kernelPythonExecutable, kernelSitePackages,
+    ephemeralAgentDir, authorSocketDirectory: resolve(sidecar.authorSocket, ".."),
+  };
+  try {
+    const result = await childExit("/usr/bin/bwrap", buildPrimeBwrapArgs(paths, primeArgs), {
+      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    });
+    if (result.signal) {
+      return 128;
+    }
+    if (result.code !== 0 || !isOneShot(primeArgs)) return result.code;
+    const gate = await completionGate(project);
+    if (!gate.complete) {
+      process.stderr.write(`WORKFLOW_INCOMPLETE: ${gate.reason}\n`);
+      return WORKFLOW_INCOMPLETE_EXIT_CODE;
+    }
+    return 0;
+  } finally {
+    await sidecar.close();
+    await rm(runtimeDirectory, { recursive: true, force: true });
+  }
+}

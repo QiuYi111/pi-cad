@@ -47,6 +47,29 @@ def project_path(value: str | Path, *, error_type: str = "CadApiError") -> tuple
 
 
 async def request(op: str, **payload: Any) -> Any:
+    request_body = json.dumps({"schema": 1, "op": op, **payload}, ensure_ascii=False).encode()
+    authority_socket = os.environ.get("PI_CAD_AUTHOR_SOCKET")
+    if authority_socket:
+        try:
+            reader, writer = await asyncio.open_unix_connection(authority_socket)
+            writer.write(request_body)
+            await writer.drain()
+            writer.write_eof()
+            stdout = await reader.read(1024 * 1024 + 1)
+            writer.close()
+            await writer.wait_closed()
+            if len(stdout) > 1024 * 1024:
+                raise CadApiError("Pi-CAD sidecar response exceeds byte limit")
+            response = json.loads(stdout.decode())
+        except CadApiError:
+            raise
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise CadApiError(f"Pi-CAD authority sidecar failed closed: {error}", error_type="SidecarUnavailable") from error
+        if not response.get("ok"):
+            detail = response.get("error") or {}
+            raise CadApiError(detail.get("message") or "Pi-CAD authority sidecar rejected the request", error_type=detail.get("type", "CadApiError"))
+        return response.get("result")
+
     root = package_root()
     command = ["node", str(root / "scripts" / "pi-cad-agent-api.mjs"), "agent-api", str(project_cwd())]
     process = await asyncio.create_subprocess_exec(
@@ -57,7 +80,7 @@ async def request(op: str, **payload: Any) -> Any:
         stderr=asyncio.subprocess.PIPE,
         env={**os.environ, "PI_CAD_REPO": str(root)},
     )
-    stdout, stderr = await process.communicate(json.dumps({"schema": 1, "op": op, **payload}, ensure_ascii=False).encode())
+    stdout, stderr = await process.communicate(request_body)
     try:
         response = json.loads(stdout.decode())
     except (UnicodeDecodeError, json.JSONDecodeError) as error:

@@ -1,8 +1,14 @@
-import type { PhaseCard } from "../../harness/card.ts";
+interface PhaseCardMessageInput {
+  text: string;
+  images: Array<{ data: string; mimeType: string }>;
+  digest: string;
+  workflowHash: string;
+  phase: string;
+}
 
 export const PHASE_CARD_CUSTOM_TYPE = "pi-cad.phase-card";
 
-export function makeEphemeralPhaseCardMessage(card: PhaseCard) {
+export function makeEphemeralPhaseCardMessage(card: PhaseCardMessageInput) {
   const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
     { type: "text", text: card.text },
     ...card.images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),

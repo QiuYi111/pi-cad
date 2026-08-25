@@ -29,6 +29,7 @@ await jiti.import("./recipe-kernel.test.ts", { default: true });
 await jiti.import("./recipe-adapter.test.ts", { default: true });
 await jiti.import("./permissions-v7.test.ts", { default: true });
 await jiti.import("./authorization-v7.test.ts", { default: true });
+await jiti.import("./authority-sidecar.test.ts", { default: true });
 await jiti.import("./mechanical-recipe-actions.test.ts", { default: true });
 await jiti.import("./recipe-templates.test.ts", { default: true });
 await jiti.import("./engine-router.test.ts", { default: true });

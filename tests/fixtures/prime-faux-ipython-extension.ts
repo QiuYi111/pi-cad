@@ -1,18 +1,19 @@
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 export default async function registerPrimePlanCFaux(pi: any): Promise<void> {
   const primeRoot = process.env.PRIME_AGENT_REPO;
-  const capturePath = process.env.PRIME_PLAN_C_CAPTURE;
-  if (!primeRoot || !capturePath) throw new Error("Prime Plan C faux fixture requires PRIME_AGENT_REPO and PRIME_PLAN_C_CAPTURE");
+  const loadMode = process.env.PRIME_PLAN_C_FAUX_MODE === "load" || existsSync(join(process.cwd(), ".prime-plan-c-load-mode"));
+  const capturePath = process.env.PRIME_PLAN_C_CAPTURE ?? join(process.cwd(), loadMode ? "provider-contexts-cross.jsonl" : "provider-contexts.jsonl");
+  if (!primeRoot) throw new Error("Prime Plan C faux fixture requires PRIME_AGENT_REPO");
   const ai = await import(pathToFileURL(join(primeRoot, "packages/ai/src/index.ts")).href);
   const faux = ai.registerFauxProvider({ provider: "faux", models: [{ id: "faux", reasoning: false, input: ["text", "image"] }] });
   const capture = (response: any) => (context: unknown) => {
     appendFileSync(capturePath, `${JSON.stringify(context)}\n`, "utf8");
     return response;
   };
-  if (process.env.PRIME_PLAN_C_FAUX_MODE === "load") {
+  if (loadMode) {
     faux.setResponses([
       capture(ai.fauxAssistantMessage(ai.fauxToolCall("ipython", {
         code: "import cad\nplan_c_history = await cad.history()\nplan_c_loaded = await cad.load(plan_c_history[-1].id)\nprint('CAD_CROSS_SESSION', plan_c_loaded.id, plan_c_loaded.variables['marker'])",

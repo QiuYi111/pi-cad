@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { harnessRunDirectory } from "../../authority/storage.ts";
 
 export type SimulationFailureStage = "manifest" | "inputs" | "runtime" | "compute" | "observe" | "validate" | "quota" | "interrupted";
 export type SimulationFailureOwner = "recipe" | "input" | "runtime" | "harness";
@@ -29,7 +30,7 @@ export function simulationFailure(input: Omit<SimulationFailure, "fingerprint">)
 }
 
 function failuresPath(cwd: string, workflowRunId: string): string {
-  return join(cwd, ".pi-cad", "runs", workflowRunId, "simulation", "failures.jsonl");
+  return join(harnessRunDirectory(cwd, workflowRunId), "simulation", "failures.jsonl");
 }
 
 export async function recordSimulationFailure(cwd: string, workflowRunId: string, failure: SimulationFailure): Promise<SimulationFailure> {

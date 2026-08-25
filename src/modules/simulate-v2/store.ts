@@ -4,6 +4,7 @@ import { chmod, copyFile, cp, link, mkdir, readFile, readdir, rename, rm, writeF
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { CadProjectStore, nowIso, sha256File } from "../../shared/store.ts";
+import { harnessRunDirectory } from "../../authority/storage.ts";
 import { hashSimulationPath, loadSimulationRecipe, selectSimulationOutputs, type LoadedSimulationRecipe, type SimulationRecipeManifest } from "./protocol.ts";
 import { validateObservationFile, type ValidatedObservation } from "./observation.ts";
 
@@ -123,7 +124,7 @@ async function currentWorkflowRun(cwd: string): Promise<string> {
 }
 
 export function simulationRoot(cwd: string, workflowRunId: string): string {
-  return join(resolve(cwd), ".pi-cad", "runs", workflowRunId, "simulation");
+  return join(harnessRunDirectory(cwd, workflowRunId), "simulation");
 }
 
 async function nextId(root: string, prefix: string): Promise<string> {

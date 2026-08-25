@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { currentRunEvidenceRoot } from "./capability.ts";
 import { CadProjectStore } from "./store.ts";
+import { harnessStorageRoot } from "../authority/storage.ts";
 
 export type SpecNamespace = "simulation" | "flow" | "thermal" | "optimization" | "drawing" | "presentation";
 
@@ -26,7 +27,7 @@ export async function writeRunSpec(
   const root = runId ? await currentRunEvidenceRoot(cwd) : null;
   const dir = runId && root
     ? join(root, namespace, randomUUID().slice(0, 8))
-    : join(cwd, ".pi-cad", "adhoc", namespace, randomUUID().slice(0, 8));
+    : join(harnessStorageRoot(cwd), "adhoc", namespace, randomUUID().slice(0, 8));
   await mkdir(dir, { recursive: true });
   const specPath = join(dir, "spec.json");
   await writeFile(specPath, JSON.stringify(spec, null, 2), "utf-8");

@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { TransactionStore } from "../transaction-store.ts";
+import { harnessRunDirectory } from "../../authority/storage.ts";
 import type { RecipeObservationSnapshotV1, RecipeRunRecordV1 } from "./types.ts";
 
 function component(value: string, where: string): string {
@@ -27,7 +28,7 @@ function inside(root: string, candidate: string): boolean {
 export async function loadRecipeRun(input: { cwd: string; workflowRunId: string; recipeRunId: string }): Promise<{ record: RecipeRunRecordV1; directory: string }> {
   component(input.workflowRunId, "workflowRunId");
   component(input.recipeRunId, "recipeRunId");
-  const root = resolve(input.cwd, ".pi-cad", "runs", input.workflowRunId, "recipe-runs");
+  const root = resolve(harnessRunDirectory(input.cwd, input.workflowRunId), "recipe-runs");
   const directory = resolve(root, input.recipeRunId);
   if (!inside(root, directory)) throw new Error("Recipe run path escapes run storage");
   const canonical = await realpath(directory);
