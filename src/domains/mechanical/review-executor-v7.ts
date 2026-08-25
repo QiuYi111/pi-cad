@@ -91,7 +91,7 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
         label: "CAD Probe (v7 Fresh Reviewer)",
         description: [
           "Read-only deterministic observation of the current immutable candidate.",
-          "For exact feature-level assertions use preset=python with purpose and code. The sandbox preloads shape (CadQuery), bd (build123d), np, math, statistics, and result; assign a JSON-compatible value to result. Imports and file/process/network access are blocked.",
+          "For exact feature-level assertions use preset=python with purpose and code. The sandbox preloads shape (a build123d Shape/Compound), bd, np, math, statistics, and result; assign a JSON-compatible value to result. Typical component inspection: solids=list(shape.solids()); for each solid use solid.bounding_box().size and solid.center(). Imports and file/process/network access are blocked.",
         ].join("\n"),
         parameters: CadProbeParametersSchema,
         execute: async (_toolCallId, raw) => {
@@ -119,6 +119,7 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
           "Use only the supplied immutable contracts/evidence and cad_probe. Do not trust the author agent's conclusions.",
           "Kernel-replayed programmable observations are affirmative evidence only when verified=true. Their code/result is bound to the immutable candidate and independently re-executed immediately before this review.",
           "Call cad_probe with preset=geometry first for exact B-Rep dimensions, cylinder axes/radii/lengths, and solid topology; use other presets only for remaining assertions.",
+          "Before returning UNRESOLVED for any exact geometric/component assertion, you MUST attempt a bounded preset=python probe yourself when the assertion can be computed from the immutable B-Rep. Inspect shape.solids(), per-solid bounding_box().size, center(), faces(), edges(), or vertices() as appropriate. Return UNRESOLVED only if the controlled probe cannot decide the assertion, and report the attempted probe's diagnostic.",
           "The kernel-verified artifacts snapshot is affirmative evidence that each listed hashed deliverable exists. A candidate-source entry satisfies source-file presence unless an assertion constrains its internal code.",
           "A candidate-authoritative artifact and candidate-source artifacts in the same snapshot were atomically produced and bound by the Kernel's candidate build. Treat that binding as affirmative source-to-deliverable regeneration provenance; inspect source internals only when an assertion explicitly constrains code content.",
           "Return only ReviewVerdictV1 JSON: {schema:1,verdict:'pass|fail|unresolved',summary,findings:[{id,severity:'info|warning|error',finding,evidenceRefs:[]}]}",
