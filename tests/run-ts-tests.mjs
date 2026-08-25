@@ -31,6 +31,7 @@ await jiti.import("./permissions-v7.test.ts", { default: true });
 await jiti.import("./authorization-v7.test.ts", { default: true });
 await jiti.import("./authority-sidecar.test.ts", { default: true });
 await jiti.import("./workflow-packages.test.ts", { default: true });
+await jiti.import("./review-runtime.test.ts", { default: true });
 await jiti.import("./mechanical-recipe-actions.test.ts", { default: true });
 await jiti.import("./recipe-templates.test.ts", { default: true });
 await jiti.import("./engine-router.test.ts", { default: true });

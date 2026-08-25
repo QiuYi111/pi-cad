@@ -263,20 +263,19 @@ class CadPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "workflow_id is required"):
             asyncio.run(cad.workflow.start("  "))
 
-    def test_review_submit_is_an_ordinary_rlm_template(self) -> None:
-        self.assertFalse(hasattr(cad.review, "current"))
-        fake_rlm = ModuleType("rlm")
-        handle = SimpleNamespace(rlm_child_id="child-1", name="reviewer")
-        fake_rlm.run = AsyncMock(return_value=handle)
+    def test_review_submit_and_current_use_event_driven_sidecar_api(self) -> None:
+        review_module = importlib.import_module("cad.review")
         commit_id = "commit-" + "a" * 32
-        with patch.dict(sys.modules, {"rlm": fake_rlm}):
+        handle = {"reviewId": "review-" + "b" * 24, "subjectCommit": commit_id, "status": "running"}
+        mocked = AsyncMock(side_effect=[handle, {**handle, "status": "pass"}])
+        with patch.object(review_module, "request", mocked):
             returned = asyncio.run(cad.review.submit(commit_id))
-        self.assertIs(returned, handle)
-        prompt = fake_rlm.run.await_args.args[0]
-        self.assertIn(commit_id, prompt)
-        self.assertIn("await cad.load", prompt)
-        self.assertIn("agent_message", prompt)
-        self.assertNotIn("transcript import", prompt.lower())
+            current = asyncio.run(cad.review.current(returned))
+        self.assertEqual(returned, handle)
+        self.assertEqual(current["status"], "pass")
+        self.assertEqual(mocked.await_args_list[0].args, ("review-submit",))
+        self.assertEqual(mocked.await_args_list[0].kwargs["subjectCommit"], commit_id)
+        self.assertEqual(mocked.await_args_list[1].kwargs["reviewId"], handle["reviewId"])
 
     def test_simulation_run_returns_a_real_pending_job(self) -> None:
         simulation_module = importlib.import_module("cad.simulation")

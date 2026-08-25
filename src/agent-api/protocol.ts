@@ -19,7 +19,10 @@ export type AgentApiRequest =
   | { schema: 1; op: "probe"; subject: "current" | "baseline" | AgentArtifactSubject; purpose: string; code: string }
   | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean }
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }
-  | { schema: 1; op: "review-current" };
+  | { schema: 1; op: "review-submit"; subjectCommit: string }
+  | { schema: 1; op: "review-current"; reviewId?: string }
+  | { schema: 1; op: "review-complete"; reviewId: string; result: { verdict: "pass" | "fail" | "unresolved"; summary: string; findings: Array<{ id: string; severity: "info" | "warning" | "error"; finding: string; evidenceRefs: string[] }> } }
+  | { schema: 1; op: "review-watch"; after?: string };
 
 export interface AgentApiResponse {
   schema: 1;

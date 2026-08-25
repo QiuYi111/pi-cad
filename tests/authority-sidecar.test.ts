@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { buildPrimeBwrapArgs, type LaunchPaths } from "../src/authority/launcher.ts";
+import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, type LaunchPaths } from "../src/authority/launcher.ts";
 import { completionGate, dispatchSidecarRequest, startAuthoritySidecar } from "../src/authority/sidecar.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
@@ -153,4 +153,23 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
+});
+
+test("reviewer bwrap is subject-scoped and cannot see the author workspace or endpoint", () => {
+  const paths: LaunchPaths = {
+    repository: "/repo/pi-cad", project: "/author-project", primeRoot: "/repo/prime", nodeRoot: "/runtime/node",
+    primeAgentDir: "/host/agent", primeKernelVenv: "/host/kernel", kernelPythonRoot: "/runtime/python",
+    kernelPythonExecutable: "python3.11", kernelSitePackages: "lib/python3.11/site-packages", runtimeDirectory: "/run/private",
+    ephemeralAgentDir: "/run/private/prime-agent", authorSocketDirectory: "/run/private/author",
+  };
+  const joined = buildReviewerBwrapArgs(paths, {
+    reviewId: "review-123", reviewerAgentDir: "/run/private/reviewer-agent", reviewerWorkspace: "/run/private/reviewer-workspace",
+    reviewerSocketDirectory: "/run/private/reviewer", prompt: "review exactly one commit",
+  }).join("\n");
+  assert.match(joined, /PI_CAD_REVIEW_ID\nreview-123/);
+  assert.match(joined, /--ro-bind\n\/run\/private\/reviewer\n\/run\/pi-cad\/reviewer/);
+  assert.match(joined, /--autonomous-max-turns\n16/);
+  assert.match(joined, /--no-session/);
+  assert.doesNotMatch(joined, /\/author-project|\/run\/private\/author|PI_CAD_AUTHOR_SOCKET/);
+  assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
 });

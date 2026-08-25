@@ -108,5 +108,6 @@ test("every active-run Agent API mutation is assigned to the unified authorizati
     probe: "probe.run",
     "model-build": "model.build",
     "simulation-run": "simulation.run",
+    "review-submit": "review.submit",
   });
 });

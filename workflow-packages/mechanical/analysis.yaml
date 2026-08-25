@@ -57,7 +57,7 @@ workflow:
     final_review:
       purpose: Independently verify evidence coverage and the conclusion.
       guidance: Recompute decisive facts from the immutable artifact and reject unsupported certainty.
-      actions: [transition]
+      actions: [cad_submit_for_review, transition]
       grants: [file_read, observe, observe_programmable, transition]
       writeScopes: [run:observation]
       recordObligations: []

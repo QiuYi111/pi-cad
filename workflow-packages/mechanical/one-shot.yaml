@@ -98,7 +98,7 @@ workflow:
     final_review:
       purpose: Obtain an independent evidence-backed verdict on the immutable candidate.
       guidance: Submit exactly one immutable candidate; author activity cannot manufacture or substitute reviewer authority.
-      actions: [transition]
+      actions: [cad_submit_for_review, transition]
       grants: [file_read, observe, observe_programmable, transition]
       writeScopes: [run:observation]
       recordObligations: []

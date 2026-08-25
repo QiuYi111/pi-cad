@@ -25,6 +25,7 @@ export const AGENT_API_MUTATION_OPERATIONS = {
   probe: "probe.run",
   "model-build": "model.build",
   "simulation-run": "simulation.run",
+  "review-submit": "review.submit",
 } as const satisfies Partial<Record<AgentApiRequest["op"], Operation>>;
 
 async function current(cwd: string) {

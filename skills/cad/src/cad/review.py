@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .client import request
+
 
 def _commit_id(commit: Any) -> str:
     value = getattr(commit, "id", commit)
@@ -11,37 +13,26 @@ def _commit_id(commit: Any) -> str:
     return value
 
 
-def _review_prompt(commit_id: str) -> str:
-    return f"""You are the Fresh Reviewer for Pi-CAD Plan C.
-
-Review exactly the immutable handoff commit {commit_id}. Start with:
-
-    import cad
-    subject = await cad.load({commit_id!r})
-
-Treat the commit variables, artifact hashes, workflow snapshot, and referenced
-evidence as the review package. Do not request or rely on the author Agent's
-transcript, hidden Python variables, or conclusions. Use task-specific Python
-checks and the controlled @cad.probe(subject=subject.artifacts[...]) primitive
-when geometry inspection is needed; there is no cad.verify.
-
-Return a verdict of pass, fail, or unresolved with concise findings and exact
-evidence/artifact references. Freeze the independent result with cad.commit,
-including subject_commit={commit_id!r}, verdict, summary, and findings, then
-send the resulting review commit ID to the parent with agent_message. A PASS
-requires affirmative evidence; missing evidence is unresolved.
-"""
+def _review_id(handle: Any) -> str:
+    value = handle.get("reviewId") if isinstance(handle, dict) else handle
+    if not isinstance(value, str) or not re.fullmatch(r"review-[a-f0-9]{24}", value):
+        raise TypeError("cad.review.current requires a review handle or review ID")
+    return value
 
 
-async def submit(commit: Any) -> Any:
-    """Spawn the normal Prime RLM Fresh Reviewer template.
+async def submit(final_commit: Any) -> dict[str, Any]:
+    """Admit one idempotent Fresh Reviewer and return immediately."""
+    return await request("review-submit", subjectCommit=_commit_id(final_commit))
 
-    Prime owns the child session and lifecycle. The returned value is Prime's
-    ordinary admission handle; review delivery happens by commit ID/message.
-    """
-    commit_id = _commit_id(commit)
-    try:
-        from rlm import run
-    except ImportError as error:
-        raise RuntimeError("cad.review.submit is available inside a Prime Agent kernel") from error
-    return await run(_review_prompt(commit_id))
+
+async def current(handle: Any) -> dict[str, Any] | None:
+    return await request("review-current", reviewId=_review_id(handle))
+
+
+async def resolve(review_id: str, *, verdict: str, summary: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Reviewer-scoped terminal result submission; authors are rejected."""
+    if verdict not in {"pass", "fail", "unresolved"}:
+        raise ValueError("verdict must be pass, fail, or unresolved")
+    return await request("review-complete", reviewId=_review_id(review_id), result={
+        "verdict": verdict, "summary": summary, "findings": findings,
+    })

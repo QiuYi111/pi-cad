@@ -2,7 +2,7 @@ import { createConnection } from "node:net";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-export async function requestAuthority<T>(request: Record<string, unknown>): Promise<T> {
+export async function requestAuthority<T>(request: Record<string, unknown>, options: { timeoutMs?: number } = {}): Promise<T> {
   const path = process.env.PI_CAD_AUTHOR_SOCKET;
   if (!path) throw new Error("Pi-CAD authority sidecar socket is not configured");
   return new Promise<T>((accept, reject) => {
@@ -20,7 +20,7 @@ export async function requestAuthority<T>(request: Record<string, unknown>): Pro
       reject(error);
     };
     const socket = createConnection(path);
-    socket.setTimeout(30_000, () => socket.destroy(new Error("Pi-CAD authority sidecar timeout")));
+    socket.setTimeout(options.timeoutMs ?? 30_000, () => socket.destroy(new Error("Pi-CAD authority sidecar timeout")));
     socket.on("connect", () => socket.end(JSON.stringify({ schema: 1, ...request })));
     socket.on("data", (chunk: Buffer) => {
       size += chunk.length;

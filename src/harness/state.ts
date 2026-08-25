@@ -63,7 +63,7 @@ export interface HarnessRunStateV7 {
   staleEvidence: EvidenceRefV7[];
   authorities: AuthorityRefV7[];
   blocker?: { type: string; reason: string; needed: string };
-  latestReview?: { id: string; verdict: string; path: string; profileId: string; subjectHash: string; workflowHash: string; registryContractHash: string };
+  latestReview?: { id: string; verdict: string; path: string; profileId: string; subjectHash: string; workflowHash: string; registryContractHash: string; subjectCommit?: string; artifactHash?: string };
   contextRefs?: Record<string, string>;
   domainMetadata?: Record<string, JsonValue>;
   createdAt: string;

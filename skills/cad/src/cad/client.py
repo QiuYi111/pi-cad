@@ -47,8 +47,10 @@ def project_path(value: str | Path, *, error_type: str = "CadApiError") -> tuple
 
 
 async def request(op: str, **payload: Any) -> Any:
-    request_body = json.dumps({"schema": 1, "op": op, **payload}, ensure_ascii=False).encode()
-    authority_socket = os.environ.get("PI_CAD_AUTHOR_SOCKET")
+    reviewer_socket = os.environ.get("PI_CAD_REVIEWER_SOCKET")
+    reviewer_id = os.environ.get("PI_CAD_REVIEW_ID") if reviewer_socket else None
+    request_body = json.dumps({"schema": 1, "op": op, **payload, **({"reviewId": reviewer_id} if reviewer_id else {})}, ensure_ascii=False).encode()
+    authority_socket = reviewer_socket or os.environ.get("PI_CAD_AUTHOR_SOCKET")
     if authority_socket:
         try:
             reader, writer = await asyncio.open_unix_connection(authority_socket)

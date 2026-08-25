@@ -9,10 +9,27 @@ interface SidecarPhaseCard {
   digest: string;
   workflowHash: string;
   phase: string;
+  effectiveCapabilities?: string[];
 }
 
 /** The entire Prime integration: inject one current, non-persisted card per call. */
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
+  let watchingReview = false;
+  const watchReview = (ctx: any) => {
+    if (watchingReview) return;
+    watchingReview = true;
+    void requestAuthority<null | { reviewId: string; subjectCommit: string; status: string }>({ op: "review-watch" }, { timeoutMs: 145_000 })
+      .then(async (review) => {
+        if (!review) return;
+        await ctx.sendMessage({
+          customType: "pi-cad.review-completed", display: true,
+          content: `Pi-CAD independent review ${review.reviewId} completed with ${review.status.toUpperCase()} for ${review.subjectCommit}. Inspect cad.review.current(handle) and take a legal workflow transition.`,
+          details: review,
+        }, { triggerTurn: true, deliverAs: "nextTurn" });
+      })
+      .catch(() => undefined)
+      .finally(() => { watchingReview = false; });
+  };
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "codex_generate_image") return undefined;
     try {
@@ -31,6 +48,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     try {
       const card = await requestAuthority<SidecarPhaseCard | null>({ op: "phase-card" });
       if (!card) return messages.length === event.messages.length ? undefined : { messages };
+      if (card.effectiveCapabilities?.includes("cad_submit_for_review")) watchReview(ctx);
       return { messages: [...messages, makeEphemeralPhaseCardMessage(card)] };
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);

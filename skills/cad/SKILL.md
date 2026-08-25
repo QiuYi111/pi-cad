@@ -36,13 +36,12 @@ engineering capability surface.
   function defined in a real source file, where Python can capture its source.
   The legacy `"current"` and `"baseline"` subjects remain available for
   state-bound v7 runs; unrestricted imports do not cross the effect fence.
-- Submit an immutable final handoff with `await cad.review.submit(commit)`. This
-  expands the Fresh Reviewer prompt and calls Prime's ordinary `rlm()` runtime;
-  the returned value is only Prime's admission handle, not a completed review.
-  Do not end the task after receiving the handle: remain active until the child
-  delivers its independent verdict by review commit ID and `agent_message`,
-  load that review commit, and apply the matching review transition. Never use
-  transcript import or treat child admission as review completion.
+- Submit an immutable final handoff with `handle = await cad.review.submit(commit)`.
+  This returns immediately and is idempotent for the same workflow, contract,
+  and artifact identity. Do not poll: the sidecar notifies Prime and triggers a
+  new parent turn when the ordinary Fresh Reviewer template completes. On that
+  turn inspect `await cad.review.current(handle)` and apply the matching legal
+  review transition. Never treat admission as completion or import transcripts.
 - Write task-specific engineering checks in Python. There is no `cad.verify`.
 - Keep large payloads in variables/files and print only selected summaries.
 
