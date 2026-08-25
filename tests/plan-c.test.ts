@@ -136,6 +136,9 @@ test("Plan C workflow metadata is optional, hashed, and rendered as a bounded st
 });
 
 test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Card images", async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-canonical-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
   const { cwd, loaded } = await projectFixture();
   try {
     await copyFile(resolve(import.meta.dirname, "fixtures", "plate.py"), join(cwd, "plate.py"));
@@ -149,10 +152,15 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
     assert.equal(result.images.length, 7);
     const card = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     assert.deepEqual(card?.images.map((image) => image.path), [
-      `.pi-cad/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,
-      `.pi-cad/runs/${loaded.state.runId}/evidence/visual/plate/front.png`,
+      `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,
+      `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/front.png`,
     ]);
-  } finally { await rm(cwd, { recursive: true, force: true }); }
+  } finally {
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
 });
 
 test("Python-facing probe bridge stays inside the existing fenced programmable backend", async () => {

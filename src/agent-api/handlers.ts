@@ -13,6 +13,7 @@ import type { AgentApiRequest } from "./protocol.ts";
 import { bootstrapAgentApiContracts } from "./bootstrap.ts";
 import { requireCurrentAuthorization } from "./authorization.ts";
 import type { Operation, OperationAuthority } from "../harness/permissions.ts";
+import { harnessStorageRoot } from "../authority/storage.ts";
 
 /**
  * Every Agent API operation that can mutate an active run is admitted here,
@@ -49,6 +50,16 @@ function projectRelativePath(cwd: string, path: string): string {
   return value.replaceAll("\\", "/");
 }
 
+function phaseCardEvidenceRef(cwd: string, path: string): string {
+  const project = relative(resolve(cwd), resolve(path));
+  if (project !== ".." && !project.startsWith(`..${sep}`) && !isAbsolute(project)) return project.replaceAll("\\", "/");
+  const storage = relative(resolve(harnessStorageRoot(cwd)), resolve(path));
+  if (storage === ".." || storage.startsWith(`..${sep}`) || isAbsolute(storage)) {
+    throw new Error(`managed CAD evidence escaped canonical storage: ${path}`);
+  }
+  return `@canonical/${storage.replaceAll("\\", "/")}`;
+}
+
 async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
   const activeBeforeBuild = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
   if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
@@ -75,7 +86,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   // Cards so mandatory visual context cannot silently disappear.
   const byName = new Map(views.map((view) => [view.name, view.path]));
   const selected = [byName.get("iso") ?? images[0], byName.get("front") ?? images[1]].filter((path): path is string => Boolean(path));
-  const contextRefs = Object.fromEntries(selected.map((path, index) => [index === 0 ? "mandatoryImageIso" : "mandatoryImageFront", projectRelativePath(cwd, path)]));
+  const contextRefs = Object.fromEntries(selected.map((path, index) => [index === 0 ? "mandatoryImageIso" : "mandatoryImageFront", phaseCardEvidenceRef(cwd, path)]));
   const artifactHash = envelopeArtifactHash(build, "step");
   if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
   await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {

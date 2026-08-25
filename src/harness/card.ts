@@ -7,6 +7,7 @@ import { PermissionEngineV7, renderLegalNextActionLines } from "./permissions.ts
 import type { RegistrySet } from "./registry.ts";
 import { unmetPhaseObligations } from "./reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "./run-store.ts";
+import { harnessStorageRoot } from "../authority/storage.ts";
 
 export interface PhaseCardImage {
   path: string;
@@ -58,17 +59,21 @@ async function mandatoryImages(cwd: string, refs: Record<string, string> | undef
     .map(([, value]) => value)
     .slice(0, cap);
   const root = await realpath(cwd);
+  const canonicalRoot = await realpath(harnessStorageRoot(cwd));
   const images: PhaseCardImage[] = [];
   for (const requested of paths) {
-    if (isAbsolute(requested) || requested.split(/[\\/]+/).includes("..")) continue;
+    const canonical = requested.startsWith("@canonical/");
+    const relativeRequest = canonical ? requested.slice("@canonical/".length) : requested;
+    if (isAbsolute(relativeRequest) || relativeRequest.split(/[\\/]+/).includes("..")) continue;
     let path: string;
-    try { path = await realpath(resolve(root, requested)); } catch { continue; }
-    if (!inside(root, path)) continue;
+    const allowedRoot = canonical ? canonicalRoot : root;
+    try { path = await realpath(resolve(allowedRoot, relativeRequest)); } catch { continue; }
+    if (!inside(allowedRoot, path)) continue;
     const mimeType = IMAGE_MIME.get(extname(path).toLowerCase() as ".png") as PhaseCardImage["mimeType"] | undefined;
     if (!mimeType) continue;
     const content = await readFile(path);
     images.push({
-      path: relative(root, path).replaceAll("\\", "/"), mimeType,
+      path: canonical ? `@canonical/${relative(allowedRoot, path).replaceAll("\\", "/")}` : relative(root, path).replaceAll("\\", "/"), mimeType,
       data: content.toString("base64"),
       sha256: createHash("sha256").update(content).digest("hex"),
     });
