@@ -80,6 +80,11 @@ engineering capability surface.
   the transition into FINAL_REVIEW. The order is strictly phase obligation ->
   build -> probe -> review-candidate commit -> transition -> review.submit.
   FINAL_REVIEW intentionally cannot create or repair workspace commits.
+  In PARTS, `cad.commit` closes only the `parts` workspace obligation.
+  `parts-geometry` and `parts-visual` are evidence obligations closed by the
+  single final `cad.model.build`; never call `cad.commit` with those names.
+  Complete source edits before that final build instead of rebuilding after its
+  evidence has been accepted.
   The first artifact must be the latest returned `ArtifactRef`, not its string
   path. `review.submit()` accepts the returned `Commit`, never an `ArtifactRef`,
   record ID, guessed ID, or earlier phase-obligation commit. Retain these Python
