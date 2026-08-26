@@ -1,6 +1,6 @@
 # Pi-CAD
 
-**从一个想法，到有证据支撑的机械设计——让 Agent 不仅会画，还知道什么时候才算真正完成。**
+**让模型搜索设计空间，让运行时守住工程事实。**
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
@@ -16,45 +16,75 @@ STEP Artifact。
 STEP 文件，都不等于完成。只有当需求、源码、几何、证据和审查结论仍然彼此一致，
 设计才真正完成。
 
-## 1. 设计是一段过程，而不是一句 Prompt
+## 1. 设计哲学：自由搜索，受控推进
 
-生成 CAD 很容易做出惊艳的演示，却很难让人放心。模型可能画出漂亮的几何，同时
-悄悄忘记一个尺寸；也可能检查了旧版本，或者根本没有验证 Artifact 就宣布成功。
+Agent 是一个逆解器。LLM 在语义空间里搜索——提出假设、编写代码、选择实验；它的
+行动则在事物空间里推进真实项目，让 Artifact 逐步逼近可接受的解集。
 
-Pi-CAD 围绕四个思想构建。
+Harness 位于两者的边界，职责只有两个：构建模型每轮看到的内容，以及解释模型返回
+的行动。因此，更高效的专用 Agent，并不是把更多说明和更多 Tool Schema 塞进一个
+越来越大的 Prompt，而是为上下文、行动与工程状态选择更合适的表达方式。
 
-### Agent 可以自由思考，但不能自由改写工程事实
+### 让语义搜索保持自由，只约束对现实的修改
 
-Prime 负责推理、模型、Session、工具和普通 RLM fan-out。Pi-CAD 负责工程权威：
-此刻允许做什么、哪个 Artifact 是当前版本、哪些证据仍然有效，以及发布门槛是否
-真的满足。
+Skill 可以传授最佳实践，但本质上只能劝诫。生产级 Workflow 还必须让义务和权限
+真正可执行。Pi-CAD 的 Workflow 规定当前必须提交什么、允许产生哪些 Effect，以及
+哪些出口合法。它约束的是项目如何向前推进，而不是模型私下如何推理，也不是模型在
+当前问题里可以如何组合代码。
 
-Agent 可以在当前阶段广泛探索；任何会改变设计的 Effect，都必须经过同一套状态机
-和固定不变的 Workflow Snapshot。
+每次模型调用前，Pi-CAD 都会从当前状态生成一张短小、临时的 Phase Card：现在位于
+哪里、还有什么必须完成、此刻可以做什么、下一步有哪些合法选择。Phase 变化时卡片
+随之变化，不会把整套状态机永久混进上下文。Workflow Package 本身是普通、可发现的
+文档，因此可以像 Skill 一样被选择、阅读、版本化和持续改进。
 
-### 文件只是输出，可追溯性才让它成为工程 Artifact
+### 把上下文当作受管理的工作记忆
 
-STEP、渲染图、JSON 报告，甚至被手工修改的状态文件，都不会因为存在于磁盘上就
-获得权威。Pi-CAD 将被接受的 Artifact 绑定到确定性源码、Build Identity、
-Workflow State 和 Evidence。模型一旦重建，依赖旧几何的观察与审查会自动失效。
+Generic Agent 往往把任务、领域知识、工具手册、参考文件和不断变化的状态压平到同一
+段消息历史里。但这些信息拥有不同的生命周期，不应该争夺同一份注意力。
 
-### 看见是必要条件，测量才是判断依据
+Prime 为 Agent 提供一个持久 IPython 工作台。Requirement、Spec、Artifact Handle、
+Probe 结果和中间计算，都可以作为有类型的 Python 值跨轮次存在。大型文件和 Solver
+原始输出留在 Prompt 之外，需要时再被召回或变换；Pi-CAD 只注入当前的操作边界与
+最有价值的观察结果。
 
-每次受控 Build 都返回可视化证据，而不只是一个文件路径。Prime 随后可以针对同一个
-Artifact 执行有边界、可编程的 B-Rep Probe：尺寸、Solid 数量、拓扑、间隙，或任务
-特有的几何断言。概念图可以帮助空间探索，但永远不能伪装成几何证明。
+这不是另一个档案库，而是真正的工作记忆：Agent 可以直接用它计算，在有边界的子
+Agent 之间传递，并把同一个值交给多个工具，而不必反复寻找路径、重新解释文件和
+重建状态。
 
-### 作者不能给自己的最终答案打分
+### 让工具在正确的抽象层上可编程
 
-最终审查由一个全新、隔离的 Prime Agent 执行。它只看到 Immutable Candidate，
-只拥有 Probe 权限，不能修改设计，也不会继承作者的对话。没有证据的 PASS、崩溃、
-超时、空回复或过期审查都会 Fail Closed。在 Headless 模式下，“完成”是 Runtime
-执行的退出条件，而不是模型生成的一句话。
+Bash 和原生 CAD Library 很有价值，因为它们可以自由组合；但它们本身并不是高效的
+Agent Interface。机械工程 API 分散在不同 Library、文件格式、Solver 版本和 Backend
+惯例中。如果让模型在每个任务里重新学习这些表面，不仅浪费上下文，也会产生不一致
+的观察结果。
 
-这也是 Pi-CAD 选择 Prime 的原因：持久 IPython 能让真实 Python 对象贯穿一段长程
-设计；持久 Session 和事件触发的新轮次支持自主工作；RLM fan-out 可以帮助完成装配
-体，同时无需再造第二套 Agent Runtime。Prime 提供智能，Pi-CAD 让智能产生的工程
-Effect 可检查、可追溯、可问责。
+Pi-CAD 在这些 Backend 之上提供稳定的 Python Operation。Prime 仍然负责写代码，
+也仍然可以在 IPython 中自由组合操作；但这些 Operation 会统一输入、Identity、失败
+语义和返回值。一次 Build 会直接返回 Agent 必须看到的视图；一次 Simulation 可以把
+巨大的数字流转换成有边界的图和 Typed Facts。因此，Managed Tooling 的主要价值并
+不是隐藏 Library，而是控制一个 Effect 发生后，究竟什么信息进入上下文。
+
+### 传递 Artifact Value，而不只是文件位置
+
+文件路径只说明一串 Bytes 在哪里。它没有说明这些 Bytes 是什么、来自哪个 Build、
+是否仍是当前版本，也没有说明哪些 Evidence 和 Review 正在引用它。`ArtifactRef`
+在解析到真实 Project-local 文件的同时，还携带 Identity、Type、Provenance 和
+Revision Semantics。
+
+这在长程任务与多 Agent 协作中尤其重要。同一个 Artifact 可以从建模流向网格、
+Probe、Simulation 和 Review，而每个参与者都不必从文件名重新猜测它的意义。一旦
+设计被 Rebuild，旧 Handle、Observation 和 Verdict 会作为同一条依赖链一起失效。
+
+### 用作者之外的证据闭合回路
+
+空间任务必须看见，工程判断必须测量，而最终评分不应该交给作者自己。Managed Build
+强制返回视觉反馈，受限 B-Rep Probe 检查精确 Artifact，Fresh Prime Reviewer 则在
+隔离环境里以 Probe-only 权限审查 Immutable Candidate。崩溃、超时、空回复、没有
+Evidence 的 PASS 或过期 Review 都会 Fail Closed。
+
+归根结底：Prime 拥有搜索过程与工作记忆；Pi-CAD 拥有合法 Effect、Managed
+Observation、Artifact Truth 与完成条件。创造力有价值的地方让模型自由，工程事实
+必须延续的地方让运行时严格。
 
 ## 2. Killer Demos
 
