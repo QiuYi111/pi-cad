@@ -12,6 +12,15 @@ interface SidecarPhaseCard {
   effectiveCapabilities?: string[];
 }
 
+function originalUserRequest(messages: any[]): string | null {
+  const message = messages.find((item) => item?.role === "user");
+  if (!message) return null;
+  if (typeof message.content === "string") return message.content.trim() || null;
+  if (!Array.isArray(message.content)) return null;
+  const text = message.content.filter((item: any) => item?.type === "text" && typeof item.text === "string").map((item: any) => item.text).join("\n").trim();
+  return text || null;
+}
+
 /** The entire Prime integration: inject one current, non-persisted card per call. */
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
   type ReviewHandle = { reviewId: string; subjectCommit: string; status: string };
@@ -63,6 +72,8 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   pi.on("context", async (event, ctx) => {
     const messages = event.messages.filter((message) => !(message.role === "custom" && message.customType === PHASE_CARD_CUSTOM_TYPE));
     try {
+      const mission = originalUserRequest(messages);
+      if (mission) await requestAuthority({ op: "mission-capture", mission }).catch(() => undefined);
       const card = await requestAuthority<SidecarPhaseCard | null>({ op: "phase-card" });
       if (!card) return messages.length === event.messages.length ? undefined : { messages };
       if (card.effectiveCapabilities?.includes("cad_submit_for_review")) watchReview();

@@ -10,7 +10,7 @@ import { ReviewRuntime } from "../src/authority/review-runtime.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { commitWorkspace } from "../src/harness/commit.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
-import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
 
 test("review runtime admits one reviewer per immutable candidate and persists an evidence-backed result", async () => {
@@ -30,18 +30,35 @@ test("review runtime admits one reviewer per immutable candidate and persists an
     }, mechanicalRegistries);
     await new HarnessProjectStoreV7(cwd).startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
     await writeFile(join(cwd, "candidate.step"), "immutable-candidate");
+    await writeFile(join(cwd, "review.png"), Buffer.from("89504e470d0a1a0a", "hex"));
     const commit = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "final-candidate", artifacts: [{ path: "candidate.step", role: "authoritative-candidate-design" }] });
+    const activeBeforeReview = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+    assert.ok(activeBeforeReview);
+    await new HarnessRunStoreV7(cwd, activeBeforeReview.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
+      state: { ...state, contextRefs: { ...(state.contextRefs ?? {}), mandatoryImageIso: "review.png" } },
+      event: { type: "TestReviewImageInstalled", data: {} },
+      payloads: { "context/frame.json": { schema: 1, mission: "Design a dependable test candidate." } },
+    }));
     let launches = 0;
+    let reviewerPrompt = "";
     let runtime!: ReviewRuntime;
-    runtime = new ReviewRuntime(cwd, async ({ reviewId }) => {
+    runtime = new ReviewRuntime(cwd, async ({ reviewId, prompt }) => {
       launches += 1;
-      await runtime.complete(reviewId, { verdict: "pass", summary: "geometry checks pass", findings: [{ id: "geometry", severity: "info", finding: "candidate is measurable", evidenceRefs: ["probe:geometry:abc"] }] });
+      reviewerPrompt = prompt;
+      const evidence = await runtime.evidence(reviewId);
+      await runtime.admitProbe(reviewId);
+      await runtime.complete(reviewId, { verdict: "pass", summary: "visual and measured geometry checks pass", findings: [{ id: "geometry", severity: "info", finding: "candidate is visually and geometrically plausible", evidenceRefs: [evidence.images[0]!.evidenceRef, "observation:geometry:abc"] }] });
     });
     const first = await runtime.submit(commit.id);
     await runtime.waitForIdle(first.reviewId);
     const second = await runtime.submit(commit.id);
     assert.equal(first.reviewId, second.reviewId);
     assert.equal(launches, 1);
+    assert.match(reviewerPrompt, /cad\.review\.inspect\(\)/);
+    assert.match(reviewerPrompt, /original user's request/);
+    assert.match(reviewerPrompt, /Form your own review plan/);
+    assert.match(reviewerPrompt, /Do not rely on a harness-prescribed checklist/);
+    assert.doesNotMatch(reviewerPrompt, /bounding.box|solid count|coaxiality|BOM/);
     assert.equal((await runtime.current(first.reviewId))?.status, "pass");
     const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
     assert.equal(active?.state.latestReview?.subjectCommit, commit.id);
@@ -84,13 +101,31 @@ test("reviewer authority fixes the immutable subject and enforces twelve probes"
     } }, mechanicalRegistries);
     await new HarnessProjectStoreV7(cwd).startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
     await writeFile(join(cwd, "candidate.step"), "candidate");
+    await writeFile(join(cwd, "review.png"), Buffer.from("89504e470d0a1a0a", "hex"));
     const commit = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "candidate", artifacts: ["candidate.step"] });
+    const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+    assert.ok(active);
+    await new HarnessRunStoreV7(cwd, active.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
+      state: { ...state, contextRefs: { ...(state.contextRefs ?? {}), mandatoryImageIso: "review.png" } },
+      event: { type: "TestReviewImageInstalled", data: {} },
+      payloads: { "context/frame.json": { schema: 1, mission: "Review the immutable candidate." } },
+    }));
     const runtime = new ReviewRuntime(cwd, async () => new Promise<void>(() => undefined));
     const handle = await runtime.submit(commit.id);
     const wrong = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "load", id: "another-commit", reviewId: handle.reviewId } as any, runtime);
     assert.equal(wrong.ok, false);
     assert.match(wrong.error?.message ?? "", /only its immutable subject/);
-    for (let index = 0; index < 12; index += 1) await runtime.admitProbe(handle.reviewId);
+    const authorEvidence = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "review-evidence", reviewId: handle.reviewId } as any, runtime);
+    assert.equal(authorEvidence.ok, false);
+    assert.match(authorEvidence.error?.message ?? "", /author endpoint does not expose/);
+    const nominalPass = { verdict: "pass" as const, summary: "nominal", findings: [{ id: "nominal", severity: "info" as const, finding: "nominal", evidenceRefs: ["visual:fake"] }] };
+    await assert.rejects(runtime.complete(handle.reviewId, nominalPass), /at least one independent probe/);
+    await runtime.admitProbe(handle.reviewId);
+    await assert.rejects(runtime.complete(handle.reviewId, nominalPass), /canonical visual evidence reference/);
+    const reviewerEvidence = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "review-evidence", reviewId: handle.reviewId } as any, runtime);
+    assert.equal(reviewerEvidence.ok, true);
+    assert.equal((reviewerEvidence.result as any).images.length, 1);
+    for (let index = 1; index < 12; index += 1) await runtime.admitProbe(handle.reviewId);
     await assert.rejects(runtime.admitProbe(handle.reviewId), /maxProbeCalls=12/);
     runtime.shutdown();
   } finally { await rm(cwd, { recursive: true, force: true }); }

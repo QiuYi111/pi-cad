@@ -187,7 +187,28 @@ class CadPackageTests(unittest.TestCase):
         with patch("IPython.display.display", attach):
             asyncio.run(model_module._attach_images(images))
         self.assertEqual(attach.call_count, 2)
-        self.assertTrue(all(call.args[0].data for call in attach.call_args_list))
+        for call, expected in zip(attach.call_args_list, images, strict=True):
+            self.assertTrue(call.kwargs["raw"])
+            self.assertEqual(call.args[0]["application/vnd.prime-agent.attachment+json"], {
+                "mime_type": "image/png", "data": expected["data"],
+            })
+            self.assertEqual(call.args[0]["text/plain"], "Pi-CAD mandatory build observation")
+
+    def test_review_inspect_attaches_canonical_images_without_returning_base64(self) -> None:
+        review_module = importlib.import_module("cad.review")
+        encoded = base64.b64encode(b"review-view").decode()
+        mocked = AsyncMock(return_value={
+            "reviewId": "review-" + "a" * 24,
+            "records": [{"obligationRef": "spec"}],
+            "images": [{"data": encoded, "mimeType": "image/png", "evidenceRef": "visual:" + "b" * 64}],
+        })
+        attach = Mock()
+        with patch.object(review_module, "request", mocked), patch("IPython.display.display", attach):
+            context = asyncio.run(review_module.inspect())
+        mocked.assert_awaited_once_with("review-evidence")
+        self.assertEqual(context["images"], [{"mimeType": "image/png", "evidenceRef": "visual:" + "b" * 64}])
+        self.assertEqual(attach.call_count, 1)
+        self.assertTrue(attach.call_args.kwargs["raw"])
 
     def test_model_build_fails_on_inner_backend_error(self) -> None:
         model_module = importlib.import_module("cad.model")

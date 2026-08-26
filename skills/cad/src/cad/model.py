@@ -2,10 +2,10 @@ from __future__ import annotations
 
 """Thin model handles over the existing Pi-CAD build capability."""
 
-import base64
 from pathlib import Path
 from typing import Any
 
+from ._attachments import display_inline_image
 from .client import CadApiError, project_path, request
 from .refs import ArtifactRef
 
@@ -18,14 +18,14 @@ async def _attach_images(images: list[dict[str, str]]) -> None:
     if not images:
         raise CadApiError("Pi-CAD model build produced no mandatory visual observations", error_type="ModelBuildError")
     try:
-        from IPython.display import Image, display
+        import IPython.display  # noqa: F401 -- fail clearly when the Prime kernel display channel is unavailable
     except Exception as error:
         raise CadApiError("Prime image attachment capability is unavailable", error_type="ModelBuildError") from error
     try:
         for image in images:
             if image.get("mimeType") != "image/png" or not image.get("data"):
                 raise ValueError("mandatory build image is not an inline PNG")
-            display(Image(data=base64.b64decode(image["data"], validate=True), format="png"))
+            display_inline_image(image, label="Pi-CAD mandatory build observation")
     except Exception as error:
         raise CadApiError(f"Pi-CAD could not inject mandatory build images into Prime: {error}", error_type="ModelBuildError") from error
 

@@ -53,7 +53,7 @@ function section(title: string, values: string[]): string[] {
   return [title, ...values.map((value) => `- ${value}`), ""];
 }
 
-async function mandatoryImages(cwd: string, refs: Record<string, string> | undefined, cap: number): Promise<PhaseCardImage[]> {
+export async function loadMandatoryImages(cwd: string, refs: Record<string, string> | undefined, cap: number): Promise<PhaseCardImage[]> {
   const paths = Object.entries(refs ?? {})
     .filter(([key]) => /^mandatory[-_.]?image/i.test(key))
     .map(([, value]) => value)
@@ -135,7 +135,7 @@ export async function compilePhaseCard(cwd: string, options: { registries: Regis
   if (Buffer.byteLength(text) > maxTextBytes) {
     throw new Error(`Phase Card authoritative sections exceed the ${maxTextBytes}-byte budget`);
   }
-  const images = await mandatoryImages(cwd, loaded.state.contextRefs, maxImages);
+  const images = await loadMandatoryImages(cwd, loaded.state.contextRefs, maxImages);
   const digest = createHash("sha256").update(JSON.stringify({ text, images: images.map(({ sha256, path }) => ({ sha256, path })), workflowHash: loaded.workflow.hash, phase: loaded.state.phase })).digest("hex");
   const bytesRead = Buffer.byteLength(JSON.stringify(project.state)) + Buffer.byteLength(JSON.stringify(loaded.state)) + Buffer.byteLength(JSON.stringify(loaded.workflow));
   const bytesEmitted = Buffer.byteLength(text);

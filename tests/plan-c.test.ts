@@ -364,6 +364,10 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   assert.equal(first.messages.length, 2);
   assert.equal(first.messages[1].customType, PHASE_CARD_CUSTOM_TYPE);
   assert.equal(first.messages[1].display, false);
+  const activeAfterContext = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  assert.ok(activeAfterContext);
+  const frame = await new HarnessRunStoreV7(cwd, activeAfterContext.state.runId).transactions.readJson<any>("context/frame.json");
+  assert.equal(frame?.mission, "hello");
   await handleAgentApi(cwd, { schema: 1, op: "commit", name: "system-design" });
   await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "integrated" });
   const second = await context({ messages: [...original, first.messages[1]] }, { cwd });

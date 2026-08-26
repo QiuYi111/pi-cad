@@ -2,7 +2,7 @@ import { createServer, type Server, type Socket } from "node:net";
 import { chmod, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { canonicalDigest } from "../harness/canonical.ts";
+import { canonicalDigest, jsonValue } from "../harness/canonical.ts";
 import { loadWorkspaceCommit } from "../harness/commit.ts";
 import { currentAuthorization } from "../agent-api/authorization.ts";
 import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
@@ -20,12 +20,14 @@ export type SidecarRole = "author" | "reviewer";
 export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "phase-card" }
   | { schema: 1; op: "completion-gate" }
+  | { schema: 1; op: "mission-capture"; mission: string }
+  | { schema: 1; op: "review-evidence"; reviewId?: string }
   | { schema: 1; op: "authorize"; operation: Operation };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "authorize"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "authorize"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
-const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-complete"]);
+const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
 
 function errorResponse(error: unknown): AgentApiResponse {
   return {
@@ -86,12 +88,18 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
       result = await reviewRuntime.submit(value.subjectCommit);
     } else if (value.op === "review-current") {
       result = reviewRuntime ? await reviewRuntime.current(value.reviewId) : await handleAgentApi(cwd, value, role);
+    } else if (value.op === "review-evidence") {
+      if (role !== "reviewer" || !reviewRuntime || !reviewerRequestId) throw new Error("review evidence requires reviewer authority");
+      result = await reviewRuntime.evidence(reviewerRequestId);
     } else if (value.op === "review-complete") {
       if (role !== "reviewer" || !reviewRuntime) throw new Error("review completion requires reviewer authority");
       result = await reviewRuntime.complete(value.reviewId, value.result);
     } else if (value.op === "review-watch") {
       if (role !== "author" || !reviewRuntime) throw new Error("review notification stream is unavailable");
       result = await reviewRuntime.watch(value.after);
+    } else if (value.op === "mission-capture") {
+      if (role !== "author") throw new Error("mission capture is author-scoped");
+      result = await captureMission(cwd, value.mission);
     } else if (value.op === "phase-card") {
       if (role !== "author") throw new Error("phase-card is author-scoped");
       bootstrapAgentApiContracts();
@@ -112,6 +120,23 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
     await refreshProjectionSafely(cwd);
     return errorResponse(error);
   }
+}
+
+async function captureMission(cwd: string, requested: string): Promise<{ captured: boolean }> {
+  const mission = typeof requested === "string" ? requested.trim() : "";
+  if (!mission || Buffer.byteLength(mission) > 32 * 1024) throw new Error("original user request must be between 1 and 32768 bytes");
+  const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  if (!active) throw new Error("mission capture requires an active workflow");
+  const run = new HarnessRunStoreV7(cwd, active.state.runId);
+  const current = await run.transactions.readJson<Record<string, unknown>>("context/frame.json") ?? { schema: 1, fragments: [] };
+  if (typeof current.mission === "string" && current.mission.trim()) return { captured: false };
+  const now = new Date().toISOString();
+  await run.mutate(mechanicalRegistries, ({ state }) => ({
+    state: { ...state, updatedAt: now },
+    event: { type: "OriginalUserRequestCaptured", data: { bytes: Buffer.byteLength(mission) } },
+    payloads: { "context/frame.json": jsonValue({ ...current, schema: 1, mission, updatedAt: now }) },
+  }));
+  return { captured: true };
 }
 
 async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime): Promise<void> {

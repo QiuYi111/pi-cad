@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ._attachments import display_inline_image
 from .client import request
 
 
@@ -27,6 +28,18 @@ async def submit(final_commit: Any) -> dict[str, Any]:
 
 async def current(handle: Any) -> dict[str, Any] | None:
     return await request("review-current", reviewId=_review_id(handle))
+
+
+async def inspect() -> dict[str, Any]:
+    """Load immutable review context and attach its canonical visual observations."""
+    payload = await request("review-evidence")
+    images = payload.pop("images", [])
+    image_refs: list[dict[str, Any]] = []
+    for image in images:
+        display_inline_image(image, label="Pi-CAD canonical review observation")
+        image_refs.append({key: value for key, value in image.items() if key != "data"})
+    payload["images"] = image_refs
+    return payload
 
 
 async def resolve(review_id: str, *, verdict: str, summary: str, findings: list[dict[str, Any]]) -> dict[str, Any]:
