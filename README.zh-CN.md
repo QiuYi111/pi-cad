@@ -224,7 +224,7 @@ Pi-CAD 当前支持 Ubuntu 和 WSL2。你需要 Node.js 22.19+、由 `uv` 管理
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y bubblewrap libglu1-mesa
+sudo apt-get install -y bubblewrap libglu1-mesa ripgrep
 
 mkdir -p ~/work && cd ~/work
 git clone https://github.com/QiuYi111/prime-agent.git

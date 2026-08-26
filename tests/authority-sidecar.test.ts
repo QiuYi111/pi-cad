@@ -179,6 +179,9 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
+  assert.match(joined, /--skill\n\/opt\/pi-cad\/cad\/SKILL\.md/);
+  assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
+  assert.doesNotMatch(joined, /cad-skill/);
 });
 
 test("Prime one-shot mode uses the canonical sidecar completion gate", () => {

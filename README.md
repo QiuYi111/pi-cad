@@ -257,7 +257,7 @@ Keep the Prime Agent and Pi-CAD repositories beside each other:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y bubblewrap libglu1-mesa
+sudo apt-get install -y bubblewrap libglu1-mesa ripgrep
 
 mkdir -p ~/work && cd ~/work
 git clone https://github.com/QiuYi111/prime-agent.git
