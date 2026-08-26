@@ -5,7 +5,7 @@ import { performance } from "node:perf_hooks";
 
 import { PermissionEngineV7, renderLegalNextActionLines } from "./permissions.ts";
 import type { RegistrySet } from "./registry.ts";
-import { unmetPhaseObligations } from "./reducer.ts";
+import { legalWorkflowTransitions, unmetPhaseObligations } from "./reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "./run-store.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
 
@@ -99,7 +99,7 @@ export async function compilePhaseCard(cwd: string, options: { registries: Regis
   const permissions = new PermissionEngineV7(options.registries, loaded.registryContract);
   const effectiveCapabilities = permissions.enabledActions(loaded.state, loaded.workflow);
   const unmetObligations = unmetPhaseObligations(loaded.state, loaded.workflow);
-  const legalTransitions = Object.entries(phase.transitions).map(([event, transition]) => `${event} -> ${transition.target}`);
+  const legalTransitions = legalWorkflowTransitions(loaded.state, loaded.workflow).map(({ event, target }) => `${event} -> ${target}`);
   const state = [
     `canonical authority: sidecar state for run ${loaded.state.runId}; workspace status files are projections only`,
     `registry contract: ${loaded.registryContract.hash}`,

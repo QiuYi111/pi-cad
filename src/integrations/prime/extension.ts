@@ -45,7 +45,6 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     if (event.message.role !== "assistant") return undefined;
     const current = await requestAuthority<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
     if (current?.status === "running") await watchReview();
-    else if (current) await notifyReview(current);
     return undefined;
   });
   pi.on("tool_call", async (event, ctx) => {

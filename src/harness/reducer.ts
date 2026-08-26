@@ -49,19 +49,10 @@ export function createHarnessRunState(input: {
 }
 
 export function transitionRun(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1, event: string): HarnessRunStateV7 {
-  if (state.status !== "active" && state.status !== "ready") throw new Error(`cannot transition run in status ${state.status}`);
+  const denial = transitionDenialReason(state, workflow, event);
+  if (denial) throw new Error(denial);
   const phase = currentPhase(state, workflow);
-  const transition = phase.transitions[event];
-  if (!transition) throw new Error(`illegal workflow transition: ${state.phase}.${event}`);
-  if (transition.requiresPhaseObligations) {
-    const unmet = unmetPhaseObligations(state, workflow, state.phase);
-    if (unmet.length) throw new Error(`phase obligations remain unmet: ${unmet.join(", ")}`);
-  }
-  if (event === "accepted" && phase.reviewProfile) {
-    const review = state.latestReview;
-    const subjectHash = canonicalDigest({ workflowHash: workflow.hash, registryContractHash: state.workflow.registryContractHash, phase: state.phase, records: state.records, artifacts: state.artifacts, evidence: state.evidence });
-    if (!review || review.verdict !== "pass" || review.profileId !== phase.reviewProfile || review.workflowHash !== workflow.hash || review.registryContractHash !== state.workflow.registryContractHash || review.subjectHash !== subjectHash) throw new Error(`transition requires a current ${phase.reviewProfile} PASS`);
-  }
+  const transition = phase.transitions[event]!;
   let authorities = state.authorities;
   if (transition.authority) {
     const index = authorities.findIndex((item) => item.kind === transition.authority && !item.consumedAt);
@@ -79,6 +70,34 @@ export function transitionRun(state: HarnessRunStateV7, workflow: WorkflowSnapsh
     authorities,
     updatedAt: now(),
   };
+}
+
+/** One source of truth for transition execution, Phase Cards, and API projections. */
+export function transitionDenialReason(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1, event: string): string | null {
+  if (state.status !== "active" && state.status !== "ready") return `cannot transition run in status ${state.status}`;
+  const phase = currentPhase(state, workflow);
+  const transition = phase.transitions[event];
+  if (!transition) return `illegal workflow transition: ${state.phase}.${event}`;
+  if (transition.requiresPhaseObligations) {
+    const unmet = unmetPhaseObligations(state, workflow, state.phase);
+    if (unmet.length) return `phase obligations remain unmet: ${unmet.join(", ")}`;
+  }
+  if (event === "accepted" && phase.reviewProfile) {
+    const review = state.latestReview;
+    const subjectHash = canonicalDigest({ workflowHash: workflow.hash, registryContractHash: state.workflow.registryContractHash, phase: state.phase, records: state.records, artifacts: state.artifacts, evidence: state.evidence });
+    if (!review || review.verdict !== "pass" || review.profileId !== phase.reviewProfile || review.workflowHash !== workflow.hash || review.registryContractHash !== state.workflow.registryContractHash || review.subjectHash !== subjectHash) return `transition requires a current ${phase.reviewProfile} PASS`;
+  }
+  if (transition.authority && !state.authorities.some((item) => item.kind === transition.authority && !item.consumedAt)) {
+    return `transition requires authority: ${transition.authority}`;
+  }
+  return null;
+}
+
+export function legalWorkflowTransitions(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1): Array<{ event: string; target: string }> {
+  const phase = currentPhase(state, workflow);
+  return Object.entries(phase.transitions)
+    .filter(([event]) => transitionDenialReason(state, workflow, event) === null)
+    .map(([event, transition]) => ({ event, target: transition.target }));
 }
 
 export function commitRecordRef(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1, ref: RecordRefV7): HarnessRunStateV7 {
@@ -193,6 +212,28 @@ export function commitEvidenceRef(state: HarnessRunStateV7, workflow: WorkflowSn
     throw new Error(`evidence obligation already closed: ${obligation.ref}`);
   }
   return { ...state, evidence: [...state.evidence, evidence], updatedAt: now() };
+}
+
+/** Replace primitive evidence after a candidate rebuild and invalidate all declared dependants. */
+export function reviseEvidenceRef(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1, registryContract: RegistryContractV1, evidence: EvidenceRefV7): HarnessRunStateV7 {
+  const obligation = currentObligation(state, workflow, evidence.obligationRef, "evidence");
+  if (obligation.recipeKind) throw new Error(`Recipe-backed evidence requires a pre-bound Recipe run: ${obligation.ref}`);
+  assertDependenciesClosed(state, obligation);
+  if (obligation.type !== evidence.type || evidence.workflowHash !== workflow.hash || evidence.registryContractHash !== registryContract.hash) throw new Error(`evidence does not match obligation: ${obligation.ref}`);
+  const existing = state.evidence.find((item) => item.obligationRef === obligation.ref);
+  if (!existing) return commitEvidenceRef(state, workflow, registryContract, evidence);
+  if (existing.sha256 === evidence.sha256 && existing.path === evidence.path) return state;
+  const invalid = dependencyClosure(workflow, new Set([evidence.obligationRef]));
+  const stale = state.evidence.filter((item) => invalid.has(item.obligationRef));
+  return {
+    ...state,
+    records: Object.fromEntries(Object.entries(state.records).filter(([ref]) => !invalid.has(ref))),
+    evidence: [...state.evidence.filter((item) => !invalid.has(item.obligationRef)), evidence],
+    staleEvidence: [...state.staleEvidence, ...stale],
+    latestReview: undefined,
+    status: "active",
+    updatedAt: now(),
+  };
 }
 
 export function unmetWorkflowObligations(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1): string[] {

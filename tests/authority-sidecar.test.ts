@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, type LaunchPaths } from "../src/authority/launcher.ts";
+import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
 import { completionGate, dispatchSidecarRequest, startAuthoritySidecar } from "../src/authority/sidecar.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
@@ -37,6 +37,12 @@ test("authority sidecar owns canonical state and rewrites a non-authoritative wo
     assert.equal(current.ok, true);
     assert.equal((current.result as any).phase, "grill");
     assert.equal(JSON.parse(await readFile(statusPath, "utf-8")).authoritative, false);
+
+    const gate = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "completion-gate" });
+    assert.equal(gate.ok, true);
+    assert.equal((gate.result as any).complete, false);
+    const reviewerGate = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "completion-gate" });
+    assert.equal(reviewerGate.ok, false);
 
     const denied = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
     assert.equal(denied.ok, false);
@@ -153,6 +159,17 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
+});
+
+test("Prime one-shot mode uses the canonical sidecar completion gate", () => {
+  const args = withHeadlessEventContinuation(["--provider", "openai-codex", "--print", "build it"]);
+  assert.ok(args.includes("--autonomous"));
+  assert.deepEqual(args.slice(args.indexOf("--autonomous-gate"), args.indexOf("--autonomous-gate") + 2), [
+    "--autonomous-gate", "$PRIME_AGENT_KERNEL_PYTHON -m cad._completion_gate",
+  ]);
+  assert.ok(args.includes("--autonomous-gate-retries"));
+  const interactive = withHeadlessEventContinuation(["--provider", "openai-codex"]);
+  assert.deepEqual(interactive, ["--provider", "openai-codex"]);
 });
 
 test("reviewer bwrap is subject-scoped and cannot see the author workspace or endpoint", () => {

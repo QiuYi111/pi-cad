@@ -69,7 +69,8 @@ workflow:
       transitions: {allocated: {target: parts, requiresPhaseObligations: true}}
     parts:
       purpose: Author deterministic part geometry and inspect the built candidate.
-      guidance: Root may use ordinary Prime RLM fan-out, but every result must return through one authoritative workspace commit and managed build. In PARTS call cad.commit only for the parts workspace obligation; never commit parts-geometry or parts-visual because the single final cad.model.build closes both evidence obligations. Finish source repair before that build. Then probe, create review-candidate from the latest returned ArtifactRef plus deterministic source, and transition; FINAL_REVIEW cannot create commits.
+      guidance: >-
+        Root may use ordinary Prime RLM fan-out, but every result must return through one authoritative workspace commit and managed build. In PARTS call cad.commit only for the parts workspace obligation; never commit parts-geometry or parts-visual because cad.model.build closes both evidence obligations. If inspection reveals a defect, edit and rebuild normally: the new build atomically revises this evidence and invalidates every older ArtifactRef. Keep only the latest returned ArtifactRef, then probe it, create review-candidate from it plus deterministic source, and take a transition shown in NEXT; FINAL_REVIEW cannot create commits.
       actions: [cad_build_step, cad_commit, transition]
       grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
       writeScopes: [project:deliverable, project:source, run:observation]
@@ -84,7 +85,7 @@ workflow:
         assembly_parts_complete: {target: assembly, requiresPhaseObligations: true}
     assembly:
       purpose: Integrate parts and verify the complete assembly candidate.
-      guidance: Build the assembly from committed parts and interfaces; inspect fit, motion envelope, and interference before review.
+      guidance: First commit the assembly obligation, then build the assembly from committed parts and interfaces. If inspection reveals a defect, edit and rebuild; only the latest ArtifactRef remains authoritative. Probe fit, motion envelope, and interference, create review-candidate, and take assembled only when it appears in NEXT.
       actions: [cad_build_step, cad_commit, transition]
       grants: [file_read, file_edit_source, model_build, observe, observe_interference, observe_programmable, shell, transition]
       writeScopes: [project:deliverable, project:source, run:observation]

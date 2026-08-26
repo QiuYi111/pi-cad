@@ -4,6 +4,7 @@ import { assertRegistryContractCompatible, type RegistryContractV1 } from "./reg
 import type { RegistrySet } from "./registry.ts";
 import type { HarnessRunStateV7 } from "./state.ts";
 import type { WorkflowSnapshotV1 } from "./workflow/types.ts";
+import { legalWorkflowTransitions } from "./reducer.ts";
 
 export type Operation =
   | "workspace.commit"
@@ -48,7 +49,7 @@ function legalNextActions(state: HarnessRunStateV7, workflow: WorkflowSnapshotV1
   const missingEvidence = phase.evidenceObligations
     .filter((item) => item.required !== false && !state.evidence.some((value) => value.obligationRef === item.ref))
     .map((item) => `${item.closeWith}: ${item.ref}`);
-  const transitions = Object.entries(phase.transitions).map(([event, value]) => `transition ${event} -> ${value.target}`);
+  const transitions = legalWorkflowTransitions(state, workflow).map(({ event, target }) => `transition ${event} -> ${target}`);
   return [...missingRecords, ...missingEvidence, ...transitions];
 }
 

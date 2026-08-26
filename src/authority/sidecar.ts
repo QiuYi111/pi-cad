@@ -19,10 +19,11 @@ export type SidecarRole = "author" | "reviewer";
 
 export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "phase-card" }
+  | { schema: 1; op: "completion-gate" }
   | { schema: 1; op: "authorize"; operation: Operation };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "authorize"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "authorize"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-complete"]);
 
@@ -95,6 +96,9 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
       if (role !== "author") throw new Error("phase-card is author-scoped");
       bootstrapAgentApiContracts();
       result = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
+    } else if (value.op === "completion-gate") {
+      if (role !== "author") throw new Error("completion-gate is author-scoped");
+      result = await completionGate(cwd);
     } else if (value.op === "authorize") {
       if (role !== "author") throw new Error("authorization query is author-scoped");
       const decision = await currentAuthorization(cwd, value.operation, "author");

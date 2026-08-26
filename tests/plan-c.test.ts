@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -101,7 +101,7 @@ test("Plan C workflow metadata is optional, hashed, and rendered as a bounded st
     assert.match(first.text, /Freeze a generic design handoff/);
     assert.match(first.text, /Use Python for bulk work/);
     assert.deepEqual(first.unmetObligations, ["system-design"]);
-    assert.deepEqual(first.legalTransitions, ["integrated -> review"]);
+    assert.deepEqual(first.legalTransitions, []);
     assert.ok(first.effectiveCapabilities.includes("cad_build_step"));
     assert.deepEqual(cardSection(first.text, "MUST"), first.unmetObligations);
     assert.deepEqual(cardSection(first.text, "CAN"), first.effectiveCapabilities);
@@ -156,6 +156,52 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
       `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,
       `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/front.png`,
     ]);
+  } finally {
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});
+
+test("a managed rebuild revises build evidence and exposes the transition only after success", async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-rebuild-canonical-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-rebuild-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  try {
+    const rebuildWorkflow = compileWorkflowDefinition({
+      schema: 1, id: "test/rebuild", version: "1.0.0", parametersSchema: {}, initialPhase: "build",
+      phases: {
+        build: {
+          purpose: "Build and revise a candidate", actions: ["cad_build_step", "transition"], grants: ["model_build", "observe", "transition"],
+          writeScopes: ["project:deliverable"], recordObligations: [],
+          evidenceObligations: [
+            { ref: "candidate-visual", type: "visual", closeWith: "cad_build_step" },
+            { ref: "candidate-geometry", type: "geometry", closeWith: "cad_build_step" },
+          ], contextProviders: ["kernel.current-action"], hooks: [],
+          transitions: { built: { target: "done", requiresPhaseObligations: true } },
+        },
+        done: { purpose: "Done", actions: [], grants: [], writeScopes: [], recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [], transitions: {}, terminal: true },
+      },
+    }, mechanicalRegistries);
+    const started = await new HarnessProjectStoreV7(cwd).startRun({ workflow: rebuildWorkflow, registryContract: buildRegistryContract(mechanicalRegistries) });
+    const sourcePath = join(cwd, "plate.py");
+    await copyFile(resolve(import.meta.dirname, "fixtures", "plate.py"), sourcePath);
+    assert.deepEqual((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.legalTransitions, []);
+    await handleAgentApi(cwd, { schema: 1, op: "model-build", source: "plate.py", output: "build/plate.step", force: true });
+    const first = await new HarnessRunStoreV7(cwd, started.state.runId).load(mechanicalRegistries);
+    assert.ok(first);
+    assert.equal(first.state.evidence.length, 2);
+    assert.deepEqual((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.legalTransitions, ["built -> done"]);
+    await writeFile(sourcePath, (await readFile(sourcePath, "utf-8")).replace("Box(100, 80, 5)", "Box(110, 80, 5)"));
+    await handleAgentApi(cwd, { schema: 1, op: "model-build", source: "plate.py", output: "build/plate.step", force: true });
+    const second = await new HarnessRunStoreV7(cwd, started.state.runId).load(mechanicalRegistries);
+    assert.ok(second);
+    assert.equal(second.state.evidence.length, 2);
+    assert.equal(second.state.staleEvidence.length, 2);
+    assert.notDeepEqual(second.state.evidence.map((item) => item.sha256), first.state.evidence.map((item) => item.sha256));
+    assert.deepEqual((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.legalTransitions, ["built -> done"]);
   } finally {
     if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
     else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;

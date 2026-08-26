@@ -8,6 +8,45 @@ description: Use Pi-CAD's Python API in Prime's persistent IPython workspace for
 Use ordinary Python variables as working state and `import cad` as the small
 engineering capability surface.
 
+The complete public signatures needed by the author workflow are below. Call
+them directly; importing `inspect`, reading docstrings, source files, or package
+internals to rediscover these signatures is a workflow violation and is never a
+valid adaptation step:
+
+```text
+cad.workflow.list() -> list[dict]
+cad.workflow.start(workflow_id: str, *, interaction_mode: str = "interactive") -> dict
+cad.workflow.current() -> dict | None
+cad.workflow.advance(event: str) -> dict
+cad.commit(
+    name: str,
+    *,
+    parent: str | Commit | None = None,
+    variables: dict | None = None,
+    artifacts: list[str | Path | ArtifactRef] | None = None,
+) -> Commit
+cad.model.build(
+    source: str | Path,
+    output: str | Path | None = None,
+    *,
+    force: bool = False,
+) -> ArtifactRef
+cad.probe.run(
+    *,
+    subject: str | ArtifactRef = "current",
+    purpose: str,
+    code: str,
+) -> ProbeResult
+cad.review.submit(final_commit: Commit) -> dict
+cad.review.current(handle: dict) -> dict | None
+```
+
+The three engineering calls are therefore canonical exactly as
+`await cad.model.build("part.py", "part.step")`,
+`await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")`,
+and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
+reason to call `inspect.signature()` before using them.
+
 - Read `await cad.workflow.current()` before acting. If it is `None`, inspect
   `await cad.workflow.list()` and start exactly one installed package, normally
   `await cad.workflow.start("mechanical.one-shot")` for greenfield design,
@@ -81,10 +120,13 @@ engineering capability surface.
   build -> probe -> review-candidate commit -> transition -> review.submit.
   FINAL_REVIEW intentionally cannot create or repair workspace commits.
   In PARTS, `cad.commit` closes only the `parts` workspace obligation.
-  `parts-geometry` and `parts-visual` are evidence obligations closed by the
-  single final `cad.model.build`; never call `cad.commit` with those names.
-  Complete source edits before that final build instead of rebuilding after its
-  evidence has been accepted.
+  `parts-geometry` and `parts-visual` are evidence obligations closed by
+  `cad.model.build`; never call `cad.commit` with those names. If the returned
+  visual or a probe reveals a defect, edit the deterministic source and call
+  `cad.model.build` again. A successful rebuild atomically revises those
+  evidence obligations and invalidates every older `ArtifactRef`; overwrite the
+  same `artifact` variable and never probe or submit an older handle. Never
+  advance with an event that is absent from the current Phase Card `NEXT`.
   The first artifact must be the latest returned `ArtifactRef`, not its string
   path. `review.submit()` accepts the returned `Commit`, never an `ArtifactRef`,
   record ID, guessed ID, or earlier phase-obligation commit. Retain these Python

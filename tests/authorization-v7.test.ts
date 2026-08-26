@@ -12,9 +12,10 @@ import {
   type Operation,
 } from "../src/harness/permissions.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
-import { createHarnessRunState, transitionRun } from "../src/harness/reducer.ts";
+import { commitEvidenceRef, createHarnessRunState, legalWorkflowTransitions, reviseEvidenceRef, transitionRun } from "../src/harness/reducer.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
 import { AGENT_API_MUTATION_OPERATIONS } from "../src/agent-api/handlers.ts";
+import type { EvidenceRefV7 } from "../src/harness/state.ts";
 
 function fixture() {
   bootstrapAgentApiContracts();
@@ -41,7 +42,7 @@ function fixture() {
         actions: ["cad_build_step", "cad_commit", "transition"],
         grants: ["model_build", "observe", "transition"],
         writeScopes: ["project:deliverable", "run:state"],
-        recordObligations: [], evidenceObligations: [],
+        recordObligations: [], evidenceObligations: [{ ref: "build-visual", type: "visual", closeWith: "cad_build_step" }],
         contextProviders: ["kernel.current-action"], hooks: [],
         transitions: { done: { target: "terminal_custom" } },
       },
@@ -69,8 +70,37 @@ test("workflow state is the authoritative operation policy for arbitrary phases"
   if (model.allowed) return;
   assert.match(model.reason, /concept_custom/);
   assert.ok(model.legalNextActions.includes("cad_commit: concept"));
+  assert.ok(!model.legalNextActions.some((item) => item.includes("approved")));
   assert.match(renderAuthorizationDenied(model), /Legal next actions/);
   assert.throws(() => requireAuthorization(model), AuthorizationDeniedError);
+});
+
+test("legal transitions exclude blocked events and candidate rebuilds revise primitive evidence", () => {
+  const { workflow, contract, state } = fixture();
+  assert.deepEqual(legalWorkflowTransitions(state, workflow), []);
+  const closedConcept = {
+    ...state,
+    records: {
+      concept: {
+        obligationRef: "concept", type: "workspace_commit", path: "concept.json", sha256: "a".repeat(64),
+        workflowHash: workflow.hash, createdAt: new Date().toISOString(),
+      },
+    },
+  };
+  const build = transitionRun(closedConcept, workflow, "approved");
+  const first: EvidenceRefV7 = {
+    id: "evidence-first", obligationRef: "build-visual", type: "visual", path: "evidence/first.json",
+    sha256: "b".repeat(64), workflowHash: workflow.hash, registryContractHash: contract.hash, createdAt: new Date().toISOString(),
+  };
+  const admitted = commitEvidenceRef(build, workflow, contract, first);
+  const second = { ...first, id: "evidence-second", path: "evidence/second.json", sha256: "c".repeat(64) };
+  const revised = reviseEvidenceRef({ ...admitted, latestReview: {
+    id: "stale-review", verdict: "pass", path: "review.json", profileId: "test", subjectHash: "d".repeat(64),
+    workflowHash: workflow.hash, registryContractHash: contract.hash,
+  } }, workflow, contract, second);
+  assert.deepEqual(revised.evidence, [second]);
+  assert.deepEqual(revised.staleEvidence, [first]);
+  assert.equal(revised.latestReview, undefined);
 });
 
 test("authority roles and terminal status fail closed", () => {

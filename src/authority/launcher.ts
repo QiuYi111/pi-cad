@@ -119,12 +119,21 @@ function isOneShot(args: string[]): boolean {
   return mode >= 0 && ["text", "json"].includes(args[mode + 1] ?? "");
 }
 
-function withHeadlessEventContinuation(args: string[]): string[] {
-  if (!isOneShot(args) || args.includes("--autonomous")) return args;
+export function withHeadlessEventContinuation(args: string[]): string[] {
+  if (!isOneShot(args)) return args;
+  const completionCommand = "$PRIME_AGENT_KERNEL_PYTHON -m cad._completion_gate";
+  const gate = args.includes(completionCommand) ? [] : [
+    "--autonomous-gate", completionCommand,
+    "--autonomous-gate-timeout-ms", "5000",
+    "--autonomous-gate-retries", "64",
+  ];
+  if (args.includes("--autonomous")) return [...gate, ...args];
   // Prime print mode disposes the session after the first provider action.
-  // A small continuation budget lets an extension-delivered review event
-  // become a provider turn; the completion gate remains the success authority.
+  // Continuations let an extension-delivered review event become a provider
+  // turn. Prime's own gate now consults the same sidecar completion authority,
+  // so a terminal release exits without a synthetic follow-up turn.
   return [
+    ...gate,
     "--autonomous", "--autonomous-max-continuations", "64",
     "--autonomous-max-turns", "64", "--autonomous-max-tokens", "500000",
     ...args,

@@ -2,7 +2,7 @@ import { canonicalDigest, jsonValue, type JsonValue } from "../harness/canonical
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { commitWorkspace, loadWorkspaceCommit, workspaceHistory } from "../harness/commit.ts";
-import { commitEvidenceRef, transitionRun, unmetPhaseObligations } from "../harness/reducer.ts";
+import { legalWorkflowTransitions, reviseEvidenceRef, transitionRun, unmetPhaseObligations } from "../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { executeCadProbe } from "../modules/probe/tool.ts";
@@ -38,7 +38,7 @@ async function current(cwd: string) {
     runId: loaded.state.runId, workflowId: loaded.workflow.id, workflowHash: loaded.workflow.hash,
     phase: loaded.state.phase, purpose: phase.purpose, guidance: phase.guidance ?? null,
     status: loaded.state.status, unmet: unmetPhaseObligations(loaded.state, loaded.workflow),
-    transitions: Object.entries(phase.transitions).map(([event, transition]) => ({ event, target: transition.target })),
+    transitions: legalWorkflowTransitions(loaded.state, loaded.workflow),
     recommendedTemplates: phase.recommendedTemplates ?? [], recommendedSkills: phase.recommendedSkills ?? [],
   };
 }
@@ -113,7 +113,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
         computeIdentity: canonicalDigest({ tool: envelope.tool, toolVersion: envelope.toolVersion, inputHashes: envelope.inputHashes, outputHashes: envelope.outputHashes }),
         createdAt: new Date().toISOString(),
       };
-      state = commitEvidenceRef(state, loaded.workflow, loaded.registryContract, evidence);
+      state = reviseEvidenceRef(state, loaded.workflow, loaded.registryContract, evidence);
       payloads[evidence.path] = jsonValue({ schema: 1, evidence, envelope });
     }
     return {
