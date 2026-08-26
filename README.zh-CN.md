@@ -86,7 +86,67 @@ Evidence 的 PASS 或过期 Review 都会 Fail Closed。
 Observation、Artifact Truth 与完成条件。创造力有价值的地方让模型自由，工程事实
 必须延续的地方让运行时严格。
 
-## 2. Killer Demos
+## 2. Pi-CAD 的位置
+
+Pi-CAD 并不试图赢下所有 AI CAD 场景。下面几种系统优化的是不同的工作单元。这是
+架构定位对比，不是生成质量排行榜；目前还没有一个统一评测，能够在相同模型、相同
+Prompt 下完整覆盖这五种系统。
+
+| 系统 | 主要工作单元 | 上下文与工具模型 | 什么让进展有效 | 最适合的场景 |
+| --- | --- | --- | --- | --- |
+| [Codex](https://openai.com/codex/) | 通用软件工程或 Computer-use Task | Repository Context、Skills、Sandbox 内的 Shell 与 Typed Tools；原生并行 Task 和 Worktree | 测试、Diff、Approval，以及任务自行提供的完成判据 | 开放式工程与软件工作；最终验收由人或项目测试拥有 |
+| 早期基于 Pi 的 Pi-CAD | 由状态机管理的 CAD Run | Skill 中的 CAD 知识，加上大量 Structured Tool Calls；状态与工具指导共享对话上下文 | Harness Phase、Hash-bound Evidence 与 Acceptance Gate | 证明强制视觉反馈和 Workflow Enforcement 能提高 Generic CAD Agent 稳定性的历史版本 |
+| [text-to-CAD](https://github.com/earthtojake/text-to-cad) | 由现有 Coding Agent 执行的一次 CAD、机器人或制造操作 | 可安装到 Codex、Claude Code 等 Agent 的 Portable Skills 和本地脚本；广泛的格式工具与 CAD Viewer Handoff | Skill 指导的流程、生成文件、Snapshot 和用户/Agent Review | 为已经在用的 Generic Agent 低成本增加一套强 CAD Toolbox |
+| [CADAM](https://github.com/Adam-CAD/CADAM) | 将一个 Prompt 或图片变成可编辑参数模型 | Browser UI；模型生成 OpenSCAD，由 WebAssembly 执行，并提供实时 Preview 和参数 Slider | 成功生成、视觉迭代与交互式参数修改 | 无需安装桌面 CAD，快速制作概念零件和 3D 打印模型 |
+| **基于 Prime 的 Pi-CAD** | 长时程机械设计或分析 Lifecycle | 持久 IPython Value、可编程 Managed Operation、可发现 Workflow 和事件驱动子 Agent | Canonical State、当前且绑定 Artifact 的 Evidence、独立 Review 与强制 Release Gate | 必须重视 Provenance、Revision Invalidation 和“真的完成”的自主工程工作 |
+
+### 与普通 Codex 相比
+
+Codex 是更强的通才。它面向各种 Repository 工作，能够在 Sandbox 中执行命令、应用
+Skills、使用 Worktree，并协调并行 Agent。如果任务只是“写一个 CadQuery 脚本，
+然后让我检查 Diff”，增加 Pi-CAD 可能没有必要。
+
+当任务大于一次代码修改时，Pi-CAD 才增加一层领域 Runtime：设计 Phase、Artifact
+Identity、视觉与几何 Evidence、Reviewer Authority 和 Release Condition 都变成机器
+可读的状态。区别不是 Codex 不会写 CAD，而是普通 Codex 会把“什么才算有效的机械
+发布”留给 Prompt、Repository 和用户定义。
+
+### 与早期 Pi 版本相比
+
+Pi 版本确立了 Pi-CAD 至今保留的几个思想：确定性 Backend、强制视觉反馈、
+Hash-bound Evidence，以及不能跳过 Review 的状态机。它的限制在架构层：领域知识、
+Workflow 指导、当前状态和大量 JSON Tool Schema 仍然争夺同一段对话上下文；复杂组合
+则依赖一连串 Tool Call 和临时脚本。
+
+Prime 保留这些强制约束，但更换了 Agent 的工作台。Typed Object 可以在 IPython 中
+持续存在；小型 Python API 替代了大量 Schema；当前 Phase Card 是临时注入；Workflow
+Package 是数据；Canonical Authority 位于 Author Process 之外。这与其说是模型升级，
+不如说是 Context Architecture 和 Effect System 的升级。
+
+### 与 text-to-CAD 相比
+
+text-to-CAD 最接近一套高质量、可移植的 Toolbox。它的 Skills 覆盖 CAD、机器人描述、
+仿真格式、制造与 Viewer，并能安装到多种 Generic Agent 中。广度和低接入成本是它的
+真实优势；它的 CAD Skill 也要求 Agent 对修改后的几何执行 Snapshot 和视觉检查。
+
+Pi-CAD 选择了更窄但更强的立场：说明书里写“始终 Review”，不等于 Runtime 会在没有
+当前 Evidence 时拒绝 Release。Pi-CAD 用一部分可移植性和简单性，换取持久 Typed
+Working Memory、可执行 Obligation、Revision Invalidation、受限 Reviewer Authority
+和 Canonical Completion Gate。希望现有 Agent 拥有更好的 CAD 能力时使用
+text-to-CAD；希望 Agent 自己把一段工程流程可靠地带到闭环时使用 Pi-CAD。
+
+### 与 CADAM 相比
+
+CADAM 提供了从文字或图片到可见参数模型的最短路径。它在浏览器中执行 OpenSCAD，
+把生成参数暴露为 Slider，并导出 STL、SCAD 或 DXF。对于快速创意和可打印零件，这种
+交互方式可能明显优于运行一个长时程自主 Agent。
+
+Pi-CAD 面向的是另一种问题尺度：STEP-first B-Rep 零件与装配体、明确的 Spec 和
+Interface、可编程测量、工程 Recipe、跨 Revision Evidence，以及独立 Release Review。
+它要求更多 Setup，是因为它保留了更多设计生命周期。CADAM 优化 Prompt-to-model
+延迟；Pi-CAD 优化从设计意图到可问责工程结果的完整路径。
+
+## 3. Killer Demos
 
 ### A. 一段需求 → 通过测试的零件 → 正式发布
 
@@ -153,7 +213,7 @@ Decorator 源码，也不需要临时适配 API。更复杂的确定性工作可
 - 可编程检查始终绑定到它实际测量的 Artifact；
 - 原始计算可以留在模型上下文之外，只有 Typed Observation 进入证据记录。
 
-## 3. 用户引导
+## 4. 用户引导
 
 Pi-CAD 当前支持 Ubuntu 和 WSL2。你需要 Node.js 22.19+、由 `uv` 管理的 Python
 3.11/3.12、Bubblewrap，以及已配置 Provider 的 Prime Agent。

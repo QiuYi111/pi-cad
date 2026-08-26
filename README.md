@@ -100,7 +100,80 @@ effects, managed observations, artifact truth, and completion. The model stays
 creative where creativity helps; the runtime stays strict where engineering
 facts must survive.
 
-## 2. Killer demos
+## 2. Where Pi-CAD fits
+
+Pi-CAD is not trying to win every form of AI-assisted CAD. The projects below
+optimize for different units of work. This is an architectural comparison, not
+an output-quality leaderboard; there is not yet a shared evaluation covering
+all five systems under identical models and prompts.
+
+| System | Primary unit of work | Context and tool model | What makes progress valid | Best fit |
+| --- | --- | --- | --- | --- |
+| [Codex](https://openai.com/codex/) | A general software or computer-use task | Repository context, Skills, shell and typed tools inside a sandbox; first-class parallel tasks and worktrees | Tests, diffs, approvals, and whatever completion criteria the task supplies | Open-ended engineering and software work where a human or project-specific test suite owns acceptance |
+| Earlier Pi-CAD on Pi | A state-machine-governed CAD run | CAD knowledge in Skills plus a large catalog of structured tool calls; changing state and tool guidance shared the conversational context | Harness phases, hash-bound evidence, and acceptance gates | The historical proof that visual evidence and workflow enforcement improve generic CAD agents |
+| [text-to-CAD](https://github.com/earthtojake/text-to-cad) | A CAD, robotics, or fabrication operation performed by an existing coding agent | Portable Skills and local scripts for Codex, Claude Code, and other agents; broad format-specific tooling and CAD Viewer handoffs | Skill-directed procedure, generated files, snapshots, and user/agent review | Adding a capable, low-friction CAD toolbox to the generic agent you already use |
+| [CADAM](https://github.com/Adam-CAD/CADAM) | A prompt or image turned into an editable parametric model | Browser UI; the model generates OpenSCAD executed with WebAssembly, with live preview and extracted parameter sliders | Successful generation, visual iteration, and interactive parameter edits | Fast, accessible concept parts and 3D-printing models without installing a desktop CAD stack |
+| **Pi-CAD on Prime** | A long-running mechanical design or analysis lifecycle | Persistent IPython values, programmable managed operations, discoverable workflows, and event-driven subagents | Canonical state, current artifact-bound evidence, independent review, and an enforced release gate | Autonomous engineering work where provenance, revision invalidation, and “actually done” matter |
+
+### Compared with ordinary Codex
+
+Codex is the stronger generalist. It is designed to work across repositories,
+run commands in a sandbox, apply Skills, use worktrees, and coordinate parallel
+agents. If the job is “write this CadQuery script and let me inspect the diff,”
+adding Pi-CAD may be unnecessary.
+
+Pi-CAD adds a domain runtime when the job is larger than a code change. It makes
+the design phase, artifact identity, visual and geometric evidence, reviewer
+authority, and release condition machine-readable. The distinction is not that
+Codex cannot write CAD; it is that ordinary Codex leaves the definition of a
+valid mechanical release to the prompt, the repository, and the user.
+
+### Compared with the earlier Pi version
+
+The Pi version established several ideas Pi-CAD keeps: deterministic backends,
+forced visual feedback, hash-bound evidence, and a state machine that prevents
+review from being skipped. Its limitation was architectural. Domain knowledge,
+workflow guidance, current state, and many JSON tool schemas still competed in
+the same conversational channel, while complex composition fell back to a
+sequence of tool calls and temporary scripts.
+
+Prime keeps those enforcement gains but changes the agent's workbench. Typed
+objects survive in IPython; a small Python API replaces much of the schema
+surface; the current Phase Card is ephemeral; workflow packages are data; and
+canonical authority lives outside the author process. This is less a model
+upgrade than a context and effect-system upgrade.
+
+### Compared with text-to-CAD
+
+text-to-CAD is closest to a high-quality portable toolbox. Its Skills cover CAD,
+robot descriptions, simulation formats, fabrication, and viewing, and can be
+installed into several generic agents. That breadth and low adoption cost are
+real advantages. Its CAD Skill also tells the agent to snapshot and visually
+review changed geometry.
+
+Pi-CAD takes a narrower but stronger position: instructions that say “always
+review” are not the same as a runtime that refuses to release without current
+evidence. Pi-CAD trades some portability and simplicity for persistent typed
+working memory, executable obligations, revision invalidation, scoped reviewer
+authority, and a canonical completion gate. Use text-to-CAD when you want better
+CAD capabilities in your agent; use Pi-CAD when the agent itself must carry an
+engineering process to closure.
+
+### Compared with CADAM
+
+CADAM offers the shortest path from text or an image to a visible parametric
+model. It runs OpenSCAD in the browser, exposes generated parameters as sliders,
+and exports STL, SCAD, or DXF. For quick ideation and printable parts, that
+interaction can be much better than operating a long autonomous agent.
+
+Pi-CAD is aimed at a different scale of problem: STEP-first B-Rep parts and
+assemblies, explicit specifications and interfaces, programmable measurement,
+engineering recipes, cross-revision evidence, and independent release review.
+It asks for more setup because it preserves more of the design's lifecycle.
+CADAM optimizes prompt-to-model latency; Pi-CAD optimizes the path from intent to
+an accountable engineering result.
+
+## 3. Killer demos
 
 ### A. Brief → tested part → release
 
@@ -173,7 +246,7 @@ What this demonstrates:
 - raw compute can remain outside model context while typed observations enter
   the evidence record.
 
-## 3. Get started
+## 4. Get started
 
 Pi-CAD currently supports Ubuntu and WSL2. You need Node.js 22.19+, Python
 3.11/3.12 managed by `uv`, Bubblewrap, and a configured Prime provider.
