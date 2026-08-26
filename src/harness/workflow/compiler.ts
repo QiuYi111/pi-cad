@@ -81,13 +81,28 @@ function phase(value: unknown, phaseId: string, registries: RegistrySet): Workfl
   for (const [event, candidate] of Object.entries(raw.transitions as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) {
     if (!ID.test(event) || !candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error(`phase ${phaseId} has invalid transition ${event}`);
     const transition = candidate as Record<string, unknown>;
-    exactKeys(transition, ["target", "authority", "terminalStatus", "requiresPhaseObligations"], `phase ${phaseId}.transitions.${event}`);
+    exactKeys(transition, ["target", "authority", "terminalStatus", "requiresPhaseObligations", "reviewVerdicts", "requiresVisited", "forbidsVisited", "invalidate"], `phase ${phaseId}.transitions.${event}`);
     if (typeof transition.target !== "string" || !transition.target) throw new Error(`phase ${phaseId}.transitions.${event}.target is required`);
     if (transition.authority !== undefined && (typeof transition.authority !== "string" || !transition.authority)) throw new Error(`phase ${phaseId}.transitions.${event}.authority must be a string`);
     if (transition.authority && grants.some((grant) => grant === transition.authority || grant === `authority:${transition.authority}`)) throw new Error(`phase ${phaseId} attempts to self-grant authority ${transition.authority}`);
     if (transition.terminalStatus !== undefined && (typeof transition.terminalStatus !== "string" || !transition.terminalStatus)) throw new Error(`phase ${phaseId}.transitions.${event}.terminalStatus must be a string`);
     if (transition.requiresPhaseObligations !== undefined && typeof transition.requiresPhaseObligations !== "boolean") throw new Error(`phase ${phaseId}.transitions.${event}.requiresPhaseObligations must be boolean`);
-    transitions[event] = { target: transition.target as string, ...(transition.authority ? { authority: transition.authority as string } : {}), ...(transition.terminalStatus ? { terminalStatus: transition.terminalStatus as string } : {}), ...(transition.requiresPhaseObligations === true ? { requiresPhaseObligations: true } : {}) };
+    const reviewVerdicts = transition.reviewVerdicts === undefined ? undefined : stringArray(transition.reviewVerdicts, `phase ${phaseId}.transitions.${event}.reviewVerdicts`);
+    if (reviewVerdicts?.some((verdict) => !["pass", "fail", "unresolved"].includes(verdict))) throw new Error(`phase ${phaseId}.transitions.${event}.reviewVerdicts contains an invalid verdict`);
+    if (reviewVerdicts?.length && !raw.reviewProfile) throw new Error(`phase ${phaseId}.transitions.${event}.reviewVerdicts requires reviewProfile`);
+    const requiresVisited = transition.requiresVisited === undefined ? undefined : stringArray(transition.requiresVisited, `phase ${phaseId}.transitions.${event}.requiresVisited`);
+    const forbidsVisited = transition.forbidsVisited === undefined ? undefined : stringArray(transition.forbidsVisited, `phase ${phaseId}.transitions.${event}.forbidsVisited`);
+    const invalidate = transition.invalidate === undefined ? undefined : stringArray(transition.invalidate, `phase ${phaseId}.transitions.${event}.invalidate`);
+    transitions[event] = {
+      target: transition.target as string,
+      ...(transition.authority ? { authority: transition.authority as string } : {}),
+      ...(transition.terminalStatus ? { terminalStatus: transition.terminalStatus as string } : {}),
+      ...(transition.requiresPhaseObligations === true ? { requiresPhaseObligations: true } : {}),
+      ...(reviewVerdicts?.length ? { reviewVerdicts: reviewVerdicts as Array<"pass" | "fail" | "unresolved"> } : {}),
+      ...(requiresVisited?.length ? { requiresVisited } : {}),
+      ...(forbidsVisited?.length ? { forbidsVisited } : {}),
+      ...(invalidate?.length ? { invalidate } : {}),
+    };
   }
   if (raw.terminal !== undefined && typeof raw.terminal !== "boolean") throw new Error(`phase ${phaseId}.terminal must be boolean`);
   if (raw.terminal === true && Object.keys(transitions).length) throw new Error(`terminal phase ${phaseId} cannot have transitions`);
@@ -124,9 +139,15 @@ export function compileWorkflowDefinition(value: unknown, registries: RegistrySe
   for (const [id, definition] of Object.entries(phases)) {
     for (const [event, transition] of Object.entries(definition.transitions)) {
       if (!phases[transition.target]) throw new Error(`transition target does not exist: ${id}.${event} -> ${transition.target}`);
+      for (const visited of [...(transition.requiresVisited ?? []), ...(transition.forbidsVisited ?? [])]) {
+        if (!phases[visited]) throw new Error(`transition phase-history condition does not exist: ${id}.${event} -> ${visited}`);
+      }
     }
   }
   const obligationRefs = new Set(Object.values(phases).flatMap((item) => [...item.recordObligations, ...item.evidenceObligations]).map((item) => item.ref));
+  for (const [id, definition] of Object.entries(phases)) for (const [event, transition] of Object.entries(definition.transitions)) {
+    for (const ref of transition.invalidate ?? []) if (!obligationRefs.has(ref)) throw new Error(`transition invalidation ref does not exist: ${id}.${event} -> ${ref}`);
+  }
   for (const [id, definition] of Object.entries(phases)) {
     for (const item of [...definition.recordObligations, ...definition.evidenceObligations]) {
       for (const dependency of item.dependsOn ?? []) {

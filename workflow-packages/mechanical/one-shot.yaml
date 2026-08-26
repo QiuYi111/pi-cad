@@ -2,11 +2,11 @@ schema: 1
 id: mechanical.one-shot
 description: Design and release a greenfield mechanical part or assembly with independent final review.
 tags: [cad, design, mechanical, release]
-version: 1.0.0
+version: 1.0.1
 workflow:
   schema: 1
   id: mechanical.one-shot
-  version: 1.0.0
+  version: 1.0.1
   parametersSchema: {type: object, additionalProperties: false}
   initialPhase: grill
   phases:
@@ -107,7 +107,10 @@ workflow:
       contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
       hooks: []
       reviewProfile: mechanical.final-review
-      transitions: {accepted: {target: release}}
+      transitions:
+        accepted: {target: release, reviewVerdicts: [pass]}
+        revise_single_part: {target: parts, reviewVerdicts: [fail, unresolved], forbidsVisited: [assembly], invalidate: [parts]}
+        revise_assembly: {target: assembly, reviewVerdicts: [fail, unresolved], requiresVisited: [assembly], invalidate: [assembly]}
     release:
       purpose: Freeze the reviewed release commit and close the workflow.
       guidance: Commit release with the reviewed subject Commit as explicit parent and the exact reviewed artifact set with roles and hashes preserved; do not substitute, omit, or add files.

@@ -18,6 +18,10 @@ export interface WorkflowTransitionDefinition {
   authority?: string;
   terminalStatus?: string;
   requiresPhaseObligations?: boolean;
+  reviewVerdicts?: Array<"pass" | "fail" | "unresolved">;
+  requiresVisited?: string[];
+  forbidsVisited?: string[];
+  invalidate?: string[];
 }
 
 export interface WorkflowPhaseDefinition {

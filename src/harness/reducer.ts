@@ -60,7 +60,7 @@ export function transitionRun(state: HarnessRunStateV7, workflow: WorkflowSnapsh
     authorities = authorities.map((item, itemIndex) => itemIndex === index ? { ...item, consumedAt: now() } : item);
   }
   const target = workflow.phases[transition.target]!;
-  return {
+  let next: HarnessRunStateV7 = {
     ...state,
     phase: transition.target,
     phaseHistory: [...(state.phaseHistory ?? [state.phase]), transition.target],
@@ -70,6 +70,18 @@ export function transitionRun(state: HarnessRunStateV7, workflow: WorkflowSnapsh
     authorities,
     updatedAt: now(),
   };
+  if (transition.invalidate?.length) {
+    const invalid = dependencyClosure(workflow, new Set(transition.invalidate));
+    const stale = next.evidence.filter((item) => invalid.has(item.obligationRef));
+    next = {
+      ...next,
+      records: Object.fromEntries(Object.entries(next.records).filter(([ref]) => !invalid.has(ref))),
+      evidence: next.evidence.filter((item) => !invalid.has(item.obligationRef)),
+      staleEvidence: [...next.staleEvidence, ...stale],
+      latestReview: undefined,
+    };
+  }
+  return next;
 }
 
 /** One source of truth for transition execution, Phase Cards, and API projections. */
@@ -82,11 +94,17 @@ export function transitionDenialReason(state: HarnessRunStateV7, workflow: Workf
     const unmet = unmetPhaseObligations(state, workflow, state.phase);
     if (unmet.length) return `phase obligations remain unmet: ${unmet.join(", ")}`;
   }
-  if (event === "accepted" && phase.reviewProfile) {
+  const allowedVerdicts = transition.reviewVerdicts ?? (event === "accepted" && phase.reviewProfile ? ["pass"] : undefined);
+  if (allowedVerdicts && phase.reviewProfile) {
     const review = state.latestReview;
     const subjectHash = canonicalDigest({ workflowHash: workflow.hash, registryContractHash: state.workflow.registryContractHash, phase: state.phase, records: state.records, artifacts: state.artifacts, evidence: state.evidence });
-    if (!review || review.verdict !== "pass" || review.profileId !== phase.reviewProfile || review.workflowHash !== workflow.hash || review.registryContractHash !== state.workflow.registryContractHash || review.subjectHash !== subjectHash) return `transition requires a current ${phase.reviewProfile} PASS`;
+    if (!review || !allowedVerdicts.includes(review.verdict as "pass" | "fail" | "unresolved") || review.profileId !== phase.reviewProfile || review.workflowHash !== workflow.hash || review.registryContractHash !== state.workflow.registryContractHash || review.subjectHash !== subjectHash) return `transition requires a current ${phase.reviewProfile} verdict in [${allowedVerdicts.join(", ")}]`;
   }
+  const visited = new Set(state.phaseHistory ?? [state.phase]);
+  const missingVisited = (transition.requiresVisited ?? []).filter((phaseId) => !visited.has(phaseId));
+  if (missingVisited.length) return `transition requires visited phase: ${missingVisited.join(", ")}`;
+  const forbiddenVisited = (transition.forbidsVisited ?? []).filter((phaseId) => visited.has(phaseId));
+  if (forbiddenVisited.length) return `transition forbids visited phase: ${forbiddenVisited.join(", ")}`;
   if (transition.authority && !state.authorities.some((item) => item.kind === transition.authority && !item.consumedAt)) {
     return `transition requires authority: ${transition.authority}`;
   }
