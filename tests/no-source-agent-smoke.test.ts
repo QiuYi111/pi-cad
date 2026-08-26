@@ -60,3 +60,13 @@ test("Prime review completion uses ExtensionAPI messaging rather than event cont
   assert.doesNotMatch(extension, /ctx\.sendMessage\(/);
   assert.doesNotMatch(extension, /else if \(current\) await notifyReview/);
 });
+
+test("published Prime entrypoints contain no development-plan or checkout-specific defaults", async () => {
+  const packageJson = JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf-8"));
+  const setup = await readFile(join(process.cwd(), "scripts", "prime-cad.mjs"), "utf-8");
+  const launcher = await readFile(join(process.cwd(), "scripts", "prime-cad-launcher.sh"), "utf-8");
+  assert.equal(packageJson.scripts["prime:setup"], "node scripts/prime-cad.mjs");
+  assert.equal(packageJson.scripts["prime:plan-c"], undefined);
+  assert.doesNotMatch(`${setup}\n${launcher}`, /plan[ -]?c|\/home\/jingyi/i);
+  assert.match(setup, /\.prime\/agent/);
+});

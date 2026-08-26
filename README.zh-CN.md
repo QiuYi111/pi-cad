@@ -1,359 +1,372 @@
 # Pi-CAD
 
-**会亮出证据的智能体机械 CAD。**
+**面向 Prime Agent、由证据约束的机械 CAD 运行时。**
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/QiuYi111/pi-cad/actions/workflows/ci.yml/badge.svg)](https://github.com/QiuYi111/pi-cad/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Pi-CAD 是为
-[Pi 编码智能体](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
-打造的机械 CAD harness。AI 智能体负责设计零件、跑数值、走完工程评审流程
-——但它做出的每一个论断,背后都有你可以亲手打开的文件、亲眼查看的渲染图,
-以及一旦被改动就会立刻报警的哈希。
+Pi-CAD 把 [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent)
+变成一个受工作流约束的机械工程 Agent。Prime 负责推理、编写确定性的
+build123d 源码和组织工作；Pi-CAD 负责权威状态：现在允许做什么、哪份证据仍然
+有效、独立审查是否可信，以及任务是否真的完成。
 
-整个系统建立在一个简单的职责划分上:
+因此它不是“能导出 STEP 的大模型”。每个被接受的发布结果都可以追溯到固定的
+工作流快照、确定性源码、哈希绑定的 Artifact、可视化结果、可编程 B-Rep Probe，
+以及 Fresh Reviewer 的独立结论。
 
-- **确定性工具负责几何与物理。** build123d/OCP 负责 CAD,gmsh 负责网格,
-  torch-fem 负责线弹性,NLopt 负责拓扑优化。任何 LLM 都不决定尺寸,
-  也不给应力图"盖章"。
-- **智能体负责解读现实** —— 它读场数据、看视图、查几何事实,然后用自然语言
-  为设计决策做论证。
-- **状态机负责流程纪律。** 评审不可跳过,只读阶段无法改动项目,
-  没有证据就无法验收——这是结构上不可能,不是口头承诺。
-- **证据与哈希绑定。** Spec、结果、场数据、渲染视图都按 run 归档、计算哈希,
-  并在每次验收时重新校验。被篡改或过期的证据会被拒绝,绝不静默复用。
+## 为什么切换到 Prime Agent
 
-> 原始设计理念见重构文档:[`refactor/pi-cad-refactoring-whitepaper.md`](refactor/pi-cad-refactoring-whitepaper.md)(愿景)与 [`refactor/pi-cad-engineering-design-v2.md`](refactor/pi-cad-engineering-design-v2.md)(实施计划,英文)。
+早期 Pi-CAD 以一组较宽的 Pi extensions 作为产品入口。当前版本把作者 Agent
+切换到 Prime，同时保留 Pi extension API 作为底层兼容实现。
 
----
+原因不是换一个 TUI，而是机械设计本质上是一项长时间、有状态的工程任务：
 
-## 快速开始
+- **持久 IPython 是控制平面。** `ArtifactRef`、`Commit`、Probe 结果和普通
+  Python 变量可以跨轮次保留。Agent 直接调用很小的 `cad` API，不需要通过 shell
+  搬运状态或临时猜测调用方式。
+- **原生 RLM fan-out。** 装配体可以使用 Prime 的普通子 Agent 做有边界的研究或
+  零件工作，但根 Agent 始终对唯一的 canonical workflow 和 authoritative
+  candidate 负责。
+- **长任务不会依赖一段无限增长的对话。** Prime 已提供持久 session、compaction、
+  goal、autonomous continuation 和事件触发的新轮次。Pi-CAD 无需再实现第二套会话
+  和上下文运行时。
+- **模型与 provider 仍由 Prime 管理。** Pi-CAD 不再造一个模型网关。作者和
+  Fresh Reviewer 使用 Prime 选择的 provider/model，Reviewer 只拥有独立且受限的
+  预算和权限。
+- **Skill 是明确的操作契约。** Prime 加载仓库跟踪的 CAD 和 imagegen skills。
+  公共 API 签名、严格的 handoff 顺序和禁止事项都直接提供，不需要读源码、
+  `inspect.signature()` 或自行适配。
+- **Headless 的成功有权威定义。** one-shot Prime 只有在 sidecar 确认 terminal
+  workflow、有效的最终 PASS 和精确的 release commit 后才返回成功。Agent 在自然
+  语言里说“完成了”不算完成。
 
-Pi-CAD 是一个 Pi 包。在无显示器的 Debian/Ubuntu 环境中，先安装 gmsh
-依赖的 GLU 运行库，再让 Pi 克隆包、安装 Node 依赖，并通过包的
-`postinstall` 脚本构建 Python CAD 运行时：
+这条边界是产品的核心：Prime 拥有推理、session、模型和子 Agent；Pi-CAD 拥有
+工程状态、effect、证据与发布权威。
 
-```bash
-sudo apt-get install -y libglu1-mesa
-pi install git:github.com/QiuYi111/pi-cad
-pi list
+## 权威模型
+
+当前运行时遵循一条简单规则：
+
+> 文件只是数据。只有 State Engine 接受的 canonical state 才具有工作流效力。
+
+任意 STEP、JSON、PNG，甚至被手工修改的 `.pi-cad/status.json`，都不能因为存在于
+磁盘上就推进工作流。只有被接受的 commit、artifact、evidence、transition 和
+review result 才有效。
+
+```text
+bwrap 中的 Prime 作者 Agent
+  ├─ 持久 IPython + cad Python client
+  ├─ project workspace（读写）
+  └─ author-scoped Unix socket
+                    │
+                    ▼
+             Authority sidecar
+             ├─ pinned workflow snapshot
+             ├─ 统一 authorize(operation, ...)
+             ├─ project 外的 canonical CAS state
+             ├─ artifact/evidence 失效传播
+             ├─ reviewer admission 与事件
+             └─ completion gate
+                    │
+                    ▼
+       独立 bwrap 中的 Fresh Prime Reviewer
+       immutable candidate + probe-only authority
 ```
 
-`package.json` 中的 `pi` manifest 会在下次启动 Pi 时自动加载全部八个扩展
-和随包 skills，无需传入任何 `-e` 参数。
+作者 sandbox 看不到 Engine 源码、canonical storage、host credentials 或 reviewer
+authority。Reviewer 使用另一条 socket，只能读取 immutable subject、执行受限 Probe
+并提交结论。project 内的 `.pi-cad/status.json` 只是原子更新、无权威性的状态投影。
 
-若要使用开发工作区，先在工作区安装依赖，再把该目录注册为用户级 Pi 包：
+## 当前能力
+
+### 可发现、可固定的工作流包
+
+工作流像 Skill 一样被发现，启动时编译并固定为 immutable snapshot。一次运行开始
+后，即使源 YAML 被修改，该运行也不会改变。
+
+| Package | 用途 |
+| --- | --- |
+| `mechanical.one-shot` | 从零设计单个零件或装配体，并经过独立审查与发布 |
+| `mechanical.modify` | 对现有设计做受控修改 |
+| `mechanical.analysis` | 有边界的只读工程分析 |
+
+`mechanical.one-shot` 的正式路径是：
+
+```text
+GRILL → SPEC → CONCEPT
+                  ├─ 简单零件 → PARTS ──────────────────┐
+                  └─ 装配体 → INTERFACE → BOM → PARTS → ASSEMBLY
+                                                        │
+                         FINAL_REVIEW → RELEASE → DONE ◀─┘
+```
+
+CONCEPT 完成前没有 detailed CAD 权限。装配体不能跳过接口、architecture/BOM、零件
+工作或装配验证。Kernel 本身不认识这些机械 phase 名称，它只执行工作流包编译出的
+通用 snapshot。
+
+### Phase Card
+
+每次 provider call 前，Prime 恰好收到一张 ephemeral card：
+
+```text
+WHERE
+GOAL
+SOP
+MUST
+CAN
+NEXT
+STATE
+WARNINGS
+```
+
+- `CAN` 严格等于统一 authorization engine 返回的有效能力。
+- `MUST` 严格等于尚未关闭的 obligations。
+- `NEXT` 只包含此刻真正可执行的 transition，而不是 YAML 中声明的所有出口。
+- 卡片有固定大小；下一轮先删除旧卡，不会永久堆进 trajectory。
+
+Denied operation 和 Phase Card 使用同一套 reason/legal-next-action 渲染，因此模型
+看到的指导与工具真正执行的权限不会分叉。
+
+### 确定性 CAD、图片和证据
+
+- Agent 编写 project-local build123d 源码，并暴露一个 `result` shape。
+- `cad.model.build()` 只有在 managed visual chain 已生成并返回强制视图后才导出
+  STEP 和 `ArtifactRef`。
+- 支持正常迭代重建。成功 rebuild 会原子替换 primitive build evidence，把旧证据
+  标为 stale，使依赖它的 claims/reviews 失效，并禁止继续使用所有旧
+  `ArtifactRef`。
+- 面向 CadQuery 描述的 benchmark 会保留几何与尺寸语义，但通过受控 build123d
+  backend 实现。
+- concept image 只是空间假设。只有 concept commit 引用后它才进入工作流记录，
+  永远不会成为 geometry authority。
+
+### 任意 ArtifactRef 的可编程 Probe
+
+Prime 可以对任意 project-local `ArtifactRef` 执行只读 B-Rep 计算，无需捕获函数
+源码：
+
+```python
+checks = await cad.probe.run(
+    subject=artifact,
+    purpose="验证发布包络和 solid 数量",
+    code="result = {'solids': len(shape.solids()), 'size': list(shape.bounding_box().size)}",
+)
+```
+
+受限程序获得预绑定的 `shape` 和 `artifact_path`，必须给 `result` 赋一个可 JSON
+序列化的值。unrestricted imports 不能越过 effect fence。
+
+### Codex OAuth 图片生成
+
+仓库跟踪的 `codex_generate_image` 是 MIT 许可
+`@crazygit/pi-codex-image-gen` v0.2.2 的 Prime 兼容移植：
+
+- 使用现有 `openai-codex` OAuth 和 `chatgpt_account_id`；
+- 固定 `gpt-image-2`，没有 `OPENAI_API_KEY` fallback，也不启动 Codex CLI；
+- 相对输出只能保存在当前 project，默认写入
+  `.pi/generated-images/<session-id>/`；
+- path traversal 和 symlink 在写入前重新校验；
+- 上传 reference image 前必须交互确认，headless reference editing fail closed；
+- 真实外部调用按需发生，不限制为“用户必须明确要求图片”。
+
+Author sandbox 默认设置 `PI_OFFLINE=1`。只有明确允许本次运行调用外部 Codex
+Images 服务时，才设置 `PI_OFFLINE=0`。
+
+### 事件驱动的独立审查
+
+Fresh Reviewer 是普通 Prime RLM template，不是特殊的高权限 Agent。Sidecar 负责：
+
+- 以 workflow + contract + artifact identity 作为幂等键；
+- 同一 candidate 最多启动一个 Reviewer；
+- immutable subject 和 reviewer-scoped endpoint；
+- probe-only 工程权限；
+- `maxProbeCalls=12`、`maxTurns=16`、`wallTimeout=120s`、禁止 compaction；
+- `pass | fail | unresolved` 三种 verdict；
+- timeout、crash、空回复、无 evidence 的 PASS 全部 fail closed；
+- 完成后向 parent Prime 发送事件并触发新一轮，不允许主 Agent polling。
+
+candidate、spec 或 contract revision 会自动使旧 review stale。Completion gate 只有
+在最终有效 PASS 和精确 release commit 同时存在时才放行。
+
+### Recipe-native 工程计算
+
+复杂确定性能力统一使用严格的 `pi-recipe.yaml` 协议。仓库当前提供或保留：
+
+- OpenFOAM 14 有限体积工作流；
+- SU2 8.5.0 稳态流动与固体传热工作流；
+- torch-fem 0.9 CUDA 结构分析与优化；
+- 确定性 drawing、presentation、observation 与 re-observation。
+
+Recipe 固定声明过的 inputs 和 compute closure，在 pinned environment 中运行，把完整
+raw output 留在模型上下文之外，并生成 typed observations。Observation 不是验收；
+它仍需被明确提交给匹配的 workflow obligation 才能成为 Evidence。
+
+## 公共 Python API
+
+Prime 通常从 CAD skill 获得这些调用。作者侧核心 API 保持很小：
+
+```python
+import cad
+
+await cad.workflow.list()
+await cad.workflow.start("mechanical.one-shot")
+await cad.workflow.current()
+await cad.workflow.advance("specified")
+
+commit = await cad.commit("spec", variables={"requirements": requirements})
+artifact = await cad.model.build("part.py", "part.step")
+checks = await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")
+
+final_commit = await cad.commit(
+    "review-candidate",
+    artifacts=[artifact, "part.py"],
+    variables={"checks": checks.value},
+)
+handle = await cad.review.submit(final_commit)
+# 等待 host review-complete event，之后：
+verdict = await cad.review.current(handle)
+```
+
+不要猜 ID、读源码/签名、轮询 review，或在 rebuild 后保留旧 artifact handle。直接
+使用 API 返回的 Python 对象，并且只执行当前 Phase Card `NEXT` 中出现的 transition。
+
+## 运行要求
+
+Authority runtime 当前仅支持 Linux/WSL：
+
+- Ubuntu 或 WSL2 Ubuntu
+- Node.js 22.19+
+- 由 `uv` 管理的 Python 3.11/3.12
+- Bubblewrap 0.11.1 或兼容版本
+- gmsh/OCP 相关路径需要 `libglu1-mesa`
+- Prime Agent 源码 checkout 和已配置的 provider
+
+当前 launcher 跟随 Prime 的 extension、IPython、event 和 autonomous-gate API，
+因此正式开发配置使用 Prime 源码 checkout。
+
+## 开发安装
+
+把两个仓库放在同一目录：
+
+```text
+~/work/
+├── prime-agent/
+└── pi-cad/
+```
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y bubblewrap libglu1-mesa
+
+mkdir -p ~/work
+cd ~/work
+git clone https://github.com/QiuYi111/prime-agent.git
 git clone https://github.com/QiuYi111/pi-cad.git
-cd pi-cad
+
+cd prime-agent
+npm ci
+
+cd ../pi-cad
 npm install
-pi install .
-pi list
+npm run setup:python
 ```
 
-本地包安装会链接工作区而不是复制文件，因此源码修改会在下次启动 Pi 时直接
-生效；只有依赖或 Python 运行时 bootstrap 变化时才需要重新运行
-`npm install`。
-
-若只想临时启动而不安装包，也可以显式加载全部扩展：
+初始化隔离的 Prime configuration/kernel，并完成一次登录：
 
 ```bash
-pi -e src/extensions/core/index.ts \
-   -e src/extensions/probe/index.ts \
-   -e src/extensions/geometry/index.ts \
-   -e src/extensions/visual/index.ts \
-   -e src/extensions/drawing/index.ts \
-   -e src/extensions/simulation/index.ts \
-   -e src/extensions/presentation/index.ts \
-   -e src/extensions/ui/index.ts
+cd ~/work/pi-cad
+PRIME_AGENT_REPO=~/work/prime-agent npm run prime:setup
+# 在 Prime 中执行：/login
 ```
 
-## 第一个零件
-
-在空目录里试试:
-
-```text
-/cad
-"设计一块 100 x 80 x 5 mm 板,四个 6 mm 通孔,孔心距边缘 10 mm。"
-```
-
-智能体会路由 run、提交需求、构建 STEP——然后在它发表任何意见**之前**,
-harness 已经自动渲染七张视图、提取几何事实作为证据,并绑定到确切的源码与
-工件哈希。图片会直接回到对话里。审查、提修改意见、验收:
-
-```text
-"看起来不错——验收并结束。"
-```
-
-常用斜杠命令:
-
-| 命令 | 作用 |
-| --- | --- |
-| `/cad` | 显示工作区:项目、设计头、当前 run |
-| `/cad-status` | run 的权威状态、阶段与证据 |
-| `/cad-abort` | 仅中止当前 run;项目设计头不受影响 |
-
-## 路由,而非工作流
-
-路由是一个层次化描述,智能体一次调用决定,harness 据此**编译**出流程——
-不存在可选的捷径:
-
-```
-route = objective × lineage × structure × maturity
-        analyze | convert | design
-                        greenfield | legacy | hybrid
-                                     part | assembly
-                                          prototype | engineering | manufacturing | release
-```
-
-| 路由(示例) | 编译出的流程 |
-| --- | --- |
-| `design/greenfield/part/engineering` | requirements → part_design → build → review(快速路径是*推导*出来的) |
-| `design/legacy/part/engineering` | requirements → baseline → plan → modify → review,带前后对比 |
-| `design/greenfield/assembly/engineering` | requirements → system_concept → assembly_design → interface_design → part_design → build → integration_review |
-| `design/*/release` | baseline(若有)→ audit → gap_closure → package → final_review,九个工作流 |
-| `analyze` | baseline → investigate → explain(只读) |
-| `convert` | source_baseline → transform_plan → convert → compare |
-
-两条 0.8 规则比表格更重要:
-
-- **Maturity 是现实底线,不是心情。** prototype 意味着 REAL / BUILDABLE /
-  FUNCTIONAL。maturity 只*增加*义务(manufacturing 要求图纸证据;release
-  增加工作流与演示交付物)——绝不会换来更短的流程。
-- **义务无法被绕过。** assembly 路由必须提交生成合同声明的 assembly-design
-  与 interface-contract records(它们是所处阶段的唯一出口),并持有当前版本的
-  装配树与干涉 Evidence。过程中 route change 只增义务时自主
-  生效并回到最早未满足的阶段;任何降级都需要 harness 签发的一次性授权
-  token——而 token 只在你真实回复过智能体的提问后才签发,智能体自称
-  "用户已同意"永远不算数。
-
-## Agent Contract
-
-安装包内含 schema-1 `AgentContract`,由 active tool catalog、route compiler、
-phase contract、event 与 obligation 直接生成。同一过程生成架构/工作流 reference
-与六类工具手册;CI 执行 `generate-agent-contract --check`,任何代码/文档漂移都会
-失败。机器合同位于 `assets/agent-contract.json`;每个公开工具到 cookbook、
-可执行 asset 与 qualification 的映射位于 `assets/cookbook-catalog.json`。
-
-运行时每轮注入紧凑且权威的 **Current Action Card**:route/phase/status、阶段目的、
-允许写入、当前可用工具、未满足 records/Evidence、artifact 绑定、合法事件、
-guards、下一动作,以及只有真实 probe ready 的 managed runtime。正常使用只依赖
-已安装 skills、实时 tool schema 与行动卡,不再读取 `src/**`;非法 transition 也会
-以机器可读形式返回同一组恢复信息。
-
-Probe 使用不可变完整快照。首屏有上下文预算,但没有不可恢复的语义硬上限:
-faces、assembly occurrences、interference pairs、Python 数组/表格与完整失败日志
-都进入压缩 collection,可按 filter/order/cursor 分页读完。超出存储 quota 会明确
-失败,绝不静默丢数据。
-
-## Harness Kernel v7 与领域 Recipe
-
-新任务默认进入 transactional v7 Kernel。通用 start action 冻结选定的 Workflow 与 Registry Contract；Mechanical routing 是 Domain Pack action，通过通用 workflow replacement transaction 替换 intake snapshot。正在运行的 v6 始终留在 v6，绝不自动迁移。Context Provider 只读取受限的 committed snapshot；Project Head 只有在 run 完成后才通过单个 project transaction 可见。
-
-Simulation、Optimization、Drawing、Presentation 与 analysis-model derivation 共用严格的 `pi-recipe.yaml` 协议；MODEL build/export 与 typed PROBE 继续作为 primitives。Recipe 选择命名的 argv action，声明精确 closure/input 和固定 runtime profile，并产生不可变 observer snapshot。会生成 Evidence 的 run 必须在 compute 前绑定精确 obligation，commit 只能关闭该 binding。
-
-## 仿真能力的诚实边界
-
-Simulation V2 的正式链路是:
-
-```text
-编写 solver-native Recipe
-→ managed compute
-→ 可选 immutable re-observation
-→ 显式 case-scoped Evidence commit
-```
-
-每个新 Recipe 包含严格的 `pi-recipe.yaml`、命名 managed actions、
-可独立修订的 observation program、显式项目输入,以及只使用
-`image | scalar | timeseries | table | field | artifact` 的命名 exports。
-visual Recipe 必须有 primary image 和 primary quantitative export;
-nonvisual Recipe 必须有 primary quantitative export。省略 `outputs` 返回
-primary floor;显式名字只能追加观察;`outputs=[]` 非法。
-
-Harness 只快照 Recipe 与 declared inputs,在固定版本、默认断网的 runtime
-中执行;完整日志和 raw state 留在上下文之外,图片先于受限的量化摘要返回。
-只修改 observer closure 会产生新的 immutable snapshot,不会重跑 Solver;
-每个 Observation 都保存实际运行的 observer contract/files 与 hash、
-rendered plot hash 与 materialized exports。因此后续 re-observe 后,旧的精确
-snapshot 仍可独立审计和提交。修改 compute 文件或输入则必须新建 run。
-现有 `pi-sim.toml` case 在 bundled benchmark 完成迁移前由只读 adapter 支持；
-adapter 不会形成第二套 runtime protocol。
-
-simulate 和 observe 都不创建 Evidence。commit 会复验精确的 run、observation、
-runtime identity、declared inputs、当前 case obligation,以及 authoritative
-artifact 或受验证 derivation。Evidence 表示溯源成立,不等于工程 PASS。
-
-schema 2 runtime registry 数据驱动注册四个精确环境:
-
-- `openfoam/openfoam-14`:固定 `openfoam14@20260724`;
-- `su2/su2-8.5.0`:官方 archive 加固定 SHA256;
-- `torch-fem/torch-fem-0.9-cu126`:正式 CUDA 结构求解与优化;
-- `torch-fem/torch-fem-0.9-cpu`:只能显式选择,用于 CI、调试和小算例。
-
-在 Linux/WSL 内分别运行 `scripts/bootstrap-openfoam14.sh`、
-`scripts/bootstrap-su2-8.5.0.sh` 与 `scripts/bootstrap-torch-fem-runtimes.sh`
-完成一次性安装。在 WSL 下，Pi-CAD、Node、`uv`、Recipe entrypoint 与
-observer 必须全部运行在同一个 Linux 发行版内；不支持 Windows-host Node
-或跨宿主进程/路径转换。entrypoint/observer 使用锁定项目的
-`uv run --offline --frozen`。正式运行由 bubblewrap、user systemd scope、
-断网、只读挂载、资源上限与 workspace quota 隔离。普通 CI 使用 stub runtime;
-每个 uv runtime 的版本/accelerator probe 由 registry entry 声明,generic runner
-不再硬编码 torch-fem/CuPy。trusted Solver health 会在默认 Observation context
-中显示 requested/actual device、GPU 与 CUDA 版本,Recipe 自报不能覆盖。
-真实 qualification Recipe 位于 `benchmarks/simulation-v2/openfoam14-box`。
-仓库内的 `benchmarks/simulation-v2/spec04-template` 已包含 OpenFOAM case
-generator、三阶段 solver runner、收敛/鲁棒性聚合和 Rev1 release gate。
-制造 CAD、材料、surface mapping 与 Rev1 criteria 仍作为 ignored 权威输入;
-缺失时明确返回 `blocked_external`,且不能产生 `SIMULATION_RELEASE_PASS`。
-
-### 结构、热与流 Recipe
-
-公开接口不再注册 typed physics wrapper。统一 Probe 是唯一探测入口;
-所有新仿真都走 Recipe-native 链路。物理、单位、材料、载荷、约束、边界、
-网格、求解控制和项目指标全部留在 Recipe,不进入 Core。
-
-`structural-analysis` skill 提供 torch-fem 线弹性 Recipe。正式 CUDA runtime
-固定 torch-fem 0.9.0、PyTorch 2.13.0+cu126、CuPy 14.1.1 和 Python 3.12,
-启动前验证 PyTorch CUDA、CuPy device、compute capability 与一次真实 GPU
-sparse solve。GPU、driver、CuPy 或架构不兼容时返回 `unavailable`,绝不
-静默转 CPU。正式 Evidence 必须记录 `actualDevice=cuda`;显式 CPU 运行绑定
-不同 runtime identity。
-
-当前共享 workflow state schema 为 v6。Simulation V2 的 clean transition 最初
-进入 v5;后续 immutable requirements revision 将总 workflow schema 升至 v6,
-但 Recipe schema 1 与 Observation wire schema 1 没有变化。
-
-`thermal-fluid-analysis` skill 提供 SU2 steady-flow 和 solid-thermal Recipe,
-并说明何时应使用 OpenFOAM。SU2 只从 immutable
-`/opt/pi-cad-runtime/su2/8.5.0` 启动,不接受宿主 PATH 或环境变量绕过。
-
-optimization operation 默认在同一个 managed CUDA runtime 内运行二维 SIMP/MMA
-可微优化。它只生成 optimization artifact,不是 CAD 或 Simulation Evidence。
-
-Skill 分三层:`pi-cad` 负责 workflow/Evidence,`pi-cad-tools` 覆盖完整 active
-public catalog,工程知识 skills 分别处理机械、参数化建模、装配、制造、
-结构分析与热流分析。
-
-#### SU2 Recipe 保留的模型契约
-
-两个 SU2 Recipe 把显式 case 数据编译成 solver config,再把 native 结果翻译
-为通用 Observation export。单位规则冻结且直接写在字段名里:
-CAD 几何按 `geometryUnits` 解释(默认 mm),所有物理量用显式 SI
-(`totalPressurePa`、`temperatureK`、`maxSizeMm`……)——求解器永远不会遇到
-隐式 mm→m。
-
-- **Steady-flow Recipe** —— 在显式水密流体域 STEP 上做稳态单区 CFD:
-  可压缩 Euler、可压缩 RANS(SA/SST)、不可压缩 NS/RANS。每个边界面必须
-  且只能分类一次(总条件进口、压力出口、壁面);结果含收敛历程、按面积的
-  面加权均值、质量平衡、原始场与视图。收敛的喷管算例出口马赫数与等熵
-  气动表相差百分之几。
-- **不隐藏流体物性。** 粘性求解器必须显式声明 `fluid.viscosity`
-  (常数 μ,或带你自己常数的 Sutherland);Reynolds 初始化尺度由声明的
-  模型推导——没有任何空气默认值。
-- **收敛性是执行有效性,不是工程判断。** 未声明或未达到
-  `residualTarget` 的运行返回 `status=not_converged`:原始场仍会展示
-  用于诊断,但该运行**不会**产生仿真证据,也关不掉 required case。
-- **Solid-thermal Recipe** —— 稳态固体导热:定温与定热流边界、其余绝热、
-  常导热系数。一维平板 fixture 在 CI 中与 `q = kAΔT/L` 解析解对比。
-  边界热流率字段命名为 `reconstructedHeatRateW`,因为它由解的单元梯度
-  重构积分而来,不是 SU2 自身的守恒面通量。
-- Probe 的 surfaces preset —— 确定性的边界面事实(类型、面积、质心、包围盒、
-  法向/轴线)加带标注的视图。面 ID 只是对当前工件哈希有效的几何选择器,
-  绝不是语义标签:哪个面是进口,由智能体自己判断。
-
-SU2 使用官方 8.5.0 "Harrier" archive 与固定 SHA256,显式 bootstrap 到
-`/opt/pi-cad-runtime`。未安装时返回 `unavailable`;正式运行不搜索宿主 PATH。
-
-Recipe 和 skill 必须明确与结论有关的非线性、多材料、CHT、燃烧或叶轮机械
-假设。工具只返回观察与 provenance;工程判断不进入 Core。
-
-## 为什么可以信任输出
-
-- **验收需要证据。** 没有当前的视觉与几何证据,工件无法被验收;
-  需求里要求仿真时,仿真证据同样不可或缺。
-- **证据防篡改。** 每个证据工件都有 sha256 哈希,并在
-  acceptance 与 finish 时重新校验。
-  改写结果文件会直接校验失败。
-- **仿真绑定求解前的工件哈希。** 求解期间 STEP 被改动,结果会被丢弃,
-  而不是绑到错误的版本上。
-- **证据输入同样会被重验。** 流/热证据携带哈希绑定的输入(canonical
-  spec、产品工件、流体域),acceptance 与 finish
-  会重新哈希;求解后改写流体域 STEP,和改写结果文件一样会使证据失效。
-- **未收敛的运行不是证据。** 收敛性由 interpreter 判定:未达到声明的
-  残差目标(或未声明目标)的运行以 `status=not_converged` 返回原始场,
-  harness 不会从中记录任何证据。
-- **声明的仿真工况必须真的跑过。** 需求里声明了按工况的义务
-  (如通过 managed simulation 验证 `nozzle-outlet`)时,验收与收尾会被一直挡住,
-  直到每个工况都用声明的工具产生了当前版本的证据——跑一次结构 FEA
-  关不掉一个流场工况。harness 只比对不透明标识,绝不理解物理。
-- **候选一变,旧证据自动过期。** 你无法拿上一版的仿真去验收新几何。
-- **不可用的后端会明说。** Blender、PDF 图纸、GD&T 缺失都会如实报告
-  unavailable——harness 绝不伪造一个假验证器。
-- **与其他插件和平共处。** Pi-CAD 只以叠加层方式管理自己的 `cad_*`
-  工具——绝不卸载或重新激活其他插件的工具;阶段策略在调用时强制执行,
-  而不只是把工具藏起来。
-
-## 配置
-
-| 变量 | 作用 |
-| --- | --- |
-| `PI_CAD_UV` | 覆盖 Linux `uv` 可执行文件 |
-| `PI_CAD_ENABLE_DEV_RUNTIMES` | 显示 development-only runtime,包括显式 CPU (`1`) |
-| `CUDA_VISIBLE_DEVICES` | 选择暴露给 managed runtime 的 CUDA 设备 |
-
-运行时 qualification 在 prompt 热路径之外执行，并持久化为绑定 registry
-hash 的 availability record。prompt 路径只读取这个有界记录（`ready` 或
-`unknown`）；执行时设置 `PI_CAD_REQUALIFY_RUNTIME=1` 可强制重新检查。
-
-## 测试与 CI
+把 sandboxed launcher 安装到当前用户：
 
 ```bash
-npm test          # 或:bash scripts/test.sh
+mkdir -p ~/.local/bin
+ln -sfn "$PWD/scripts/prime-cad-launcher.sh" ~/.local/bin/prime-cad
 ```
 
-TypeScript 协议/harness 测试与 Linux 中通过 `uv run` 执行的 Python
-测试覆盖 manifest/path closure、Observation、显式 commit、资源限制、CUDA
-fail-closed、结构 refinement/平衡/梯度、SU2 解析导热与流动守恒以及 OpenFOAM
-qualification。普通 CI 不伪造 GPU qualification。
+确认 `~/.local/bin` 在 `PATH` 中。之后在需要设计的 project 目录启动：
 
-## 磁盘上有什么
+```bash
+cd /path/to/design-project
+PRIME_AGENT_REPO=~/work/prime-agent prime-cad
+# 本次运行允许外部图片生成：
+PI_OFFLINE=0 PRIME_AGENT_REPO=~/work/prime-agent prime-cad
+```
 
-一个工作目录是一个长生命周期的**设计项目**;每次工作流活动是一个
-短生命周期的 **run**:
+Launcher 会独占 `--cwd`、启动 authority sidecar、建立 author/reviewer sandbox，且只
+加载仓库跟踪的 CAD/imagegen extension 与 skill。Canonical state 存储在：
 
 ```text
-.pi-cad/
-├── project.json      # 设计头:当前源码/STEP/哈希 + 已验收证据
-└── runs/
-    └── run-.../      # 状态、事件、记录、
-                      └── evidence/<kind>/<id>/   # spec.json + 结果 + 视图
+~/.local/share/pi-cad/<sha256(realpath(project))>/
 ```
 
-项目空闲时由生成合同声明的 route operation 创建 run;finish 与 `/cad-abort` 清除它。
-中止 run 不影响设计头。旧的单状态布局会自动迁移。
+Headless 示例：
 
-## 仓库导航
+```bash
+PRIME_AGENT_REPO=~/work/prime-agent \
+prime-cad --provider openai-codex --model gpt-5.6-luna \
+  --thinking medium --no-session --mode json --print \
+  "Use mechanical.one-shot to design and release a 100 x 80 x 5 mm plate."
+```
 
-| 区域 | 路径 |
+如果 canonical completion gate 未满足，one-shot 会返回退出码 `42` 和
+`WORKFLOW_INCOMPLETE`，不会把自然语言输出当成功。
+
+## 验证
+
+```bash
+npm run check:agent-contract
+npm run test:ts
+
+PYTHONPATH="$PWD/skills/cad/src" PYTHONDONTWRITEBYTECODE=1 \
+uv run --offline --frozen --project python --extra simulation \
+  python -m unittest discover -s tests -p 'test_*.py'
+
+npm run check:prime-imagegen
+npm run test:prime-imagegen
+node tests/prime-cli-smoke.mjs
+git diff --check
+```
+
+当前 targeted Prime acceptance baseline 包含 CADTestBench `00001817`：CAD tests
+`17/17`、RS `9/9`，且没有 probe source-capture error、tool/API adaptation error 或
+polling；同一 candidate 只有一个 Reviewer，最终 workflow 为 terminal。
+
+## 仓库结构
+
+| 路径 | 职责 |
 | --- | --- |
-| Harness 核心(状态机、策略、证据) | `src/core/` |
-| 工具扩展(探测、几何、图纸、仿真、演示、UI) | `src/extensions/` |
-| Skill 路由、工程参考与 Recipe assets | `skills/` |
-| 工作流定义(全部七种) | `src/workflows/` |
-| 分层提示词 | `src/prompts/` |
-| 确定性 Python 后端 | `python/cadctl/` |
-| Spec 模板 | `assets/templates/` |
+| `src/authority/` | sidecar、bwrap launcher、canonical storage、completion gate |
+| `src/harness/` | workflow compiler/state、authorization、Phase Card、commit/evidence |
+| `src/agent-api/` | 小型、与 transport 无关的 Agent-facing operations |
+| `src/integrations/prime/` | Prime Phase Card、图片授权和 review-event 薄适配层 |
+| `skills/cad/` | Prime CAD 操作契约和 Python client |
+| `workflow-packages/` | 可发现的 workflow package YAML |
+| `packages/prime-codex-image-gen/` | Codex OAuth 图片生成 extension |
+| `recipes/` | 严格的确定性 compute packages |
+| `benchmarks/cadtestbench/` | targeted CADTestBench runner 与报告 |
 
-## 已做过的验证
+更早的架构和重构历史保留在 [`refactor/`](refactor/)；本 README 描述的是当前发布的
+Prime authority runtime。
 
-真实端到端运行(使用 `openai-codex/gpt-5.6-luna`,thinking=medium):
-板件构建(快速路径)、只读板件分析、5→4 mm 板件修改(带对比证据)、greenfield
-笔架、以及一次诚实地报告 closed/blocked 工作流的 release 交付——
-全部到达 `done` 且证据完好。
+## Trust model 与限制
 
-## 许可证
+- Author project 是可写的。请使用独立 project 目录或 Git worktree，并审查生成的
+  源码和 artifacts。
+- Authority sidecar 当前只支持 Linux/WSL。
+- Prime 集成目前跟随源码 checkout，尚未提供独立的一键 Pi-CAD installer。
+- Codex OAuth 的 `gpt-image-2` 是 provider-managed capability，可能在仓库之外发生
+  变化。
+- Reviewer 只证明配置的 evidence contract，不替代物理测试、制造审查或专业工程
+  签字。
+- Simulation scope 必须显式。非线性、多材料、共轭传热、燃烧或透平机械等未支持
+  假设必须被说明，不能静默近似。
 
-MIT —— 见 [LICENSE](LICENSE)。
+## License
+
+[MIT](LICENSE)。图片生成兼容包保留了上游 attribution 和 license，位于
+[`packages/prime-codex-image-gen`](packages/prime-codex-image-gen)。

@@ -33,7 +33,7 @@ test("runtime has one Linux process boundary and no Windows-host bridge", async 
         "src/shared/process-runner.ts",
         "scripts/postinstall.mjs",
         "scripts/install-blender.mjs",
-        "scripts/prime-plan-c.mjs",
+        "scripts/prime-cad.mjs",
         "src/authority/launcher.ts",
       ]);
       const repositoryPath = relative(root, path).replaceAll("\\", "/");

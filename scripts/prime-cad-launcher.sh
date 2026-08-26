@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repository="${PI_CAD_REPO:-/home/jingyi/pi-cad-plan-c-tests}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repository="${PI_CAD_REPO:-$(cd "$script_dir/.." && pwd)}"
 export PI_CAD_REPO="$repository"
 export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
 

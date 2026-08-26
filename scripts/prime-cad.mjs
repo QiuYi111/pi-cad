@@ -5,10 +5,10 @@ import { resolve } from "node:path";
 
 const repository = realpathSync(resolve(import.meta.dirname, ".."));
 const projectCwd = resolve(process.env.PI_CAD_PROJECT_CWD ?? process.cwd());
-const primeRoot = resolve(process.env.PRIME_AGENT_REPO ?? resolve(repository, "../prime-agent-plan-c-upstream"));
-const primeAgentDir = resolve(process.env.PRIME_AGENT_CODING_AGENT_DIR ?? resolve(homedir(), ".prime-plan-c/agent"));
-const primeSessionDir = resolve(process.env.PRIME_AGENT_SESSION_DIR ?? resolve(homedir(), ".prime-plan-c/sessions"));
-const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(homedir(), ".prime-plan-c/kernel-venv"));
+const primeRoot = resolve(process.env.PRIME_AGENT_REPO ?? resolve(repository, "../prime-agent"));
+const primeAgentDir = resolve(process.env.PRIME_AGENT_CODING_AGENT_DIR ?? resolve(homedir(), ".prime/agent"));
+const primeSessionDir = resolve(process.env.PRIME_AGENT_SESSION_DIR ?? resolve(primeAgentDir, "sessions"));
+const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(primeAgentDir, "kernel-venv"));
 
 mkdirSync(primeAgentDir, { recursive: true });
 mkdirSync(primeSessionDir, { recursive: true });
