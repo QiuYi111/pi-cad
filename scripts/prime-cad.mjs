@@ -1,17 +1,27 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 const repository = realpathSync(resolve(import.meta.dirname, ".."));
 const projectCwd = resolve(process.env.PI_CAD_PROJECT_CWD ?? process.cwd());
-const primeRoot = resolve(process.env.PRIME_AGENT_REPO ?? resolve(repository, "../prime-agent"));
 const primeAgentDir = resolve(process.env.PRIME_AGENT_CODING_AGENT_DIR ?? resolve(homedir(), ".prime/agent"));
 const primeSessionDir = resolve(process.env.PRIME_AGENT_SESSION_DIR ?? resolve(primeAgentDir, "sessions"));
 const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(primeAgentDir, "kernel-venv"));
+const primeCandidate = resolve(process.env.PRIME_AGENT_REPO ?? resolve(repository, "../prime-agent"));
+let primeRoot;
+try {
+  primeRoot = realpathSync(primeCandidate);
+} catch {
+  throw new Error(`Prime Agent repository does not exist: ${primeCandidate}. Set PRIME_AGENT_REPO to its checkout path.`);
+}
+if (!existsSync(resolve(primeRoot, "prime-agent.sh"))) {
+  throw new Error(`Prime Agent repository is missing prime-agent.sh: ${primeRoot}`);
+}
 
 mkdirSync(primeAgentDir, { recursive: true });
 mkdirSync(primeSessionDir, { recursive: true });
+writeFileSync(resolve(primeAgentDir, "prime-cad.json"), `${JSON.stringify({ primeAgentRepo: primeRoot }, null, 2)}\n`, { mode: 0o600 });
 
 const args = [
   "--cwd", projectCwd,

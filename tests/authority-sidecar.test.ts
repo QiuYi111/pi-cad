@@ -1,15 +1,35 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
+import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, resolvePrimeRepository, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
 import { completionGate, dispatchSidecarRequest, startAuthoritySidecar } from "../src/authority/sidecar.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+
+test("Prime repository resolution persists custom setup paths and fails with an actionable error", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-cad-prime-path-"));
+  const repository = join(root, "pi-cad");
+  const agentDirectory = join(root, "agent");
+  const primeRepository = join(root, "custom-prime");
+  try {
+    await mkdir(repository);
+    await mkdir(agentDirectory);
+    await mkdir(primeRepository);
+    await writeFile(join(primeRepository, "prime-agent.sh"), "#!/usr/bin/env bash\n");
+    await writeFile(join(agentDirectory, "prime-cad.json"), `${JSON.stringify({ primeAgentRepo: primeRepository })}\n`);
+    assert.equal(resolvePrimeRepository(repository, agentDirectory, undefined), primeRepository);
+    assert.equal(resolvePrimeRepository(repository, agentDirectory, primeRepository), primeRepository);
+    await writeFile(join(agentDirectory, "prime-cad.json"), `${JSON.stringify({ primeAgentRepo: join(root, "missing") })}\n`);
+    assert.throws(() => resolvePrimeRepository(repository, agentDirectory, undefined), /Run npm run prime:setup with PRIME_AGENT_REPO=/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test("authority sidecar owns canonical state and rewrites a non-authoritative workspace projection", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-project-"));

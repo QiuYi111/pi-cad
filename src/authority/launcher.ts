@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { copyFile, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
@@ -9,6 +9,7 @@ import { completionGate, startAuthoritySidecar } from "./sidecar.ts";
 import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
 
 export const WORKFLOW_INCOMPLETE_EXIT_CODE = 42;
+export const PRIME_CAD_CONFIG_FILE = "prime-cad.json";
 
 export interface LaunchPaths {
   repository: string;
@@ -23,6 +24,34 @@ export interface LaunchPaths {
   runtimeDirectory: string;
   ephemeralAgentDir: string;
   authorSocketDirectory: string;
+}
+
+export function resolvePrimeRepository(repository: string, primeAgentDir: string, explicit = process.env.PRIME_AGENT_REPO): string {
+  let configured: string | undefined;
+  const configPath = join(primeAgentDir, PRIME_CAD_CONFIG_FILE);
+  if (!explicit && existsSync(configPath)) {
+    try {
+      const config = JSON.parse(readFileSync(configPath, "utf8")) as { primeAgentRepo?: unknown };
+      if (typeof config.primeAgentRepo !== "string" || !config.primeAgentRepo.trim()) {
+        throw new Error("primeAgentRepo must be a non-empty string");
+      }
+      configured = config.primeAgentRepo;
+    } catch (error) {
+      throw new Error(`Invalid Prime repository configuration at ${configPath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const candidate = resolve(explicit ?? configured ?? resolve(repository, "../prime-agent"));
+  let primeRoot: string;
+  try {
+    primeRoot = realpathSync(candidate);
+  } catch {
+    const source = explicit ? "PRIME_AGENT_REPO" : configured ? configPath : "the default sibling checkout";
+    throw new Error(`Prime Agent repository from ${source} does not exist: ${candidate}. Run npm run prime:setup with PRIME_AGENT_REPO=/path/to/prime-agent.`);
+  }
+  if (!existsSync(join(primeRoot, "prime-agent.sh"))) {
+    throw new Error(`Prime Agent repository is missing prime-agent.sh: ${primeRoot}`);
+  }
+  return primeRoot;
 }
 
 export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string; modelArgs?: string[] }): string[] {
@@ -196,9 +225,9 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   primeArgs = withHeadlessEventContinuation(primeArgs);
   const repository = realpathSync(resolve(process.env.PI_CAD_REPO ?? resolve(import.meta.dirname, "..", "..")));
   const project = await realpath(resolve(process.env.PI_CAD_PROJECT_CWD ?? process.cwd()));
-  const primeRoot = realpathSync(resolve(process.env.PRIME_AGENT_REPO ?? resolve(repository, "../prime-agent")));
   const nodeRoot = dirname(dirname(realpathSync(process.execPath)));
   const primeAgentDir = resolve(process.env.PRIME_AGENT_CODING_AGENT_DIR ?? join(homedir(), ".prime", "agent"));
+  const primeRoot = resolvePrimeRepository(repository, primeAgentDir);
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
   const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
   const kernelPythonRoot = dirname(dirname(kernelPython));
