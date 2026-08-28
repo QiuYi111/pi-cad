@@ -48,6 +48,12 @@ import {
   isHeadless,
   isTerminalStatus,
 } from "./interaction-mode.ts";
+import {
+  finalizeExperience,
+  maybeBeginDistillation,
+  recordEvaluation,
+} from "../experience/store.ts";
+import type { ExperienceIndexEntry } from "../experience/types.ts";
 
 /** Route a failed closure review through the process's existing editable regression edge. */
 function regressFinalReview(state: CadRunState, note: string) {
@@ -343,7 +349,9 @@ const AssemblyDesignRecordSchema = Type.Object(
         {
           name: Type.String({ minLength: 1 }),
           purpose: Type.String({ minLength: 1 }),
-          envelopeMm: Type.Optional(Type.Tuple([Type.Number(), Type.Number(), Type.Number()])),
+          // Fixed-length homogeneous arrays avoid JSON Schema `prefixItems`,
+          // which ZAI's OpenAI-compatible tool endpoint rejects.
+          envelopeMm: Type.Optional(Type.Array(Type.Number(), { minItems: 3, maxItems: 3 })),
           notes: Type.Optional(Type.String()),
         },
         { additionalProperties: false },
@@ -377,14 +385,7 @@ const AssemblyDesignRecordSchema = Type.Object(
         Type.Object(
           {
             module: Type.String(),
-            bboxMm: Type.Tuple([
-              Type.Number(),
-              Type.Number(),
-              Type.Number(),
-              Type.Number(),
-              Type.Number(),
-              Type.Number(),
-            ]),
+            bboxMm: Type.Array(Type.Number(), { minItems: 6, maxItems: 6 }),
             massKg: Type.Optional(Type.Number()),
           },
           { additionalProperties: false },
@@ -458,6 +459,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         state = createIntakeState({
           runId: run.runId,
           projectId: project.projectId,
+          projectRoot: store.cwd,
           interactionMode: interactionModeFromEnvironment(),
         });
         const head = project.head;
@@ -841,7 +843,19 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       summary: Type.String(),
       protected: Type.Array(Type.String(), { default: [] }),
       plannedChanges: Type.Array(Type.String(), { default: [] }),
-      interfaces: Type.Array(Type.Any(), { default: [] }),
+      // Keep the common mechanical-interface vocabulary explicit. ZAI and
+      // other strict OpenAI-compatible providers reject both an untyped `{}`
+      // (Type.Any) and open additionalProperties schemas before inference.
+      interfaces: Type.Array(Type.Object({
+        id: Type.Optional(Type.String()),
+        name: Type.Optional(Type.String()),
+        description: Type.Optional(Type.String()),
+        fit: Type.Optional(Type.String()),
+        locating: Type.Optional(Type.String()),
+        dof: Type.Optional(Type.Array(Type.String())),
+        fastening: Type.Optional(Type.String()),
+        access: Type.Optional(Type.String()),
+      }, { additionalProperties: false }), { default: [] }),
       datums: Type.Array(Type.String(), { default: [] }),
       reviewPlan: Type.Array(Type.String(), { default: [] }),
       architecture: Type.Optional(Type.Array(Type.String())),
@@ -857,10 +871,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
               not_applicable: "not_applicable",
               blocked_external: "blocked_external",
             }),
-          }),
+          }, { additionalProperties: false }),
         ),
       ),
-    }),
+    }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
@@ -1313,7 +1327,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     parameters: Type.Object({
       event: Type.String(),
       note: Type.String(),
-    }),
+    }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = new CadProjectStore(ctx.cwd);
       const state = await guardState(store);
@@ -1562,10 +1576,52 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const result = finish(state);
       if (!result.ok) return errTool(result.reason);
       await deps.persist(pi, store, result.state, result.events);
+      let experience: ExperienceIndexEntry | null = null;
+      let experienceNote = "";
+      const sessionPath = ctx.sessionManager?.getSessionFile?.();
+      if (!sessionPath) {
+        experienceNote = " Experience archival failed: this host session is not persisted.";
+      } else {
+        try {
+          experience = await finalizeExperience({
+            state: result.state,
+            projectPath: result.state.projectRoot ?? store.cwd,
+            sessionPath,
+            model: ctx.model?.id,
+            reasoning: ctx.thinkingLevel,
+          });
+          experienceNote = ` Experience archived as #${experience.seq} (${experience.sha.slice(0, 12)}; analysis=${experience.analysis_status}).`;
+        } catch (error) {
+          experienceNote = ` Experience archival failed: ${error instanceof Error ? error.message : String(error)}.`;
+        }
+      }
       await store.setCurrentRun(null);
+      if (experience && ctx.hasUI && !isHeadless(result.state)) {
+        try {
+          const rating = await ctx.ui.input(
+            `Rate completed run #${experience.seq}`,
+            "quality difficulty (1-5), or leave blank to skip",
+          );
+          if (rating?.trim()) {
+            const match = rating.trim().match(/^([1-5])\s+([1-5])$/);
+            if (match) {
+              experience = await recordEvaluation({ seq: experience.seq }, Number(match[1]), Number(match[2]));
+              const trigger = await maybeBeginDistillation();
+              if (trigger.triggered) pi.events.emit("pi-cad:distillation-requested", trigger);
+              experienceNote += ` Human rating recorded; score=${experience.score}.${trigger.triggered ? ` Distillation requested through cutoff #${trigger.cutoff_seq}.` : ""}`;
+            } else {
+              experienceNote += " Rating skipped because the response was not two integers from 1 to 5; use /cad-rate later.";
+            }
+          } else {
+            experienceNote += " Human rating pending; use /cad-rate later.";
+          }
+        } catch (error) {
+          experienceNote += ` Human rating remains pending: ${error instanceof Error ? error.message : String(error)}.`;
+        }
+      }
       return okTool(
-        `Run ${result.state.runId} (${result.state.route ? routeKey(result.state.route) : "unset"}) finished. Project head is unchanged unless this run accepted a new candidate.`,
-        { state: result.state },
+        `Run ${result.state.runId} (${result.state.route ? routeKey(result.state.route) : "unset"}) finished. Project head is unchanged unless this run accepted a new candidate.${experienceNote}`,
+        { state: result.state, experience },
       );
     },
   });

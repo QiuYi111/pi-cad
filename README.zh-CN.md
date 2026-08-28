@@ -329,12 +329,32 @@ qualification。普通 CI 不伪造 GPU qualification。
 项目空闲时由生成合同声明的 route operation 创建 run;finish 与 `/cad-abort` 清除它。
 中止 run 不影响设计头。旧的单状态布局会自动迁移。
 
+## 持久经验库
+
+工作流成功进入终态后，系统会先快照宿主持久化 JSONL，再请求人工输入
+`quality difficulty`。现有 Prime Transcript Lab 分析器通过 `uv` 运行，原始轨迹、
+Markdown、指标和报告默认归档到 `~/.cad/transcripts`；可用
+`PI_CAD_EXPERIENCE_ROOT` 覆盖。跳过评分后可执行
+`/cad-rate <seq> <quality> <difficulty>` 补录。
+
+Agent 可通过生成契约中的经验搜索、元数据、文内查找和有界读取操作检索历史，其中读取默认有
+行数边界。v1 仅使用确定性的元数据/关键词检索，不生成逐 run 摘要、embedding
+或自动产品评分。已评价 transcript 的累计 token 达到
+`PI_CAD_DISTILL_THRESHOLD_TOKENS`（默认 250,000）时，系统固定序号 cutoff、获取
+`distill.lock`、写入可审计请求并发出 `pi-cad:distillation-requested`。系统默认会在
+后台启动独立 Prime 进程，使用 `zai/glm-5.3-flash` 和 low thinking，
+并在 `distill-jobs/` 下记录状态、日志和审计说明。可用
+`PI_CAD_DISTILL_MODEL`、`PI_CAD_DISTILL_THINKING` 覆盖模型和 thinking，或设置
+`PI_CAD_DISTILL_COMMAND_JSON`（JSON argv 数组）运行外部 distiller；失败
+不会推进游标。
+
 ## 仓库导航
 
 | 区域 | 路径 |
 | --- | --- |
 | Harness 核心(状态机、策略、证据) | `src/core/` |
-| 工具扩展(探测、几何、图纸、仿真、演示、UI) | `src/extensions/` |
+| 工具扩展(探测、几何、图纸、仿真、演示、经验、UI) | `src/extensions/` |
+| 持久经验归档、评分、检索与蒸馏状态 | `src/experience/` |
 | Skill 路由、工程参考与 Recipe assets | `skills/` |
 | 工作流定义(全部七种) | `src/workflows/` |
 | 分层提示词 | `src/prompts/` |

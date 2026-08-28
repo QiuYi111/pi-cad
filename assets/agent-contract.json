@@ -998,7 +998,39 @@
           },
           "interfaces": {
             "type": "array",
-            "items": {},
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "fit": {
+                  "type": "string"
+                },
+                "locating": {
+                  "type": "string"
+                },
+                "dof": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "fastening": {
+                  "type": "string"
+                },
+                "access": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            },
             "default": []
           },
           "datums": {
@@ -1093,10 +1125,12 @@
                     "blocked_external"
                   ]
                 }
-              }
+              },
+              "additionalProperties": false
             }
           }
-        }
+        },
+        "additionalProperties": false
       },
       "phases": [
         "review",
@@ -1159,19 +1193,11 @@
                 },
                 "envelopeMm": {
                   "type": "array",
-                  "additionalItems": false,
-                  "items": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    }
-                  ],
-                  "minItems": 3
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 3,
+                  "maxItems": 3
                 },
                 "notes": {
                   "type": "string"
@@ -1255,28 +1281,11 @@
                 },
                 "bboxMm": {
                   "type": "array",
-                  "additionalItems": false,
-                  "items": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    }
-                  ],
-                  "minItems": 6
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 6,
+                  "maxItems": 6
                 },
                 "massKg": {
                   "type": "number"
@@ -1512,7 +1521,8 @@
           "note": {
             "type": "string"
           }
-        }
+        },
+        "additionalProperties": false
       },
       "phases": [
         "build",
@@ -3423,29 +3433,19 @@
               "properties": {
                 "p1": {
                   "type": "array",
-                  "additionalItems": false,
-                  "items": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    }
-                  ],
-                  "minItems": 2
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
                 },
                 "p2": {
                   "type": "array",
-                  "additionalItems": false,
-                  "items": [
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "number"
-                    }
-                  ],
-                  "minItems": 2
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
                 },
                 "text": {
                   "type": "string",
@@ -3773,6 +3773,406 @@
         "Follow structured suggestedActions; never guess event or retry names."
       ],
       "cookbook": "pi-cad-tools/references/cookbooks/deliverable.md"
+    },
+    {
+      "name": "cad_experience_search",
+      "category": "experience",
+      "purpose": "Search persistent historical CAD trajectories without semantic summarization.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string"
+          },
+          "workflow": {
+            "type": "string"
+          },
+          "project_name": {
+            "type": "string"
+          },
+          "project_path": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "reasoning": {
+            "type": "string"
+          },
+          "min_quality": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "max_quality": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "min_difficulty": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "max_difficulty": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "min_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "max_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "timestamp_from": {
+            "type": "string"
+          },
+          "timestamp_to": {
+            "type": "string"
+          },
+          "min_transcript_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_transcript_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "min_processed_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_processed_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "min_duration_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "max_duration_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "evaluation_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "pending"
+              },
+              {
+                "type": "string",
+                "const": "evaluated"
+              }
+            ]
+          },
+          "sort": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "relevance"
+              },
+              {
+                "type": "string",
+                "const": "score"
+              },
+              {
+                "type": "string",
+                "const": "quality"
+              },
+              {
+                "type": "string",
+                "const": "difficulty"
+              },
+              {
+                "type": "string",
+                "const": "timestamp"
+              },
+              {
+                "type": "string",
+                "const": "duration"
+              },
+              {
+                "type": "string",
+                "const": "transcript_tokens"
+              },
+              {
+                "type": "string",
+                "const": "processed_tokens"
+              }
+            ]
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "asc"
+              },
+              {
+                "type": "string",
+                "const": "desc"
+              }
+            ]
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "intake",
+        "requirements",
+        "build",
+        "review",
+        "ready",
+        "done",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/experience.md"
+    },
+    {
+      "name": "cad_experience_get",
+      "category": "experience",
+      "purpose": "Retrieve canonical metadata for one historical trajectory.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha": {
+            "type": "string",
+            "minLength": 8
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "intake",
+        "requirements",
+        "build",
+        "review",
+        "ready",
+        "done",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/experience.md"
+    },
+    {
+      "name": "cad_experience_read",
+      "category": "experience",
+      "purpose": "Read a bounded line range from a readable historical transcript.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha": {
+            "type": "string",
+            "minLength": 8
+          },
+          "start_line": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "end_line": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "intake",
+        "requirements",
+        "build",
+        "review",
+        "ready",
+        "done",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/experience.md"
+    },
+    {
+      "name": "cad_experience_find",
+      "category": "experience",
+      "purpose": "Find keyword occurrences within one historical transcript.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha": {
+            "type": "string",
+            "minLength": 8
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1
+          },
+          "context": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 20
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "phases": [
+        "intake",
+        "requirements",
+        "build",
+        "review",
+        "ready",
+        "done",
+        "baseline",
+        "investigate",
+        "explain",
+        "plan",
+        "modify",
+        "concept",
+        "domain_analysis",
+        "source_baseline",
+        "transform_plan",
+        "convert",
+        "compare",
+        "audit",
+        "gap_closure",
+        "package",
+        "final_review",
+        "system_concept",
+        "assembly_design",
+        "interface_design",
+        "part_design",
+        "integration_review"
+      ],
+      "writes": [
+        "outputs allowed by current phase policy"
+      ],
+      "produces": [
+        "Declared tool artifact or canonical workflow state"
+      ],
+      "lifecycle": "Use only when exposed by the action card; inspect returned state/artifacts.",
+      "success": "The declared state/artifact operation completed; engineering PASS still requires workflow review.",
+      "failures": [
+        "Reject invalid or phase-inapplicable input.",
+        "Follow structured suggestedActions; never guess event or retry names."
+      ],
+      "cookbook": "pi-cad-tools/references/cookbooks/experience.md"
     }
   ],
   "phases": [

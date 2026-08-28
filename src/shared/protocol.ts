@@ -380,6 +380,8 @@ export interface CadRunState {
   schemaVersion: number;
   runId: string;
   projectId: string;
+  /** Absolute project root captured when the workflow run begins. */
+  projectRoot?: string;
   createdAt: string;
   /** Persisted execution semantics; environment variables only bootstrap this value. */
   interactionMode?: InteractionMode;

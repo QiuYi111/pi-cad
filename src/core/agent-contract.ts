@@ -96,6 +96,10 @@ export const TOOL_PURPOSES: Record<ActivePublicTool, string> = {
   cad_export: "Create geometry sidecars without changing Project Head.",
   cad_generate_drawing: "Generate a structured drawing from declared intent.",
   cad_render_scene: "Create presentation assets from an explicit scene specification.",
+  cad_experience_search: "Search persistent historical CAD trajectories without semantic summarization.",
+  cad_experience_get: "Retrieve canonical metadata for one historical trajectory.",
+  cad_experience_read: "Read a bounded line range from a readable historical transcript.",
+  cad_experience_find: "Find keyword occurrences within one historical transcript.",
 };
 
 export const PHASE_PURPOSES: Record<CadPhase, string> = {
@@ -181,6 +185,7 @@ function categoryOf(name: ActivePublicTool): PublicToolGroup {
 }
 
 function cookbookFor(category: PublicToolGroup): string {
+  if (category === "experience") return "pi-cad-tools/references/cookbooks/experience.md";
   if (category === "control") return "pi-cad/references/cookbooks/workflow-records.md";
   if (category === "probe") return "pi-cad-tools/references/cookbooks/probe.md";
   if (category === "simulation") return "pi-cad-tools/references/cookbooks/simulation-recipes.md";
@@ -188,6 +193,7 @@ function cookbookFor(category: PublicToolGroup): string {
 }
 
 function phasesForTool(name: ActivePublicTool): CadPhase[] {
+  if ((ACTIVE_PUBLIC_TOOLS.experience as readonly string[]).includes(name)) return [...CAD_PHASES];
   const base = allPhaseContracts().filter((item) => contractTools(item).includes(name)).map((item) => item.phase);
   if (name === "cad_reroute") return CAD_PHASES.filter((phase) => !["intake", "requirements", "ready", "done"].includes(phase));
   if (name === "cad_revise_requirements") return CAD_PHASES.filter((phase) => !["intake", "done"].includes(phase));

@@ -407,6 +407,28 @@ The generated route operation creates a run when the project is idle; finish and
 `/cad-abort` clear it. The design head survives aborts. Legacy single-state
 layouts are migrated automatically.
 
+## Persistent experience
+
+Successful workflow closure snapshots the persisted host JSONL before
+asking for a human `quality difficulty` rating. The existing Prime Transcript
+Lab analyzer runs through `uv` and writes the lossless archive under
+`~/.cad/transcripts` (override with `PI_CAD_EXPERIENCE_ROOT`). A skipped rating
+can be added later with `/cad-rate <seq> <quality> <difficulty>`.
+
+Agents retrieve history with the generated experience search, metadata,
+find-in-transcript, and bounded-read operations. Retrieval is
+deterministic keyword/metadata search; no summaries, embeddings, or automatic
+product ratings are generated. When evaluated transcript volume reaches
+`PI_CAD_DISTILL_THRESHOLD_TOKENS` (default 250,000), Pi-CAD fixes a sequence
+cutoff, acquires `distill.lock`, writes an auditable request manifest, and emits
+`pi-cad:distillation-requested`. By default Pi-CAD launches a detached Prime
+process with `zai/glm-5.3-flash` and low thinking. The job writes status, logs,
+and an audit note under `distill-jobs/`; the originating session does not wait
+for it. Override the model with `PI_CAD_DISTILL_MODEL`, thinking level with
+`PI_CAD_DISTILL_THINKING`, or set `PI_CAD_DISTILL_COMMAND_JSON` to a JSON argv
+array for a custom distiller (the request-manifest path is appended). A failed
+job never advances the cursor.
+
 ## Repository map
 
 | Area | Path |
@@ -415,7 +437,8 @@ layouts are migrated automatically.
 | Control plane (phase contracts: phase → capability grants) | `src/control/` |
 | Observation layer (ObservationBundle/Renderer/Profiles) | `src/observations/` |
 | Capability modules (MODEL / PROBE / SIMULATE) | `src/modules/` |
-| Tool extensions (probe, geometry, drawing, simulation, presentation, UI) | `src/extensions/` |
+| Tool extensions (probe, geometry, drawing, simulation, presentation, experience, UI) | `src/extensions/` |
+| Persistent experience archive, ranking, retrieval, and distillation state | `src/experience/` |
 | Skill routing, engineering references, and Recipe assets | `skills/` |
 | Route ontology + workflow compiler | `src/shared/route.ts`, `src/workflows/compiler.ts` |
 | Layered prompts | `src/prompts/` |

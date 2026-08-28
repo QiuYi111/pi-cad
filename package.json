@@ -18,7 +18,8 @@
       "./src/extensions/ui/index.ts",
       "./src/extensions/drawing/index.ts",
       "./src/extensions/simulation/index.ts",
-      "./src/extensions/presentation/index.ts"
+      "./src/extensions/presentation/index.ts",
+      "./src/extensions/experience/index.ts"
     ],
     "skills": [
       "./skills"

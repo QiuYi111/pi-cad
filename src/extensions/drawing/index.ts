@@ -56,8 +56,10 @@ export default function cadDrawingExtension(pi: ExtensionAPI) {
           Type.Array(
             Type.Object(
               {
-                p1: Type.Tuple([Type.Number(), Type.Number()]),
-                p2: Type.Tuple([Type.Number(), Type.Number()]),
+                // Fixed-length homogeneous arrays preserve the point shape
+                // without JSON Schema `prefixItems`, rejected by ZAI tools.
+                p1: Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }),
+                p2: Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }),
                 text: Type.String({ minLength: 1 }),
                 featureRefs: Type.Optional(Type.Array(Type.String())),
                 tolerance: Type.Optional(

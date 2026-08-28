@@ -34,6 +34,7 @@ await jiti.import("./simulation-v2-spec04.test.ts", { default: true });
 await jiti.import("./phase-contract.test.ts", { default: true });
 await jiti.import("./observation-index.test.ts", { default: true });
 await jiti.import("./agent-contract.test.ts", { default: true });
+await jiti.import("./experience.test.ts", { default: true });
 await jiti.import("./no-source-agent-smoke.test.ts", { default: true });
 await jiti.import("./skill-system.test.ts", { default: true });
 await jiti.import("./final-review.test.ts", { default: true });

@@ -27,7 +27,7 @@ generated.set("assets/agent-contract.json", `${JSON.stringify(contract, null, 2)
 generated.set("skills/pi-cad/references/generated/architecture.md", renderArchitecture(contract));
 generated.set("skills/pi-cad/references/generated/workflow.md", renderWorkflow(contract));
 generated.set("assets/cookbook-catalog.json", `${JSON.stringify(renderCookbookCatalog(contract), null, 2)}\n`);
-for (const category of ["control", "model", "probe", "simulation", "optimization", "deliverable"]) {
+for (const category of ["control", "model", "probe", "simulation", "optimization", "deliverable", "experience"]) {
   generated.set(`skills/pi-cad-tools/references/generated/${category}.md`, renderTools(contract, category));
 }
 

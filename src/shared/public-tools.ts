@@ -30,6 +30,7 @@ export const ACTIVE_PUBLIC_TOOLS = {
   simulation: ["cad_simulate", "cad_sim_observe"],
   optimization: ["cad_optimize"],
   deliverable: ["cad_export", "cad_generate_drawing", "cad_render_scene"],
+  experience: ["cad_experience_search", "cad_experience_get", "cad_experience_read", "cad_experience_find"],
 } as const;
 
 export type PublicToolGroup = keyof typeof ACTIVE_PUBLIC_TOOLS;

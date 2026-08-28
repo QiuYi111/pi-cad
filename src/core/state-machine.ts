@@ -67,6 +67,7 @@ export function missingRecordObligations(
 export interface CreateIntakeOptions {
   runId?: string;
   projectId?: string;
+  projectRoot?: string;
   interactionMode?: InteractionMode;
 }
 
@@ -78,6 +79,7 @@ export function createIntakeState(options: CreateIntakeOptions = {}): CadRunStat
       options.runId ??
       `run-${createdAt.slice(0, 10).replace(/-/g, "")}-${Math.random().toString(36).slice(2, 8)}`,
     projectId: options.projectId ?? "project",
+    ...(options.projectRoot ? { projectRoot: options.projectRoot } : {}),
     createdAt,
     interactionMode: options.interactionMode ?? "interactive",
     route: null,

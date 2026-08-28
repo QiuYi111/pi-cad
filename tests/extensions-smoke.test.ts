@@ -61,6 +61,7 @@ test("all configured extensions load and register the expected tools/events", as
   const simulation = (await import("../src/extensions/simulation/index.ts")).default;
   const presentation = (await import("../src/extensions/presentation/index.ts")).default;
   const ui = (await import("../src/extensions/ui/index.ts")).default;
+  const experience = (await import("../src/extensions/experience/index.ts")).default;
   core(pi);
   probe(pi);
   geometry(pi);
@@ -68,9 +69,10 @@ test("all configured extensions load and register the expected tools/events", as
   simulation(pi);
   presentation(pi);
   ui(pi);
+  experience(pi);
 
   assert.deepEqual(pi.tools.sort(), [...ACTIVE_PUBLIC_TOOL_NAMES].sort());
-  assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-reroute", "cad-status"]);
+  assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-reroute", "cad-distill-complete", "cad-rate", "cad-status"].sort());
   for (const event of ["before_agent_start", "tool_call", "tool_result", "agent_settled"]) {
     assert.ok((pi.handlers.get(event) ?? []).length > 0, `missing ${event} handler`);
   }
