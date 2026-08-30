@@ -37,13 +37,14 @@ test("pi-cad-tools references cover every active public tool", () => {
   }
 });
 
-test("the skill surface includes the Plan C Python capability skill", () => {
+test("the skill surface includes the Prime Python capability and grilling skills", () => {
   const skillsDir = fileURLToPath(new URL("../skills/", import.meta.url));
   const names = readdirSync(skillsDir).sort();
   assert.deepEqual(names, [
     "assembly-design",
     "cad",
     "design-for-manufacturing",
+    "grill-me",
     "mechanical-design",
     "parametric-cad-modeling",
     "pi-cad",
