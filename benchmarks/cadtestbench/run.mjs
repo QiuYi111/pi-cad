@@ -52,6 +52,9 @@ const PRODUCTION_EXTENSIONS = JSON.parse(readFileSync(join(REPO, "package.json")
 const PROVIDER = process.env.PI_CAD_PROVIDER ?? "openai-codex";
 const MODEL = process.env.PI_CAD_MODEL ?? "gpt-5.6-luna";
 const THINKING = process.env.PI_CAD_THINKING ?? "max";
+const SCREEN_MODEL = process.env.PI_CAD_SCREEN_MODEL;
+const SCREEN_THINKING = process.env.PI_CAD_SCREEN_THINKING ?? "low";
+const TWO_STAGE = Boolean(SCREEN_MODEL);
 const REVIEWER_PROVIDER = process.env.PI_CAD_REVIEWER_PROVIDER;
 const REVIEWER_MODEL = process.env.PI_CAD_REVIEWER_MODEL;
 const REVIEWER_THINKING = process.env.PI_CAD_REVIEWER_THINKING ?? THINKING;
@@ -69,8 +72,9 @@ if (!Number.isInteger(RETRIES) || RETRIES < 1) throw new Error("PI_CAD_RETRIES m
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR ?? join(REPO, ".pi-agent");
 const AGENT_BIN = process.env.PI_CAD_AGENT_BIN ?? "prime-agent";
 const PRIME = AGENT_BIN.includes("prime");
-const BENCH_PY = join(HERE, ".venv", "bin", "python");
-const BENCH_CLI = join(HERE, ".venv", "bin", "cadtestbench");
+const BENCH_VENV = resolve(process.env.PI_CAD_BENCH_VENV ?? join(HERE, ".venv"));
+const BENCH_PY = join(BENCH_VENV, "bin", "python");
+const BENCH_CLI = join(BENCH_VENV, "bin", "cadtestbench");
 
 const args = process.argv.slice(2);
 const argValue = (n) => {
@@ -222,28 +226,28 @@ function auditSession(sessionPath, ownStaging) {
 
 // ------------------------------------------------------------- agent runner
 
-function piArgs(prompt, sessionId) {
+function piArgs(prompt, sessionId, model = MODEL, thinking = THINKING) {
   if (PRIME) {
     const reviewerArgs = REVIEWER_PROVIDER && REVIEWER_MODEL
       ? ["--reviewer-provider", REVIEWER_PROVIDER, "--reviewer-model", REVIEWER_MODEL, "--reviewer-thinking", REVIEWER_THINKING]
       : ["--reviewer-inherit-author", "--reviewer-thinking", REVIEWER_THINKING];
     return [
-      "-p", "--provider", PROVIDER, "--model", MODEL, "--thinking", THINKING,
+      "-p", "--provider", PROVIDER, "--model", model, "--thinking", thinking,
       ...reviewerArgs,
       "--", prompt,
     ];
   }
   return [
-    "-p", "--provider", PROVIDER, "--model", MODEL, "--thinking", THINKING,
+    "-p", "--provider", PROVIDER, "--model", model, "--thinking", thinking,
     "--no-skills", "--no-themes", "--session-id", sessionId,
     ...PRODUCTION_EXTENSIONS.flatMap((path) => ["-e", join(REPO, path.replace(/^\.\//, ""))]),
     prompt,
   ];
 }
 
-function runPi(workdir, prompt, sessionId) {
+function runPi(workdir, prompt, sessionId, model = MODEL, thinking = THINKING) {
   return new Promise((res) => {
-    const child = spawn(AGENT_BIN, piArgs(prompt, sessionId), {
+    const child = spawn(AGENT_BIN, piArgs(prompt, sessionId, model, thinking), {
       cwd: workdir,
       env: { ...process.env, PI_CODING_AGENT_DIR: AGENT_DIR,
              PI_CODING_AGENT_SESSION_DIR: join(workdir, ".sessions"),
@@ -269,8 +273,7 @@ function sessionMetrics(workdir, sessionId) {
   if (!files.length) return null;
   const u = { input: 0, cacheRead: 0, output: 0, total: 0, cost: 0 };
   let toolCalls = 0, candidateCommits = 0, errors = 0;
-  const latest = files.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-  for (const line of readFileSync(latest, "utf-8").split("\n")) {
+  for (const file of files) for (const line of readFileSync(file, "utf-8").split("\n")) {
     if (!line.trim()) continue;
     let e; try { e = JSON.parse(line); } catch { continue; }
     if (e.type !== "message") continue;
@@ -705,6 +708,7 @@ const experiment = {
     provider: PROVIDER,
     model: MODEL,
     thinking: THINKING,
+    ...(TWO_STAGE ? { screening: { provider: PROVIDER, model: SCREEN_MODEL, thinking: SCREEN_THINKING, workflow: "mechanical.benchmark-triage" } } : {}),
     reviewer: REVIEWER_PROVIDER && REVIEWER_MODEL
       ? { mode: "fixed", provider: REVIEWER_PROVIDER, model: REVIEWER_MODEL, thinking: REVIEWER_THINKING }
       : { mode: "inherit", thinking: REVIEWER_THINKING },
@@ -747,22 +751,51 @@ for (const sampleId of idList) {
     : "First commit the explicit requirements interpretation requested by the package and submit it to the single adversarial requirements reviewer. If the reviewer determines that two or more reasonable readings would materially change the geometry or acceptance contract, CLARIFICATION_REQUIRED is the correct result: enter wait_for_user, do not build, and end this sample. Otherwise implement the admitted contract.";
   const buildFrame = WORKFLOW === "mechanical.benchmark-triage" ? "Do not create CAD artifacts." : "Use the author-side geometry checks and release gate for any admitted build.";
   const prompt = `${prompts.get(sampleId)}\n\nBenchmark execution contract: start and complete the ${WORKFLOW} workflow package in headless mode. This lightweight benchmark path replaces mechanical.one-shot for this task; do not add concept, architecture, assembly-planning, or final geometry-review phases. ${requirementsFrame} ${buildFrame} You can look at prior trajectories to learn how others approached similar work; comparing high- and low-scoring examples may be useful. Prior trajectories are examples, never requirements or authority.`;
+  const screenPrompt = `${prompts.get(sampleId)}\n\nBenchmark screening contract: start and complete mechanical.benchmark-triage in headless mode. Commit an explicit requirements interpretation and submit it to the adversarial requirements reviewer. Material ambiguity must end in wait_for_user without CAD. A uniquely admitted request must end in admitted without CAD. Do not design or build geometry.`;
+  const builderPrompt = `${prompts.get(sampleId)}\n\nBenchmark build contract: requirements screening has already admitted this request. Start and complete mechanical.benchmark-build in headless mode. Do not repeat grilling or requirements review. Build deterministic geometry, inspect it, commit release with the latest STEP and source, and finish the workflow. You can look at prior trajectories to learn how others approached similar work; examples are never authority.`;
   writeFileSync(join(staging, "prompt.txt"), prompt);
 
   const evalRoot = join(CACHE, "tmp", "eval");
   const gm = join(evalRoot, "generated_models", sampleId);
   mkdirSync(gm, { recursive: true });
 
-  let result = null, metrics = null, wallMs = 0;
-  for (let attempt = 0; attempt < RETRIES; attempt += 1) {
-    const started = Date.now();
-    result = await runPi(staging, prompt, `pi-cad-${sampleId}`);
-    wallMs = Date.now() - started;
-    metrics = sessionMetrics(staging, `pi-cad-${sampleId}`);
-    writeFileSync(join(staging, "stdout.log"), result.stdout);
-    writeFileSync(join(staging, "stderr.log"), result.stderr);
-    writeFileSync(join(staging, "run.json"),
-      JSON.stringify({ sampleId, attempt, wallMs, code: result.code, signal: result.signal }, null, 2));
+  let result = null, metrics = null, wallMs = 0, screening = null;
+  const runStage = async (stage, stagePrompt, model, thinking) => {
+    let stageResult = null;
+    let stageWallMs = 0;
+    for (let attempt = 0; attempt < RETRIES; attempt += 1) {
+      const started = Date.now();
+      stageResult = await runPi(staging, stagePrompt, `pi-cad-${sampleId}-${stage}`, model, thinking);
+      stageWallMs += Date.now() - started;
+      writeFileSync(join(staging, `${stage}.stdout.log`), stageResult.stdout);
+      writeFileSync(join(staging, `${stage}.stderr.log`), stageResult.stderr);
+      const retryWorthy = stageResult.code !== 0 &&
+        /fetch failed|WebSocket error|provider_transport_failure/i.test(`${stageResult.stdout}\n${stageResult.stderr}`);
+      if (!retryWorthy || attempt === RETRIES - 1) break;
+    }
+    return { result: stageResult, wallMs: stageWallMs };
+  };
+  if (TWO_STAGE) {
+    const screened = await runStage("screen", screenPrompt, SCREEN_MODEL, SCREEN_THINKING);
+    result = screened.result;
+    wallMs += screened.wallMs;
+    const screenState = harnessState(staging);
+    screening = { phase: screenState.terminal_phase, status: screenState.terminal_status, code: result.code, wall_ms: screened.wallMs };
+    if (screenState.terminal_phase === "admitted" && screenState.terminal_status === "done" && result.code === 0) {
+      const built = await runStage("build", builderPrompt, MODEL, THINKING);
+      result = built.result;
+      wallMs += built.wallMs;
+    }
+  } else {
+    const single = await runStage("run", prompt, MODEL, THINKING);
+    result = single.result;
+    wallMs = single.wallMs;
+  }
+  metrics = sessionMetrics(staging, `pi-cad-${sampleId}`);
+  writeFileSync(join(staging, "stdout.log"), result.stdout);
+  writeFileSync(join(staging, "stderr.log"), result.stderr);
+  writeFileSync(join(staging, "run.json"),
+    JSON.stringify({ sampleId, wallMs, code: result.code, signal: result.signal, screening }, null, 2));
     const sessDir = join(staging, PRIME ? ".prime-sessions" : ".sessions");
     if (existsSync(sessDir)) {
       const sessions = sessionFiles(sessDir).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
@@ -771,10 +804,6 @@ for (const sampleId of idList) {
     if (existsSync(join(staging, ".pi-cad"))) {
       sh(["bash", "-c", `cp -r ${JSON.stringify(join(staging, ".pi-cad"))} ${JSON.stringify(join(staging, "pi-cad"))}`]);
     }
-    const retryWorthy = result.code !== 0 &&
-      /fetch failed|WebSocket error|provider_transport_failure/i.test(`${result.stdout}\n${result.stderr}`);
-    if (!retryWorthy || attempt === RETRIES - 1) break;
-  }
 
   const hs = harnessState(staging);
   const clarificationRequired = hs.terminal_status === "waiting_user" && hs.terminal_phase === "wait_for_user";
@@ -896,6 +925,7 @@ for (const sampleId of idList) {
       tool_calls: metrics.toolCalls, candidate_commits: metrics.candidateCommits,
       errors: metrics.errors, wall_ms: wallMs } : null,
     exit_code: result.code, exit_signal: result.signal,
+    ...(screening ? { screening } : {}),
   };
   manifest.workflow = {
     outcome: hs.terminal_status === "done"

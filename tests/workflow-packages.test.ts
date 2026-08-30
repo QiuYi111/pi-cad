@@ -17,7 +17,7 @@ test("installed Mechanical packages expose metadata only and compile branchable 
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
   try {
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-triage", "mechanical.modify", "mechanical.one-shot"]);
+    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.modify", "mechanical.one-shot"]);
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
 
     const benchmark = await resolveWorkflowPackage(cwd, "mechanical.benchmark", mechanicalRegistries);
@@ -44,6 +44,11 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.equal(triage.workflow.phases.requirements_review!.transitions.accepted!.target, "admitted");
     assert.equal(triage.workflow.phases.admitted!.terminal, true);
     assert.equal(Object.values(triage.workflow.phases).some((phase) => phase.actions.includes("cad_build_step")), false);
+
+    const builder = await resolveWorkflowPackage(cwd, "mechanical.benchmark-build", mechanicalRegistries);
+    assert.equal(builder.workflow.initialPhase, "build");
+    assert.equal(builder.workflow.phases.build!.actions.includes("cad_build_step"), true);
+    assert.equal(builder.workflow.phases.build!.reviewProfile, undefined);
 
     await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
     const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);

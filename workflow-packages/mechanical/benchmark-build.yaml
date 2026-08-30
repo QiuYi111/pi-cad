@@ -1,0 +1,37 @@
+schema: 1
+id: mechanical.benchmark-build
+description: Build an already screened benchmark request with managed visual feedback and author checks.
+tags: [benchmark, build, cad, mechanical]
+version: 1.0.0
+workflow:
+  schema: 1
+  id: mechanical.benchmark-build
+  version: 1.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: build
+  phases:
+    build:
+      purpose: Implement the admitted benchmark request as deterministic geometry, inspect it, and release it.
+      guidance: >-
+        The benchmark runner has already admitted this request through independent requirements screening. Treat the original prompt as the complete contract. Write deterministic build123d source exposing result, build through cad.model.build, and inspect the managed views. Translate every requested dimension, feature placement, connection, and spatial or topological relation into observable invariants. Perform an adversarial pre-mortem, then use cad.probe.run on the ArtifactRef to distinguish plausible wrong constructions. Rebuild if any material invariant is false or unmeasured. Commit release with the latest ArtifactRef, source, counterexamples, and boolean results, then advance delivered. Do not repeat requirements review.
+      actions: [cad_build_step, cad_commit, transition]
+      grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: [{ref: release, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations:
+        - {ref: candidate-visual, type: visual, closeWith: cad_build_step}
+        - {ref: candidate-geometry, type: geometry, closeWith: cad_build_step}
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions: {delivered: {target: done, requiresPhaseObligations: true}}
+    done:
+      purpose: Preserve the delivered benchmark artifact.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true
