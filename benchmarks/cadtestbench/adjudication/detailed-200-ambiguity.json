@@ -1,0 +1,2091 @@
+{
+  "schema_version": "1.0",
+  "source_set": "CADTestBench detailed-200 frozen set",
+  "criteria": {
+    "ambiguous": "Two or more reasonable readings materially change geometry, topology, dimensions, or acceptance conditions.",
+    "borderline": "A conventional reading is strong, but an alternate literal reading could materially change the result.",
+    "clear": "The request determines one solid up to scoring-irrelevant rigid transforms or mirror equivalence.",
+    "exclusions": [
+      "Bare unit labels are not treated as intent ambiguity; unit normalization is adjudicated separately.",
+      "Presentation-only orientation is not ambiguity when alternatives are congruent and scoring-invariant."
+    ]
+  },
+  "counts": {
+    "ambiguous": 100,
+    "borderline": 10,
+    "clear": 90,
+    "total": 200
+  },
+  "samples": [
+    {
+      "sample_id": "00000007",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00000633",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00000960",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00001411",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00001490",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00001615",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00001817",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00001977",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00002221",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00002298",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00003219",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00003247",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00003558",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00003763",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00003801",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00004154",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00004495",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00004596",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00004935",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00005161",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00005358",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00005721",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "underdefined-profile"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00006013",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00006136",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00006578",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00006863",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00006892",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "boolean-or-topology"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00007258",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00007362",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00008138",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00008315",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00008597",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00008835",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00009044",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00009307",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00009529",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00009823",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00009843",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "underdefined-profile"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00009863",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00009998",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00017291",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "placement-or-datum",
+        "boolean-or-topology"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00019015",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00019066",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "placement-or-datum"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00031181",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00031303",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "boolean-or-topology",
+        "underdefined-profile"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00031637",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00032961",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00033093",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "placement-or-datum"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00033624",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00034100",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "placement-or-datum",
+        "boolean-or-topology"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00034239",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00034243",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00034256",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology",
+        "underdefined-profile"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00036518",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00037135",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00037161",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00037276",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00037494",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00038438",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00038614",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00039012",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "boolean-or-topology"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00039227",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00039365",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00039681",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00039777",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00300037",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520130",
+      "label": "ambiguous",
+      "categories": [
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520150",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520321",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520402",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520453",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00520570",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00520638",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520671",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520675",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00520699",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00520726",
+      "label": "ambiguous",
+      "categories": [
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00520776",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00520974",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00520976",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00521000",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00521025",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00521217",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00521230",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00521437",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00521895",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00521969",
+      "label": "ambiguous",
+      "categories": [
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00522355",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00522404",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00522865",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "placement-or-datum"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00523882",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00524912",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00670105",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "underdefined-profile"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00670106",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670231",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670256",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670259",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670266",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00670268",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "placement-or-datum"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00670274",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670279",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670334",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670441",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670454",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00670457",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00670466",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670817",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00670960",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00671873",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00671898",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00671938",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00672098",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00672272",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00672291",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00672309",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00672352",
+      "label": "ambiguous",
+      "categories": [
+        "underspecified-geometry"
+      ],
+      "reason": "The wording admits at least two reasonable implementations that materially change geometry, topology, dimensions, or acceptance.",
+      "interpretations": [
+        "Apply the strongest conventional CAD reading.",
+        "Apply the alternate literal reading of the disputed instruction."
+      ],
+      "minimal_question": "Which of the materially different readings is intended?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00672355",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00672359",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00672804",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00673733",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00673788",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00675092",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00675498",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "underdefined-profile"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00675952",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00676218",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00680715",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00681053",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00681399",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00681463",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00681547",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00681589",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00681754",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00681760",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00681831",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00681999",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00682073",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00682075",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00684686",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00684841",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology",
+        "underdefined-profile"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00685823",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00689273",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00689964",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00851553",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00852000",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00853706",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00857821",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00980412",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00980651",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00982481",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00983173",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00984033",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "placement-or-datum",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00984234",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00984488",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00984833",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00985066",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00985482",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00985494",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00986712",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00986814",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00995686",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00995733",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00995759",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension",
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00995843",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00996001",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00996329",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00996368",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00996457",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00996473",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00996962",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00997040",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00997065",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00997068",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00997071",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00997229",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00997300",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00997373",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00997428",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00997536",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00997580",
+      "label": "ambiguous",
+      "categories": [
+        "boolean-or-topology"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00997616",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "boolean-or-topology"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00997677",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00997681",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00997753",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "boolean-or-topology"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00997785",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00997852",
+      "label": "ambiguous",
+      "categories": [
+        "underspecified-geometry"
+      ],
+      "reason": "The wording admits at least two reasonable implementations that materially change geometry, topology, dimensions, or acceptance.",
+      "interpretations": [
+        "Apply the strongest conventional CAD reading.",
+        "Apply the alternate literal reading of the disputed instruction."
+      ],
+      "minimal_question": "Which of the materially different readings is intended?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00997878",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00998012",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00998074",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00998088",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00998283",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00998300",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00998356",
+      "label": "ambiguous",
+      "categories": [
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "At least one profile, wall, depth, angle, extrusion, or outer-envelope dimension required for a unique solid is absent.",
+      "interpretations": [
+        "Infer the missing value from a conventional symmetric/default construction.",
+        "Choose another value that still satisfies all explicit dimensions."
+      ],
+      "minimal_question": "Please provide the missing profile, wall, depth, angle, or extrusion dimension.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00998398",
+      "label": "clear",
+      "reason": "Explicit dimensions and standard operation semantics determine one solid up to scoring-irrelevant rigid transforms or mirror equivalence."
+    },
+    {
+      "sample_id": "00998698",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "missing-critical-dimension",
+        "underdefined-profile"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00998714",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum",
+        "boolean-or-topology",
+        "underdefined-profile"
+      ],
+      "reason": "The feature operation or body relationship permits materially different additive, subtractive, fused, separate, through, or blind topology.",
+      "interpretations": [
+        "Use the additive/fused or through-all interpretation.",
+        "Use the competing subtractive/separate-body or finite-depth interpretation."
+      ],
+      "minimal_question": "Should the feature be additive or subtractive, fused or separate, and through-all or finite-depth?",
+      "confidence": 0.97
+    },
+    {
+      "sample_id": "00998749",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "missing-critical-dimension",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00998843",
+      "label": "borderline",
+      "categories": [
+        "convention-dependent"
+      ],
+      "reason": "A common CAD convention gives a strong intended reading, but an alternate literal reading can change placement, topology, or feature type.",
+      "interpretations": [
+        "Apply the standard convention for the named feature.",
+        "Apply the alternate literal reading of the disputed phrase."
+      ],
+      "minimal_question": "Confirm the conventional reading or provide the disputed placement/feature detail.",
+      "confidence": 0.68
+    },
+    {
+      "sample_id": "00999126",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00999141",
+      "label": "ambiguous",
+      "categories": [
+        "numeric-or-verbal-conflict",
+        "geometrically-infeasible"
+      ],
+      "reason": "Explicit numeric constraints conflict with a verbal ratio, named shape, qualitative relation, or another numeric constraint.",
+      "interpretations": [
+        "Treat the explicit numeric dimensions as authoritative.",
+        "Treat the competing verbal, relational, or named-shape constraint as authoritative."
+      ],
+      "minimal_question": "Which constraint is authoritative: the explicit numeric values or the competing verbal/relational requirement?",
+      "confidence": 0.99
+    },
+    {
+      "sample_id": "00999374",
+      "label": "ambiguous",
+      "categories": [
+        "placement-or-datum"
+      ],
+      "reason": "The attachment edge, placement direction, or center-versus-boundary datum is not sufficient to locate the feature uniquely.",
+      "interpretations": [
+        "Locate the feature from its center/centerline using the first plausible attachment edge.",
+        "Locate it from its boundary or another equally plausible attachment edge/direction."
+      ],
+      "minimal_question": "Please specify the attachment edge/face and exact center coordinates or offset datums.",
+      "confidence": 0.97
+    }
+  ]
+}

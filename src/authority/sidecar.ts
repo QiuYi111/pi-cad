@@ -14,18 +14,26 @@ import { renderAuthorizationDenied, type Operation } from "../harness/permission
 import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } from "../harness/run-store.ts";
 import { writeStatusProjection } from "./storage.ts";
 import { ReviewRuntime, type ReviewerExecutor } from "./review-runtime.ts";
+import { findExperience, getExperience, readExperience, searchExperience } from "../experience/store.ts";
+import type { ExperienceSearchOptions } from "../experience/types.ts";
 
 export type SidecarRole = "author" | "reviewer";
+type AuthorModelSelection = { provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" };
 
 export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "phase-card" }
   | { schema: 1; op: "completion-gate" }
   | { schema: 1; op: "mission-capture"; mission: string }
+  | { schema: 1; op: "author-model"; provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
   | { schema: 1; op: "review-evidence"; reviewId?: string }
-  | { schema: 1; op: "authorize"; operation: Operation };
+  | { schema: 1; op: "authorize"; operation: Operation }
+  | { schema: 1; op: "experience-search"; options?: ExperienceSearchOptions }
+  | { schema: 1; op: "experience-get"; identifier: { seq?: number; sha?: string } }
+  | { schema: 1; op: "experience-find"; identifier: { seq?: number; sha?: string }; query: string; context?: number; limit?: number }
+  | { schema: 1; op: "experience-read"; identifier: { seq?: number; sha?: string }; startLine?: number; endLine?: number };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "authorize"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "author-model", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
 
@@ -63,7 +71,15 @@ async function refreshProjectionSafely(cwd: string): Promise<void> {
   }
 }
 
-export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime): Promise<AgentApiResponse> {
+function agentExperienceEntry(entry: Record<string, unknown>): Record<string, unknown> {
+  const safe = { ...entry };
+  delete safe.archive_path;
+  delete safe.session_path;
+  delete safe.project_path;
+  return safe;
+}
+
+export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void): Promise<AgentApiResponse> {
   try {
     validateRequest(value);
     if (role === "reviewer" && !REVIEWER_ALLOWED.has(value.op)) {
@@ -81,7 +97,13 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
       if (value.op === "review-complete" && value.reviewId !== reviewerRequestId) throw new Error("reviewer authority does not match review result");
     }
     let result: unknown;
-    if (value.op === "review-submit") {
+    if (value.op === "author-model") {
+      if (role !== "author" || !onAuthorModelSelection) throw new Error("author model reporting is unavailable");
+      if (typeof value.provider !== "string" || !value.provider.trim() || typeof value.model !== "string" || !value.model.trim()) throw new Error("author model requires non-empty provider and model");
+      if (!["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value.thinking)) throw new Error("author model has an invalid thinking level");
+      onAuthorModelSelection({ provider: value.provider.trim(), model: value.model.trim(), thinking: value.thinking });
+      result = { recorded: true };
+    } else if (value.op === "review-submit") {
       if (!reviewRuntime) throw new Error("review runtime is unavailable");
       const decision = await currentAuthorization(cwd, "review.submit", "author");
       if (!decision?.allowed) throw new Error(decision && !decision.allowed ? renderAuthorizationDenied(decision) : "review.submit requires an active workflow");
@@ -111,6 +133,15 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
       if (role !== "author") throw new Error("authorization query is author-scoped");
       const decision = await currentAuthorization(cwd, value.operation, "author");
       result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
+    } else if (value.op === "experience-search") {
+      result = (await searchExperience(value.options ?? {})).map((entry) => agentExperienceEntry(entry as unknown as Record<string, unknown>));
+    } else if (value.op === "experience-get") {
+      result = agentExperienceEntry(await getExperience(value.identifier) as unknown as Record<string, unknown>);
+    } else if (value.op === "experience-find") {
+      result = await findExperience(value.identifier, value.query, value.context, value.limit);
+    } else if (value.op === "experience-read") {
+      const read = await readExperience(value.identifier, value.startLine, value.endLine);
+      result = { ...read, entry: agentExperienceEntry(read.entry as unknown as Record<string, unknown>) };
     } else {
       result = await handleAgentApi(cwd, value, role);
     }
@@ -139,7 +170,7 @@ async function captureMission(cwd: string, requested: string): Promise<{ capture
   return { captured: true };
 }
 
-async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime): Promise<void> {
+async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void): Promise<void> {
   const chunks: Buffer[] = [];
   let size = 0;
   socket.setTimeout(150_000, () => socket.destroy(new Error("sidecar request timeout")));
@@ -153,7 +184,7 @@ async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, revi
     let response: AgentApiResponse;
     try {
       const body = Buffer.concat(chunks).toString("utf-8");
-      response = await dispatchSidecarRequest(role, cwd, JSON.parse(body), reviewRuntime);
+      response = await dispatchSidecarRequest(role, cwd, JSON.parse(body), reviewRuntime, onAuthorModelSelection);
     } catch (error) {
       response = errorResponse(error);
     }
@@ -179,7 +210,7 @@ export interface AuthoritySidecar {
   close(): Promise<void>;
 }
 
-export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor }): Promise<AuthoritySidecar> {
+export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor; onAuthorModelSelection?: (selection: AuthorModelSelection) => void }): Promise<AuthoritySidecar> {
   bootstrapAgentApiContracts();
   const cwd = resolve(input.cwd);
   const authorDirectory = join(resolve(input.runtimeDirectory), "author");
@@ -191,7 +222,7 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
   const authorSocket = join(authorDirectory, "authority.sock");
   const reviewerSocket = join(reviewerDirectory, "authority.sock");
   const reviewRuntime = new ReviewRuntime(cwd, input.reviewerExecutor ?? (async () => { throw new Error("reviewer executor is not configured"); }));
-  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime); });
+  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection); });
   const reviewerServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "reviewer", cwd, reviewRuntime); });
   try {
     await listen(authorServer, authorSocket);
@@ -216,7 +247,9 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
 export interface CompletionGateResult {
   complete: boolean;
   reason: string;
+  outcome?: "complete" | "clarification_required" | "admitted";
   runId?: string;
+  workflowId?: string;
 }
 
 async function selectedCompletionRun(cwd: string): Promise<LoadedHarnessRunV7 | null> {
@@ -230,12 +263,86 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
   const loaded = await selectedCompletionRun(cwd);
   if (!loaded) return { complete: false, reason: "no canonical workflow run exists" };
   const phase = loaded.workflow.phases[loaded.state.phase];
+  if (loaded.state.interactionMode === "headless" && loaded.state.status === "waiting_user" && loaded.state.phase === "wait_for_user") {
+    const review = loaded.state.latestReview;
+    if (review?.verdict === "clarification_required"
+      && review.profileId === "mechanical.requirements-review"
+      && review.workflowHash === loaded.workflow.hash
+      && review.registryContractHash === loaded.registryContract.hash) {
+      return {
+        complete: true,
+        outcome: "clarification_required",
+        reason: "material requirements ambiguity requires user clarification before CAD begins",
+        runId: loaded.state.runId,
+        workflowId: loaded.workflow.id,
+      };
+    }
+    const authorOwnedClarification = loaded.workflow.id === "mechanical.benchmark-author-only"
+      && loaded.state.records.requirements?.type === "workspace_commit"
+      && loaded.state.records.requirements.workflowHash === loaded.workflow.hash
+      && loaded.state.phaseHistory.at(-2) === "grilling";
+    if (authorOwnedClarification) {
+      return {
+        complete: true,
+        outcome: "clarification_required",
+        reason: "author identified a material requirements ambiguity before CAD began",
+        runId: loaded.state.runId,
+        workflowId: loaded.workflow.id,
+      };
+    }
+    return {
+      complete: false,
+      reason: "waiting_user is not backed by a current authoritative clarification-required review or author-only benchmark requirements commit",
+      runId: loaded.state.runId,
+      workflowId: loaded.workflow.id,
+    };
+  }
   if (!phase?.terminal || loaded.state.status !== "done") {
-    return { complete: false, reason: `workflow is ${loaded.state.status} in non-terminal phase ${loaded.state.phase}`, runId: loaded.state.runId };
+    return { complete: false, reason: `workflow is ${loaded.state.status} in non-terminal phase ${loaded.state.phase}`, runId: loaded.state.runId, workflowId: loaded.workflow.id };
+  }
+  if (loaded.workflow.id === "mechanical.benchmark-triage" && loaded.state.phase === "admitted") {
+    const review = loaded.state.latestReview;
+    const requirements = loaded.state.records.requirements;
+    if (review?.verdict === "pass"
+      && review.profileId === "mechanical.requirements-review"
+      && review.workflowHash === loaded.workflow.hash
+      && review.registryContractHash === loaded.registryContract.hash
+      && requirements?.type === "workspace_commit"
+      && requirements.workflowHash === loaded.workflow.hash) {
+      return {
+        complete: true,
+        outcome: "admitted",
+        reason: "requirements contract passed independent review and is ready for a builder",
+        runId: loaded.state.runId,
+        workflowId: loaded.workflow.id,
+      };
+    }
+    return { complete: false, reason: "admitted requirements are missing current independent PASS authority", runId: loaded.state.runId, workflowId: loaded.workflow.id };
   }
   const release = loaded.state.records.release;
   if (!release || release.type !== "workspace_commit" || release.workflowHash !== loaded.workflow.hash) {
-    return { complete: false, reason: "authoritative release commit is missing or stale", runId: loaded.state.runId };
+    return { complete: false, reason: "authoritative release commit is missing or stale", runId: loaded.state.runId, workflowId: loaded.workflow.id };
+  }
+  const finalReleasePhases = new Set(Object.entries(loaded.workflow.phases)
+    .filter(([, candidate]) => candidate.recordObligations.some((obligation) => obligation.ref === "release"))
+    .filter(([, candidate]) => !candidate.actions.includes("cad_build_step"))
+    .map(([phaseId]) => phaseId));
+  const requiresFinalReview = Object.entries(loaded.workflow.phases).some(([phaseId, candidate]) => Boolean(candidate.reviewProfile) && (
+    (phaseId === loaded.state.phase && Boolean(candidate.terminal))
+    ||
+    finalReleasePhases.has(phaseId)
+    || Object.values(candidate.transitions).some((transition) => finalReleasePhases.has(transition.target) && (transition.reviewVerdicts ?? []).includes("pass"))
+  ));
+  if (!requiresFinalReview) {
+    const releaseManifest = await new HarnessRunStoreV7(cwd, loaded.state.runId).transactions.readJson<{ artifacts?: Array<{ path: string; sha256: string; role: string }> }>(release.path);
+    const candidate = loaded.state.artifacts["candidate:authoritative"];
+    const source = loaded.state.artifacts["candidate:source"];
+    const requiredArtifacts = [candidate, source].filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const releaseArtifacts = releaseManifest?.artifacts ?? [];
+    if (!candidate || !source || requiredArtifacts.some((required) => !releaseArtifacts.some((item) => item.path === required.path && item.sha256 === required.sha256))) {
+      return { complete: false, reason: "release without a final review does not contain the current authoritative candidate and source", runId: loaded.state.runId, workflowId: loaded.workflow.id };
+    }
+    return { complete: true, outcome: "complete", reason: "terminal workflow and authoritative release commit are valid without a final review", runId: loaded.state.runId, workflowId: loaded.workflow.id };
   }
   const review = loaded.state.latestReview;
   let releaseMatchesReview = review?.subjectHash === release.sha256;
@@ -248,9 +355,9 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
   }
   if (!review || review.verdict.toLowerCase() !== "pass" || review.workflowHash !== loaded.workflow.hash
     || review.registryContractHash !== loaded.registryContract.hash || !releaseMatchesReview) {
-    return { complete: false, reason: "required final review authority is missing, stale, not PASS, or bound to another release", runId: loaded.state.runId };
+    return { complete: false, reason: "required final review authority is missing, stale, not PASS, or bound to another release", runId: loaded.state.runId, workflowId: loaded.workflow.id };
   }
-  return { complete: true, reason: "terminal workflow, final PASS, and release commit are valid", runId: loaded.state.runId };
+  return { complete: true, outcome: "complete", reason: "terminal workflow, final PASS, and release commit are valid", runId: loaded.state.runId, workflowId: loaded.workflow.id };
 }
 
 function canonicalArtifactContentHash(artifacts: Array<{ path: string; sha256: string }>): string {

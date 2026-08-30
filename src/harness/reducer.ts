@@ -98,7 +98,7 @@ export function transitionDenialReason(state: HarnessRunStateV7, workflow: Workf
   if (allowedVerdicts && phase.reviewProfile) {
     const review = state.latestReview;
     const subjectHash = canonicalDigest({ workflowHash: workflow.hash, registryContractHash: state.workflow.registryContractHash, phase: state.phase, records: state.records, artifacts: state.artifacts, evidence: state.evidence });
-    if (!review || !allowedVerdicts.includes(review.verdict as "pass" | "fail" | "unresolved") || review.profileId !== phase.reviewProfile || review.workflowHash !== workflow.hash || review.registryContractHash !== state.workflow.registryContractHash || review.subjectHash !== subjectHash) return `transition requires a current ${phase.reviewProfile} verdict in [${allowedVerdicts.join(", ")}]`;
+    if (!review || !allowedVerdicts.includes(review.verdict as "pass" | "fail" | "clarification_required" | "unresolved") || review.profileId !== phase.reviewProfile || review.workflowHash !== workflow.hash || review.registryContractHash !== state.workflow.registryContractHash || review.subjectHash !== subjectHash) return `transition requires a current ${phase.reviewProfile} verdict in [${allowedVerdicts.join(", ")}]`;
   }
   const visited = new Set(state.phaseHistory ?? [state.phase]);
   const missingVisited = (transition.requiresVisited ?? []).filter((phaseId) => !visited.has(phaseId));

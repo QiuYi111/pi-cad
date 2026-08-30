@@ -1,0 +1,4 @@
+{"type":"session","version":3,"id":"child-session","timestamp":"2026-08-26T08:00:05.500Z","cwd":"/tmp/demo","parentSession":"root.jsonl"}
+{"type":"session_info","id":"si1","parentId":null,"timestamp":"2026-08-26T08:00:05.600Z","name":"geometry-scout"}
+{"type":"message","id":"cu1","parentId":"si1","timestamp":"2026-08-26T08:00:06.000Z","message":{"role":"user","content":"[task from parent]\n\nInspect geometry assumptions."}}
+{"type":"message","id":"ca1","parentId":"cu1","timestamp":"2026-08-26T08:00:09.000Z","message":{"role":"assistant","content":[{"type":"text","text":"Geometry assumptions look consistent."}],"api":"messages","provider":"anthropic","model":"demo-child","usage":{"input":900,"output":60,"cacheRead":100,"cacheWrite":0,"totalTokens":1060,"cost":{"input":0.01,"output":0.01,"cacheRead":0,"cacheWrite":0,"total":0.02}},"stopReason":"stop"}}

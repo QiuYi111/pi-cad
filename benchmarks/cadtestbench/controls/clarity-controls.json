@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "id": "clarity-controls",
+  "description": "Complex, contract-complete variants of ten previously adjudicated ambiguous CADTestBench prompts. These preserve each geometric theme while making every datum, dimension referent, topology choice, and acceptance-critical relation explicit.",
+  "variants": [
+    {
+      "sample_id": "00001817",
+      "title": "Datum-controlled fused table",
+      "resolutions": [
+        "Each leg lies fully inside the tabletop footprint with its two outer faces flush to the corresponding tabletop edges.",
+        "All five boxes must be boolean-fused into one connected solid."
+      ],
+      "complexity": ["Exact symmetry, coincident attachment faces, final envelope, and topology are all contractual."],
+      "prompt": "Create a table as one connected solid in model units. Use a right-handed coordinate system with X along tabletop length, Y along tabletop width, and Z upward. Create a tabletop centered on X=0 and Y=0 with X length 1.20302, Y width 0.55872, and Z thickness 0.020134; its bottom face is at Z=0.75 and its top face is at Z=0.770134. Create four square-prism legs, each 0.060403 by 0.060403 in X/Y and exactly 0.75 high from Z=0 to Z=0.75. Each leg must lie fully inside the tabletop footprint: its two outward-facing side faces are exactly flush with the corresponding two outer side faces of the tabletop. The leg top faces are coincident with the tabletop bottom face. Boolean-fuse the tabletop and all four legs into exactly one solid. The final object must be mirror-symmetric about X=0 and Y=0, must not extend beyond the tabletop footprint in X or Y, and must have overall Z height 0.770134.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00005721",
+      "title": "Explicit obtuse scalene triangular plate",
+      "resolutions": [
+        "Length and width are the X/Y bounding-box spans.",
+        "Centered means bounding-box centered, and the upward vertex is explicitly identified."
+      ],
+      "complexity": ["Exact vertex coordinates, winding, extrusion direction, envelope, and topology are contractual."],
+      "prompt": "Create one triangular plate in model units. In the XY plane use exactly these three vertices in counter-clockwise order when viewed from +Z: A=(-0.75,-0.365565), B=(0.75,-0.365565), and C=(0.05,0.365565). These coordinates are authoritative: they produce an obtuse scalene triangle whose axis-aligned X span is 1.5 and Y span is 0.73113. 'Centered' means that the center of this X/Y bounding box is the global origin; it does not mean centroid-centered. Vertex C is the single vertex that faces +Y ('upward' in the top view). Extrude the closed triangular region from Z=0 to Z=0.00472 without draft, edge fillets, or additional bodies. The result must be exactly one solid with two triangular planar faces and three rectangular side faces.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00006578",
+      "title": "Four-hole plate with centerline datums",
+      "resolutions": [
+        "Both edge insets are measured to hole centerlines, not to hole circumferences.",
+        "All holes are through-holes normal to the top face."
+      ],
+      "complexity": ["Exact signed center coordinates, symmetry, through-depth, and resulting topology are specified."],
+      "prompt": "Create a rectangular prism in model units, centered on X=0 and Y=0, with X length 1.5, Y width 1.02857, and Z height 0.17143 extending from Z=0 to Z=0.17143. Cut exactly four cylindrical through-holes normal to the XY faces. Every hole has diameter 0.095635 and its axis runs parallel to Z through the full prism. The stated edge insets are distances from the outer prism side faces to each hole centerline, not clearances to the circular edge. Therefore the four hole centers are the Cartesian product X=±(0.75-0.263507) and Y=±(0.514285-0.219429), i.e. X=±0.486493 and Y=±0.294856. The holes must be mutually distinct, symmetric about X=0 and Y=0, and open on both the Z=0 and Z=0.17143 faces. The result is exactly one solid containing four through-bores.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00521969",
+      "title": "Extruded rounded-rectangle profile",
+      "resolutions": [
+        "The radius applies only to the four plan-view profile corners.",
+        "The top and bottom perimeter edges remain sharp."
+      ],
+      "complexity": ["Profile construction and forbidden post-extrusion edge treatment are explicit."],
+      "prompt": "Create one rounded-rectangle prism in model units. On the XY plane, construct a closed rounded rectangle centered at the origin with overall X length 0.74999, overall Y width 0.73843, and exactly four tangent corner arcs of radius 0.038. The straight portions and arcs must remain within those overall dimensions. Extrude this 2D profile from Z=0 to Z=0.11078. The 0.038 radius applies only to the four corners of the planar profile, producing four vertical cylindrical side patches. Do not apply any 3D fillet to the top or bottom perimeter edges; those eight perimeter transitions remain sharp. The result must be exactly one solid with constant XY cross-section over its full height.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00670105",
+      "title": "Dimension-complete house pentagon",
+      "resolutions": [
+        "The formerly conflicting 0.204545 value is defined as roof height, not roof base length.",
+        "The triangular roof spans the rectangle's entire 0.477273 top edge."
+      ],
+      "complexity": ["All five profile vertices, shared edge, symmetry, and extrusion axis are explicit."],
+      "prompt": "Create a pentagonal prism in model units from a symmetric 'house' profile in the XZ plane. The rectangular lower portion has X length 0.477273 and Z height 0.2727275. The triangular roof above it has base length exactly 0.477273, sharing the rectangle's complete top edge, and roof height exactly 0.204545. With the profile centered about X=0 and its bottom at Z=0, use the five boundary vertices (-0.2386365,0), (0.2386365,0), (0.2386365,0.2727275), (0,0.4772725), and (-0.2386365,0.2727275), in boundary order. Extrude this single closed profile along +Y from Y=0 to Y=0.75. Fuse the lower and roof regions as one profile before extrusion; the result must be exactly one solid with a true five-sided end face and no shoulder edges between the rectangle and roof.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00670268",
+      "title": "Offset coaxial three-stage cylinder",
+      "resolutions": [
+        "Explicit cylinder dimensions govern; the inconsistent approximate ratios are discarded.",
+        "Padding is measured from the +Z tangent of the large circular face to the smaller-cylinder axis."
+      ],
+      "complexity": ["Final orientation, axial intervals, shared axis offset, attachment, and fusion are explicit."],
+      "prompt": "Create a fused three-stage cylindrical object in model units directly in its final orientation; do not apply a later rotation. All three cylinder axes are parallel to +X. Cylinder 1 has diameter 0.470339, extends from X=0 to X=0.75, and has its axis at Y=0,Z=0. Cylinder 2 has diameter 0.152542 and axial length 0.082627; it starts on Cylinder 1's X=0.75 circular face and extends to X=0.832627. Define the padding 0.247881 as the signed distance measured downward in Z from Cylinder 1's +Z tangent plane to Cylinder 2's axis. Thus Cylinder 2's axis is exactly at Y=0,Z=(0.470339/2)-0.247881=-0.0127115. Cylinder 3 is concentric with Cylinder 2, has diameter 0.075981 and axial length 0.190678, starts at X=0.832627, and ends at X=1.023305. The explicit dimensions in this paragraph are authoritative; do not recompute them from approximate ratios. Fuse all stages into exactly one connected solid, with coincident mating faces and no axial gaps.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00984833",
+      "title": "Two-tier centered rectangular solid",
+      "resolutions": [
+        "The formerly reversed widths are assigned explicitly: 0.198188 bottom and 0.049547 top.",
+        "Both tiers share the same X length and are fused across a coincident face."
+      ],
+      "complexity": ["Exact tier intervals, symmetry, shared-face relation, final envelope, and topology are specified."],
+      "prompt": "Create a two-tier rectangular solid in model units, centered about X=0 and Y=0. The bottom tier has X length 0.475652, Y width 0.198188, and Z height 0.317101, extending from Z=0 to Z=0.317101. The top tier has the same X length 0.475652, the explicitly narrower Y width 0.049547, and the same Z height 0.317101, extending from Z=0.317101 to Z=0.634202. The complete bottom face of the top tier must be coincident with the corresponding central strip of the bottom tier's top face. Both tiers share their X and Y center planes. Boolean-fuse them into exactly one connected solid; retain the two exposed horizontal shoulders on either side of the top tier and do not fillet or chamfer any edge.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00986712",
+      "title": "Feasible rounded-end plate with located bores",
+      "resolutions": [
+        "Incompatible profile and hole dimensions are replaced by a feasible dimension set.",
+        "The two rounded corners, hole-bearing face, axis, centers, and spacing are explicitly named."
+      ],
+      "complexity": ["The part combines a partially rounded profile, exact mirrored hole locations, and through topology."],
+      "prompt": "Create one perforated prism in model units. On the XY plane start from a rectangle of X length 0.875 and Y width 0.60, centered at the origin. Replace exactly the two corners on the +Y long edge—corners (-0.4375,0.30) and (0.4375,0.30)—with tangent 2D corner fillets of radius 0.25; leave the two -Y corners sharp. Extrude the resulting profile from Z=0 to Z=1.5. Cut two cylindrical through-holes parallel to Z, each of diameter 0.30. Their center coordinates are exactly (-0.1875,0.05) and (0.1875,0.05), so they are mirror-symmetric about X=0 and have center-to-center spacing 0.375. Both holes must open on the Z=0 and Z=1.5 faces. Do not interpret any dimension as padding and do not apply 3D edge fillets after extrusion. The result must remain exactly one solid with two through-bores.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00995733",
+      "title": "Constant-width swept curved L profile",
+      "resolutions": [
+        "The L is defined as a constant-width planar sweep around an exact centerline.",
+        "The curve type, curve length, continuation length, caps, joins, units, and extrusion direction are explicit."
+      ],
+      "complexity": ["The profile contains an exact-length analytic curve and requires offset-curve construction before extrusion."],
+      "prompt": "Create one curved L-shaped solid in model units. In the XY plane define a centerline that begins at A=(0,0), runs horizontally to B=(0.024896,0), then follows a counter-clockwise circular arc of exactly 90 degrees whose tangent at B is +X. Set the arc radius to R=2*0.752339/pi, so its arc length is exactly 0.752339; its center is at (0.024896,R), and it ends at C=(0.024896+R,R) with tangent +Y. Continue from C with a straight segment of length 0.30 in +Y to D=(0.024896+R,R+0.30). Construct the closed planar profile as the constant-width 0.08 sweep of this entire centerline, using round joins at B and C and flat caps perpendicular to the centerline at A and D. The width is measured normal to the centerline, 0.04 on each side. Extrude the closed profile from Z=0 to Z=0.018672 without draft or edge fillets. The result must be one solid with constant extrusion depth.\n\nDeliver the part as a STEP artifact with its Python source."
+    },
+    {
+      "sample_id": "00996001",
+      "title": "Dimension-complete inverted-U bracket",
+      "resolutions": [
+        "Upright thickness is exactly twice horizontal-bar thickness; 0.416667 is reassigned as the clear inner span.",
+        "The hole axis and center are defined on the top bar."
+      ],
+      "complexity": ["The profile uses derived overall dimensions, a fused U topology, and a through-hole on a named surface."],
+      "prompt": "Create an inverted-U bracket in model units. Define its 2D cross-section in the XZ plane and extrude it along +Y from Y=0 to Y=0.475. The horizontal top bar has Z thickness 0.083333. Each of the two vertical uprights has X thickness 0.166666, exactly twice the bar thickness. The clear X distance between the inner faces of the uprights is 0.416667, so the overall X width is 0.749999. The uprights extend from Z=0 to Z=0.416667; the top bar spans the full overall width from X=-0.3749995 to X=0.3749995 and extends from Z=0.416667 to Z=0.50. Fuse the uprights and bar into exactly one solid. Cut one circular through-hole of diameter 0.1375 normal to the top horizontal surface, with axis parallel to Z and center at X=0,Y=0.2375. The hole passes only through the top bar from Z=0.416667 to Z=0.50 and is centered in both X and Y.\n\nDeliver the part as a STEP artifact with its Python source."
+    }
+  ]
+}

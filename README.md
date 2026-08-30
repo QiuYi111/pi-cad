@@ -311,6 +311,34 @@ run that should access the Codex Images service:
 PI_OFFLINE=0 PRIME_AGENT_REPO=~/work/prime-agent prime-cad
 ```
 
+### Choose the reviewer model
+
+The independent reviewer inherits the author's current provider, model, and
+thinking level by default, including model changes made inside an interactive
+Prime session. To pin a different reviewer for one run:
+
+```bash
+prime-cad --reviewer-provider openai-codex \
+  --reviewer-model gpt-5.6-luna --reviewer-thinking high
+```
+
+For a persistent choice, add this to `~/.prime/agent/prime-cad.json`:
+
+```json
+{
+  "reviewer": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "thinking": "high"
+  }
+}
+```
+
+Use `"reviewer": "inherit"`, or pass `--reviewer-inherit-author`, to restore
+live author inheritance. Environment equivalents are
+`PI_CAD_REVIEWER_PROVIDER`, `PI_CAD_REVIEWER_MODEL`, and
+`PI_CAD_REVIEWER_THINKING`.
+
 ### Headless use
 
 ```bash

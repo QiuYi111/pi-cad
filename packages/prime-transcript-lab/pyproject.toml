@@ -1,0 +1,19 @@
+[project]
+name = "prime-transcript-lab"
+version = "0.1.0"
+description = "Static forensic analyzer for Prime Agent JSONL transcripts"
+requires-python = ">=3.11"
+dependencies = ["plotly>=5.20"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[project.scripts]
+prime-trace = "prime_trace.cli:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["prime_trace*"]

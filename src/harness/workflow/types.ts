@@ -18,7 +18,7 @@ export interface WorkflowTransitionDefinition {
   authority?: string;
   terminalStatus?: string;
   requiresPhaseObligations?: boolean;
-  reviewVerdicts?: Array<"pass" | "fail" | "unresolved">;
+  reviewVerdicts?: Array<"pass" | "fail" | "clarification_required" | "unresolved">;
   requiresVisited?: string[];
   forbidsVisited?: string[];
   invalidate?: string[];

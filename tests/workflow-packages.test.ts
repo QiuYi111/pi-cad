@@ -5,29 +5,60 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
+import { completionGate } from "../src/authority/sidecar.ts";
+import { commitWorkspace } from "../src/harness/commit.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { canonicalDigest } from "../src/harness/canonical.ts";
 import { legalWorkflowTransitions, transitionRun } from "../src/harness/reducer.ts";
 import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
+import { resolveWorkflowPackage } from "../src/harness/workflow/packages.ts";
 
 test("installed Mechanical packages expose metadata only and compile branchable kernel-generic snapshots", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
   try {
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.modify", "mechanical.one-shot"]);
+    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-triage", "mechanical.modify", "mechanical.one-shot"]);
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
+
+    const benchmark = await resolveWorkflowPackage(cwd, "mechanical.benchmark", mechanicalRegistries);
+    assert.equal(benchmark.workflow.initialPhase, "grilling");
+    assert.equal(benchmark.workflow.phases.requirements_review!.reviewProfile, "mechanical.requirements-review");
+    assert.deepEqual(Object.keys(benchmark.workflow.phases.requirements_review!.transitions), ["accepted", "clarification_required", "revise_requirements"]);
+    assert.equal(benchmark.workflow.phases.requirements_review!.transitions.clarification_required!.terminalStatus, "waiting_user");
+    assert.equal(benchmark.workflow.phases.wait_for_user!.actions.length, 0);
+    assert.deepEqual(Object.keys(benchmark.workflow.phases.build!.transitions), ["delivered"]);
+    assert.deepEqual(benchmark.workflow.phases.build!.recordObligations.map((item) => item.ref), ["release"]);
+    assert.deepEqual(benchmark.workflow.phases.build!.evidenceObligations.map((item) => item.ref), ["candidate-geometry", "candidate-visual"]);
+    assert.equal(benchmark.workflow.phases.final_review, undefined);
+    assert.equal(benchmark.workflow.phases.release, undefined);
+    assert.equal(benchmark.workflow.phases.done!.terminal, true);
+
+    const authorOnly = await resolveWorkflowPackage(cwd, "mechanical.benchmark-author-only", mechanicalRegistries);
+    assert.equal(authorOnly.workflow.phases.grilling!.reviewProfile, undefined);
+    assert.deepEqual(Object.keys(authorOnly.workflow.phases.grilling!.transitions), ["clarification_required", "interpreted"]);
+    assert.equal(authorOnly.workflow.phases.grilling!.transitions.clarification_required!.terminalStatus, "waiting_user");
+    assert.equal(authorOnly.workflow.phases.requirements_review, undefined);
+
+    const triage = await resolveWorkflowPackage(cwd, "mechanical.benchmark-triage", mechanicalRegistries);
+    assert.equal(triage.workflow.phases.requirements_review!.reviewProfile, "mechanical.requirements-review");
+    assert.equal(triage.workflow.phases.requirements_review!.transitions.accepted!.target, "admitted");
+    assert.equal(triage.workflow.phases.admitted!.terminal, true);
+    assert.equal(Object.values(triage.workflow.phases).some((phase) => phase.actions.includes("cad_build_step")), false);
 
     await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
     const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
     assert.ok(loaded);
-    assert.equal(loaded.workflow.initialPhase, "grill");
+    assert.equal(loaded.workflow.initialPhase, "grilling");
+    assert.deepEqual(loaded.workflow.phases.grilling!.recommendedSkills, ["grill-me"]);
+    const grillingView = await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any;
+    assert.match(grillingView.text, /Use the grill-me skill in this phase/);
     assert.deepEqual(Object.keys(loaded.workflow.phases.concept!.transitions), ["assembly", "single_part"]);
     assert.ok(loaded.workflow.phases.concept!.grants.includes("image_generate"));
     assert.equal(loaded.workflow.phases.concept!.actions.includes("cad_build_step"), false);
     assert.equal(loaded.workflow.phases.parts!.actions.includes("cad_build_step"), true);
     assert.deepEqual(loaded.workflow.phases.final_review!.reviewProfile, "mechanical.final-review");
-    assert.equal(loaded.workflow.version, "1.0.1");
-    assert.deepEqual(Object.keys(loaded.workflow.phases.final_review!.transitions), ["accepted", "revise_assembly", "revise_single_part"]);
+    assert.equal(loaded.workflow.version, "1.0.4");
+    assert.deepEqual(Object.keys(loaded.workflow.phases.final_review!.transitions), ["accepted", "revise_architecture_bom", "revise_assembly", "revise_concept", "revise_interface", "revise_parts", "revise_spec"]);
     assert.equal(loaded.workflow.phases.done!.terminal, true);
 
     const record = (ref: string) => ({ obligationRef: ref, type: "workspace_commit", path: `workspace/commits/${ref}.json`, sha256: "a".repeat(64), workflowHash: loaded.workflow.hash, createdAt: "now" });
@@ -41,11 +72,18 @@ test("installed Mechanical packages expose metadata only and compile branchable 
       },
     });
     const assemblyReview = reviewFailure({
-      ...loaded.state, phase: "final_review", phaseHistory: ["grill", "spec", "concept", "interface", "architecture_bom", "parts", "assembly", "final_review"],
+      ...loaded.state, phase: "final_review", phaseHistory: ["grilling", "spec", "concept", "interface", "architecture_bom", "parts", "assembly", "final_review"],
       records: { parts: record("parts"), assembly: record("assembly") },
       evidence: [evidence("assembly-visual"), evidence("assembly-geometry")],
     });
-    assert.deepEqual(legalWorkflowTransitions(assemblyReview, loaded.workflow), [{ event: "revise_assembly", target: "assembly" }]);
+    assert.deepEqual(legalWorkflowTransitions(assemblyReview, loaded.workflow), [
+      { event: "revise_architecture_bom", target: "architecture_bom" },
+      { event: "revise_assembly", target: "assembly" },
+      { event: "revise_concept", target: "concept" },
+      { event: "revise_interface", target: "interface" },
+      { event: "revise_parts", target: "parts" },
+      { event: "revise_spec", target: "spec" },
+    ]);
     const revisedAssembly = transitionRun(assemblyReview, loaded.workflow, "revise_assembly");
     assert.equal(revisedAssembly.phase, "assembly");
     assert.equal(revisedAssembly.records.assembly, undefined);
@@ -54,8 +92,30 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.equal(revisedAssembly.staleEvidence.length, 2);
     assert.equal(revisedAssembly.latestReview, undefined);
 
-    const partReview = reviewFailure({ ...loaded.state, phase: "final_review", phaseHistory: ["grill", "spec", "concept", "parts", "final_review"] });
-    assert.deepEqual(legalWorkflowTransitions(partReview, loaded.workflow), [{ event: "revise_single_part", target: "parts" }]);
+    const partReview = reviewFailure({ ...loaded.state, phase: "final_review", phaseHistory: ["grilling", "spec", "concept", "parts", "final_review"] });
+    assert.deepEqual(legalWorkflowTransitions(partReview, loaded.workflow), [
+      { event: "revise_concept", target: "concept" },
+      { event: "revise_parts", target: "parts" },
+      { event: "revise_spec", target: "spec" },
+    ]);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("author-only benchmark can stop headless at wait_for_user without reviewer authority", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-author-only-clarification-"));
+  try {
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.benchmark-author-only", interactionMode: "headless" });
+    await writeFile(join(cwd, "requirements.md"), "Two placements are materially different. Ask which datum owns the offset.");
+    await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "requirements", artifacts: ["requirements.md"] });
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "clarification_required" });
+    const current = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+    assert.equal(current?.state.phase, "wait_for_user");
+    assert.equal(current?.state.status, "waiting_user");
+    assert.equal(current?.state.latestReview, undefined);
+    const gate = await completionGate(cwd);
+    assert.equal(gate.complete, true);
+    assert.equal(gate.outcome, "clarification_required");
+    assert.match(gate.reason, /author identified/);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 

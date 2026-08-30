@@ -277,6 +277,33 @@ PRIME_AGENT_REPO=~/work/prime-agent prime-cad
 PI_OFFLINE=0 PRIME_AGENT_REPO=~/work/prime-agent prime-cad
 ```
 
+### 选择 Reviewer 模型
+
+默认情况下，独立 Reviewer 会继承 Author 当前实际使用的 Provider、模型和思考等级，
+包括在交互式 Prime 会话内切换后的模型。若只想为本次运行固定一个不同的 Reviewer：
+
+```bash
+prime-cad --reviewer-provider openai-codex \
+  --reviewer-model gpt-5.6-luna --reviewer-thinking high
+```
+
+若要持久配置，在 `~/.prime/agent/prime-cad.json` 中加入：
+
+```json
+{
+  "reviewer": {
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "thinking": "high"
+  }
+}
+```
+
+将其改为 `"reviewer": "inherit"`，或启动时传入
+`--reviewer-inherit-author`，即可恢复实时继承。对应的环境变量为
+`PI_CAD_REVIEWER_PROVIDER`、`PI_CAD_REVIEWER_MODEL` 和
+`PI_CAD_REVIEWER_THINKING`。
+
 ### Headless 运行
 
 ```bash

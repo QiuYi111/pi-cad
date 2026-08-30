@@ -35,6 +35,25 @@ export interface ProcessResult {
   terminationDetail?: string;
 }
 
+export interface DetachedProcessOptions {
+  command: string;
+  args?: string[];
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+/** Start a deliberately detached supervisor without leaking child_process imports across the runtime. */
+export function spawnDetachedProcess(options: DetachedProcessOptions): void {
+  assertLinuxRuntime("Pi-CAD detached process runner");
+  const child = spawn(options.command, options.args ?? [], {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+}
+
 interface GateWaiter {
   resolve(release: () => void): void;
   reject(error: Error): void;

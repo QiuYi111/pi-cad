@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { renderCurrentActionCard } from "../src/core/agent-contract.ts";
+import { persistedReviewNotificationIds } from "../src/integrations/prime/extension.ts";
 
 function nextActionFromInstalledContext(actionCard: string): string {
   const line = actionCard.split(/\r?\n/).find((item) => item.startsWith("Recommended next action:"));
@@ -57,8 +58,35 @@ test("Prime CAD skill forbids nested Python adaptation and maps CadQuery tasks t
 test("Prime review completion uses ExtensionAPI messaging rather than event context", async () => {
   const extension = await readFile(join(process.cwd(), "src", "integrations", "prime", "extension.ts"), "utf-8");
   assert.match(extension, /pi\.sendMessage\(/);
+  assert.match(extension, /Summary: \$\{result\.summary\}/);
+  assert.match(extension, /result\?\.findings/);
+  assert.match(extension, /finding\.evidenceRefs/);
   assert.doesNotMatch(extension, /ctx\.sendMessage\(/);
   assert.doesNotMatch(extension, /else if \(current\) await notifyReview/);
+  assert.match(extension, /persistedReviewNotificationIds\(event\.messages\)/);
+  assert.match(extension, /op: "review-current"/);
+  assert.match(extension, /resumedReviewMessage = reviewCompletionMessage\(current\)/);
+});
+
+test("Prime review notification identity survives resume and imported legacy messages", () => {
+  assert.deepEqual(persistedReviewNotificationIds([
+    {
+      role: "custom",
+      customType: "pi-cad.review-completed",
+      content: "display text",
+      details: { reviewId: "review-structured" },
+    },
+    {
+      role: "custom",
+      customType: "pi-cad.review-completed",
+      content: "Pi-CAD independent review review-legacy completed with FAIL for commit-x.",
+    },
+    {
+      role: "custom",
+      customType: "unrelated",
+      details: { reviewId: "review-ignore" },
+    },
+  ]), ["review-structured", "review-legacy"]);
 });
 
 test("published Prime entrypoints contain no development-plan or checkout-specific defaults", async () => {

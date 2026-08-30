@@ -2,17 +2,18 @@ schema: 1
 id: mechanical.modify
 description: Modify an existing mechanical design while preserving baseline traceability and independent release review.
 tags: [cad, mechanical, modify, release]
-version: 1.0.1
+version: 1.0.3
 workflow:
   schema: 1
   id: mechanical.modify
-  version: 1.0.1
+  version: 1.0.3
   parametersSchema: {type: object, additionalProperties: false}
-  initialPhase: grill
+  initialPhase: grilling
   phases:
-    grill:
+    grilling:
       purpose: Resolve requested changes and user-owned decisions.
-      guidance: Separate requested deltas from assumptions and unchanged baseline behavior.
+      guidance: In interactive mode use the grill-me skill. Separate requested deltas from assumptions and unchanged baseline behavior, then wait for explicit confirmation.
+      recommendedSkills: [grill-me]
       actions: [cad_commit, transition]
       grants: [file_read, transition]
       writeScopes: []
@@ -59,8 +60,8 @@ workflow:
     final_review:
       purpose: Independently verify the delta and regression contract.
       guidance: Review the immutable baseline, candidate, and evidence without author authority.
-      actions: [cad_submit_for_review, transition]
-      grants: [file_read, observe, observe_programmable, transition]
+      actions: [cad_submit_for_review]
+      grants: [file_read, observe, observe_programmable]
       writeScopes: [run:observation]
       recordObligations: []
       evidenceObligations: []
@@ -69,7 +70,7 @@ workflow:
       reviewProfile: mechanical.final-review
       transitions:
         accepted: {target: release, reviewVerdicts: [pass]}
-        revise: {target: modify, reviewVerdicts: [fail, unresolved], invalidate: [candidate]}
+        revise: {target: modify, reviewVerdicts: [fail], invalidate: [candidate]}
     release:
       purpose: Freeze the reviewed modified release.
       guidance: Commit the exact reviewed artifact set, then close the workflow.

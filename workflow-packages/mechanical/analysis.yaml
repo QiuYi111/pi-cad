@@ -2,17 +2,18 @@ schema: 1
 id: mechanical.analysis
 description: Analyze an immutable mechanical artifact and release an independently reviewed evidence-backed conclusion.
 tags: [analysis, cad, mechanical, review]
-version: 1.0.1
+version: 1.0.3
 workflow:
   schema: 1
   id: mechanical.analysis
-  version: 1.0.1
+  version: 1.0.3
   parametersSchema: {type: object, additionalProperties: false}
-  initialPhase: grill
+  initialPhase: grilling
   phases:
-    grill:
+    grilling:
       purpose: Resolve the analysis question and decisions that affect interpretation.
-      guidance: Turn the request into a bounded falsifiable question.
+      guidance: In interactive mode use the grill-me skill. Turn the request into a bounded falsifiable question and wait for explicit confirmation.
+      recommendedSkills: [grill-me]
       actions: [cad_commit, transition]
       grants: [file_read, transition]
       writeScopes: []
@@ -57,8 +58,8 @@ workflow:
     final_review:
       purpose: Independently verify evidence coverage and the conclusion.
       guidance: Recompute decisive facts from the immutable artifact and reject unsupported certainty.
-      actions: [cad_submit_for_review, transition]
-      grants: [file_read, observe, observe_programmable, transition]
+      actions: [cad_submit_for_review]
+      grants: [file_read, observe, observe_programmable]
       writeScopes: [run:observation]
       recordObligations: []
       evidenceObligations: []
@@ -67,7 +68,7 @@ workflow:
       reviewProfile: mechanical.final-review
       transitions:
         accepted: {target: release, reviewVerdicts: [pass]}
-        revise: {target: analyze, reviewVerdicts: [fail, unresolved], invalidate: [analysis]}
+        revise: {target: analyze, reviewVerdicts: [fail], invalidate: [analysis]}
     release:
       purpose: Freeze the reviewed analysis report and close the workflow.
       guidance: Commit the exact reviewed report and cited artifact identities.

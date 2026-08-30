@@ -30,12 +30,19 @@ const quickRoute = {
   maturity: "prototype",
 } as const;
 
-test("CADTestBench headless runs enable the independent final reviewer", () => {
+test("CADTestBench headless runs use one pre-build requirements review and no final geometry review", () => {
   const runner = readFileSync(join(process.cwd(), "benchmarks", "cadtestbench", "run.mjs"), "utf-8");
-  assert.match(
-    runner,
-    /PI_CAD_HEADLESS:\s*"1"[\s\S]*?PI_CAD_FINAL_REVIEWER:\s*"1"/,
-  );
+  const workflow = readFileSync(join(process.cwd(), "workflow-packages", "mechanical", "benchmark.yaml"), "utf-8");
+  assert.match(runner, /PI_CAD_HEADLESS:\s*"1"/);
+  assert.match(runner, /PI_CAD_AGENT_BIN \?\? "prime-agent"/);
+  assert.match(runner, /PI_CAD_EXPERIENCE_ROOT: experienceRoot/);
+  assert.match(runner, /recordBenchmarkExperience\(staging, sampleId, evaluation, audit\)/);
+  assert.match(runner, /evaluatorAuthority: "CADTestBench PR\/RS"/);
+  assert.match(runner, /single adversarial requirements reviewer/);
+  assert.match(runner, /--reviewer-inherit-author/);
+  assert.match(workflow, /reviewProfile: mechanical\.requirements-review/);
+  assert.doesNotMatch(workflow, /reviewProfile: mechanical\.final-review/);
+  assert.match(workflow, /adversarial pre-mortem/);
   assert.match(runner, /tarExtract\(vaultTarPath\(e\.tar\), preloadDir\)/);
   assert.doesNotMatch(runner, /tarExtract\(vaultTarPath\(e\.tar\), join\(preloadDir, key\)\)/);
 });

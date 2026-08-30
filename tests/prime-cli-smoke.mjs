@@ -67,13 +67,19 @@ try {
   assert.ok(events.some((event) => event.type === "message_end" && JSON.stringify(event.message).includes("PRIME_PLAN_C_SMOKE_OK")));
 
   assert.equal(contexts.length, 3);
-  const firstCard = JSON.stringify(contexts[0]);
-  const laterCards = contexts.slice(1).map((context) => JSON.stringify(context));
-  assert.match(firstCard, /MUST.*provider-handoff/);
+  const phaseCardText = (context) => context.messages
+    .flatMap((message) => Array.isArray(message.content) ? message.content : [])
+    .find((item) => item.type === "text" && item.text.startsWith("WHERE\n"))?.text;
+  const firstCard = phaseCardText(contexts[0]);
+  const laterCards = contexts.slice(1).map(phaseCardText);
+  assert.ok(firstCard, "first provider call must contain the ephemeral Phase Card");
+  assert.ok(laterCards.every(Boolean), "every provider call must contain the ephemeral Phase Card");
+  assert.match(firstCard, /MUST[\s\S]*provider-handoff/);
   assert.doesNotMatch(firstCard, /record provider-handoff@/);
   for (const card of laterCards) {
     assert.match(card, /record provider-handoff@/);
-    assert.doesNotMatch(card, /MUST.*- provider-handoff/);
+    const must = card.slice(card.indexOf("MUST"), card.indexOf("\n\nCAN"));
+    assert.doesNotMatch(must, /- provider-handoff/);
   }
   const imageBase64 = readFileSync(join(fixture, "mandatory.png")).toString("base64");
   for (const context of contexts) {

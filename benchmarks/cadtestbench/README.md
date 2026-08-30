@@ -1,5 +1,16 @@
 # CADTestBench × Pi-CAD Benchmark
 
+Headless requirements screening can either continue into CAD or stop after a
+recorded decision:
+
+```bash
+PI_CAD_HEADLESS_AFTER_GRILLING=build node run.mjs ... # default
+PI_CAD_HEADLESS_AFTER_GRILLING=exit node run.mjs ...  # triage only
+```
+
+Interactive workflows enter the `grilling` phase and use the bundled
+`grill-me` skill before engineering begins.
+
 External deterministic benchmark loop for the Pi-CAD harness (plan v0.1,
 Jira JIN-30). One command takes a CADTestBench prompt through the
 **unmodified production harness** to a scored, fully-logged run:

@@ -57,11 +57,20 @@ async def request(op: str, **payload: Any) -> Any:
             writer.write(request_body)
             await writer.drain()
             writer.write_eof()
-            stdout = await reader.read(8 * 1024 * 1024 + 1)
+            limit = 8 * 1024 * 1024
+            chunks: list[bytes] = []
+            size = 0
+            while True:
+                chunk = await reader.read(min(64 * 1024, limit + 1 - size))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                size += len(chunk)
+                if size > limit:
+                    raise CadApiError("Pi-CAD sidecar response exceeds byte limit")
+            stdout = b"".join(chunks)
             writer.close()
             await writer.wait_closed()
-            if len(stdout) > 8 * 1024 * 1024:
-                raise CadApiError("Pi-CAD sidecar response exceeds byte limit")
             response = json.loads(stdout.decode())
         except CadApiError:
             raise

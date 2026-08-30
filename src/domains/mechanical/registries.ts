@@ -102,6 +102,7 @@ simple("contextProviders", {
   "mechanical.runtime-availability": { source: "bounded runtime manifests", maxBytesRead: 131072, maxBytesEmitted: 16384 },
 });
 simple("reviewProfiles", {
+  "mechanical.requirements-review": { reviewer: "fresh", deterministicPreflight: false, authority: "pre-build-admission-gate" },
   "mechanical.design-review": { reviewer: "fresh", deterministicPreflight: true, authority: "advisory-until-reducer" },
   "mechanical.final-review": { reviewer: "fresh", deterministicPreflight: true, authority: "closure-gate" },
 });

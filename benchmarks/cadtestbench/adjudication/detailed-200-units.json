@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "benchmark_set": "detailed-200",
+  "canonical_step_unit": "mm",
+  "policy": {
+    "physical_unit_samples": 8,
+    "abstract_model_unit_samples": 192,
+    "abstract_model_units": "The other 192 prompts use generic 'units'. They are abstract model units, not physical metres, inches, feet, or millimetres, and their numeric values must not be converted.",
+    "physical_units": "For the eight samples listed below, rewrite every physical length into millimetres before presenting the prompt. STEP coordinates and evaluator absolute quantities must use mm, mm^2, and mm^3 respectively.",
+    "dimensionless_quantities": "Angles, counts, ratios, and explicit scale factors are unchanged.",
+    "evaluator_scope": "Only absolute length, area, and volume checks identified below are rescaled. Topology, ratios, shape factors, centering, and other scale-invariant checks remain unchanged."
+  },
+  "samples": [
+    {
+      "sample_id": "00031181",
+      "source_unit": "m",
+      "scale_to_mm": 1000,
+      "dimensions": [
+        { "name": "length", "source": 0.61135, "mm": 611.35 },
+        { "name": "width", "source": 0.36026, "mm": 360.26 },
+        { "name": "height", "source": 0.33843, "mm": 338.43 }
+      ],
+      "prompt_strategy": {
+        "action": "replace_physical_dimensions",
+        "instruction": "Replace the three metre-valued dimensions with 611.35 mm, 360.26 mm, and 338.43 mm. State that the delivered STEP uses millimetres."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 6, "quantity": "length", "scale": 1000 },
+        { "test_id": 7, "quantity": "length", "scale": 1000 },
+        { "test_id": 8, "quantity": "length", "scale": 1000 },
+        { "test_id": 9, "quantity": "volume", "scale": 1000000000 }
+      ],
+      "affected_test_count": 4,
+      "non_unit_semantic_issues": []
+    },
+    {
+      "sample_id": "00037135",
+      "source_unit": "m",
+      "scale_to_mm": 1000,
+      "dimensions": [
+        {
+          "name": "polyline_points",
+          "source": [
+            [-0.05430806, 0.05735744],
+            [-0.05430806, -0.05851911],
+            [-0.04704762, -0.05851911],
+            [-0.0383351, -0.00217813],
+            [0.00232334, -0.00217813],
+            [0.0116167, -0.06200412],
+            [0.01742505, -0.06200412],
+            [0.01452087, 0.01030982],
+            [-0.02875133, 0.01030982],
+            [-0.0450147, 0.05735744],
+            [-0.05430806, 0.05735744]
+          ],
+          "mm": [
+            [-54.30806, 57.35744],
+            [-54.30806, -58.51911],
+            [-47.04762, -58.51911],
+            [-38.3351, -2.17813],
+            [2.32334, -2.17813],
+            [11.6167, -62.00412],
+            [17.42505, -62.00412],
+            [14.52087, 10.30982],
+            [-28.75133, 10.30982],
+            [-45.0147, 57.35744],
+            [-54.30806, 57.35744]
+          ]
+        },
+        { "name": "extrusion_depth", "source": 0.1016, "mm": 101.6 },
+        { "name": "uniform_scale_factor", "source": 7.38186180173805, "mm": null, "dimension": "dimensionless" },
+        { "name": "final_bbox_span_x", "source": 0.5295239046288738, "mm": 529.5239046288738, "derived": true },
+        { "name": "final_bbox_span_y", "source": 0.8811105403598644, "mm": 881.1105403598643, "derived": true },
+        { "name": "final_extrusion_span", "source": 0.7499971590565858, "mm": 749.9971590565858, "derived": true }
+      ],
+      "prompt_strategy": {
+        "action": "clarify_and_replace_physical_dimensions",
+        "instruction": "Explicitly declare that every polyline coordinate is in metres, convert all coordinates and the 0.1016 m extrusion to millimetres, then apply the unchanged dimensionless scale factor 7.38186180173805. State that the delivered STEP uses millimetres."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 6, "quantity": "volume", "scale": 1000000000 },
+        { "test_id": 7, "quantity": "length", "scale": 1000 },
+        { "test_id": 13, "quantity": "length", "scale": 1000 },
+        { "test_id": 18, "quantity": "length", "scale": 1000 }
+      ],
+      "affected_test_count": 4,
+      "non_unit_semantic_issues": [
+        "The source prompt assigns metres to the extrusion but leaves the polyline coordinate unit implicit. The normalized prompt must explicitly declare the point coordinates to be metres before conversion."
+      ]
+    },
+    {
+      "sample_id": "00039012",
+      "source_unit": "in",
+      "scale_to_mm": 25.4,
+      "dimensions": [
+        { "name": "pipe_body_diameter", "source": 0.70248, "mm": 17.842992 },
+        { "name": "pipe_height", "source": 0.75, "mm": 19.05 },
+        { "name": "flange_outer_diameter", "source": 0.825, "mm": 20.955 },
+        { "name": "flange_height", "source": 0.01125, "mm": 0.28575 }
+      ],
+      "prompt_strategy": {
+        "action": "replace_physical_dimensions",
+        "instruction": "Replace every inch-valued length with its millimetre equivalent and state that the delivered STEP uses millimetres. Do not silently repair the separate positive/negative extrusion wording conflict."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 4, "quantity": "length", "scale": 25.4 },
+        { "test_id": 5, "quantity": "length", "scale": 25.4 },
+        { "test_id": 9, "quantity": "volume", "scale": 16387.064 },
+        { "test_id": 13, "quantity": "length", "scale": 25.4 }
+      ],
+      "affected_test_count": 4,
+      "non_unit_semantic_issues": [
+        "The prompt calls the 0.70248 inch circle 'inner' and its extrusion positive while calling the 0.825 inch circle 'outer' and its extrusion negative. That Boolean/diameter description is reversed or otherwise semantically inconsistent and must be adjudicated separately."
+      ]
+    },
+    {
+      "sample_id": "00520570",
+      "source_unit": "m",
+      "scale_to_mm": 1000,
+      "dimensions": [
+        { "name": "base_width", "source": 0.767871, "mm": 767.871 },
+        { "name": "top_width", "source": 1.04978, "mm": 1049.78 },
+        { "name": "height", "source": 0.576632, "mm": 576.632 },
+        { "name": "extrusion_length", "source": 0.012814, "mm": 12.814 }
+      ],
+      "prompt_strategy": {
+        "action": "replace_physical_dimensions",
+        "instruction": "Replace every metre-valued length with its millimetre equivalent and state that the delivered STEP uses millimetres. Preserve unspecified transforms as unspecified."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 6, "quantity": "length", "scale": 1000 },
+        { "test_id": 7, "quantity": "length", "scale": 1000 },
+        { "test_id": 8, "quantity": "length", "scale": 1000 },
+        { "test_id": 9, "quantity": "volume", "scale": 1000000000 }
+      ],
+      "affected_test_count": 4,
+      "non_unit_semantic_issues": [
+        "The phrase 'with additional translation adjustments as specified' provides no actual translation values. This is a missing-placement requirement, not a unit defect."
+      ]
+    },
+    {
+      "sample_id": "00670259",
+      "source_unit": "m",
+      "scale_to_mm": 1000,
+      "dimensions": [
+        { "name": "outer_length", "source": 0.06, "mm": 60 },
+        { "name": "outer_width", "source": 0.06, "mm": 60 },
+        { "name": "extrusion_height", "source": 0.75, "mm": 750 },
+        { "name": "inside_padding_each_side", "source": 0.0045, "mm": 4.5 },
+        { "name": "derived_inner_side", "source": 0.051, "mm": 51, "derived": true }
+      ],
+      "prompt_strategy": {
+        "action": "replace_physical_dimensions",
+        "instruction": "Replace every metre-valued length with its millimetre equivalent, explicitly retain 4.5 mm wall padding on all four sides, and state that the delivered STEP uses millimetres."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 2, "quantity": "length", "scale": 1000 },
+        { "test_id": 3, "quantity": "length", "scale": 1000 },
+        { "test_id": 6, "quantity": "volume", "scale": 1000000000 },
+        { "test_id": 12, "quantity": "length", "scale": 1000 },
+        { "test_id": 13, "quantity": "length", "scale": 1000 }
+      ],
+      "affected_test_count": 5,
+      "non_unit_semantic_issues": []
+    },
+    {
+      "sample_id": "00983173",
+      "source_unit": "in",
+      "scale_to_mm": 25.4,
+      "dimensions": [
+        { "name": "square_length", "source": 1.3125, "mm": 33.3375 },
+        { "name": "square_width", "source": 1.3125, "mm": 33.3375 },
+        { "name": "plate_height", "source": 0.0625, "mm": 1.5875 },
+        { "name": "corner_hole_diameter", "source": 0.05, "mm": 1.27 },
+        { "name": "cylinder_outer_diameter", "source": 1, "mm": 25.4 },
+        { "name": "cylinder_inner_diameter", "source": 0.9375, "mm": 23.8125 },
+        { "name": "cylinder_height", "source": 0.6875, "mm": 17.4625 },
+        { "name": "z_translation", "source": 0.03125, "mm": 0.79375 }
+      ],
+      "prompt_strategy": {
+        "action": "replace_physical_dimensions",
+        "instruction": "Replace every inch-valued length with its millimetre equivalent and state that the delivered STEP uses millimetres."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 1, "quantity": "length", "scale": 25.4 },
+        { "test_id": 3, "quantity": "length", "scale": 25.4 },
+        { "test_id": 8, "quantity": "volume", "scale": 16387.064 },
+        { "test_id": 14, "quantity": "area", "scale": 645.16 }
+      ],
+      "affected_test_count": 4,
+      "non_unit_semantic_issues": []
+    },
+    {
+      "sample_id": "00985066",
+      "source_unit": "m",
+      "scale_to_mm": 1000,
+      "dimensions": [
+        { "name": "upright_column_length", "source": 0.05, "mm": 50 },
+        { "name": "upright_column_width", "source": 0.35, "mm": 350 },
+        { "name": "horizontal_section_length", "source": 1.175, "mm": 1175 },
+        { "name": "horizontal_section_width", "source": 0.35, "mm": 350 },
+        { "name": "column_height", "source": 0.725, "mm": 725 },
+        { "name": "horizontal_section_height", "source": 0.025, "mm": 25 },
+        { "name": "derived_total_height", "source": 0.75, "mm": 750, "derived": true }
+      ],
+      "prompt_strategy": {
+        "action": "replace_physical_dimensions",
+        "instruction": "Replace every metre-valued length with its millimetre equivalent and state that the delivered STEP uses millimetres."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 2, "quantity": "length", "scale": 1000 },
+        { "test_id": 3, "quantity": "length", "scale": 1000 },
+        { "test_id": 4, "quantity": "length", "scale": 1000 },
+        { "test_id": 5, "quantity": "volume", "scale": 1000000000 },
+        { "test_id": 13, "quantity": "volume", "scale": 1000000000 },
+        { "test_id": 17, "quantity": "volume", "scale": 1000000000 }
+      ],
+      "affected_test_count": 6,
+      "non_unit_semantic_issues": [
+        "The prose says the upright columns have a slightly larger width than the horizontal section, but assigns both widths the same 0.35 m value. This relational conflict is not caused by unit conversion."
+      ]
+    },
+    {
+      "sample_id": "00998300",
+      "source_unit": "m",
+      "scale_to_mm": 1000,
+      "dimensions": [
+        { "name": "vertical_rectangle_length", "source": 0.036, "mm": 36 },
+        { "name": "vertical_rectangle_width", "source": 0.0135, "mm": 13.5 },
+        { "name": "vertical_extrusion_height", "source": 0.9, "mm": 900 },
+        { "name": "horizontal_rectangle_width", "source": 0.0135, "mm": 13.5 },
+        { "name": "horizontal_rectangle_length", "source": 0.24, "mm": 240 },
+        { "name": "horizontal_offset_below_top", "source": 0.15, "mm": 150 },
+        { "name": "horizontal_extrusion_depth", "source": 0.036, "mm": 36 }
+      ],
+      "prompt_strategy": {
+        "action": "replace_physical_dimensions",
+        "instruction": "Replace every metre-valued length with its millimetre equivalent and state that the delivered STEP uses millimetres."
+      },
+      "affected_evaluator_tests": [
+        { "test_id": 2, "quantity": "length", "scale": 1000 },
+        { "test_id": 3, "quantity": "length", "scale": 1000 },
+        { "test_id": 4, "quantity": "length", "scale": 1000 },
+        { "test_id": 5, "quantity": "volume", "scale": 1000000000 },
+        { "test_id": 13, "quantity": "volume", "scale": 1000000000 },
+        { "test_id": 14, "quantity": "length", "scale": 1000 }
+      ],
+      "affected_test_count": 6,
+      "non_unit_semantic_issues": [
+        "The phrase 'skewed, T-shaped' does not uniquely define the skew angle or planar attachment geometry. Historical failures beyond the six unit-sensitive tests must remain available for semantic adjudication rather than being attributed to unit conversion."
+      ]
+    }
+  ],
+  "false_positive_terms": [
+    {
+      "sample_id": "00996329",
+      "term": "foot width",
+      "classification": "geometry",
+      "note": "Here 'foot' names the lower arm of an L-shaped cross-section; it is not the imperial unit foot. The prompt uses abstract model units and must not be converted."
+    }
+  ],
+  "evidence": [
+    "benchmarks/cadtestbench/data/prompts.detailed.json",
+    "benchmarks/cadtestbench/data/hf/cadtests/detailed.parquet",
+    "benchmarks/cadtestbench/results/2026-08-29T01-42-35-656Z_sol-low-prime-experience-full200/experience/distill-jobs/evidence-distill-1-100/seq-41-60.md",
+    "benchmarks/cadtestbench/results/2026-08-29T01-42-35-656Z_sol-low-prime-experience-full200/experience/distill-jobs/evidence-distill-1-100/seq-61-80.md",
+    "benchmarks/cadtestbench/results/2026-08-29T01-42-35-656Z_sol-low-prime-experience-full200/experience/distill-jobs/evidence-distill-1-100/seq-81-100.md"
+  ]
+}

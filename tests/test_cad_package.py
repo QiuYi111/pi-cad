@@ -5,6 +5,7 @@ import ast
 import asyncio
 import base64
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -39,6 +40,32 @@ class CadPackageTests(unittest.TestCase):
             with self.assertRaisesRegex(client.CadApiError, "failed closed"):
                 asyncio.run(client.request("workflow-current"))
         local_engine.assert_not_awaited()
+
+    def test_sidecar_response_is_read_to_eof_before_json_decode(self) -> None:
+        client = importlib.import_module("cad.client")
+        encoded = json.dumps({"ok": True, "result": {"image": "a" * 100_000}}).encode()
+
+        class FragmentedReader:
+            def __init__(self) -> None:
+                self._chunks = [encoded[:31], encoded[31:70_000], encoded[70_000:], b""]
+
+            async def read(self, _limit: int) -> bytes:
+                return self._chunks.pop(0)
+
+        writer = SimpleNamespace(
+            write=Mock(),
+            drain=AsyncMock(),
+            write_eof=Mock(),
+            close=Mock(),
+            wait_closed=AsyncMock(),
+        )
+        with (
+            patch.dict(os.environ, {"PI_CAD_AUTHOR_SOCKET": "/run/pi-cad/authority.sock"}),
+            patch.object(client.asyncio, "open_unix_connection", AsyncMock(return_value=(FragmentedReader(), writer))),
+        ):
+            result = asyncio.run(client.request("workflow-current"))
+        self.assertEqual(len(result["image"]), 100_000)
+        writer.close.assert_called_once()
 
     def test_json_dataclass_path_and_numpy_codecs_are_explicit(self) -> None:
         self.assertEqual(cad.snapshot.registry.decode(cad.snapshot.registry.encode({"a": [1, 2]})), {"a": [1, 2]})
@@ -200,6 +227,7 @@ class CadPackageTests(unittest.TestCase):
         mocked = AsyncMock(return_value={
             "reviewId": "review-" + "a" * 24,
             "records": [{"obligationRef": "spec"}],
+            "candidate": {"path": "build/candidate.step", "sha256": "c" * 64, "role": "authoritative-candidate-design"},
             "images": [{"data": encoded, "mimeType": "image/png", "evidenceRef": "visual:" + "b" * 64}],
         })
         attach = Mock()
@@ -207,6 +235,9 @@ class CadPackageTests(unittest.TestCase):
             context = asyncio.run(review_module.inspect())
         mocked.assert_awaited_once_with("review-evidence")
         self.assertEqual(context["images"], [{"mimeType": "image/png", "evidenceRef": "visual:" + "b" * 64}])
+        self.assertIsInstance(context["candidate"], cad.ArtifactRef)
+        self.assertEqual(context["candidate"].path, Path("build/candidate.step"))
+        self.assertEqual(context["candidate"].sha256, "c" * 64)
         self.assertEqual(attach.call_count, 1)
         self.assertTrue(attach.call_args.kwargs["raw"])
 
@@ -280,7 +311,7 @@ class CadPackageTests(unittest.TestCase):
         workflow_module = importlib.import_module("cad.workflow")
         mocked = AsyncMock(side_effect=[
             [{"id": "mechanical.one-shot", "description": "Design", "tags": ["cad"], "version": "1.0.0"}],
-            {"workflowId": "mechanical.one-shot", "phase": "grill"},
+            {"workflowId": "mechanical.one-shot", "phase": "grilling"},
             {"phase": "spec"},
         ])
         with patch.object(workflow_module, "request", mocked):
@@ -302,15 +333,31 @@ class CadPackageTests(unittest.TestCase):
         review_module = importlib.import_module("cad.review")
         commit_id = "commit-" + "a" * 32
         handle = {"reviewId": "review-" + "b" * 24, "subjectCommit": commit_id, "status": "running"}
-        mocked = AsyncMock(side_effect=[handle, {**handle, "status": "pass"}])
+        result = {"verdict": "pass", "target": "release", "summary": "accepted", "findings": []}
+        mocked = AsyncMock(side_effect=[handle, {**handle, "status": "pass", "result": result}])
         with patch.object(review_module, "request", mocked):
             returned = asyncio.run(cad.review.submit(commit_id))
             current = asyncio.run(cad.review.current(returned))
         self.assertEqual(returned, handle)
         self.assertEqual(current["status"], "pass")
+        self.assertEqual(current["result"], result)
         self.assertEqual(mocked.await_args_list[0].args, ("review-submit",))
         self.assertEqual(mocked.await_args_list[0].kwargs["subjectCommit"], commit_id)
         self.assertEqual(mocked.await_args_list[1].kwargs["reviewId"], handle["reviewId"])
+
+    def test_review_resolve_submits_authoritative_verdicts_and_rejects_runtime_unresolved(self) -> None:
+        review_module = importlib.import_module("cad.review")
+        review_id = "review-" + "b" * 24
+        mocked = AsyncMock(return_value={"reviewId": review_id, "status": "fail"})
+        with patch.object(review_module, "request", mocked):
+            asyncio.run(cad.review.resolve(review_id, verdict="fail", target="concept", summary="concept is unsound", findings=[]))
+            self.assertEqual(mocked.await_args.kwargs["result"], {
+                "verdict": "fail", "target": "concept", "summary": "concept is unsound", "findings": [],
+            })
+            asyncio.run(cad.review.resolve(review_id, verdict="clarification_required", target="wait_for_user", summary="ask the user", findings=[]))
+            self.assertEqual(mocked.await_args.kwargs["result"]["verdict"], "clarification_required")
+        with self.assertRaisesRegex(ValueError, "clarification_required"):
+            asyncio.run(cad.review.resolve(review_id, verdict="unresolved", target="concept", summary="unsure", findings=[]))
 
     def test_simulation_run_returns_a_real_pending_job(self) -> None:
         simulation_module = importlib.import_module("cad.simulation")

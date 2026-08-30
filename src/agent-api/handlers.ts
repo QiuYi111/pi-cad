@@ -2,7 +2,7 @@ import { canonicalDigest, jsonValue, type JsonValue } from "../harness/canonical
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { commitWorkspace, loadWorkspaceCommit, workspaceHistory } from "../harness/commit.ts";
-import { legalWorkflowTransitions, reviseEvidenceRef, transitionRun, unmetPhaseObligations } from "../harness/reducer.ts";
+import { reviseEvidenceRef, transitionRun } from "../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { executeCadProbe } from "../modules/probe/tool.ts";
@@ -15,6 +15,8 @@ import { bootstrapAgentApiContracts } from "./bootstrap.ts";
 import { requireCurrentAuthorization } from "./authorization.ts";
 import type { Operation, OperationAuthority } from "../harness/permissions.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
+import { workflowCurrentView } from "../harness/card.ts";
+import { sha256File } from "../shared/store.ts";
 
 /**
  * Every Agent API operation that can mutate an active run is admitted here,
@@ -33,14 +35,7 @@ export const AGENT_API_MUTATION_OPERATIONS = {
 async function current(cwd: string) {
   const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
   if (!loaded) return null;
-  const phase = loaded.workflow.phases[loaded.state.phase]!;
-  return {
-    runId: loaded.state.runId, workflowId: loaded.workflow.id, workflowHash: loaded.workflow.hash,
-    phase: loaded.state.phase, purpose: phase.purpose, guidance: phase.guidance ?? null,
-    status: loaded.state.status, unmet: unmetPhaseObligations(loaded.state, loaded.workflow),
-    transitions: legalWorkflowTransitions(loaded.state, loaded.workflow),
-    recommendedTemplates: phase.recommendedTemplates ?? [], recommendedSkills: phase.recommendedSkills ?? [],
-  };
+  return workflowCurrentView(loaded, mechanicalRegistries);
 }
 
 function projectRelativePath(cwd: string, path: string): string {
@@ -90,12 +85,15 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   const contextRefs = Object.fromEntries(selected.map((path, index) => [index === 0 ? "mandatoryImageIso" : "mandatoryImageFront", phaseCardEvidenceRef(cwd, path)]));
   const artifactHash = envelopeArtifactHash(build, "step");
   if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
+  const sourcePath = projectRelativePath(cwd, request.source);
+  const sourceHash = await sha256File(resolve(cwd, request.source));
   await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
     let state = {
       ...loaded.state,
       artifacts: {
         ...loaded.state.artifacts,
         "candidate:authoritative": { id: "candidate:authoritative", path: projectRelativePath(cwd, artifact), sha256: artifactHash, role: "authoritative-candidate-design" },
+        "candidate:source": { id: "candidate:source", path: sourcePath, sha256: sourceHash, role: "candidate-source" },
       },
       contextRefs: { ...loaded.state.contextRefs, ...contextRefs },
     };

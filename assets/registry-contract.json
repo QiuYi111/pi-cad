@@ -374,6 +374,11 @@
       "version": "1.0.0",
       "schemaDigest": "3fe79c3dd81975916de20f7a3e402e39e6faec44088d4912750529b2f139bf24",
       "semanticsDigest": "0fbf69b5a2a7dd139fede9d66f4325af2d2036afab0094759c1e6872b13ddc41"
+    },
+    "mechanical.requirements-review": {
+      "version": "1.0.0",
+      "schemaDigest": "3fe79c3dd81975916de20f7a3e402e39e6faec44088d4912750529b2f139bf24",
+      "semanticsDigest": "a8161a4e0b44ca32f71398a51f613014d2e8ca14d79e9a2be6b5a8726f4964c0"
     }
   },
   "recordTypes": {
@@ -534,5 +539,5 @@
       "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
     }
   },
-  "hash": "f84f5fb716c05a6ed76264bf17fba9db824d72e2ccab11fe0ba6b474c9ce8679"
+  "hash": "74f147801137ab381186f1868d9004721a9a7ee3d734db4a97bb3e4876fbc9ab"
 }

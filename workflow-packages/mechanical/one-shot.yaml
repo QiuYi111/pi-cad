@@ -2,17 +2,18 @@ schema: 1
 id: mechanical.one-shot
 description: Design and release a greenfield mechanical part or assembly with independent final review.
 tags: [cad, design, mechanical, release]
-version: 1.0.1
+version: 1.0.4
 workflow:
   schema: 1
   id: mechanical.one-shot
-  version: 1.0.1
+  version: 1.0.4
   parametersSchema: {type: object, additionalProperties: false}
-  initialPhase: grill
+  initialPhase: grilling
   phases:
-    grill:
+    grilling:
       purpose: Resolve the task intent, missing constraints, and user-owned decisions.
-      guidance: Ask only questions that materially change the design contract; record explicit assumptions for everything else.
+      guidance: In interactive mode use the grill-me skill and follow it as written. Wait for explicit confirmation before committing. Headless runs use the configured requirements-review path instead.
+      recommendedSkills: [grill-me]
       actions: [cad_commit, transition]
       grants: [file_read, transition]
       writeScopes: []
@@ -85,7 +86,7 @@ workflow:
         assembly_parts_complete: {target: assembly, requiresPhaseObligations: true}
     assembly:
       purpose: Integrate parts and verify the complete assembly candidate.
-      guidance: First commit the assembly obligation, then build the assembly from committed parts and interfaces. If inspection reveals a defect, edit and rebuild; only the latest ArtifactRef remains authoritative. Probe fit, motion envelope, and interference, create review-candidate, and take assembled only when it appears in NEXT.
+      guidance: First close the assembly workspace obligation with assembly = await cad.commit("assembly", ...). Then call artifact = await cad.model.build(source, output, force=True); that managed build closes both assembly-geometry and assembly-visual. Never try to close those evidence obligations with cad.commit. If inspection reveals a defect, edit and rebuild into the same artifact variable. Probe fit, motion envelope, and interference, create review-candidate from the latest artifact plus deterministic source, and take assembled only when it appears in NEXT.
       actions: [cad_build_step, cad_commit, transition]
       grants: [file_read, file_edit_source, model_build, observe, observe_interference, observe_programmable, shell, transition]
       writeScopes: [project:deliverable, project:source, run:observation]
@@ -98,9 +99,9 @@ workflow:
       transitions: {assembled: {target: final_review, requiresPhaseObligations: true}}
     final_review:
       purpose: Obtain an independent evidence-backed verdict on the immutable candidate.
-      guidance: Submit exactly once using the review-candidate Commit object returned by cad.commit; do not submit an ArtifactRef, phase record, guessed ID, or stale commit. Wait for the host review-complete event before reading the verdict or transitioning.
-      actions: [cad_submit_for_review, transition]
-      grants: [file_read, observe, observe_programmable, transition]
+      guidance: Submit exactly once using the review-candidate Commit object returned by cad.commit; do not submit an ArtifactRef, phase record, guessed ID, or stale commit. Wait for the host review-complete event. The reviewer chooses PASS/FAIL and the legal destination; the sidecar transitions atomically, so the author must not guess or repeat it.
+      actions: [cad_submit_for_review]
+      grants: [file_read, observe, observe_programmable]
       writeScopes: [run:observation]
       recordObligations: []
       evidenceObligations: []
@@ -109,8 +110,12 @@ workflow:
       reviewProfile: mechanical.final-review
       transitions:
         accepted: {target: release, reviewVerdicts: [pass]}
-        revise_single_part: {target: parts, reviewVerdicts: [fail, unresolved], forbidsVisited: [assembly], invalidate: [parts]}
-        revise_assembly: {target: assembly, reviewVerdicts: [fail, unresolved], requiresVisited: [assembly], invalidate: [assembly]}
+        revise_spec: {target: spec, reviewVerdicts: [fail], invalidate: [spec]}
+        revise_concept: {target: concept, reviewVerdicts: [fail], invalidate: [concept]}
+        revise_interface: {target: interface, reviewVerdicts: [fail], requiresVisited: [interface], invalidate: [interface]}
+        revise_architecture_bom: {target: architecture_bom, reviewVerdicts: [fail], requiresVisited: [architecture_bom], invalidate: [architecture-bom]}
+        revise_parts: {target: parts, reviewVerdicts: [fail], invalidate: [parts]}
+        revise_assembly: {target: assembly, reviewVerdicts: [fail], requiresVisited: [assembly], invalidate: [assembly]}
     release:
       purpose: Freeze the reviewed release commit and close the workflow.
       guidance: Commit release with the reviewed subject Commit as explicit parent and the exact reviewed artifact set with roles and hashes preserved; do not substitute, omit, or add files.

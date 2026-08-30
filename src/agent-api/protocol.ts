@@ -21,7 +21,7 @@ export type AgentApiRequest =
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }
   | { schema: 1; op: "review-submit"; subjectCommit: string }
   | { schema: 1; op: "review-current"; reviewId?: string }
-  | { schema: 1; op: "review-complete"; reviewId: string; result: { verdict: "pass" | "fail" | "unresolved"; summary: string; findings: Array<{ id: string; severity: "info" | "warning" | "error"; finding: string; evidenceRefs: string[] }> } }
+  | { schema: 1; op: "review-complete"; reviewId: string; result: { verdict: "pass" | "fail" | "clarification_required"; target: string; summary: string; findings: Array<{ id: string; severity: "info" | "warning" | "error"; finding: string; evidenceRefs: string[] }> } }
   | { schema: 1; op: "review-watch"; after?: string };
 
 export interface AgentApiResponse {

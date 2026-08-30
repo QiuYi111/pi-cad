@@ -1,0 +1,63 @@
+schema: 1
+id: mechanical.benchmark-triage
+description: Review benchmark requirements and stop before CAD implementation.
+tags: [benchmark, cad, requirements, triage]
+version: 1.1.0
+workflow:
+  schema: 1
+  id: mechanical.benchmark-triage
+  version: 1.1.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: grilling
+  phases:
+    grilling:
+      purpose: Translate the benchmark prompt into an explicit, testable geometry contract without designing CAD.
+      guidance: >-
+        Read the original request literally and commit requirements.md as a compact interpretation of every dimension, unit, referent, feature, placement, connection, and spatial or topological relation. State the plausible competing interpretation most likely to produce a different valid geometry. Do not design or build geometry. Store the document as the requirements workspace commit, then advance interpreted.
+      actions: [cad_commit, transition]
+      grants: [file_read, file_edit_source, transition]
+      writeScopes: [project:deliverable]
+      recordObligations: [{ref: requirements, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {interpreted: {target: requirements_review, requiresPhaseObligations: true}}
+    requirements_review:
+      purpose: Adversarially decide whether the committed interpretation is uniquely authorized by the original request.
+      guidance: >-
+        Submit the requirements Commit exactly once to the independent reviewer. The reviewer compares it with the immutable original request and atomically either admits the contract, returns it for correction, or requests user clarification. Do not build geometry, guess a transition, poll, or submit an ArtifactRef.
+      actions: [cad_submit_for_review]
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      reviewProfile: mechanical.requirements-review
+      transitions:
+        accepted: {target: admitted, reviewVerdicts: [pass]}
+        revise_requirements: {target: grilling, reviewVerdicts: [fail], invalidate: [requirements]}
+        clarification_required: {target: wait_for_user, reviewVerdicts: [clarification_required], terminalStatus: waiting_user}
+    admitted:
+      purpose: Preserve the independently admitted requirements contract for a later builder.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {}
+      terminal: true
+    wait_for_user:
+      purpose: Wait for the user to resolve a material requirements ambiguity before CAD begins.
+      guidance: >-
+        Present the reviewer's precise clarification question. Do not choose an interpretation or build geometry. In a headless benchmark this is an accepted clarification-required exit.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {}

@@ -1,0 +1,77 @@
+schema: 1
+id: mechanical.benchmark
+description: Build and deliver a directly specified benchmark part with managed visual feedback and author-side adversarial contract checks.
+tags: [benchmark, cad, mechanical]
+version: 1.8.0
+workflow:
+  schema: 1
+  id: mechanical.benchmark
+  version: 1.8.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: grilling
+  phases:
+    grilling:
+      purpose: Translate the benchmark prompt into an explicit, testable geometry contract before writing CAD.
+      guidance: >-
+        Read the original request literally and commit requirements.md as a compact interpretation of every dimension, unit, referent, feature, placement, connection, and spatial or topological relation. State the intended coordinate-independent relation and the plausible competing interpretation most likely to cause a wrong model. Do not design geometry yet. Store the document as the requirements workspace commit, then advance interpreted.
+      actions: [cad_commit, transition]
+      grants: [file_read, file_edit_source, transition]
+      writeScopes: [project:deliverable]
+      recordObligations: [{ref: requirements, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {interpreted: {target: requirements_review, requiresPhaseObligations: true}}
+    requirements_review:
+      purpose: Adversarially verify that the committed interpretation preserves the original request before CAD begins.
+      guidance: >-
+        Submit the requirements Commit exactly once to the independent reviewer. The reviewer compares it with the immutable original request and atomically either admits BUILD or returns to REQUIREMENTS. Do not build geometry, guess a transition, poll, or submit an ArtifactRef.
+      actions: [cad_submit_for_review]
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      reviewProfile: mechanical.requirements-review
+      transitions:
+        accepted: {target: build, reviewVerdicts: [pass]}
+        revise_requirements: {target: grilling, reviewVerdicts: [fail], invalidate: [requirements]}
+        clarification_required: {target: wait_for_user, reviewVerdicts: [clarification_required], terminalStatus: waiting_user}
+    wait_for_user:
+      purpose: Wait for the user to resolve a material requirements ambiguity before CAD begins.
+      guidance: >-
+        Do not design, build, or choose between the competing interpretations. Present the reviewer's precise clarification question and wait for new user authority. In a headless benchmark this is an accepted clarification-required exit for the current sample.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {}
+    build:
+      purpose: Implement the benchmark prompt as deterministic geometry, adversarially inspect it against the original request, and release it.
+      guidance: >-
+        Treat the prompt as the complete contract; skip concept, architecture, assembly planning, and review. Write deterministic build123d source exposing result, build through cad.model.build, and inspect the managed views. Before committing, translate every requested dimension, feature placement, connection, and spatial/topological relation into an observable invariant. Perform an adversarial pre-mortem by naming plausible wrong constructions (including centered/T crossings versus edge adjacency, offset, mirrored orientation, disconnection, mere contact, and excessive overlap where applicable), then use cad.probe.run on the ArtifactRef to return measured booleans that distinguish them. Bounding boxes, volume, normals, source constants, and prose are insufficient when they do not prove the disputed placement or contact locus. Rebuild if any material invariant is false, ambiguous, or unmeasured. Commit release with the latest ArtifactRef, source, counterexamples, and boolean results, then advance delivered. Never submit a review candidate.
+      actions: [cad_build_step, cad_commit, transition]
+      grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: [{ref: release, type: workspace_commit, closeWith: cad_commit, dependsOn: [requirements]}]
+      evidenceObligations:
+        - {ref: candidate-visual, type: visual, closeWith: cad_build_step}
+        - {ref: candidate-geometry, type: geometry, closeWith: cad_build_step}
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions: {delivered: {target: done, requiresPhaseObligations: true}}
+    done:
+      purpose: Preserve the delivered benchmark artifact.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

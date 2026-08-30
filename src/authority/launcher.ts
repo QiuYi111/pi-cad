@@ -1,15 +1,128 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { chmod, copyFile, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 import { assertLinuxRuntime } from "../shared/platform.ts";
 import { completionGate, startAuthoritySidecar } from "./sidecar.ts";
 import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
+import { experienceRoot, finalizeExperience } from "../experience/store.ts";
 
 export const WORKFLOW_INCOMPLETE_EXIT_CODE = 42;
 export const PRIME_CAD_CONFIG_FILE = "prime-cad.json";
+
+export type ReviewerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export interface ReviewerModelSelection { provider: string; model: string; thinking: ReviewerThinkingLevel }
+export type ReviewerModelPolicy =
+  | { mode: "inherit"; thinking?: ReviewerThinkingLevel }
+  | { mode: "fixed"; provider: string; model: string; thinking: ReviewerThinkingLevel };
+
+interface PrimeCadConfig {
+  primeAgentRepo?: string;
+  reviewer?: "inherit" | {
+    inheritAuthor?: boolean;
+    provider?: string;
+    model?: string;
+    thinking?: ReviewerThinkingLevel;
+  };
+}
+
+const REVIEWER_THINKING_LEVELS = new Set<ReviewerThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+
+function readPrimeCadConfig(primeAgentDir: string): PrimeCadConfig {
+  const configPath = join(primeAgentDir, PRIME_CAD_CONFIG_FILE);
+  if (!existsSync(configPath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("configuration must be a JSON object");
+    return parsed as PrimeCadConfig;
+  } catch (error) {
+    throw new Error(`Invalid Prime configuration at ${configPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function reviewerThinking(value: unknown, source: string): ReviewerThinkingLevel | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !REVIEWER_THINKING_LEVELS.has(value as ReviewerThinkingLevel)) {
+    throw new Error(`${source} must be one of ${[...REVIEWER_THINKING_LEVELS].join(", ")}`);
+  }
+  return value as ReviewerThinkingLevel;
+}
+
+function reviewerPolicyFromConfig(config: PrimeCadConfig, configPath: string): ReviewerModelPolicy {
+  const reviewer = config.reviewer;
+  if (reviewer === undefined || reviewer === "inherit") return { mode: "inherit" };
+  if (!reviewer || typeof reviewer !== "object" || Array.isArray(reviewer)) throw new Error(`${configPath}.reviewer must be "inherit" or an object`);
+  const thinking = reviewerThinking(reviewer.thinking, `${configPath}.reviewer.thinking`);
+  if (reviewer.inheritAuthor === true) {
+    if (reviewer.provider !== undefined || reviewer.model !== undefined) throw new Error(`${configPath}.reviewer cannot combine inheritAuthor with provider/model`);
+    return { mode: "inherit", ...(thinking ? { thinking } : {}) };
+  }
+  if (typeof reviewer.provider !== "string" || !reviewer.provider.trim() || typeof reviewer.model !== "string" || !reviewer.model.trim()) {
+    throw new Error(`${configPath}.reviewer fixed configuration requires non-empty provider and model`);
+  }
+  return { mode: "fixed", provider: reviewer.provider.trim(), model: reviewer.model.trim(), thinking: thinking ?? "medium" };
+}
+
+function optionValue(args: string[], index: number, name: string): { value: string; consumed: number } | null {
+  const value = args[index]!;
+  if (value.startsWith(`${name}=`)) return { value: value.slice(name.length + 1), consumed: 1 };
+  if (value !== name) return null;
+  const following = args[index + 1];
+  if (!following || following.startsWith("-")) throw new Error(`${name} requires a value`);
+  return { value: following, consumed: 2 };
+}
+
+export function resolveReviewerLaunchOptions(primeArgs: string[], primeAgentDir: string, env: NodeJS.ProcessEnv = process.env): { primeArgs: string[]; policy: ReviewerModelPolicy } {
+  const forwarded: string[] = [];
+  let cliProvider: string | undefined;
+  let cliModel: string | undefined;
+  let cliThinking: ReviewerThinkingLevel | undefined;
+  let cliInherit = false;
+  for (let index = 0; index < primeArgs.length;) {
+    if (primeArgs[index] === "--") {
+      forwarded.push(...primeArgs.slice(index));
+      break;
+    }
+    if (primeArgs[index] === "--reviewer-inherit-author") { cliInherit = true; index++; continue; }
+    const provider = optionValue(primeArgs, index, "--reviewer-provider");
+    if (provider) { cliProvider = provider.value; index += provider.consumed; continue; }
+    const model = optionValue(primeArgs, index, "--reviewer-model");
+    if (model) { cliModel = model.value; index += model.consumed; continue; }
+    const thinking = optionValue(primeArgs, index, "--reviewer-thinking");
+    if (thinking) { cliThinking = reviewerThinking(thinking.value, "--reviewer-thinking"); index += thinking.consumed; continue; }
+    forwarded.push(primeArgs[index]!);
+    index++;
+  }
+  if (cliInherit && (cliProvider || cliModel)) throw new Error("--reviewer-inherit-author cannot be combined with --reviewer-provider/--reviewer-model");
+  if (cliProvider || cliModel) {
+    if (!cliProvider?.trim() || !cliModel?.trim()) throw new Error("--reviewer-provider and --reviewer-model must be provided together");
+    return { primeArgs: forwarded, policy: { mode: "fixed", provider: cliProvider.trim(), model: cliModel.trim(), thinking: cliThinking ?? "medium" } };
+  }
+  if (cliInherit || cliThinking) return { primeArgs: forwarded, policy: { mode: "inherit", ...(cliThinking ? { thinking: cliThinking } : {}) } };
+
+  const envProvider = env.PI_CAD_REVIEWER_PROVIDER;
+  const envModel = env.PI_CAD_REVIEWER_MODEL;
+  const envThinking = reviewerThinking(env.PI_CAD_REVIEWER_THINKING, "PI_CAD_REVIEWER_THINKING");
+  if (envProvider || envModel) {
+    if (!envProvider?.trim() || !envModel?.trim()) throw new Error("PI_CAD_REVIEWER_PROVIDER and PI_CAD_REVIEWER_MODEL must be provided together");
+    return { primeArgs: forwarded, policy: { mode: "fixed", provider: envProvider.trim(), model: envModel.trim(), thinking: envThinking ?? "medium" } };
+  }
+  if (env.PI_CAD_REVIEWER_INHERIT_AUTHOR === "1" || envThinking) {
+    return { primeArgs: forwarded, policy: { mode: "inherit", ...(envThinking ? { thinking: envThinking } : {}) } };
+  }
+  const configPath = join(primeAgentDir, PRIME_CAD_CONFIG_FILE);
+  return { primeArgs: forwarded, policy: reviewerPolicyFromConfig(readPrimeCadConfig(primeAgentDir), configPath) };
+}
+
+export function reviewerModelArgs(policy: ReviewerModelPolicy, author: ReviewerModelSelection | undefined): string[] {
+  const selected = policy.mode === "fixed"
+    ? { provider: policy.provider, model: policy.model, thinking: policy.thinking }
+    : author && { ...author, thinking: policy.thinking ?? author.thinking };
+  if (!selected) throw new Error("reviewer model inheritance is unavailable until Prime reports the current author model");
+  return ["--provider", selected.provider, "--model", selected.model, "--thinking", selected.thinking];
+}
 
 export interface LaunchPaths {
   repository: string;
@@ -26,20 +139,15 @@ export interface LaunchPaths {
   authorSocketDirectory: string;
 }
 
+// Prime's CLI requires positive autonomous limits. Max-safe values leave the
+// ordinary reviewer free of practical rollout, token, continuation, and time caps.
+const REVIEWER_UNBOUNDED_LIMIT = String(Number.MAX_SAFE_INTEGER);
+
 export function resolvePrimeRepository(repository: string, primeAgentDir: string, explicit = process.env.PRIME_AGENT_REPO): string {
-  let configured: string | undefined;
   const configPath = join(primeAgentDir, PRIME_CAD_CONFIG_FILE);
-  if (!explicit && existsSync(configPath)) {
-    try {
-      const config = JSON.parse(readFileSync(configPath, "utf8")) as { primeAgentRepo?: unknown };
-      if (typeof config.primeAgentRepo !== "string" || !config.primeAgentRepo.trim()) {
-        throw new Error("primeAgentRepo must be a non-empty string");
-      }
-      configured = config.primeAgentRepo;
-    } catch (error) {
-      throw new Error(`Invalid Prime repository configuration at ${configPath}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  const configuredValue = readPrimeCadConfig(primeAgentDir).primeAgentRepo;
+  if (configuredValue !== undefined && (typeof configuredValue !== "string" || !configuredValue.trim())) throw new Error(`Invalid Prime repository configuration at ${configPath}: primeAgentRepo must be a non-empty string`);
+  const configured = configuredValue?.trim();
   const candidate = resolve(explicit ?? configured ?? resolve(repository, "../prime-agent"));
   let primeRoot: string;
   try {
@@ -78,7 +186,16 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PI_OFFLINE", "1",
   );
   for (const name of ["TERM", "LANG", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) passEnvironment(args, name, process.env[name]);
-  args.push("--", "/opt/prime/prime-agent.sh", "--cwd", "/workspace", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--tools", "ipython", ...(input.modelArgs ?? []), "--autonomous", "--autonomous-max-turns", "16", "--autonomous-timeout-ms", "115000", "--no-session", "--mode", "json", "--print", input.prompt);
+  args.push(
+    "--", "/opt/prime/prime-agent.sh", "--cwd", "/workspace",
+    "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
+    "--tools", "ipython", ...(input.modelArgs ?? []), "--autonomous",
+    "--autonomous-max-continuations", REVIEWER_UNBOUNDED_LIMIT,
+    "--autonomous-max-turns", REVIEWER_UNBOUNDED_LIMIT,
+    "--autonomous-max-tokens", REVIEWER_UNBOUNDED_LIMIT,
+    "--autonomous-timeout-ms", REVIEWER_UNBOUNDED_LIMIT,
+    "--no-session", "--mode", "json", "--print", input.prompt,
+  );
   return args;
 }
 
@@ -104,6 +221,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[]): st
     "--ro-bind", paths.nodeRoot, "/opt/node",
     "--ro-bind", join(paths.repository, "src", "integrations", "prime"), "/opt/pi-cad/prime-extension",
     "--ro-bind", join(paths.repository, "skills", "cad"), "/opt/pi-cad/cad",
+    "--ro-bind", join(paths.repository, "skills", "grill-me"), "/opt/pi-cad/grill-me",
     "--ro-bind", join(paths.repository, "packages", "prime-codex-image-gen"), "/opt/pi-cad/imagegen",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
     "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
@@ -132,10 +250,11 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[]): st
     "--", "/opt/prime/prime-agent.sh",
     "--cwd", "/workspace",
     "--no-extensions", "--no-prompt-templates", "--no-themes", "--no-context-files",
-    "--tools", "ipython,codex_generate_image",
+    "--tools", "ipython,codex_generate_image,cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read",
     "--extension", "/opt/pi-cad/prime-extension/extension.ts",
     "--extension", "/opt/pi-cad/imagegen/index.ts",
     "--skill", "/opt/pi-cad/cad/SKILL.md",
+    "--skill", "/opt/pi-cad/grill-me/SKILL.md",
     "--skill", "/opt/pi-cad/imagegen/skills/imagegen/SKILL.md",
     ...primeArgs,
   );
@@ -148,13 +267,63 @@ function isOneShot(args: string[]): boolean {
   return mode >= 0 && ["text", "json"].includes(args[mode + 1] ?? "");
 }
 
+function latestPrimeSession(project: string): string | null {
+  const root = join(project, ".prime-sessions");
+  if (!existsSync(root)) return null;
+  const candidates: Array<{ path: string; mtimeMs: number }> = [];
+  const visit = (directory: string, depth: number) => {
+    if (depth > 3) return;
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path, depth + 1);
+      else if (entry.isFile() && entry.name.endsWith(".jsonl")) candidates.push({ path, mtimeMs: statSync(path).mtimeMs });
+    }
+  };
+  visit(root, 0);
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return candidates[0]?.path ?? null;
+}
+
+async function archivePrimeExperience(
+  project: string,
+  gate: { complete: boolean; outcome?: "complete" | "clarification_required"; reason?: string; runId?: string; workflowId?: string },
+  author: ReviewerModelSelection | undefined,
+): Promise<void> {
+  if (process.env.PI_CAD_EXPERIENCE_ENABLED === "0") return;
+  const sessionPath = latestPrimeSession(project);
+  if (!sessionPath || !gate.runId) {
+    process.stderr.write("[pi-cad] experience archival skipped: run has no persisted Prime session or run id\n");
+    return;
+  }
+  try {
+    const entry = await finalizeExperience({
+      runId: gate.runId,
+      workflow: gate.workflowId,
+      projectPath: project,
+      sessionPath,
+      model: author ? `${author.provider}/${author.model}` : undefined,
+      reasoning: author?.thinking,
+      outcome: gate.outcome ?? (gate.complete ? "complete" : "incomplete"),
+      outcomeReason: gate.reason,
+    });
+    const markerDirectory = join(project, ".pi-cad");
+    await mkdir(markerDirectory, { recursive: true });
+    const marker = join(markerDirectory, "experience.json");
+    const temporary = `${marker}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify({ schema: 1, seq: entry.seq, sha: entry.sha, root: experienceRoot(), runId: entry.run_id }, null, 2)}\n`, "utf8");
+    await rename(temporary, marker);
+  } catch (error) {
+    process.stderr.write(`[pi-cad] experience archival failed: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
 export function withHeadlessEventContinuation(args: string[]): string[] {
   if (!isOneShot(args)) return args;
   const completionCommand = "$PRIME_AGENT_KERNEL_PYTHON -m cad._completion_gate";
   const gate = args.includes(completionCommand) ? [] : [
     "--autonomous-gate", completionCommand,
     "--autonomous-gate-timeout-ms", "5000",
-    "--autonomous-gate-retries", "64",
+    "--autonomous-gate-retries", process.env.PI_CAD_AUTONOMOUS_GATE_RETRIES || "8",
   ];
   if (args.includes("--autonomous")) return [...gate, ...args];
   // Prime print mode disposes the session after the first provider action.
@@ -177,13 +346,44 @@ async function copyPrimeBootstrap(source: string, destination: string): Promise<
   }
 }
 
-async function disableReviewerCompaction(agentDirectory: string): Promise<void> {
-  const path = join(agentDirectory, "settings.json");
-  let settings: Record<string, unknown> = {};
-  try { settings = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>; }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-  settings.compaction = { ...((settings.compaction && typeof settings.compaction === "object") ? settings.compaction as Record<string, unknown> : {}), enabled: false, agentCallable: false };
-  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+/**
+ * The author runs in an isolated, per-launch agent directory.  Prime's
+ * /login writes auth.json there, so without this handoff API keys disappear
+ * as soon as the sandbox is cleaned up.  Merge only credentials back into the
+ * durable host directory; settings and session state intentionally remain
+ * isolated per project launch.
+ */
+async function persistPrimeCredentials(source: string, destination: string): Promise<void> {
+  const sourcePath = join(source, "auth.json");
+  let sourceCredentials: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(await readFile(sourcePath, "utf8")) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+    sourceCredentials = parsed as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+
+  const destinationPath = join(destination, "auth.json");
+  let destinationCredentials: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await readFile(destinationPath, "utf8")) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      destinationCredentials = parsed as Record<string, unknown>;
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  await mkdir(destination, { recursive: true, mode: 0o700 });
+  const temporaryPath = join(destination, `auth.json.${process.pid}.${Date.now()}.tmp`);
+  await writeFile(temporaryPath, `${JSON.stringify({ ...destinationCredentials, ...sourceCredentials }, null, 2)}\n`, {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  await chmod(temporaryPath, 0o600);
+  await rename(temporaryPath, destinationPath);
 }
 
 function childExit(command: string, args: string[], env: NodeJS.ProcessEnv): Promise<{ code: number; signal: NodeJS.Signals | null }> {
@@ -194,27 +394,30 @@ function childExit(command: string, args: string[], env: NodeJS.ProcessEnv): Pro
   });
 }
 
-function boundedChildExit(command: string, args: string[], env: NodeJS.ProcessEnv, timeoutMs: number): Promise<{ code: number; signal: NodeJS.Signals | null; diagnostic: string }> {
+function capturedChildExit(command: string, args: string[], env: NodeJS.ProcessEnv, abortSignal?: AbortSignal): Promise<{ code: number; signal: NodeJS.Signals | null; diagnostic: string; aborted: boolean }> {
   return new Promise((accept, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env });
     let diagnostic = "";
+    let aborted = false;
+    let killTimer: NodeJS.Timeout | undefined;
     const append = (chunk: Buffer) => { diagnostic = `${diagnostic}${chunk.toString("utf8")}`.slice(-8192); };
+    const abort = () => {
+      aborted = true;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 2_000);
+      killTimer.unref();
+    };
     child.stdout.on("data", append);
     child.stderr.on("data", append);
-    let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, timeoutMs);
-    child.once("error", (error) => { clearTimeout(timer); reject(error); });
-    child.once("exit", (code, signal) => { clearTimeout(timer); accept({ code: timedOut ? 124 : (code ?? 1), signal, diagnostic }); });
+    abortSignal?.addEventListener("abort", abort, { once: true });
+    if (abortSignal?.aborted) abort();
+    child.once("error", (error) => { abortSignal?.removeEventListener("abort", abort); reject(error); });
+    child.once("exit", (code, signal) => {
+      abortSignal?.removeEventListener("abort", abort);
+      if (killTimer) clearTimeout(killTimer);
+      accept({ code: code ?? 1, signal, diagnostic, aborted });
+    });
   });
-}
-
-function reviewerModelArgs(primeArgs: string[]): string[] {
-  const selected: string[] = [];
-  for (const name of ["--provider", "--model"]) {
-    const index = primeArgs.indexOf(name);
-    if (index >= 0 && primeArgs[index + 1] && !primeArgs[index + 1]!.startsWith("-")) selected.push(name, primeArgs[index + 1]!);
-  }
-  return [...selected, "--thinking", "medium"];
 }
 
 export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
@@ -222,12 +425,14 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   if (primeArgs.some((value) => value === "--cwd" || value.startsWith("--cwd="))) {
     throw new Error("prime-cad owns --cwd so the sandbox cannot escape its project root");
   }
-  primeArgs = withHeadlessEventContinuation(primeArgs);
   const repository = realpathSync(resolve(process.env.PI_CAD_REPO ?? resolve(import.meta.dirname, "..", "..")));
   const project = await realpath(resolve(process.env.PI_CAD_PROJECT_CWD ?? process.cwd()));
   const nodeRoot = dirname(dirname(realpathSync(process.execPath)));
   const primeAgentDir = resolve(process.env.PRIME_AGENT_CODING_AGENT_DIR ?? join(homedir(), ".prime", "agent"));
+  const reviewerLaunch = resolveReviewerLaunchOptions(primeArgs, primeAgentDir);
+  primeArgs = withHeadlessEventContinuation(reviewerLaunch.primeArgs);
   const primeRoot = resolvePrimeRepository(repository, primeAgentDir);
+  process.env.PRIME_AGENT_REPO = primeRoot;
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
   const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
   const kernelPythonRoot = dirname(dirname(kernelPython));
@@ -246,24 +451,25 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
   await copyPrimeBootstrap(primeAgentDir, ephemeralAgentDir);
   await copyPrimeBootstrap(primeAgentDir, reviewerAgentDir);
-  await disableReviewerCompaction(reviewerAgentDir);
   await mkdir(reviewerWorkspace, { recursive: true, mode: 0o700 });
   process.env.PI_CAD_CANONICAL_PROJECT_DIR = defaultCanonicalProjectDirectory(project);
   await mkdir(process.env.PI_CAD_CANONICAL_PROJECT_DIR, { recursive: true, mode: 0o700 });
   let reviewerSocketDirectory = "";
   let launchPaths!: LaunchPaths;
+  let currentAuthorModel: ReviewerModelSelection | undefined;
   const sidecar = await startAuthoritySidecar({
     cwd: project, runtimeDirectory,
-    reviewerExecutor: async ({ reviewId, prompt }) => {
+    onAuthorModelSelection: (selection) => { currentAuthorModel = selection; },
+    reviewerExecutor: async ({ reviewId, prompt, signal }) => {
       // OAuth providers may rotate the refresh token while the author is
       // running. Snapshot the live isolated author bootstrap at admission so
       // a late reviewer never starts with the stale launch-time copy.
       await copyPrimeBootstrap(ephemeralAgentDir, reviewerAgentDir);
-      await disableReviewerCompaction(reviewerAgentDir);
-      const result = await boundedChildExit("/usr/bin/bwrap", buildReviewerBwrapArgs(launchPaths, { reviewId, reviewerAgentDir, reviewerWorkspace, reviewerSocketDirectory, prompt, modelArgs: reviewerModelArgs(primeArgs) }), { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, 120_000);
+      const result = await capturedChildExit("/usr/bin/bwrap", buildReviewerBwrapArgs(launchPaths, { reviewId, reviewerAgentDir, reviewerWorkspace, reviewerSocketDirectory, prompt, modelArgs: reviewerModelArgs(reviewerLaunch.policy, currentAuthorModel) }), { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, signal);
+      if (result.aborted) return;
       if (result.code !== 0) {
         const detail = result.diagnostic.trim().split("\n").slice(-3).join(" | ").replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]");
-        throw new Error(`${result.code === 124 ? "reviewer wall timeout (120s)" : `reviewer exited with code ${result.code}`}${detail ? `: ${detail}` : ""}`);
+        throw new Error(`reviewer exited with code ${result.code}${detail ? `: ${detail}` : ""}`);
       }
     },
   });
@@ -278,11 +484,13 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     const result = await childExit("/usr/bin/bwrap", buildPrimeBwrapArgs(paths, primeArgs), {
       PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     });
-    if (result.signal) {
-      return 128;
-    }
-    if (!isOneShot(primeArgs)) return result.code;
+		// Persist credentials entered via /login before the runtime directory is
+		// removed in finally. This makes provider keys available to future tasks.
+		await persistPrimeCredentials(ephemeralAgentDir, primeAgentDir);
     const gate = await completionGate(project);
+    await archivePrimeExperience(project, gate, currentAuthorModel);
+    if (result.signal) return 128;
+    if (!isOneShot(primeArgs)) return result.code;
     if (gate.complete) return 0;
     process.stderr.write(`WORKFLOW_INCOMPLETE: ${gate.reason}\n`);
     return WORKFLOW_INCOMPLETE_EXIT_CODE;

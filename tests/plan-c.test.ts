@@ -4,6 +4,7 @@ import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createServer } from "node:net";
 import { test } from "node:test";
 
 import { compilePhaseCard } from "../src/harness/card.ts";
@@ -15,6 +16,7 @@ import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import primeExtension from "../src/integrations/prime/extension.ts";
 import { PHASE_CARD_CUSTOM_TYPE } from "../src/integrations/prime/phase-card-message.ts";
+import { requestAuthority } from "../src/integrations/prime/sidecar-client.ts";
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
 import probeExtension from "../src/extensions/probe/index.ts";
 import { startAuthoritySidecar } from "../src/authority/sidecar.ts";
@@ -55,6 +57,39 @@ function workflow() {
   }, mechanicalRegistries);
 }
 
+test("authority client retries bounded transient socket closures", async () => {
+  const runtime = await mkdtemp(join(tmpdir(), "pi-cad-authority-retry-"));
+  const socketPath = join(runtime, "authority.sock");
+  const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
+  let attempts = 0;
+  const server = createServer({ allowHalfOpen: true }, (socket) => {
+    socket.on("error", () => undefined);
+    socket.on("data", () => undefined);
+    socket.on("end", () => {
+      attempts++;
+      if (attempts < 3) socket.destroy();
+      else socket.end(`${JSON.stringify({ schema: 1, ok: true, result: { live: true } })}\n`);
+    });
+  });
+  await new Promise<void>((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(socketPath, resolveListen);
+  });
+  process.env.PI_CAD_AUTHOR_SOCKET = socketPath;
+  try {
+    assert.deepEqual(
+      await requestAuthority({ op: "phase-card" }, { retries: 2, retryDelayMs: 1, timeoutMs: 1000 }),
+      { live: true },
+    );
+    assert.equal(attempts, 3);
+  } finally {
+    if (previousSocket === undefined) delete process.env.PI_CAD_AUTHOR_SOCKET;
+    else process.env.PI_CAD_AUTHOR_SOCKET = previousSocket;
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+    await rm(runtime, { recursive: true, force: true });
+  }
+});
+
 async function projectFixture() {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-"));
   const project = new HarnessProjectStoreV7(cwd);
@@ -71,15 +106,22 @@ test("Plan C discovers and pins a workflow package before mutation", async () =>
       /cad\.workflow\.start/,
     );
     const packages = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(packages.map((item) => item.id), ["mechanical.analysis", "mechanical.modify", "mechanical.one-shot"]);
+    assert.deepEqual(packages.map((item) => item.id), [
+      "mechanical.analysis",
+      "mechanical.benchmark",
+      "mechanical.benchmark-author-only",
+      "mechanical.benchmark-triage",
+      "mechanical.modify",
+      "mechanical.one-shot",
+    ]);
     assert.deepEqual(Object.keys(packages[0]).sort(), ["description", "id", "tags", "version"]);
     const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" }) as any;
     assert.equal(started.workflowId, "mechanical.one-shot");
-    assert.equal(started.phase, "grill");
+    assert.equal(started.phase, "grilling");
     assert.deepEqual(started.unmet, ["grill"]);
     await assert.rejects(
       handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }),
-      /model\.build is not granted in workflow phase grill/,
+      /model\.build is not granted in workflow phase grilling/,
     );
     const grillCommit = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "grill" }) as any;
     assert.equal(grillCommit.name, "grill");
@@ -103,11 +145,28 @@ test("Plan C workflow metadata is optional, hashed, and rendered as a bounded st
     assert.deepEqual(first.unmetObligations, ["system-design"]);
     assert.deepEqual(first.legalTransitions, []);
     assert.ok(first.effectiveCapabilities.includes("cad_build_step"));
-    assert.deepEqual(cardSection(first.text, "MUST"), first.unmetObligations);
-    assert.deepEqual(cardSection(first.text, "CAN"), first.effectiveCapabilities);
+    assert.deepEqual(cardSection(first.text, "MUST").map((line) => line.split(" (")[0]), first.unmetObligations);
+    assert.deepEqual(cardSection(first.text, "CAN").map((line) => line.split(" — ")[0]), first.effectiveCapabilities);
     assert.deepEqual(cardSection(first.text, "NEXT"), first.legalTransitions);
+    assert.match(cardSection(first.text, "MUST")[0] ?? "", /close with await cad\.commit\("system-design"/);
+    assert.ok(cardSection(first.text, "CAN").some((line) => /cad_build_step — artifact = await cad\.model\.build\(source, output, force=True\)/.test(line)));
+    const current = await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any;
+    assert.equal(current.text, first.text);
+    assert.deepEqual(current.must, cardSection(first.text, "MUST"));
+    assert.deepEqual(current.can, cardSection(first.text, "CAN"));
+    assert.deepEqual(current.next, cardSection(first.text, "NEXT"));
+    assert.deepEqual(current.obligations, [{
+      ref: "system-design", type: "workspace_commit", closeWith: "cad_commit",
+      canonicalCall: 'await cad.commit("system-design", variables={...}, artifacts=[...])',
+    }]);
     assert.ok(first.metrics.estimatedTokens >= 300 && first.metrics.estimatedTokens <= 800, `unexpected Phase Card token estimate: ${first.metrics.estimatedTokens}`);
     assert.ok(first.metrics.bytesEmitted <= 3200);
+    const aggressivelyBounded = await compilePhaseCard(cwd, { registries: mechanicalRegistries, maxTextBytes: 1200 });
+    assert.ok(aggressivelyBounded, "an oversized explanatory section must not suppress the authoritative card");
+    assert.equal(aggressivelyBounded.metrics.truncated, true);
+    assert.deepEqual(cardSection(aggressivelyBounded.text, "MUST").map((line) => line.split(" (")[0]), first.unmetObligations);
+    assert.deepEqual(cardSection(aggressivelyBounded.text, "CAN").map((line) => line.split(" — ")[0]), first.effectiveCapabilities);
+    assert.deepEqual(cardSection(aggressivelyBounded.text, "NEXT"), first.legalTransitions);
     assert.deepEqual((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.digest, first.digest);
     const durations: number[] = [];
     for (let index = 0; index < 20; index += 1) {
@@ -151,6 +210,10 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
     assert.deepEqual(result.visual.payload.views.map((view: any) => view.name), ["iso", "front", "back", "left", "right", "top", "bottom"]);
     assert.equal(result.images.length, 2);
     assert.ok(result.images.every((image: any) => image.mimeType === "image/png" && Buffer.from(image.data, "base64").subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))));
+    const afterBuild = await new HarnessRunStoreV7(cwd, loaded.state.runId).load(mechanicalRegistries);
+    assert.equal(afterBuild?.state.artifacts["candidate:authoritative"]?.path, "build/plate.step");
+    assert.equal(afterBuild?.state.artifacts["candidate:source"]?.path, "plate.py");
+    assert.equal(afterBuild?.state.artifacts["candidate:source"]?.sha256, createHash("sha256").update(await readFile(join(cwd, "plate.py"))).digest("hex"));
     const card = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     assert.deepEqual(card?.images.map((image) => image.path), [
       `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,
@@ -352,15 +415,25 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   const { cwd } = await projectFixture();
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-test-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  let reportedModel: unknown;
+  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime, onAuthorModelSelection: (selection) => { reportedModel = selection; } });
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const handlers = new Map<string, Function>();
-  const pi = { on(name: string, handler: Function) { handlers.set(name, handler); } } as any;
+  const registeredTools = new Map<string, unknown>();
+  const pi = {
+    on(name: string, handler: Function) { handlers.set(name, handler); },
+    registerTool(tool: { name: string }) { registeredTools.set(tool.name, tool); },
+    getThinkingLevel() { return "low"; },
+  } as any;
   primeExtension(pi);
+  assert.deepEqual([...registeredTools.keys()].sort(), [
+    "cad_experience_find", "cad_experience_get", "cad_experience_read", "cad_experience_search",
+  ]);
   const context = handlers.get("context")!;
   const toolCall = handlers.get("tool_call")!;
   const original = [{ role: "user", content: "hello", timestamp: 1 }];
-  const first = await context({ messages: original }, { cwd });
+  const first = await context({ messages: original }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  assert.deepEqual(reportedModel, { provider: "dashscope", model: "qwen3.8-max", thinking: "low" });
   assert.equal(first.messages.length, 2);
   assert.equal(first.messages[1].customType, PHASE_CARD_CUSTOM_TYPE);
   assert.equal(first.messages[1].display, false);
@@ -379,6 +452,11 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   assert.match(deniedImage.reason, /image\.generate is not granted in workflow phase review/);
 
   await sidecar.close();
+  const unavailableContext = await context({ messages: original }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  const fallbackCard = unavailableContext.messages.at(-1).content;
+  assert.match(fallbackCard, /await cad\.workflow\.current\(\)/);
+  assert.match(fallbackCard, /read only/);
+  assert.doesNotMatch(fallbackCard, /CAN\n- none/);
   const unavailableImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });
   assert.equal(unavailableImage.block, true);
   assert.match(unavailableImage.reason, /authority sidecar unavailable/i);

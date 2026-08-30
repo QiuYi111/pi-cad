@@ -1,0 +1,63 @@
+schema: 1
+id: mechanical.benchmark-author-only
+description: Build a benchmark part with author-owned requirements triage and no independent reviewer.
+tags: [benchmark, cad, mechanical, author-only]
+version: 1.1.0
+workflow:
+  schema: 1
+  id: mechanical.benchmark-author-only
+  version: 1.1.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: grilling
+  phases:
+    grilling:
+      purpose: Decide whether the benchmark prompt uniquely determines a testable geometry contract before writing CAD.
+      guidance: >-
+        You alone own requirements triage in this reviewer-free experiment. Read the original request literally and commit requirements as a compact account of every dimension, unit, referent, feature, placement, connection, and spatial or topological relation. If two or more reasonable readings would materially change geometry, topology, dimensions, or acceptance, do not choose one: record the competing readings and the smallest precise user question, then advance clarification_required. Otherwise record the unique contract and advance interpreted. Ordinary implementation choices that preserve the same observable contract are not ambiguity. Do not design or build geometry in this phase.
+      actions: [cad_commit, transition]
+      grants: [file_read, file_edit_source, transition]
+      writeScopes: [project:deliverable]
+      recordObligations: [{ref: requirements, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions:
+        clarification_required: {target: wait_for_user, requiresPhaseObligations: true, terminalStatus: waiting_user}
+        interpreted: {target: build, requiresPhaseObligations: true}
+    wait_for_user:
+      purpose: Wait for the user to resolve a material requirements ambiguity before CAD begins.
+      guidance: >-
+        Do not design, build, or choose between the competing interpretations. Present the precise clarification question recorded in requirements and wait for new user authority. In a headless benchmark this is an accepted author-initiated clarification-required exit for the current sample.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions: {}
+    build:
+      purpose: Implement the admitted benchmark contract as deterministic geometry, inspect it, and release it.
+      guidance: >-
+        Treat the admitted requirements record as the complete contract. Write deterministic build123d source exposing result, build through cad.model.build, and inspect the managed views. Translate every requested dimension, feature placement, connection, and spatial or topological relation into an observable invariant. Perform an adversarial pre-mortem, then use cad.probe.run on the ArtifactRef to return measured booleans that distinguish plausible wrong constructions. Rebuild if any material invariant is false or unmeasured. Commit release with the latest ArtifactRef, source, counterexamples, and boolean results, then advance delivered. There is no reviewer in this workflow.
+      actions: [cad_build_step, cad_commit, transition]
+      grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: [{ref: release, type: workspace_commit, closeWith: cad_commit, dependsOn: [requirements]}]
+      evidenceObligations:
+        - {ref: candidate-visual, type: visual, closeWith: cad_build_step}
+        - {ref: candidate-geometry, type: geometry, closeWith: cad_build_step}
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions: {delivered: {target: done, requiresPhaseObligations: true}}
+    done:
+      purpose: Preserve the delivered benchmark artifact.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

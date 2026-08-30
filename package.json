@@ -40,6 +40,7 @@
     "test:prime": "node tests/run-prime-tests.mjs",
     "test:prime-imagegen": "npm --prefix packages/prime-codex-image-gen test",
     "check:prime-imagegen": "npm --prefix packages/prime-codex-image-gen run check",
+    "test:transcript-lab": "uv run --project packages/prime-transcript-lab --group dev pytest packages/prime-transcript-lab/tests",
     "test:openfoam14": "node scripts/qualify-openfoam14.mjs",
     "test:torch-fem-cuda": "node scripts/qualify-torch-fem-cuda.mjs",
     "test:su2": "node scripts/qualify-su2-8.5.0.mjs",
@@ -62,6 +63,7 @@
   "files": [
     "src",
     "packages/prime-codex-image-gen",
+    "packages/prime-transcript-lab",
     "skills",
     "python",
     "assets",

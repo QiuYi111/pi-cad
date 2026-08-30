@@ -88,7 +88,7 @@ function phase(value: unknown, phaseId: string, registries: RegistrySet): Workfl
     if (transition.terminalStatus !== undefined && (typeof transition.terminalStatus !== "string" || !transition.terminalStatus)) throw new Error(`phase ${phaseId}.transitions.${event}.terminalStatus must be a string`);
     if (transition.requiresPhaseObligations !== undefined && typeof transition.requiresPhaseObligations !== "boolean") throw new Error(`phase ${phaseId}.transitions.${event}.requiresPhaseObligations must be boolean`);
     const reviewVerdicts = transition.reviewVerdicts === undefined ? undefined : stringArray(transition.reviewVerdicts, `phase ${phaseId}.transitions.${event}.reviewVerdicts`);
-    if (reviewVerdicts?.some((verdict) => !["pass", "fail", "unresolved"].includes(verdict))) throw new Error(`phase ${phaseId}.transitions.${event}.reviewVerdicts contains an invalid verdict`);
+    if (reviewVerdicts?.some((verdict) => !["pass", "fail", "clarification_required", "unresolved"].includes(verdict))) throw new Error(`phase ${phaseId}.transitions.${event}.reviewVerdicts contains an invalid verdict`);
     if (reviewVerdicts?.length && !raw.reviewProfile) throw new Error(`phase ${phaseId}.transitions.${event}.reviewVerdicts requires reviewProfile`);
     const requiresVisited = transition.requiresVisited === undefined ? undefined : stringArray(transition.requiresVisited, `phase ${phaseId}.transitions.${event}.requiresVisited`);
     const forbidsVisited = transition.forbidsVisited === undefined ? undefined : stringArray(transition.forbidsVisited, `phase ${phaseId}.transitions.${event}.forbidsVisited`);
@@ -98,7 +98,7 @@ function phase(value: unknown, phaseId: string, registries: RegistrySet): Workfl
       ...(transition.authority ? { authority: transition.authority as string } : {}),
       ...(transition.terminalStatus ? { terminalStatus: transition.terminalStatus as string } : {}),
       ...(transition.requiresPhaseObligations === true ? { requiresPhaseObligations: true } : {}),
-      ...(reviewVerdicts?.length ? { reviewVerdicts: reviewVerdicts as Array<"pass" | "fail" | "unresolved"> } : {}),
+      ...(reviewVerdicts?.length ? { reviewVerdicts: reviewVerdicts as Array<"pass" | "fail" | "clarification_required" | "unresolved"> } : {}),
       ...(requiresVisited?.length ? { requiresVisited } : {}),
       ...(forbidsVisited?.length ? { forbidsVisited } : {}),
       ...(invalidate?.length ? { invalidate } : {}),

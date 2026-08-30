@@ -2,7 +2,17 @@ import { createConnection } from "node:net";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
-export async function requestAuthority<T>(request: Record<string, unknown>, options: { timeoutMs?: number } = {}): Promise<T> {
+export interface AuthorityRequestOptions {
+  timeoutMs?: number;
+  retries?: number;
+  retryDelayMs?: number;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function requestAuthorityOnce<T>(request: Record<string, unknown>, timeoutMs: number): Promise<T> {
   const path = process.env.PI_CAD_AUTHOR_SOCKET;
   if (!path) throw new Error("Pi-CAD authority sidecar socket is not configured");
   return new Promise<T>((accept, reject) => {
@@ -20,7 +30,7 @@ export async function requestAuthority<T>(request: Record<string, unknown>, opti
       reject(error);
     };
     const socket = createConnection(path);
-    socket.setTimeout(options.timeoutMs ?? 30_000, () => socket.destroy(new Error("Pi-CAD authority sidecar timeout")));
+    socket.setTimeout(timeoutMs, () => socket.destroy(new Error("Pi-CAD authority sidecar timeout")));
     socket.on("connect", () => socket.end(JSON.stringify({ schema: 1, ...request })));
     socket.on("data", (chunk: Buffer) => {
       size += chunk.length;
@@ -42,4 +52,25 @@ export async function requestAuthority<T>(request: Record<string, unknown>, opti
       }
     });
   });
+}
+
+/**
+ * Send one authority request. Callers that are rendering provider context may
+ * opt into a small retry budget: a transient Unix-socket/CAS read failure must
+ * not be misrepresented to the model as a permanent loss of authority.
+ * Mutating engineering calls deliberately retain the default of zero retries.
+ */
+export async function requestAuthority<T>(request: Record<string, unknown>, options: AuthorityRequestOptions = {}): Promise<T> {
+  const retries = Math.max(0, Math.floor(options.retries ?? 0));
+  const retryDelayMs = Math.max(0, Math.floor(options.retryDelayMs ?? 25));
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await requestAuthorityOnce<T>(request, options.timeoutMs ?? 30_000);
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries && retryDelayMs) await delay(retryDelayMs * (attempt + 1));
+    }
+  }
+  throw lastError;
 }
