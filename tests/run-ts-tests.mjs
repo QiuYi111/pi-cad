@@ -38,3 +38,4 @@ await jiti.import("./experience.test.ts", { default: true });
 await jiti.import("./no-source-agent-smoke.test.ts", { default: true });
 await jiti.import("./skill-system.test.ts", { default: true });
 await jiti.import("./final-review.test.ts", { default: true });
+await jiti.import("./requirements-review.test.ts", { default: true });

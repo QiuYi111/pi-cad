@@ -30,11 +30,11 @@ const quickRoute = {
   maturity: "prototype",
 } as const;
 
-test("CADTestBench headless runs enable the independent final reviewer", () => {
+test("CADTestBench headless runs move the independent reviewer to requirements", () => {
   const runner = readFileSync(join(process.cwd(), "benchmarks", "cadtestbench", "run.mjs"), "utf-8");
   assert.match(
     runner,
-    /PI_CAD_HEADLESS:\s*"1"[\s\S]*?PI_CAD_FINAL_REVIEWER:\s*"1"/,
+    /PI_CAD_HEADLESS:\s*"1"[\s\S]*?PI_CAD_REQUIREMENTS_REVIEWER:\s*"1"[\s\S]*?PI_CAD_FINAL_REVIEWER:\s*"0"/,
   );
   assert.match(runner, /tarExtract\(vaultTarPath\(e\.tar\), preloadDir\)/);
   assert.doesNotMatch(runner, /tarExtract\(vaultTarPath\(e\.tar\), join\(preloadDir, key\)\)/);

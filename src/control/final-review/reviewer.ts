@@ -58,6 +58,21 @@ export interface ReviewerRunner {
   ): Promise<ReviewerRunOutput>;
 }
 
+export interface RequirementsReviewRunOutput {
+  result: FinalReviewResult;
+  usage: unknown[];
+  reviewerModel: string;
+  sourceRefs: string[];
+}
+
+export interface RequirementsReviewerRunner {
+  run(
+    ctx: ExtensionContext,
+    state: CadRunState,
+    requirements: CadRequirements,
+  ): Promise<RequirementsReviewRunOutput>;
+}
+
 function envInt(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isInteger(value) && value > 0 ? value : fallback;
@@ -115,6 +130,32 @@ function finalJsonFromResponse(response: ReviewerResponse): FinalReviewResult | 
     }
   }
   return null;
+}
+
+function textContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .filter((item): item is { type: string; text: string } =>
+      Boolean(item) && typeof item === "object" && (item as { type?: unknown }).type === "text" &&
+      typeof (item as { text?: unknown }).text === "string")
+    .map((item) => item.text)
+    .join("\n");
+}
+
+function requirementsSourceMessages(ctx: ExtensionContext): Array<{ ref: string; text: string }> {
+  const messages = ctx.sessionManager?.getBranch?.() ?? [];
+  const userMessages = messages.flatMap((entry) => {
+    if (entry.type !== "message" || entry.message.role !== "user") return [];
+    const text = textContent(entry.message.content).trim();
+    return text ? [text] : [];
+  });
+  // Requirements are reviewed early, but retain a bounded tail for interactive
+  // clarification turns without feeding an entire unrelated session to the judge.
+  return userMessages.slice(-8).map((text, index, selected) => ({
+    ref: `user:${userMessages.length - selected.length + index + 1}`,
+    text: text.slice(0, 8_000),
+  }));
 }
 
 function unresolvedResult(requirements: CadRequirements, summary: string): FinalReviewResult {
@@ -394,4 +435,135 @@ export async function runFreshReviewer(
   }
 }
 
+export async function runFreshRequirementsReviewer(
+  ctx: ExtensionContext,
+  state: CadRunState,
+  requirements: CadRequirements,
+): Promise<RequirementsReviewRunOutput> {
+  const model = resolveReviewerModel(ctx);
+  const reviewerModel = modelLabel(model);
+  const sourceMessages = requirementsSourceMessages(ctx);
+  const sourceRefs = [
+    ...sourceMessages.map((item) => item.ref),
+    ...requirements.assertions.map((item) => `requirements:${item.id}`),
+  ];
+  if (!model) {
+    return {
+      result: unresolvedResult(requirements, "reviewer model is unavailable"),
+      usage: [],
+      reviewerModel,
+      sourceRefs,
+    };
+  }
+  const systemPrompt = await readFile(
+    fileURLToPath(new URL("../../prompts/requirements_verifier.md", import.meta.url)),
+    "utf-8",
+  );
+  const initial = [
+    "# Selected route",
+    JSON.stringify(state.route),
+    "# Author-proposed requirements contract",
+    JSON.stringify(requirements, null, 2),
+    "# Original user conversation excerpts",
+    ...(sourceMessages.length
+      ? sourceMessages.flatMap((item) => [`## ${item.ref}`, item.text])
+      : ["(not available; review the proposed contract for internal semantic defects)"]),
+    "# Required output",
+    "Return only one FinalReviewResult JSON object. Cover every proposed Assertion exactly once.",
+    "For an assertion check, cite requirements:<assertionId>. For an omission or misreading, cite the relevant user:<n> excerpt when available.",
+  ].join("\n\n");
+  const knownEvidenceRefs = new Set(sourceRefs);
+  const maxTurns = envInt("PI_CAD_REVIEWER_MAX_TURNS", 16);
+  const timeoutMs = envInt("PI_CAD_REVIEWER_TIMEOUT_MS", 120_000);
+  const usage: unknown[] = [];
+  let timedOut = false;
+  let turnBudgetExhausted = false;
+  let turns = 0;
+  let session: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
+  try {
+    const agentDir = getAgentDir();
+    const settingsManager = SettingsManager.inMemory({
+      compaction: { enabled: false },
+      retry: { enabled: true, maxRetries: 1 },
+    });
+    const resourceLoader = new DefaultResourceLoader({
+      cwd: ctx.cwd,
+      agentDir,
+      settingsManager,
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noThemes: true,
+      noContextFiles: true,
+      systemPrompt,
+    });
+    await resourceLoader.reload();
+    const created = await createAgentSession({
+      cwd: ctx.cwd,
+      agentDir,
+      model: model as never,
+      thinkingLevel: (reviewerReasoning() ?? "off") as never,
+      tools: [],
+      customTools: [],
+      resourceLoader,
+      sessionManager: SessionManager.inMemory(ctx.cwd),
+      settingsManager,
+    });
+    session = created.session;
+    const unsubscribe = session.subscribe((event) => {
+      if (event.type !== "message_end" || event.message.role !== "assistant") return;
+      turns += 1;
+      if (turns >= maxTurns && session?.isStreaming) {
+        turnBudgetExhausted = true;
+        void session.abort();
+      }
+    });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      void session?.abort();
+    }, timeoutMs);
+    const abortFromParent = () => void session?.abort();
+    ctx.signal?.addEventListener("abort", abortFromParent, { once: true });
+    try {
+      await session.prompt(initial, { expandPromptTemplates: false });
+    } finally {
+      clearTimeout(timeout);
+      ctx.signal?.removeEventListener("abort", abortFromParent);
+      unsubscribe();
+    }
+    const assistantMessages = session.messages.filter((message) => message.role === "assistant") as unknown as ReviewerResponse[];
+    usage.push(...assistantMessages.map((message) => message.usage).filter((item) => item !== undefined));
+    const failure = timedOut
+      ? "requirements reviewer timed out"
+      : turnBudgetExhausted
+        ? "requirements reviewer turn budget exhausted"
+        : null;
+    if (failure) return { result: unresolvedResult(requirements, failure), usage, reviewerModel, sourceRefs };
+    const response = assistantMessages.at(-1);
+    if (!response || response.stopReason !== "stop") {
+      return {
+        result: unresolvedResult(requirements, `requirements reviewer stopped before a complete verdict (${response?.stopReason ?? "unknown"})`),
+        usage,
+        reviewerModel,
+        sourceRefs,
+      };
+    }
+    const parsed = finalJsonFromResponse(response);
+    if (!parsed) return { result: unresolvedResult(requirements, "requirements reviewer returned malformed JSON"), usage, reviewerModel, sourceRefs };
+    const invalid = validateFinalReviewResult(parsed, requirements, knownEvidenceRefs);
+    return {
+      result: invalid ? unresolvedResult(requirements, `invalid requirements reviewer output: ${invalid}`) : parsed,
+      usage,
+      reviewerModel,
+      sourceRefs,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { result: unresolvedResult(requirements, `requirements reviewer failed safely: ${message}`), usage, reviewerModel, sourceRefs };
+  } finally {
+    session?.dispose();
+  }
+}
+
 export const freshReviewerRunner: ReviewerRunner = { run: runFreshReviewer };
+export const freshRequirementsReviewerRunner: RequirementsReviewerRunner = { run: runFreshRequirementsReviewer };

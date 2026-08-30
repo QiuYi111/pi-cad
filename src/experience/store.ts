@@ -368,8 +368,8 @@ export async function completeDistillation(success: boolean, root = experienceRo
 }
 
 /**
- * Launch a detached distillation supervisor. By default it starts Prime with
- * GLM; PI_CAD_DISTILL_COMMAND_JSON remains an argv-array override. The worker
+ * Launch a detached distillation supervisor. By default it starts Prime Agent
+ * with GLM; PI_CAD_DISTILL_COMMAND_JSON remains an argv-array override. The worker
  * owns log capture, cursor advancement on zero exit, and lock cleanup.
  */
 export async function runConfiguredDistillation(requestPath: string, root = experienceRoot()): Promise<"queued" | "complete" | "failed"> {

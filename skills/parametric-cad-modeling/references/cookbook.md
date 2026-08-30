@@ -18,10 +18,12 @@ The part asset builds a centered plate from named dimensions and cuts a compound
 
 ## Preflight
 
+- Make a compact contract table before construction: classify values as authoritative, derived, assumed, or unresolved; state local/world axes, operation type, and attachment plane. Do not hide an unresolved acceptance-critical coordinate in source.
 - Select topology by stable geometric conditions (orientation, extrema, radius/area), not face index. See [build123d topology selection](https://build123d.readthedocs.io/en/stable/topology_selection.html).
 - Use explicit datum planes/Locations and semantic labels/joints for assemblies. See [build123d assemblies](https://build123d.readthedocs.io/en/latest/assemblies.html).
-- Combine repeated cutters before one Boolean operation; avoid long incremental fuse/cut loops.
-- Check positive dimensions, wall/edge distance, expected solid/occurrence count, bounding box, and volume.
+- State `Align` or an equivalent datum placement on every attachment-sensitive primitive. Verify each primitive's bounds and each stacked/tangent interface plane before composition; do not rely on constructor centering defaults.
+- Combine repeated cutters before one Boolean operation; avoid long incremental fuse/cut loops. For a through-cut, overrun only along the cut axis, then verify every intended center/axis and entry/exit rim or face.
+- Check positive dimensions, wall/edge distance, expected solid/occurrence count, bounding box, and volume. After each Boolean, also check retained external datums, connectivity, and material added or removed at the intended locus.
 
 ## Expected Observation
 

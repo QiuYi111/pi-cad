@@ -16,6 +16,7 @@ const jobStem = basename(requestPath, ".json");
 const jobsDir = join(root, "distill-jobs");
 const statusPath = join(jobsDir, `${jobStem}.job.json`);
 const logPath = join(jobsDir, `${jobStem}.log`);
+const auditPath = join(jobsDir, `${jobStem}.audit.md`);
 
 async function atomicWrite(path, value) {
   await mkdir(dirname(path), { recursive: true });
@@ -59,6 +60,9 @@ function defaultPrompt(request) {
     "Extract only recurring, generalizable CAD strategies, failure modes, tool-use patterns, and verification habits supported by the trajectories.",
     "Preserve unrelated working-tree changes. Do not copy project-specific dimensions unless they express reusable domain knowledge.",
     "Validate every changed skill and run the relevant repository tests. If evidence does not justify a skill change, leave skills unchanged and explain why.",
+    "If you delegate evidence analysis to RLM children, wait for every child and collect its result before returning. Do not leave background analysis running.",
+    "Treat benchmark evaluator contract or unit-convention defects as data-quality findings, not as reusable agent guidance.",
+    "Write the audit note only after evidence collection, skill edits (if any), and validation are complete.",
     `Write a concise audit note to ${join(jobsDir, `${jobStem}.audit.md`)} describing evidence used, files changed, validation, model, and sequence range.`,
   ].join("\n");
 }
@@ -78,13 +82,24 @@ async function run() {
     args.push(requestPath);
     mode = "custom";
   } else {
-    command = process.env.PI_CAD_DISTILL_PI_COMMAND || "pi";
+    command = process.env.PI_CAD_DISTILL_PI_COMMAND || "prime-agent";
     args = [
       "--model", process.env.PI_CAD_DISTILL_MODEL || "zai/glm-5.3-flash",
       "--thinking", process.env.PI_CAD_DISTILL_THINKING || "low",
       "--print",
-      "--approve",
-      "--name", `pi-cad-${jobStem}`,
+      "--cwd", packageRoot,
+      "--session-dir", join(jobsDir, "sessions"),
+      "--no-extensions",
+      "--no-skills",
+      "--no-prompt-templates",
+      "--no-context-files",
+      "--tools", "ipython",
+      "--autonomous",
+      "--autonomous-gate", `test -s '${auditPath}'`,
+      "--autonomous-max-continuations", "8",
+      "--autonomous-max-turns", "40",
+      "--autonomous-max-tokens", "160000",
+      "--autonomous-timeout-ms", "3600000",
       defaultPrompt(request),
     ];
     mode = "builtin-prime";
@@ -117,7 +132,15 @@ async function run() {
     child.once("exit", (code) => fulfill(code ?? 1));
   }).finally(() => log.close());
 
-  const success = exitCode === 0;
+  let success = exitCode === 0;
+  let completionError = null;
+  if (success && mode === "builtin-prime") {
+    const audit = await readFile(auditPath, "utf8").catch(() => "");
+    if (!audit.trim()) {
+      success = false;
+      completionError = `Prime exited successfully without the required audit artifact: ${auditPath}`;
+    }
+  }
   const state = await finishDistillation(success);
   const completedAt = new Date().toISOString();
   const logDigest = createHash("sha256").update(await readFile(logPath)).digest("hex");
@@ -129,6 +152,7 @@ async function run() {
     thinking: mode === "builtin-prime" ? process.env.PI_CAD_DISTILL_THINKING || "low" : null,
     pid: process.pid,
     exit_code: exitCode,
+    ...(completionError ? { completion_error: completionError } : {}),
     request_path: requestPath,
     log_path: logPath,
     log_sha256: logDigest,

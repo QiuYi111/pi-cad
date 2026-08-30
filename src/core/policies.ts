@@ -103,6 +103,12 @@ export function finalReviewerEnabled(): boolean {
   return value === "1" || value === "true" || value === "on";
 }
 
+export function requirementsReviewerEnabled(): boolean {
+  const value = process.env.PI_CAD_REQUIREMENTS_REVIEWER?.trim().toLowerCase();
+  if (value) return value === "1" || value === "true" || value === "on";
+  return finalReviewerEnabled();
+}
+
 /** The transition table, not a hardcoded phase list, defines final closure. */
 export function finalSubmissionAllowed(state: CadRunState): boolean {
   if (!finalReviewerEnabled() || !state.route) return false;

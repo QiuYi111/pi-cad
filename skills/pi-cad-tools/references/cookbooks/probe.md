@@ -36,7 +36,8 @@ For 444 faces, the first result reports totals, type distribution, area range, a
 - Pick the narrowest preset; use Python only if no typed preset expresses the question.
 - Supply exactly one permitted subject form.
 - Never reuse selectors after the resolved artifact hash changes.
-- For Python, assign a JSON-serializable `result`; keep scalars/small objects inline and allow arrays/tables to become collections.
+- Derive expected values from the requirement contract, not from construction constants copied into the probe. Include a discriminator for a plausible wrong placement, axis, Boolean direction, or feature interpretation.
+- For Python, assign a JSON-serializable `result`; keep scalars/small objects inline and allow arrays/tables to become collections. Inventory and filter entities by geometric type before reading type-specific properties such as radius or axis. Prefer plain bounded loops and lists over unsupported builtins, imports, or generator-heavy shortcuts.
 
 ## Expected Observation
 

@@ -50,6 +50,7 @@ const THINKING = process.env.PI_CAD_THINKING ?? "max";
 const TIMEOUT_MS = Number(process.env.PI_CAD_TIMEOUT_MS ?? 1_800_000);
 const RETRIES = Number(process.env.PI_CAD_RETRIES ?? 1);
 const AGENT_DIR = process.env.PI_CODING_AGENT_DIR ?? join(REPO, ".pi-agent");
+const AGENT_COMMAND = process.env.PI_CAD_AGENT_COMMAND ?? "prime-agent";
 const BENCH_PY = join(HERE, ".venv", "bin", "python");
 const BENCH_CLI = join(HERE, ".venv", "bin", "cadtestbench");
 
@@ -145,7 +146,7 @@ function restoreVault() {
 
 // ---------------------------------------------------------------- audit (L3)
 
-const TOOLCHAIN_RX = /\/(src|node_modules|\.python|python|\.venv|ref|tests|scripts|assets|build)\//;
+const TOOLCHAIN_RX = /\/(src|skills|node_modules|\.python|python|\.venv|ref|tests|scripts|assets|build)\//;
 
 function auditSession(sessionPath, sid) {
   const flags = [];
@@ -167,7 +168,7 @@ function auditSession(sessionPath, sid) {
       const argv = JSON.stringify(part.arguments ?? part.input ?? {});
       const paths = argv.match(/(?:\\?")(\/[^"\\]{4,}|\.?\.\/[^"\\]{2,})/g) ?? [];
       for (let raw of paths) {
-        raw = raw.slice(1).replace(/\\\\/g, "\\");
+        raw = raw.slice(1).replace(/\\\\/g, "\\").replace(/^\"+/, "");
         if (raw.startsWith("./") || raw === ".") continue;
         if (raw === ownStaging || raw.startsWith(ownStaging + "/")) continue;
         if (raw.includes("/.cache/") || raw.includes("/.cache")) {
@@ -193,29 +194,44 @@ function auditSession(sessionPath, sid) {
 
 // ---------------------------------------------------------------- pi runner
 
-function piArgs(prompt, sessionId) {
+function piArgs(workdir, prompt) {
   const ext = (name) => join(REPO, "src", "extensions", name, "index.ts");
+  const extensions = ["core", "probe", "geometry", "ui", "drawing", "presentation", "experience"];
+  const completionGate = `node ${join(REPO, "benchmarks", "cadtestbench", "completion-gate.mjs")}`;
   return [
     "-p", "--provider", PROVIDER, "--model", MODEL, "--thinking", THINKING,
-    "--no-skills", "--no-themes", "--session-id", sessionId,
-    "-e", ext("core"), "-e", ext("geometry"), "-e", ext("visual"), "-e", ext("ui"),
+    "--cwd", workdir, "--session-dir", join(workdir, ".sessions"),
+    "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
+    ...extensions.flatMap((name) => ["-e", ext(name)]),
+    "--skill", join(REPO, "skills", "pi-cad", "SKILL.md"),
+    "--skill", join(REPO, "skills", "pi-cad-tools", "SKILL.md"),
+    "--skill", join(REPO, "skills", "parametric-cad-modeling", "SKILL.md"),
+    "--append-system-prompt",
+    "Pi-CAD workflow state is authoritative. After routing, finish the current action card before implementation, and do not answer until the workflow reaches DONE. Before implementation, load the relevant engineering knowledge skill referenced by pi-cad.",
+    "--autonomous", "--autonomous-gate", completionGate,
+    "--autonomous-gate-retries", "16",
+    "--autonomous-max-continuations", "32",
+    "--autonomous-max-turns", "64",
+    "--autonomous-max-tokens", "500000",
+    "--autonomous-timeout-ms", String(TIMEOUT_MS),
     prompt,
   ];
 }
 
 function runPi(workdir, prompt, sessionId) {
   return new Promise((res) => {
-    const child = spawn("pi", piArgs(prompt, sessionId), {
+    const child = spawn(AGENT_COMMAND, piArgs(workdir, prompt), {
       cwd: workdir,
       env: { ...process.env, PI_CODING_AGENT_DIR: AGENT_DIR,
              PI_CODING_AGENT_SESSION_DIR: join(workdir, ".sessions"),
              PI_CAD_REPO: REPO,
+             PI_CAD_PROJECT_CWD: workdir,
              PI_CAD_HEADLESS: "1",
-             // Benchmarks must exercise the production closure path. Without
-             // this flag cad_submit_for_review is hidden and cad_transition
-             // can take the legacy direct-to-READY edge, making results depend
-             // on how each Agent reacts to the missing review tool.
-             PI_CAD_FINAL_REVIEWER: "1" },
+             // Catch semantic mistakes before implementation. The benchmark
+             // deliberately spends its single independent review here rather
+             // than after the entire candidate has already been built.
+             PI_CAD_REQUIREMENTS_REVIEWER: "1",
+             PI_CAD_FINAL_REVIEWER: "0" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "", stderr = "";
@@ -229,7 +245,9 @@ function runPi(workdir, prompt, sessionId) {
 function sessionMetrics(workdir, sessionId) {
   const dir = join(workdir, ".sessions");
   if (!existsSync(dir)) return null;
-  const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl") && f.includes(sessionId));
+  const allFiles = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort();
+  const matching = allFiles.filter((f) => f.includes(sessionId));
+  const files = matching.length ? matching : allFiles;
   if (!files.length) return null;
   const u = { input: 0, cacheRead: 0, output: 0, total: 0, cost: 0 };
   let toolCalls = 0, candidateCommits = 0, errors = 0;
@@ -419,7 +437,7 @@ const dataEntry = vaultManifest.find((e) => e.dest.endsWith("/data") || e.dest =
 const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 const runName = `${stamp}_${LABEL}`;
 const gitHead = sh(["git", "-C", REPO, "rev-parse", "HEAD"]).trim();
-const piVersion = sh(["pi", "--version"]).trim();
+const piVersion = sh([AGENT_COMMAND, "--version"]).trim();
 
 const experiment = {
   benchmark: { name: "CADTestBench", partition: PARTITION,
@@ -429,7 +447,8 @@ const experiment = {
   agent: { provider: PROVIDER, model: MODEL, thinking: THINKING },
   harness: { piCadCommit: gitHead, branch: sh(["git", "-C", REPO, "rev-parse", "--abbrev-ref", "HEAD"]).trim(),
     piAgentVersion: piVersion,
-    extensions: ["core", "geometry", "visual", "ui"],
+    runtime: "Prime Agent",
+    extensions: ["core", "probe", "geometry", "ui", "drawing", "presentation", "experience"],
     isolation: "L1 vault + L2 per-sample staging + L3 per-session audit gate" },
   execution: { timeoutMs: TIMEOUT_MS, retries: RETRIES },
   sampleIds: idList,

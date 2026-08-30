@@ -35,13 +35,19 @@ import { loadPrompt } from "./context.ts";
 import { verifyCurrentArtifacts, verifyEvidenceFilesForHash, verifyPresentationDeliverables } from "./evidence.ts";
 import type { PersistFn } from "./auto-actions.ts";
 import { runFinalReviewPreflight } from "../control/final-review/preflight.ts";
-import { REVIEWER_PROMPT_VERSION, freshReviewerRunner, type ReviewerRunner } from "../control/final-review/reviewer.ts";
+import {
+  REVIEWER_PROMPT_VERSION,
+  freshRequirementsReviewerRunner,
+  freshReviewerRunner,
+  type RequirementsReviewerRunner,
+  type ReviewerRunner,
+} from "../control/final-review/reviewer.ts";
 import { collectReviewerEvidenceIndex } from "../control/final-review/evidence-index.ts";
 import {
   aggregateReviewVotes,
   type StoredReviewVote,
 } from "../control/final-review/voting.ts";
-import { finalReviewerEnabled, finalSubmissionAllowed } from "./policies.ts";
+import { finalReviewerEnabled, finalSubmissionAllowed, requirementsReviewerEnabled } from "./policies.ts";
 import { transitionFailureDetails } from "./agent-contract.ts";
 import {
   interactionModeFromEnvironment,
@@ -93,6 +99,7 @@ export interface ControllerDeps {
     persist: PersistFn,
   ) => Promise<{ ok: boolean; text?: string; images?: Array<{ type: "image"; data: string; mimeType: string }>; details?: unknown }>;
   reviewerRunner?: ReviewerRunner;
+  requirementsReviewerRunner?: RequirementsReviewerRunner;
 }
 
 function okTool(text: string, details: unknown): AgentToolResult<unknown> {
@@ -633,6 +640,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptSnippet: "Commit the working brief and enter the next process phase",
     promptGuidelines: [
       "Do not commit before shared understanding is reached.",
+      "The proposed contract receives one fresh adversarial requirements review before it becomes canonical. If rejected, repair the reported semantic or binding defects and resubmit; do not argue for an implementation that has not started.",
       "Before any candidate exists, preregister one or more assertions for every Must using stable M1/M2/... references. Geometry assertions state only facts observable on the completed deliverable, never modeling order, feature history, pre-cut construction geometry, or removed entities. Translate procedural instructions into final dimensions and relationships that an independent reviewer can establish from the final artifact without source history.",
       "Set canonicalCheck only when the Must truly maps to a global digest field; do not guess a bbox axis from prose. If binding.direction explicitly names global X/Y/Z for a numeric extent, the matching bbox canonicalCheck is mandatory.",
       "For legacy/hybrid lineages, analyze, and convert, list supplied STEP/STP files in inputs.",
@@ -669,6 +677,45 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       if (validationFailure) {
         return errTool(`invalid requirements record: ${validationFailure}. The workflow state is unchanged.`);
       }
+      let requirementsReviewEvent: { type: string; data?: unknown } | null = null;
+      if (requirementsReviewerEnabled()) {
+        const review = await (deps.requirementsReviewerRunner ?? freshRequirementsReviewerRunner).run(ctx, state, record);
+        const createdAt = nowIso();
+        const report = {
+          version: 1,
+          kind: "requirements",
+          createdAt,
+          requirementsHash: hashRecord(record),
+          assertionsHash: hashRecord(record.assertions),
+          reviewerModel: review.reviewerModel,
+          reviewerPromptVersion: "requirements-adversary-v1",
+          sourceRefs: review.sourceRefs,
+          usage: review.usage,
+          result: review.result,
+        };
+        const reportPath = await store.writeReview(report);
+        requirementsReviewEvent = {
+          type: "RequirementsReviewCompleted",
+          data: {
+            verdict: review.result.verdict,
+            report: store.relative(reportPath),
+            requirementsHash: report.requirementsHash,
+          },
+        };
+        if (review.result.verdict !== "pass") {
+          await deps.persist(pi, store, state, [requirementsReviewEvent]);
+          const findings = [
+            ...review.result.assertionChecks
+              .filter((check) => check.verdict !== "pass")
+              .map((check) => `- ${check.assertionId} ${check.verdict.toUpperCase()}: ${check.finding}`),
+            ...review.result.semanticObjections.map((item) => `- ${item.mustRef} ${item.type.toUpperCase()}: ${item.finding}`),
+          ];
+          return errTool(
+            `Adversarial requirements review ${review.result.verdict.toUpperCase()}. The contract was not committed; repair it and resubmit.\nReport: ${store.relative(reportPath)}\n${findings.join("\n") || review.result.summary}`,
+            { state, requirementsReview: report },
+          );
+        }
+      }
       const result = commitRequirements(state, record);
       if (!result.ok) return errTool(result.reason);
       let next = result.state;
@@ -686,7 +733,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
         }
         await store.writeRequirementsVersion(next.requirementsVersion!, record);
         await store.writeRecord("requirements", record);
-        await deps.persist(pi, store, next, result.events);
+        await deps.persist(pi, store, next, [...(requirementsReviewEvent ? [requirementsReviewEvent] : []), ...result.events]);
         const baseline = await deps.runBaselineAuto(pi, store, next, baselineInput, deps.persist);
         next = baseline.state;
         const text = [
@@ -699,7 +746,7 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       }
       await store.writeRequirementsVersion(next.requirementsVersion!, record);
       await store.writeRecord("requirements", record);
-      await deps.persist(pi, store, next, result.events);
+      await deps.persist(pi, store, next, [...(requirementsReviewEvent ? [requirementsReviewEvent] : []), ...result.events]);
       return okTool(
         `Requirements committed (${next.requirementsVersion?.slice(0, 12)}). Harness phase is now ${next.phase.toUpperCase()}.\n\n${await loadPrompt(next.phase)}`,
         { state: next, requirementsVersion: next.requirementsVersion },
