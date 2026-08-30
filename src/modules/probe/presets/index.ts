@@ -76,10 +76,27 @@ const geometryPreset: ProbePreset<GeometryProbeArgs> = {
   async run(args, ctx) {
     const output = args.output ?? (await currentGeometryEvidencePath(ctx.cwd, args.artifact));
     const envelope = await inspectGeometry(ctx.cwd, args.artifact, output);
+    const payload = envelope.payload as {
+      bbox?: { x?: number; y?: number; z?: number };
+      bboxMin?: number[];
+      bboxMax?: number[];
+      solidCount?: number;
+      occurrenceCount?: number;
+      cylinders?: Array<{ label?: string; radius?: number }>;
+    };
+    const cylinders = payload.cylinders ?? [];
     return {
       envelope,
       kind: "geometry",
       headline: `geometry facts: ${args.artifact}`,
+      facts: [
+        ...(payload.bbox ? [{ key: "bbox", value: JSON.stringify(payload.bbox) }] : []),
+        ...(payload.bboxMin ? [{ key: "bboxMin", value: JSON.stringify(payload.bboxMin) }] : []),
+        ...(payload.bboxMax ? [{ key: "bboxMax", value: JSON.stringify(payload.bboxMax) }] : []),
+        ...(payload.solidCount !== undefined ? [{ key: "solidCount", value: String(payload.solidCount) }] : []),
+        ...(payload.occurrenceCount !== undefined ? [{ key: "occurrenceCount", value: String(payload.occurrenceCount) }] : []),
+        ...(cylinders.length ? [{ key: "cylinderRadii", value: JSON.stringify(cylinders.map((item) => ({ label: item.label, radius: item.radius }))) }] : []),
+      ],
       artifactPath: resolve(ctx.cwd, args.artifact),
     };
   },

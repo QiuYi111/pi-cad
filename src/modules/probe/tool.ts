@@ -152,11 +152,19 @@ async function resolveSubjectArtifact(
     const project = new HarnessProjectStoreV7(cwd);
     const loaded = await project.currentRun(mechanicalRegistries);
     if (!loaded) return null;
+    const preferredArtifact = (artifacts: typeof loaded.state.artifacts) => {
+      const entries = Object.values(artifacts);
+      return entries.find((item) => /authoritative/i.test(item.role))?.path
+        ?? entries.find((item) => /design/i.test(item.role))?.path
+        ?? entries.find((item) => /candidate/i.test(item.role) && !/source/i.test(item.role))?.path
+        ?? entries[0]?.path
+        ?? null;
+    };
     if ((subject ?? "current") === "baseline") {
       const { state } = await project.load();
-      return Object.values(state.head.artifacts).find((item) => /authoritative|design|candidate/i.test(item.role))?.path ?? Object.values(state.head.artifacts)[0]?.path ?? null;
+      return preferredArtifact(state.head.artifacts);
     }
-    return Object.values(loaded.state.artifacts).find((item) => /authoritative|design|candidate/i.test(item.role))?.path ?? Object.values(loaded.state.artifacts)[0]?.path ?? null;
+    return preferredArtifact(loaded.state.artifacts);
   }
   const state = await new CadProjectStore(cwd).load();
   if (!state) return null;
