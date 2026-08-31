@@ -248,10 +248,35 @@ What this demonstrates:
 
 ## 4. Get started
 
-Pi-CAD currently supports Ubuntu and WSL2. You need Node.js 22.19+, Python
+Pi-CAD currently supports Windows with WSL2, plus the Ubuntu command line.
+
+### Desktop app
+
+Install `Pi-CAD-0.1.0-x64.exe`, open Pi-CAD, and choose a project folder in
+Settings. The app includes the matching Prime Agent and Pi-CAD runtime. On first
+run it checks WSL, then installs missing Node.js, Python, `uv`, and Bubblewrap
+inside the selected distro. WSL itself remains a Windows prerequisite.
+
+Sign in with ChatGPT from the Provider card. The OAuth result is stored in the
+Prime agent directory inside WSL; the desktop app never asks for an API key.
+Choose the author model, thinking level, reviewer model, and workflow, then
+return to the Workbench. The left pane is resizable and the viewer follows the
+available screen size.
+
+The desktop app provides:
+
+- a Prime conversation and persistent engineering workbench;
+- a live workflow rail and workflow package editor;
+- a large STEP viewer with fit, standard views, section, and explode controls;
+- visible build, probe, simulation, image, transition, and review activity;
+- processed trajectory inspection, rating, and distillation progress.
+
+### Command line
+
+The command line supports Ubuntu and WSL2. You need Node.js 22.19+, Python
 3.11/3.12 managed by `uv`, Bubblewrap, and a configured Prime provider.
 
-### Install
+#### Install
 
 Keep the Prime Agent and Pi-CAD repositories beside each other:
 
@@ -279,7 +304,7 @@ ln -sfn "$PWD/scripts/prime-cad-launcher.sh" ~/.local/bin/prime-cad
 
 Make sure `~/.local/bin` is on `PATH`.
 
-### Run your first design
+#### Run your first design
 
 Start inside a dedicated design project or Git worktree:
 

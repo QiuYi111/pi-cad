@@ -187,7 +187,7 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
   );
   for (const name of ["TERM", "LANG", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) passEnvironment(args, name, process.env[name]);
   args.push(
-    "--", "/opt/prime/prime-agent.sh", "--cwd", "/workspace",
+    "--", "/opt/prime/prime-agent.sh", "--dist", "--cwd", "/workspace",
     "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
     "--tools", "ipython", ...(input.modelArgs ?? []), "--autonomous",
     "--autonomous-max-continuations", REVIEWER_UNBOUNDED_LIMIT,
@@ -247,7 +247,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[]): st
     passEnvironment(args, name, process.env[name]);
   }
   args.push(
-    "--", "/opt/prime/prime-agent.sh",
+    "--", "/opt/prime/prime-agent.sh", "--dist",
     "--cwd", "/workspace",
     "--no-extensions", "--no-prompt-templates", "--no-themes", "--no-context-files",
     "--tools", "ipython,codex_generate_image,cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read",

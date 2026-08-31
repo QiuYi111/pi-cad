@@ -6,6 +6,9 @@ __pycache__/
 .pi-cad/
 models/
 build/
+!apps/desktop/build/
+!apps/desktop/build/icon.png
+!apps/desktop/build/icon.ico
 node_modules/
 .npm-cache/
 .pi-agent/
@@ -28,3 +31,9 @@ benchmarks/results/*
 .postinstall-test.pid
 .uv-cache/
 .runtime/
+apps/desktop/out/
+apps/desktop/release/
+apps/desktop/resources/runtime/
+apps/desktop/test-results/
+apps/desktop/playwright-report/
+*.tsbuildinfo

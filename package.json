@@ -31,6 +31,11 @@
     ]
   },
   "scripts": {
+    "desktop:dev": "npm --prefix apps/desktop run dev",
+    "desktop:build": "npm --prefix apps/desktop run build",
+    "desktop:test": "npm --prefix apps/desktop test",
+    "desktop:test:e2e": "npm --prefix apps/desktop run test:e2e",
+    "desktop:package:win": "npm --prefix apps/desktop run package:win",
     "prime:setup": "node scripts/prime-cad.mjs",
     "generate:agent-contract": "node scripts/generate-agent-contract.mjs",
     "check:agent-contract": "node scripts/generate-agent-contract.mjs --check",
@@ -53,14 +58,15 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
+    "jiti": "^2.7.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "jiti": "^2.7.0",
     "typebox": "^1.3.15",
     "typescript": "^5.9.3"
   },
   "files": [
+    "apps/desktop",
     "src",
     "packages/prime-codex-image-gen",
     "packages/prime-transcript-lab",

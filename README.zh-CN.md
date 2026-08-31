@@ -215,10 +215,32 @@ Decorator 源码，也不需要临时适配 API。更复杂的确定性工作可
 
 ## 4. 用户引导
 
-Pi-CAD 当前支持 Ubuntu 和 WSL2。你需要 Node.js 22.19+、由 `uv` 管理的 Python
-3.11/3.12、Bubblewrap，以及已配置 Provider 的 Prime Agent。
+Pi-CAD 当前支持 Windows + WSL2，也支持 Ubuntu 命令行。
 
-### 安装
+### 桌面应用
+
+安装 `Pi-CAD-0.1.0-x64.exe`，打开 Pi-CAD，在设置中选择项目目录。安装包已内含匹配的
+Prime Agent 和 Pi-CAD 运行时。首次启动会检查 WSL，并在所选发行版中自动补齐 Node.js、
+Python、`uv` 和 Bubblewrap。WSL 本身仍需用户先在 Windows 中启用。
+
+在 Provider 卡片中使用 ChatGPT 登录。OAuth 结果保存在 WSL 内的 Prime 目录，应用不要求
+API Key。选择作者模型、思考等级、Reviewer 模型和 Workflow 后，回到主工作台即可使用。
+对话区可以拖动，查看器会跟随屏幕大小变化。
+
+桌面应用包含：
+
+- Prime 对话和持久工程工作台；
+- 实时 Workflow 条和 Workflow 编辑器；
+- 大型 STEP 查看器，支持适配、标准视角、剖切和爆炸；
+- 可见的 Build、Probe、Simulation、Image、Transition、Review 过程；
+- 处理后的轨迹查看、评分与蒸馏进度。
+
+### 命令行
+
+命令行支持 Ubuntu 和 WSL2。你需要 Node.js 22.19+、由 `uv` 管理的 Python 3.11/3.12、
+Bubblewrap，以及已配置 Provider 的 Prime Agent。
+
+#### 安装
 
 将 Prime Agent 和 Pi-CAD 放在同一级目录：
 
@@ -246,7 +268,7 @@ ln -sfn "$PWD/scripts/prime-cad-launcher.sh" ~/.local/bin/prime-cad
 
 确认 `~/.local/bin` 已加入 `PATH`。
 
-### 完成第一个设计
+#### 完成第一个设计
 
 在独立的设计 Project 或 Git Worktree 中启动：
 

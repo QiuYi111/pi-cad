@@ -482,9 +482,9 @@ async function addPendingTokens(seq: number, tokens: number, root: string): Prom
   await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
 }
 
-export async function maybeBeginDistillation(root = experienceRoot()): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
+async function beginDistillation(root: string, requireThreshold: boolean): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
   const state = await readDistillState(root);
-  if (state.pending_transcript_tokens < state.threshold_tokens || state.active_cutoff_seq !== null) return { triggered: false };
+  if ((requireThreshold && state.pending_transcript_tokens < state.threshold_tokens) || state.pending_transcript_tokens <= 0 || state.active_cutoff_seq !== null) return { triggered: false };
   const lockPath = join(root, "distill.lock");
   let lock;
   try { lock = await open(lockPath, "wx"); } catch { return { triggered: false }; }
@@ -497,6 +497,15 @@ export async function maybeBeginDistillation(root = experienceRoot()): Promise<{
   const requestPath = join(root, `distill-${state.last_distilled_seq + 1}-${cutoff}.json`);
   await atomicWrite(requestPath, JSON.stringify({ schema_version: 1, from_seq: state.last_distilled_seq + 1, cutoff_seq: cutoff, transcript_tokens: state.pending_transcript_tokens, created_at: state.active_started_at }, null, 2) + "\n");
   return { triggered: true, cutoff_seq: cutoff, request_path: requestPath };
+}
+
+export async function maybeBeginDistillation(root = experienceRoot()): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
+  return beginDistillation(root, true);
+}
+
+/** Explicit user action: preserve the same lock and immutable cutoff, but do not wait for the automatic token threshold. */
+export async function beginDistillationNow(root = experienceRoot()): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
+  return beginDistillation(root, false);
 }
 
 export async function completeDistillation(success: boolean, root = experienceRoot()): Promise<DistillState> {
