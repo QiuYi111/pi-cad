@@ -13,13 +13,29 @@ export class TraceStore {
     return stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as TraceSummary).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
-  async read(path: string): Promise<unknown[]> {
+  private async sessionPath(settings: AppSettings, path: string): Promise<string> {
+    const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
+    const root = `${projectPath}/.prime-sessions/`;
+    if (!projectPath || !path.startsWith(root) || !path.endsWith(".jsonl") || path.includes("/../")) throw new Error("Trajectory path escapes the active project.");
+    const [{ stdout: canonicalRoot }, { stdout: canonicalPath }] = await Promise.all([
+      this.bridge.exec(["realpath", "-e", root]),
+      this.bridge.exec(["realpath", "-e", "--", path]),
+    ]);
+    const confinedRoot = `${canonicalRoot.trim()}/`;
+    const confinedPath = canonicalPath.trim();
+    if (!confinedPath.startsWith(confinedRoot) || !confinedPath.endsWith(".jsonl")) throw new Error("Trajectory path escapes the active project.");
+    return confinedPath;
+  }
+
+  async read(settings: AppSettings, path: string): Promise<unknown[]> {
+    path = await this.sessionPath(settings, path);
     const { stdout } = await this.bridge.exec(["cat", path], { timeout: 60_000 });
     return stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
   }
 
   async distill(settings: AppSettings, paths: string[], evaluation: { quality: number; difficulty: number }, onStatus: (value: DistillationStatus) => void): Promise<DistillationStatus> {
     if (!paths.length) throw new Error("Select at least one trajectory.");
+    paths = await Promise.all(paths.map((path) => this.sessionPath(settings, path)));
     const { piCadRepo, primeAgentRepo } = await this.bridge.resolveRuntimePaths(settings);
     const state: DistillationStatus = { state: "running", processed: 0, total: paths.length, message: "Preparing selected trajectories…" };
     onStatus(state);

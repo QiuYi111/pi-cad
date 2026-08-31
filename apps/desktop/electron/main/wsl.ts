@@ -68,7 +68,7 @@ export class WslBridge {
   }
 
   async commandPath(name: "node" | "uv"): Promise<string> {
-    const { stdout } = await this.exec(["bash", "-lc", `command -v ${name}`]);
+    const { stdout } = await this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; command -v ${name}`]);
     const value = stdout.trim();
     if (!value.startsWith("/")) throw new Error(`${name} is not available in WSL.`);
     return value;
@@ -78,12 +78,17 @@ export class WslBridge {
     const home = await this.homeDirectory();
     const piCadRepo = settings.piCadRepo ? await this.toLinuxPath(settings.piCadRepo) : `${home}/.local/share/pi-cad-desktop/runtime/pi-cad`;
     const projectPath = settings.projectPath ? await this.toLinuxPath(settings.projectPath) : "";
-    let primeAgentRepo = settings.primeAgentRepo ? await this.toLinuxPath(settings.primeAgentRepo) : "";
+    const explicitPrime = Boolean(settings.primeAgentRepo);
+    let primeAgentRepo = explicitPrime ? await this.toLinuxPath(settings.primeAgentRepo) : "";
     if (!primeAgentRepo) {
       try {
         const { stdout } = await this.exec(["bash", "-lc", "node -e 'const fs=require(\"fs\"),os=require(\"os\"),p=os.homedir()+\"/.prime/agent/prime-cad.json\";try{process.stdout.write(JSON.parse(fs.readFileSync(p,\"utf8\")).primeAgentRepo||\"\")}catch{}'"]);
         primeAgentRepo = stdout.trim();
       } catch {}
+    }
+    if (primeAgentRepo && !explicitPrime) {
+      try { await this.exec(["test", "-f", `${primeAgentRepo}/prime-agent.sh`]); }
+      catch { primeAgentRepo = ""; }
     }
     if (!primeAgentRepo) primeAgentRepo = `${home}/.local/share/pi-cad-desktop/runtime/prime-agent`;
     return { piCadRepo, primeAgentRepo, projectPath };
@@ -102,6 +107,7 @@ export class WslBridge {
     }
     const paths = await this.resolveRuntimePaths(settings);
     const script = [
+      "export PATH=\"$HOME/.local/bin:$PATH\"",
       "node=$(command -v node || true)",
       "nodev=$([ -n \"$node\" ] && node -p 'process.versions.node' 2>/dev/null || true)",
       "printf 'node=%s\\n' \"$nodev\"",
@@ -138,7 +144,7 @@ export class WslBridge {
       await this.exec(["bash", "-lc", "curl -LsSf https://astral.sh/uv/install.sh | sh"], { timeout: 5 * 60_000 });
     }
     if (missing.has("node")) {
-      await this.exec(["bash", "-lc", "curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell && ~/.local/share/fnm/fnm install 22 && ~/.local/share/fnm/fnm default 22"], { timeout: 10 * 60_000 });
+      await this.exec(["bash", "-lc", "set -e; curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell; FNM=$HOME/.local/share/fnm/fnm; eval \"$($FNM env --shell bash)\"; $FNM install 22; $FNM default 22; mkdir -p $HOME/.local/bin; NODE=$($FNM which 22); ln -sfn $NODE $HOME/.local/bin/node; DIR=$(dirname $NODE); ln -sfn $DIR/npm $HOME/.local/bin/npm; ln -sfn $DIR/npx $HOME/.local/bin/npx"], { timeout: 10 * 60_000 });
     }
     let paths = await this.resolveRuntimePaths(settings);
     if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath) {
@@ -151,7 +157,7 @@ export class WslBridge {
     if (missing.has("prime")) {
       throw new Error(`Bundled Prime runtime is not staged at ${paths.primeAgentRepo}. Reinstall Pi-CAD or select a Prime Agent checkout in Settings.`);
     }
-    await this.exec(["bash", "-lc", `cd ${JSON.stringify(paths.piCadRepo)} && npm install --omit=dev --legacy-peer-deps && npm run setup:python`], { timeout: 15 * 60_000 });
+    await this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; cd ${JSON.stringify(paths.piCadRepo)} && npm install --omit=dev --legacy-peer-deps && npm run setup:python`], { timeout: 15 * 60_000 });
     status = await this.check(settings);
     onStatus?.(status);
     return status;

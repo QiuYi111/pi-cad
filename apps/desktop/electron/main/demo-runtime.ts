@@ -27,7 +27,7 @@ export class DemoRuntime extends EventEmitter {
     await wait(120);
     this.emit("event", {
       type: "tool_execution_end", toolCallId: "demo-build", toolName: "ipython",
-      result: { content: [{ type: "text", text: "ArtifactRef(role='candidate', path='build/part.step')" }], details: { attachments: [] } },
+      result: { content: [{ type: "text", text: "ArtifactRef(role='candidate', path='build/part.step')" }], details: { attachments: [{ mimeType: "image/png", role: "isometric", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }] } },
     });
     this.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "The first model is built and ready for inspection." }], id: "demo-assistant" } });
     this.status = { ...this.status, state: "ready" };

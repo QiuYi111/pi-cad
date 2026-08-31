@@ -33,6 +33,7 @@ export class PrimeRpc extends EventEmitter {
       `PI_CAD_PROJECT_CWD=${paths.projectPath}`,
       `PRIME_AGENT_REPO=${paths.primeAgentRepo}`,
       `PRIME_AGENT_CODING_AGENT_DIR=${home}/.prime/agent`,
+      `PI_CAD_DESKTOP_PERMISSION=${settings.permission}`,
       node, `${paths.piCadRepo}/scripts/prime-cad-sidecar.mjs`,
       "--mode", "rpc",
       "--provider", settings.provider,

@@ -64,7 +64,12 @@ export class AuthController extends EventEmitter {
       } else if (event.type === "auth_error") {
         this.update({ provider: "openai-codex", state: "error", message: event.message });
       } else if (event.type === "auth_input" || event.type === "auth_select") {
-        this.update({ provider: "openai-codex", state: "waiting", message: event.message || "Paste the redirect URL from your browser." });
+        this.update({
+          provider: "openai-codex", state: "waiting", message: event.message || "Paste the redirect URL from your browser.",
+          input: event.type === "auth_select"
+            ? { kind: "select", options: (event.options || []).map((option: any) => ({ id: String(option.id), label: String(option.label || option.name || option.id) })) }
+            : { kind: "text", placeholder: event.placeholder },
+        });
       } else if (event.type === "auth_progress") {
         this.update({ provider: "openai-codex", state: "waiting", message: event.message });
       }

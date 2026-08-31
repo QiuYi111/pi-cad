@@ -132,7 +132,7 @@ function registerIpc() {
   });
   ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? { source: path, parts: [{ name: "Demo", positions: [-1,-1,0,1,-1,0,0,1,0], indices: [0,1,2], color: "#7da8f7" }], bounds: { min: [-1,-1,0], max: [1,1,0] } } : new ViewerBackend(await bridge()).loadStep(await settingsStore.get(), path));
   ipcMain.handle(IPC.tracesList, async () => demo ? [{ id: "demo-trace", path: "/workspace/.prime-sessions/demo.jsonl", title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420 }] : new TraceStore(await bridge()).list(await settingsStore.get()));
-  ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(path));
+  ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(await settingsStore.get(), path));
   ipcMain.handle(IPC.tracesDistill, async (_event, paths: string[], evaluation: { quality: number; difficulty: number }) => {
     if (demo) {
       const status = { state: "complete", processed: paths.length, total: paths.length, message: `Experience updated · quality ${evaluation.quality}/5` } as const;

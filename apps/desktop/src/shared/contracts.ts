@@ -39,6 +39,7 @@ export interface AuthStatus {
   state: "checking" | "signed-out" | "waiting" | "signed-in" | "error";
   message?: string;
   expiresAt?: number;
+  input?: { kind: "text"; placeholder?: string } | { kind: "select"; options: Array<{ id: string; label: string }> };
 }
 
 export interface WorkflowCurrent {
@@ -93,6 +94,7 @@ export interface CadActivity {
   finishedAt?: number;
   metrics?: Array<{ label: string; value: string }>;
   media?: MediaAttachment[];
+  artifactPath?: string;
   details?: unknown;
 }
 

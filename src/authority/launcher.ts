@@ -207,7 +207,7 @@ function passEnvironment(args: string[], name: string, value: string | undefined
   if (value !== undefined) args.push("--setenv", name, value);
 }
 
-export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[]): string[] {
+export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], permission: "workspace" | "read-only" = "workspace"): string[] {
   const args = [
     "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
     "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
@@ -216,7 +216,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[]): st
   ];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
   args.push(
-    "--bind", paths.project, "/workspace",
+    permission === "read-only" ? "--ro-bind" : "--bind", paths.project, "/workspace",
     "--ro-bind", paths.primeRoot, "/opt/prime",
     "--ro-bind", paths.nodeRoot, "/opt/node",
     "--ro-bind", join(paths.repository, "src", "integrations", "prime"), "/opt/pi-cad/prime-extension",
@@ -459,6 +459,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   let currentAuthorModel: ReviewerModelSelection | undefined;
   const sidecar = await startAuthoritySidecar({
     cwd: project, runtimeDirectory,
+    authorReadOnly: process.env.PI_CAD_DESKTOP_PERMISSION === "read-only",
     onAuthorModelSelection: (selection) => { currentAuthorModel = selection; },
     reviewerExecutor: async ({ reviewId, prompt, signal }) => {
       // OAuth providers may rotate the refresh token while the author is
@@ -481,7 +482,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   launchPaths = paths;
   reviewerSocketDirectory = resolve(sidecar.reviewerSocket, "..");
   try {
-    const result = await childExit("/usr/bin/bwrap", buildPrimeBwrapArgs(paths, primeArgs), {
+    const result = await childExit("/usr/bin/bwrap", buildPrimeBwrapArgs(paths, primeArgs, process.env.PI_CAD_DESKTOP_PERMISSION === "read-only" ? "read-only" : "workspace"), {
       PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     });
 		// Persist credentials entered via /login before the runtime directory is

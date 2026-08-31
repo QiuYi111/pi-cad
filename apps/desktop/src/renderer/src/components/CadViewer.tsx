@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { Box, Focus, FolderOpen, Grid3X3, Maximize2, Rotate3D } from "./icons";
+import { Box, Focus, FolderOpen, Grid3X3, Maximize2, Rotate3D, ScanLine } from "./icons";
 import type { MeshDocument } from "@shared/contracts";
 
-export function CadViewer() {
+export function CadViewer({ artifactPath }: { artifactPath?: string }) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<ViewerScene | null>(null);
   const [mesh, setMesh] = useState<MeshDocument | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [orthographic, setOrthographic] = useState(false);
   const [grid, setGrid] = useState(true);
   const [explode, setExplode] = useState(0);
+  const [section, setSection] = useState(false);
+  const [sectionPosition, setSectionPosition] = useState(.5);
 
   useEffect(() => {
     if (!host.current) return;
@@ -23,25 +26,37 @@ export function CadViewer() {
   useEffect(() => { sceneRef.current?.setProjection(orthographic); }, [orthographic]);
   useEffect(() => { sceneRef.current?.setGrid(grid); }, [grid]);
   useEffect(() => { sceneRef.current?.setExplode(explode); }, [explode]);
+  useEffect(() => { sceneRef.current?.setSection(section, sectionPosition); }, [section, sectionPosition]);
+  useEffect(() => {
+    if (!artifactPath) return;
+    let active = true;
+    setError("");
+    setLoading(true);
+    window.piCad.viewer.loadStep(artifactPath).then((document) => { if (active) setMesh(document); }).catch((reason) => { if (active) setError(String(reason)); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [artifactPath]);
 
   const open = async () => {
     const path = await window.piCad.viewer.chooseStep();
     if (!path) return;
+    setError("");
     setLoading(true);
     try { setMesh(await window.piCad.viewer.loadStep(path)); }
+    catch (reason) { setError(String(reason)); }
     finally { setLoading(false); }
   };
 
   return <section className="cad-viewer" data-testid="cad-viewer">
     <div ref={host} className="viewer-canvas" />
-    {!mesh && <div className="viewer-empty"><span className="viewer-empty-mark"><Box size={28} /></span><strong>{loading ? "Preparing model…" : "No model open"}</strong><p>Build a candidate or open a project STEP file.</p><button onClick={() => void open()}><FolderOpen size={15} />Open STEP</button></div>}
+    {!mesh && <div className="viewer-empty"><span className="viewer-empty-mark"><Box size={28} /></span><strong>{loading ? "Preparing model…" : error ? "Model unavailable" : "No model open"}</strong><p>{error || "Build a candidate or open a project STEP file."}</p><button onClick={() => void open()}><FolderOpen size={15} />Open STEP</button></div>}
     <div className="viewer-toolbar">
       <button onClick={() => sceneRef.current?.fit()} title="Fit"><Focus size={17} /></button>
       <button onClick={() => sceneRef.current?.reset()} title="Isometric"><Rotate3D size={17} /></button>
       <button className={orthographic ? "active" : ""} onClick={() => setOrthographic(!orthographic)} title="Projection"><Maximize2 size={17} /></button>
       <button className={grid ? "active" : ""} onClick={() => setGrid(!grid)} title="Grid"><Grid3X3 size={17} /></button>
+      <button className={section ? "active" : ""} onClick={() => setSection(!section)} title="Section"><ScanLine size={17} /></button>
     </div>
-    {mesh && <div className="viewer-explode"><span>Explode</span><input type="range" min="0" max="1" step="0.01" value={explode} onChange={(event) => setExplode(Number(event.target.value))} /></div>}
+    {mesh && <div className="viewer-sliders"><label><span>Explode</span><input type="range" min="0" max="1" step="0.01" value={explode} onChange={(event) => setExplode(Number(event.target.value))} /></label>{section && <label><span>Section</span><input type="range" min="0" max="1" step="0.01" value={sectionPosition} onChange={(event) => setSectionPosition(Number(event.target.value))} /></label>}</div>}
     <div className="view-cube" aria-label="View orientation"><button onClick={() => sceneRef.current?.view("top")}>TOP</button><button onClick={() => sceneRef.current?.view("front")}>FRONT</button><button onClick={() => sceneRef.current?.view("right")}>RIGHT</button></div>
     <div className="axis-gizmo"><i className="x" />X<i className="y" />Y<i className="z" />Z</div>
   </section>;
@@ -59,6 +74,8 @@ class ViewerScene {
   private resize: ResizeObserver;
   private animation = 0;
   private centers: THREE.Vector3[] = [];
+  private clipping = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+  private zBounds: [number, number] = [0, 1];
 
   constructor(private host: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
@@ -85,6 +102,7 @@ class ViewerScene {
 
   setMesh(document: MeshDocument) {
     this.model.clear(); this.centers = [];
+    this.zBounds = [document.bounds.min[2], document.bounds.max[2]];
     const globalCenter = new THREE.Vector3(
       (document.bounds.min[0] + document.bounds.max[0]) / 2,
       (document.bounds.min[1] + document.bounds.max[1]) / 2,
@@ -96,7 +114,7 @@ class ViewerScene {
       geometry.setIndex(part.indices);
       geometry.computeVertexNormals();
       geometry.computeBoundingBox();
-      const material = new THREE.MeshStandardMaterial({ color: part.color, metalness: .12, roughness: .48, side: THREE.DoubleSide });
+      const material = new THREE.MeshStandardMaterial({ color: part.color, metalness: .12, roughness: .48, side: THREE.DoubleSide, clippingPlanes: [this.clipping] });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.name = part.name;
       const center = new THREE.Vector3(); geometry.boundingBox?.getCenter(center); this.centers.push(center.sub(globalCenter));
@@ -106,6 +124,7 @@ class ViewerScene {
   }
 
   setExplode(amount: number) { this.model.children.forEach((part, index) => part.position.copy(this.centers[index] || new THREE.Vector3()).multiplyScalar(amount * 1.2)); }
+  setSection(enabled: boolean, position: number) { this.renderer.localClippingEnabled = enabled; this.clipping.constant = this.zBounds[0] + (this.zBounds[1] - this.zBounds[0]) * position; }
   setGrid(visible: boolean) { this.grid.visible = visible; }
   setProjection(orthographic: boolean) { this.camera = orthographic ? this.orthographic : this.perspective; this.controls.object = this.camera; this.controls.update(); this.onResize(); }
   fit(bounds?: MeshDocument["bounds"]) {

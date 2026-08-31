@@ -36,6 +36,8 @@ const MAX_REQUEST_BYTES = 1024 * 1024;
 const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "author-model", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
+const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture"]);
+const READ_ONLY_OPERATIONS = new Set<Operation>(["workspace.commit", "model.build", "simulation.run", "image.generate", "review.submit", "workflow.transition"]);
 
 function errorResponse(error: unknown): AgentApiResponse {
   return {
@@ -79,7 +81,7 @@ function agentExperienceEntry(entry: Record<string, unknown>): Record<string, un
   return safe;
 }
 
-export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void): Promise<AgentApiResponse> {
+export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
   try {
     validateRequest(value);
     if (role === "reviewer" && !REVIEWER_ALLOWED.has(value.op)) {
@@ -87,6 +89,9 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
     }
     if (role === "author" && !AUTHOR_ONLY.has(value.op) && !COMMON_ALLOWED.has(value.op)) {
       throw new Error(`author endpoint does not expose operation: ${value.op}`);
+    }
+    if (role === "author" && options.authorReadOnly && READ_ONLY_AUTHOR_DENIED.has(value.op)) {
+      throw new Error(`desktop read-only mode denies operation: ${value.op}; switch permission to Workspace to modify the project`);
     }
     const reviewerRequestId = role === "reviewer" ? (value as { reviewId?: string }).reviewId : undefined;
     if (role === "reviewer") {
@@ -131,8 +136,12 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
       result = await completionGate(cwd);
     } else if (value.op === "authorize") {
       if (role !== "author") throw new Error("authorization query is author-scoped");
-      const decision = await currentAuthorization(cwd, value.operation, "author");
-      result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
+      if (options.authorReadOnly && READ_ONLY_OPERATIONS.has(value.operation)) {
+        result = { allowed: false, reason: "Desktop is in read-only mode.", legalNextActions: ["Switch permission to Workspace."] };
+      } else {
+        const decision = await currentAuthorization(cwd, value.operation, "author");
+        result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
+      }
     } else if (value.op === "experience-search") {
       result = (await searchExperience(value.options ?? {})).map((entry) => agentExperienceEntry(entry as unknown as Record<string, unknown>));
     } else if (value.op === "experience-get") {
@@ -170,7 +179,7 @@ async function captureMission(cwd: string, requested: string): Promise<{ capture
   return { captured: true };
 }
 
-async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void): Promise<void> {
+async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<void> {
   const chunks: Buffer[] = [];
   let size = 0;
   socket.setTimeout(150_000, () => socket.destroy(new Error("sidecar request timeout")));
@@ -184,7 +193,7 @@ async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, revi
     let response: AgentApiResponse;
     try {
       const body = Buffer.concat(chunks).toString("utf-8");
-      response = await dispatchSidecarRequest(role, cwd, JSON.parse(body), reviewRuntime, onAuthorModelSelection);
+      response = await dispatchSidecarRequest(role, cwd, JSON.parse(body), reviewRuntime, onAuthorModelSelection, options);
     } catch (error) {
       response = errorResponse(error);
     }
@@ -210,7 +219,7 @@ export interface AuthoritySidecar {
   close(): Promise<void>;
 }
 
-export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor; onAuthorModelSelection?: (selection: AuthorModelSelection) => void }): Promise<AuthoritySidecar> {
+export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor; onAuthorModelSelection?: (selection: AuthorModelSelection) => void; authorReadOnly?: boolean }): Promise<AuthoritySidecar> {
   bootstrapAgentApiContracts();
   const cwd = resolve(input.cwd);
   const authorDirectory = join(resolve(input.runtimeDirectory), "author");
@@ -222,7 +231,7 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
   const authorSocket = join(authorDirectory, "authority.sock");
   const reviewerSocket = join(reviewerDirectory, "authority.sock");
   const reviewRuntime = new ReviewRuntime(cwd, input.reviewerExecutor ?? (async () => { throw new Error("reviewer executor is not configured"); }));
-  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection); });
+  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection, { authorReadOnly: input.authorReadOnly }); });
   const reviewerServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "reviewer", cwd, reviewRuntime); });
   try {
     await listen(authorServer, authorSocket);

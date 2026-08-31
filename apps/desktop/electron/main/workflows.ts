@@ -8,9 +8,9 @@ export class WorkflowStore {
   constructor(private readonly bridge: WslBridge) {}
 
   async list(settings: AppSettings): Promise<WorkflowDocument[]> {
-    const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);
-    const root = `${piCadRepo}/workflow-packages`;
-    const { stdout } = await this.bridge.exec(["bash", "-lc", `find ${quote(root)} -type f -name '*.yaml' -print0 | sort -z | xargs -0 -r -n1 printf '%s\\n'`]);
+    const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
+    const roots = [`${piCadRepo}/workflow-packages`, ...(projectPath ? [`${projectPath}/workflows`] : [])];
+    const { stdout } = await this.bridge.exec(["bash", "-lc", `find ${roots.map(quote).join(" ")} -type f -name '*.yaml' -print0 2>/dev/null | sort -z | xargs -0 -r -n1 printf '%s\\n'`]);
     const paths = stdout.split("\n").map((item) => item.trim()).filter(Boolean);
     return Promise.all(paths.map(async (path) => this.read(path)));
   }
@@ -51,12 +51,33 @@ export class WorkflowStore {
   }
 
   async save(settings: AppSettings, document: WorkflowDocument): Promise<WorkflowDocument> {
-    if (!document.sourcePath || !document.raw) throw new Error("Workflow source path and YAML are required.");
+    if (!document.raw) throw new Error("Workflow YAML is required.");
     const parsed = YAML.parse(document.raw) as any;
     if (!parsed?.workflow?.phases || !parsed.id || !parsed.version) throw new Error("Workflow YAML must define id, version, and workflow.phases.");
-    const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);
-    if (!document.sourcePath.startsWith(`${piCadRepo}/workflow-packages/`)) throw new Error("Workflow path escapes the package directory.");
-    await this.bridge.pipe(["tee", document.sourcePath], document.raw);
-    return this.read(document.sourcePath);
+    const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
+    if (!projectPath && !document.sourcePath) throw new Error("Choose a project before creating a workflow.");
+    const node = await this.bridge.commandPath("node");
+    await this.bridge.pipe([node, `${piCadRepo}/scripts/desktop-validate-workflow.mjs`], document.raw, 60_000);
+    const allowedRoots = [`${piCadRepo}/workflow-packages`, ...(projectPath ? [`${projectPath}/workflows`] : [])];
+    let path: string;
+    if (document.sourcePath) {
+      const canonicalRoots = await Promise.all(allowedRoots.map(async (root) => {
+        try { return (await this.bridge.exec(["realpath", "-e", root])).stdout.trim(); } catch { return ""; }
+      }));
+      const canonicalPath = (await this.bridge.exec(["realpath", "-e", "--", document.sourcePath])).stdout.trim();
+      if (!canonicalRoots.some((root) => root && canonicalPath.startsWith(`${root}/`))) throw new Error("Workflow path escapes the package directory.");
+      path = canonicalPath;
+    } else {
+      if (!/^[a-z][a-z0-9_]*(?:[.:/-][a-z0-9_]+)*$/.test(parsed.id)) throw new Error("Workflow id is invalid.");
+      const root = `${projectPath}/workflows`;
+      await this.bridge.exec(["mkdir", "-p", root]);
+      const canonicalRoot = (await this.bridge.exec(["realpath", "-e", root])).stdout.trim();
+      path = `${canonicalRoot}/${String(parsed.id).replace(/[/:]/g, "-")}.yaml`;
+      try { await this.bridge.exec(["test", "!", "-e", path]); }
+      catch { throw new Error(`Workflow already exists: ${parsed.id}`); }
+    }
+    const atomicWrite = "const fs=require('fs'),p=process.argv[1],t=p+'.'+process.pid+'.tmp';let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{fs.writeFileSync(t,s,{mode:0o644});fs.renameSync(t,p)})";
+    await this.bridge.pipe([node, "-e", atomicWrite, path], document.raw);
+    return this.read(path);
   }
 }

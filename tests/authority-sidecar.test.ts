@@ -300,6 +300,24 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
   assert.doesNotMatch(joined, /cad-skill/);
+
+  const readOnly = buildPrimeBwrapArgs(paths, ["--print", "inspect it"], "read-only").join("\n");
+  assert.match(readOnly, /--ro-bind\n\/project\n\/workspace/);
+  assert.doesNotMatch(readOnly, /--bind\n\/project\n\/workspace/);
+});
+
+test("desktop read-only authority denies workflow and artifact mutation", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-read-only-"));
+  try {
+    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" }, undefined, undefined, { authorReadOnly: true });
+    assert.equal(started.ok, false);
+    if (!started.ok) assert.match(started.error.message, /read-only mode denies/);
+    const authorization = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "authorize", operation: "model.build" }, undefined, undefined, { authorReadOnly: true });
+    assert.equal(authorization.ok, true);
+    if (authorization.ok) assert.deepEqual(authorization.result, { allowed: false, reason: "Desktop is in read-only mode.", legalNextActions: ["Switch permission to Workspace."] });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("Prime one-shot mode uses the canonical sidecar completion gate", () => {

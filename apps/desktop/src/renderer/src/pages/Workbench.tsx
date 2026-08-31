@@ -12,6 +12,7 @@ export function Workbench({ settings, onSettingsChange, onOpenSettings }: { sett
   const prime = usePrimeRuntime();
   const [chatWidth, setChatWidth] = useState(460);
   const project = settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || "Untitled project";
+  const currentArtifact = [...prime.messages].reverse().find((message) => message.activity?.kind === "build" && message.activity.state === "success" && message.activity.artifactPath)?.activity?.artifactPath;
   const start = async () => {
     if (!settings.projectPath) { onOpenSettings(); return; }
     await prime.start();
@@ -52,7 +53,7 @@ export function Workbench({ settings, onSettingsChange, onOpenSettings }: { sett
         <button className="share-button"><Share2 size={15} />Share</button>
       </header>
       <WorkflowRail />
-      <CadViewer />
+      <CadViewer artifactPath={currentArtifact} />
     </section>
     <StatusBar settings={settings} status={prime.status} />
   </div>;

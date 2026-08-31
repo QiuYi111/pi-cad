@@ -6,6 +6,7 @@ const icons = { build: Box, probe: ScanLine, workflow: GitCommit, simulation: Wa
 
 export function ActivityCard({ activity }: { activity: CadActivity }) {
   const [expanded, setExpanded] = useState(false);
+  const [preview, setPreview] = useState<string | null>(null);
   const Icon = icons[activity.kind];
   if (activity.kind === "workflow") return <WorkflowActivity activity={activity} />;
   const running = activity.state === "running" || activity.state === "queued";
@@ -22,9 +23,10 @@ export function ActivityCard({ activity }: { activity: CadActivity }) {
     {running && <ActivityMotion kind={activity.kind} progress={activity.progress} />}
     {!!activity.metrics?.length && <div className="activity-metrics">{activity.metrics.map((metric) => <div key={metric.label}><span>{metric.label}</span><b>{metric.value}</b></div>)}</div>}
     {!!activity.media?.length && <div className={`activity-media media-${activity.media.length}`}>
-      {activity.media.map((media) => <button key={media.id} className="media-tile">{media.dataUrl ? <img src={media.dataUrl} alt={media.label || media.role} /> : <span><Image size={22} />{media.label || media.role}</span>}</button>)}
+      {activity.media.map((media) => <button key={media.id} className="media-tile" onClick={() => media.dataUrl && setPreview(media.dataUrl)}>{media.dataUrl ? <img src={media.dataUrl} alt={media.label || media.role} /> : <span><Image size={22} />{media.label || media.role}</span>}</button>)}
     </div>}
     {expanded && <pre className="activity-details">{JSON.stringify(activity.details, null, 2)}</pre>}
+    {preview && <div className="activity-preview" role="dialog" aria-label="Tool image preview" onClick={() => setPreview(null)}><img src={preview} alt="Tool output preview" /></div>}
   </section>;
 }
 

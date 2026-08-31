@@ -19,19 +19,42 @@ function classify(code: string): { kind: CadActivity["kind"]; title: string } | 
 }
 
 function attachments(result: any, id: string): MediaAttachment[] {
-  const values = result?.details?.attachments || result?.attachments || [];
+  const values = [
+    ...(Array.isArray(result?.details?.attachments) ? result.details.attachments : []),
+    ...(Array.isArray(result?.attachments) ? result.attachments : []),
+    ...(Array.isArray(result?.content) ? result.content.filter((item: any) => item?.type === "image" || item?.mimeType?.startsWith?.("image/") || item?.mime_type?.startsWith?.("image/")) : []),
+  ];
   return values.flatMap((item: any, index: number) => {
-    const mimeType = item.mimeType || item.mime_type;
+    const mimeType = item.mimeType || item.mime_type || "image/png";
     if (!mimeType?.startsWith("image/")) return [];
     return [{
       id: `${id}-media-${index}`,
       mimeType,
       role: item.role || item.label || "Tool output",
-      dataUrl: item.data ? `data:${mimeType};base64,${item.data}` : undefined,
+      dataUrl: item.data ? `data:${mimeType};base64,${item.data}` : item.dataUrl || item.image_url,
       path: item.path,
       label: item.label,
     }];
   });
+}
+
+function stepArtifact(value: unknown, depth = 0): string | undefined {
+  if (depth > 8 || value === null || value === undefined) return undefined;
+  if (typeof value === "string") {
+    const match = value.match(/(?:[A-Za-z]:[\\/]|\/workspace\/|\/)[^\s"'<>]*?\.(?:step|stp)\b|(?:^|[\s"'])((?:[\w.-]+[\\/])*[\w.-]+\.(?:step|stp))\b/i);
+    return (match?.[1] || match?.[0])?.trim().replace(/^["']/, "");
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) { const found = stepArtifact(item, depth + 1); if (found) return found; }
+    return undefined;
+  }
+  if (typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (/artifact|path|step|output/i.test(key)) { const found = stepArtifact(item, depth + 1); if (found) return found; }
+    }
+    for (const item of Object.values(value)) { const found = stepArtifact(item, depth + 1); if (found) return found; }
+  }
+  return undefined;
 }
 
 export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessage[] {
@@ -77,6 +100,7 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
           progress: 1,
           finishedAt: Date.now(),
           media,
+          artifactPath: activity.kind === "build" ? stepArtifact(event.result) : undefined,
           details: event.result,
         },
       };

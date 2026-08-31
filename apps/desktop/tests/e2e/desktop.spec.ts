@@ -49,11 +49,22 @@ test("complete desktop product path", async () => {
   await expect(page.getByText("Building model")).toBeVisible();
   await expect(page.getByText("Model built")).toBeVisible();
   await expect(page.getByText("The first model is built and ready for inspection.")).toBeVisible();
+  await expect(page.locator(".activity-media img")).toBeVisible();
+  await page.locator(".activity-media img").click();
+  await expect(page.getByRole("dialog", { name: "Tool image preview" })).toBeVisible();
+  await page.getByRole("dialog", { name: "Tool image preview" }).click();
+  await expect(page.getByText("Explode", { exact: true })).toBeVisible();
+  await page.getByTitle("Section").click();
+  await expect(page.getByText("Section", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "mechanical.one-shot" })).toBeVisible();
   await page.getByRole("button", { name: /concept/i }).click();
   await expect(page.getByText("image.generate")).toBeVisible();
+  await page.getByRole("button", { name: "New workflow" }).click();
+  await expect(page.getByRole("heading", { name: "custom.workflow" })).toBeVisible();
+  await page.getByRole("button", { name: "Save workflow" }).click();
+  await expect(page.getByText("Saved and validated")).toBeVisible();
 
   await page.getByRole("button", { name: "Trajectories" }).click();
   await expect(page.getByText("Folding stand")).toBeVisible();

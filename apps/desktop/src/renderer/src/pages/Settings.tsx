@@ -9,6 +9,7 @@ export function Settings({ value, onChange }: { value: AppSettings; onChange: (v
   const [runtime, setRuntime] = useState<RuntimeStatus>({ state: "checking", checks: [] });
   const [saving, setSaving] = useState(false);
   const [auth, setAuth] = useState<AuthStatus>({ provider: "openai-codex", state: "checking" });
+  const [authInput, setAuthInput] = useState("");
   const check = () => window.piCad.runtime.check().then(setRuntime).catch((error) => setRuntime({ state: "error", checks: [], message: String(error) }));
   useEffect(() => {
     void check();
@@ -27,6 +28,7 @@ export function Settings({ value, onChange }: { value: AppSettings; onChange: (v
         <label>Default model<input value={draft.model} onChange={(event) => patch("model", event.target.value)} /></label>
         <label>Reasoning<select value={draft.thinking} onChange={(event) => patch("thinking", event.target.value as ThinkingLevel)}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label>
         <div className="auth-row"><div><i className={auth.state === "signed-in" ? "online" : ""} /><span>{auth.message || auth.state}</span></div><button disabled={auth.state === "waiting"} onClick={() => void window.piCad.auth.login().then(setAuth)}>{auth.state === "signed-in" ? "Reconnect" : auth.state === "waiting" ? "Waiting…" : "Sign in with ChatGPT"}</button></div>
+        {auth.input && <div className="auth-input">{auth.input.kind === "select" ? <select value={authInput} onChange={(event) => setAuthInput(event.target.value)}><option value="">Choose an account</option>{auth.input.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input value={authInput} placeholder={auth.input.placeholder || "Paste the redirect URL"} onChange={(event) => setAuthInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && authInput.trim()) { void window.piCad.auth.submitManualCode(authInput.trim()); setAuthInput(""); } }} />}<button className="primary" disabled={!authInput.trim()} onClick={() => { void window.piCad.auth.submitManualCode(authInput.trim()); setAuthInput(""); }}>Continue</button></div>}
       </section>
       <section className="settings-card"><header><div><span className="setting-icon"><Check size={18} /></span><div><h2>Independent reviewer</h2><p>Defaults to the active author model.</p></div></div></header>
         <div className="segmented"><button className={draft.reviewer.mode === "inherit" ? "active" : ""} onClick={() => patch("reviewer", { mode: "inherit" })}>Inherit author</button><button className={draft.reviewer.mode === "fixed" ? "active" : ""} onClick={() => patch("reviewer", { mode: "fixed", provider: draft.provider, model: draft.model, thinking: "medium" })}>Separate model</button></div>
