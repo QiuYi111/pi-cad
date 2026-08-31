@@ -1,16 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { ViewerBackend } from "../electron/main/viewer";
+import { toThreeCadShapes } from "../src/renderer/src/lib/cad-scene";
 
 describe("desktop viewer bridge", () => {
+  it("adapts STEP tessellation to the open-source Z-up CAD scene protocol", () => {
+    const scene = toThreeCadShapes({
+      source: "/project/bracket.step",
+      parts: [{ name: "Bracket", positions: [0,0,0, 1,0,0, 0,1,0], indices: [0,1,2], color: "#ffffff" }],
+      bounds: { min: [0,0,0], max: [1,1,0] },
+    });
+    expect(scene.name).toBe("bracket.step");
+    expect(scene.parts?.[0]?.state).toEqual([1, 1]);
+    expect(scene.parts?.[0]?.shape && "triangles_per_face" in scene.parts[0].shape ? scene.parts[0].shape.triangles_per_face : []).toEqual([1]);
+    expect(scene.bb).toMatchObject({ xmin: 0, ymax: 1, zmax: 0 });
+  });
+
   it("maps sandbox artifacts back into the active project", async () => {
     let command: string[] = [];
     const bridge = {
       resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
-      commandPath: async () => "/home/user/.local/bin/uv",
       toLinuxPath: async (path: string) => path,
       exec: async (args: string[]) => { command = args; return { stdout: JSON.stringify({ source: args.at(-1), parts: [], bounds: { min: [0,0,0], max: [1,1,1] } }), stderr: "" }; },
     };
     const result = await new ViewerBackend(bridge as never).loadStep({} as never, "/workspace/build/part.step");
+    expect(command.slice(0, 2)).toEqual(["/runtime/pi-cad/python/.venv/bin/python", "/runtime/pi-cad/scripts/desktop-export-mesh.py"]);
     expect(command.at(-1)).toBe("/projects/bracket/build/part.step");
     expect(result.source).toBe("/projects/bracket/build/part.step");
   });

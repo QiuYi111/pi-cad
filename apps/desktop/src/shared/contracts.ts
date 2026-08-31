@@ -48,6 +48,10 @@ export interface WorkflowCurrent {
   phase?: string;
   status?: string;
   updatedAt?: string;
+  workflowHash?: string;
+  workflowVersion?: string;
+  phaseHistory: string[];
+  phases: WorkflowPhase[];
   authoritative: false;
 }
 
@@ -55,7 +59,7 @@ export interface WorkflowPhase {
   id: string;
   title: string;
   purpose: string;
-  status: "complete" | "active" | "pending" | "blocked";
+  status: "complete" | "active" | "pending" | "blocked" | "skipped";
   transitions: Array<{ event: string; target: string }>;
   capabilities: string[];
   obligations: string[];
@@ -104,6 +108,12 @@ export interface ChatMessage {
   text: string;
   createdAt: number;
   activity?: CadActivity;
+  stream?: {
+    state: "waiting" | "thinking" | "responding" | "complete" | "aborted" | "error";
+    startedAt: number;
+    firstTokenAt?: number;
+    finishedAt?: number;
+  };
 }
 
 export interface TraceSummary {
@@ -150,6 +160,7 @@ export interface DesktopApi {
     get(): Promise<AppSettings>;
     update(patch: Partial<AppSettings>): Promise<AppSettings>;
     chooseProject(): Promise<string | null>;
+    createProject(name: string): Promise<string | null>;
   };
   runtime: {
     check(): Promise<RuntimeStatus>;
@@ -195,6 +206,7 @@ export const IPC = {
   settingsGet: "settings:get",
   settingsUpdate: "settings:update",
   settingsChooseProject: "settings:choose-project",
+  settingsCreateProject: "settings:create-project",
   runtimeCheck: "runtime:check",
   runtimeInstall: "runtime:install",
   runtimeStart: "runtime:start",

@@ -58,11 +58,37 @@ function stepArtifact(value: unknown, depth = 0): string | undefined {
 }
 
 export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessage[] {
+  if (input?.type === "desktop_event_batch") return (input.events || []).reduce((state: ChatMessage[], event: unknown) => reducePrimeEvent(state, event), messages);
   if (input?.type === "desktop_user_message") {
     return [...messages, { id: input.id, role: "user", text: input.text, createdAt: Date.now() }];
   }
+  if (input?.type === "desktop_agent_pending") return reducePrimeEvent(messages, { type: "agent_start" });
+  if (input?.type === "desktop_agent_error") {
+    const next = finishOpenAssistant(messages, "error");
+    const index = findLast(next, (message) => message.stream?.state === "error");
+    return next.map((message, current) => current === index ? { ...message, text: message.text || input.message || "Prime failed to respond." } : message);
+  }
   const event = input?.type === "session_event" ? input.event : input;
   if (!event || typeof event !== "object") return messages;
+  if (event.type === "agent_start") {
+    if (findOpenAssistant(messages) >= 0) return messages;
+    const now = Date.now();
+    return [...messages, { id: `stream-${now}`, role: "assistant", text: "", createdAt: now, stream: { state: "waiting", startedAt: now } }];
+  }
+  if (event.type === "message_update") {
+    const update = event.assistantMessageEvent;
+    if (!update || (update.type !== "thinking_delta" && update.type !== "text_delta")) return messages;
+    const now = Date.now();
+    const index = findOpenAssistant(messages);
+    const target: ChatMessage = index >= 0 ? messages[index]! : { id: event.message?.id || `stream-${now}`, role: "assistant", text: "", createdAt: now, stream: { state: "waiting", startedAt: now } };
+    const next: ChatMessage = {
+      ...target,
+      text: update.type === "text_delta" ? `${target.text}${update.delta || ""}` : target.text,
+      stream: { ...(target.stream!), state: update.type === "text_delta" ? "responding" : target.text ? "responding" : "thinking", firstTokenAt: target.stream?.firstTokenAt || now },
+    };
+    if (index < 0) return [...messages, next];
+    return messages.map((message, current) => current === index ? next : message);
+  }
   if (event.type === "tool_execution_start") {
     const code = event.args?.code || event.input?.code || JSON.stringify(event.args || event.input || {});
     const classified = classify(`${event.toolName || ""}\n${code}`);
@@ -96,7 +122,7 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
           ...activity,
           state: event.isError || event.result?.isError ? "failed" : "success",
           title: completedTitle(activity.kind, event.isError || event.result?.isError),
-          summary: concise(content) || activity.summary,
+          summary: activity.kind === "workflow" ? workflowSummary(event.result) : concise(content) || activity.summary,
           progress: 1,
           finishedAt: Date.now(),
           media,
@@ -110,7 +136,12 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
     const message = event.message;
     if (message?.role === "assistant") {
       const text = textOf(message.content).trim();
-      if (text) return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text, createdAt: Date.now() }];
+      const index = findOpenAssistant(messages);
+      if (index >= 0) {
+        const now = Date.now();
+        return messages.map((existing, current) => current === index ? { ...existing, id: message.id || existing.id, text: text || existing.text, stream: { ...existing.stream!, state: "complete", finishedAt: now } } : existing);
+      }
+      if (text) { const now = Date.now(); return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text, createdAt: now, stream: { state: "complete", startedAt: now, finishedAt: now } }]; }
     }
     if (message?.role === "custom" && message.customType === "pi-cad.review-completed") {
       const details = message.details || {};
@@ -124,7 +155,25 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
       return [...messages, { id: `review-${activity.id}`, role: "system", text: "", createdAt: Date.now(), activity }];
     }
   }
+  if (event.type === "agent_end") return finishOpenAssistant(messages, "complete");
+  if (event.type === "agent_abort" || event.type === "abort") return finishOpenAssistant(messages, "aborted");
+  if (event.type === "agent_error") return finishOpenAssistant(messages, "error");
   return messages;
+}
+
+function findOpenAssistant(messages: ChatMessage[]): number {
+  return findLast(messages, (message) => message.role === "assistant" && Boolean(message.stream) && !["complete", "aborted", "error"].includes(message.stream!.state));
+}
+
+function findLast(messages: ChatMessage[], predicate: (message: ChatMessage) => boolean): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) if (predicate(messages[index]!)) return index;
+  return -1;
+}
+
+function finishOpenAssistant(messages: ChatMessage[], state: "complete" | "aborted" | "error"): ChatMessage[] {
+  const index = findOpenAssistant(messages);
+  if (index < 0) return messages;
+  return messages.map((message, current) => current === index ? { ...message, stream: { ...message.stream!, state, finishedAt: Date.now() } } : message);
 }
 
 function completedTitle(kind: CadActivity["kind"], failed: boolean): string {
@@ -134,4 +183,22 @@ function completedTitle(kind: CadActivity["kind"], failed: boolean): string {
 
 function concise(value: string): string {
   return value.replace(/\s+/g, " ").trim().slice(0, 180);
+}
+
+function workflowSummary(result: unknown): string {
+  const phase = findPhase(result);
+  return phase ? `Now in ${phase.replaceAll("_", " ")}` : "Workflow state updated";
+}
+
+function findPhase(value: unknown, depth = 0): string | undefined {
+  if (depth > 6 || value === null || value === undefined) return undefined;
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    for (const key of ["currentPhase", "current_phase", "targetPhase", "target_phase", "phase"]) {
+      if (typeof record[key] === "string" && /^[a-z][a-z0-9_-]*$/i.test(record[key])) return record[key] as string;
+    }
+    for (const item of Object.values(record)) { const found = findPhase(item, depth + 1); if (found) return found; }
+  }
+  if (Array.isArray(value)) for (const item of value) { const found = findPhase(item, depth + 1); if (found) return found; }
+  return undefined;
 }

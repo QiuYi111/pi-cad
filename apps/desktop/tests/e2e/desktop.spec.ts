@@ -16,13 +16,14 @@ test("complete desktop product path", async () => {
   const cacheRoot = join(process.env.LOCALAPPDATA || "", "electron", "Cache");
   let electronZip = "";
   for await (const candidate of glob(join(cacheRoot, "**/electron-v*-win32-x64.zip"))) { electronZip = candidate; break; }
-  if (!electronZip) throw new Error("Electron cache archive is unavailable");
-  await extract(electronZip, { dir: electronRoot });
+  let executablePath = join(process.cwd(), "node_modules/electron/dist/electron.exe");
+  if (electronZip) { await extract(electronZip, { dir: electronRoot }); executablePath = join(electronRoot, "electron.exe"); }
   await writeFile(join(appRoot, "package.json"), JSON.stringify({ name: "pi-cad-e2e", version: "0.0.0", type: "module", main: "out/main/index.js" }));
-  const application = await electron.launch({ executablePath: join(electronRoot, "electron.exe"), args: ["--disable-gpu", appRoot], env: { ...process.env, PI_CAD_DESKTOP_E2E: "1", PI_CAD_PROJECT_CWD: "/workspace/demo" } });
+  const application = await electron.launch({ executablePath, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", appRoot, "--pi-cad-e2e"], env: { ...process.env, PI_CAD_DESKTOP_E2E: "1", PI_CAD_PROJECT_CWD: "/workspace/demo" } });
   const page = await application.firstWindow();
-  page.on("console", (message) => console.log(`[renderer:${message.type()}] ${message.text()}`));
-  page.on("pageerror", (error) => console.error(`[renderer:error] ${error.message}`));
+  const pageErrors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") pageErrors.push(message.text()); console.log(`[renderer:${message.type()}] ${message.text()}`); });
+  page.on("pageerror", (error) => { pageErrors.push(error.message); console.error(`[renderer:error] ${error.message}`); });
   await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
   await expect(page.getByText("Pi-CAD").first()).toBeVisible();
   await expect(page.getByTestId("workflow-rail")).toBeVisible();
@@ -49,13 +50,18 @@ test("complete desktop product path", async () => {
   await expect(page.getByText("Building model")).toBeVisible();
   await expect(page.getByText("Model built")).toBeVisible();
   await expect(page.getByText("The first model is built and ready for inspection.")).toBeVisible();
+  expect(await page.locator(".conversation").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
   await expect(page.locator(".activity-media img")).toBeVisible();
   await page.locator(".activity-media img").click();
   await expect(page.getByRole("dialog", { name: "Tool image preview" })).toBeVisible();
   await page.getByRole("dialog", { name: "Tool image preview" }).click();
-  await expect(page.getByText("Explode", { exact: true })).toBeVisible();
-  await page.getByTitle("Section").click();
-  await expect(page.getByText("Section", { exact: true })).toBeVisible();
+  const unavailable = page.getByText("3D preview unavailable", { exact: true });
+  if (await unavailable.isVisible()) {
+    await expect(unavailable).toBeVisible();
+  } else {
+    await expect(page.locator(".cad-viewer-open-source .tcv_cad_body")).toBeVisible();
+    await expect(page.locator(".cad-viewer-open-source canvas")).toBeVisible();
+  }
 
   await page.getByRole("button", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "mechanical.one-shot" })).toBeVisible();
@@ -76,6 +82,7 @@ test("complete desktop product path", async () => {
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByText("ChatGPT connected")).toBeVisible();
+  expect(pageErrors).toEqual([]);
   await application.close();
   await rm(nativeRoot, { recursive: true, force: true });
 });

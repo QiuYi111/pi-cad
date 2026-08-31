@@ -89,6 +89,13 @@ test("authority sidecar owns canonical state and rewrites a non-authoritative wo
     const projection = JSON.parse(await readFile(statusPath, "utf-8"));
     assert.equal(projection.authoritative, false);
     assert.equal(projection.run.phase, "grilling");
+    assert.equal(projection.run.workflowId, "mechanical.one-shot");
+    assert.ok(projection.run.workflowHash);
+    assert.deepEqual(projection.run.phaseHistory, ["grilling"]);
+    assert.equal(projection.run.phases.find((phase: any) => phase.id === "grilling").status, "active");
+    assert.deepEqual(projection.run.phases.find((phase: any) => phase.id === "grilling").transitions, []);
+    assert.ok(projection.run.phases.some((phase: any) => phase.id !== "grilling" && phase.transitions.length > 0));
+    assert.ok(projection.run.phases.find((phase: any) => phase.id === "grilling").capabilities.length > 0);
 
     await chmod(statusPath, 0o644);
     await writeFile(statusPath, '{"authoritative":true,"run":{"phase":"release"}}\n');

@@ -9,7 +9,7 @@ import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
 import { handleAgentApi } from "../agent-api/handlers.ts";
 import type { AgentApiRequest, AgentApiResponse } from "../agent-api/protocol.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
-import { compilePhaseCard } from "../harness/card.ts";
+import { compilePhaseCard, workflowCurrentView } from "../harness/card.ts";
 import { renderAuthorizationDenied, type Operation } from "../harness/permissions.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } from "../harness/run-store.ts";
 import { writeStatusProjection } from "./storage.ts";
@@ -62,7 +62,11 @@ async function refreshProjection(cwd: string): Promise<void> {
   const run = loadedProject.state.currentRunId
     ? await new HarnessRunStoreV7(cwd, loadedProject.state.currentRunId).load(mechanicalRegistries)
     : null;
-  await writeStatusProjection(cwd, loadedProject.state, run?.state ?? null);
+  await writeStatusProjection(cwd, loadedProject.state, run ? {
+    state: run.state,
+    workflow: run.workflow,
+    view: workflowCurrentView(run, mechanicalRegistries),
+  } : null);
 }
 
 async function refreshProjectionSafely(cwd: string): Promise<void> {

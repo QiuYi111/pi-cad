@@ -15,7 +15,7 @@ export class ViewerBackend {
       throw new Error("The selected STEP file must remain inside the active project.");
     }
     const { stdout } = await this.bridge.exec([
-      await this.bridge.commandPath("uv"), "run", "--project", `${piCadRepo}/python`, "python", `${piCadRepo}/scripts/desktop-export-mesh.py`, linuxPath,
+      `${piCadRepo}/python/.venv/bin/python`, `${piCadRepo}/scripts/desktop-export-mesh.py`, linuxPath,
     ], { timeout: 120_000 });
     return JSON.parse(stdout) as MeshDocument;
   }

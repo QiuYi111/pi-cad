@@ -17,13 +17,18 @@ export class WorkflowStore {
 
   async current(settings: AppSettings): Promise<WorkflowCurrent> {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
-    if (!projectPath) return { authoritative: false };
+    if (!projectPath) return { authoritative: false, phaseHistory: [], phases: [] };
     try {
       const { stdout } = await this.bridge.exec(["cat", `${projectPath}/.pi-cad/status.json`]);
       const state = JSON.parse(stdout) as any;
       const run = state.run || {};
-      return { workflowId: run.workflowId, runId: run.id, phase: run.phase, status: run.status, updatedAt: run.updatedAt, authoritative: false };
-    } catch { return { authoritative: false }; }
+      return {
+        workflowId: run.workflowId, workflowVersion: run.workflowVersion, workflowHash: run.workflowHash, runId: run.id,
+        phase: run.phase, status: run.status, updatedAt: run.updatedAt,
+        phaseHistory: Array.isArray(run.phaseHistory) ? run.phaseHistory : [],
+        phases: Array.isArray(run.phases) ? run.phases : [], authoritative: false,
+      };
+    } catch { return { authoritative: false, phaseHistory: [], phases: [] }; }
   }
 
   private async read(path: string): Promise<WorkflowDocument> {

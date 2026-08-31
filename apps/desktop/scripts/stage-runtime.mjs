@@ -16,7 +16,7 @@ function wslPath(value) {
   return text;
 }
 const primeLinux = process.env.PRIME_AGENT_REPO || execFileSync("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO || "Ubuntu", "--", "sh", "-lc", "printf %s \"${PRIME_AGENT_REPO:-$HOME/prime-agent-plan-c-upstream}\""], { encoding: "utf8", windowsHide: true }).trim();
-const prime = wslPath(primeLinux);
+const prime = process.platform === "linux" ? primeLinux : wslPath(primeLinux);
 
 await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });

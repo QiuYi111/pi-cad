@@ -2,6 +2,28 @@ import { describe, expect, it } from "vitest";
 import { reducePrimeEvent } from "../src/renderer/src/lib/activity";
 
 describe("Prime activity projection", () => {
+  it("shows thinking immediately and streams into one message", () => {
+    let messages = reducePrimeEvent([], { type: "agent_start" });
+    expect(messages[0]?.stream?.state).toBe("waiting");
+    messages = reducePrimeEvent(messages, { type: "message_update", message: { id: "a1", role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "hidden" } });
+    expect(messages[0]).toMatchObject({ text: "", stream: { state: "thinking" } });
+    messages = reducePrimeEvent(messages, { type: "message_update", message: { id: "a1", role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: "Hello" } });
+    messages = reducePrimeEvent(messages, { type: "message_update", message: { id: "a1", role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: " world" } });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({ text: "Hello world", stream: { state: "responding" } });
+    messages = reducePrimeEvent(messages, { type: "message_end", message: { id: "a1", role: "assistant", content: [{ type: "text", text: "Hello world" }] } });
+    expect(messages[0]).toMatchObject({ id: "a1", text: "Hello world", stream: { state: "complete" } });
+  });
+
+  it("keeps event order when stream updates are frame-batched", () => {
+    const messages = reducePrimeEvent([], { type: "desktop_event_batch", events: [
+      { type: "agent_start" },
+      { type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "x" } },
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Done" } },
+      { type: "agent_end" },
+    ] });
+    expect(messages[0]).toMatchObject({ text: "Done", stream: { state: "complete" } });
+  });
   it("turns a CAD build call into one completed semantic card", () => {
     let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "b1", toolName: "ipython", args: { code: "await cad.model.build(source, output)" } });
     expect(messages[0]?.activity).toMatchObject({ kind: "build", state: "running" });
@@ -19,5 +41,12 @@ describe("Prime activity projection", () => {
   it("shows the authoritative review result", () => {
     const messages = reducePrimeEvent([], { type: "message_end", message: { role: "custom", customType: "pi-cad.review-completed", details: { reviewId: "r1", status: "fail", result: { summary: "hinge collides" } } } });
     expect(messages[0]?.activity).toMatchObject({ kind: "review", state: "failed", summary: "hinge collides" });
+  });
+
+  it("does not leak workflow result objects into the chat", () => {
+    let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "w1", toolName: "ipython", args: { code: "await cad.workflow.advance('built')" } });
+    messages = reducePrimeEvent(messages, { type: "tool_execution_end", toolCallId: "w1", result: { content: [{ type: "text", text: "Commit(id='secret', variables=8, artifacts=2)" }], details: { currentPhase: "final_review" } } });
+    expect(messages[0]?.activity?.summary).toBe("Now in final review");
+    expect(messages[0]?.activity?.summary).not.toContain("Commit");
   });
 });

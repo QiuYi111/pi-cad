@@ -22,6 +22,8 @@ export class DemoRuntime extends EventEmitter {
     this.status = { ...this.status, state: "streaming" };
     this.emit("status", this.status);
     this.emit("event", { type: "message_start", message: { role: "user", content: message, id: "demo-user" } });
+    this.emit("event", { type: "agent_start" });
+    this.emit("event", { type: "message_update", message: { role: "assistant", id: "demo-assistant" }, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "Checking requirements" } });
     await wait(80);
     this.emit("event", { type: "tool_execution_start", toolCallId: "demo-build", toolName: "ipython", args: { code: "artifact = await cad.model.build('part.py', 'part.step')" } });
     await wait(120);
@@ -29,7 +31,11 @@ export class DemoRuntime extends EventEmitter {
       type: "tool_execution_end", toolCallId: "demo-build", toolName: "ipython",
       result: { content: [{ type: "text", text: "ArtifactRef(role='candidate', path='build/part.step')" }], details: { attachments: [{ mimeType: "image/png", role: "isometric", data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }] } },
     });
+    this.emit("event", { type: "tool_execution_start", toolCallId: "demo-workflow", toolName: "ipython", args: { code: "await cad.workflow.advance('built')" } });
+    this.emit("event", { type: "tool_execution_end", toolCallId: "demo-workflow", result: { content: [{ type: "text", text: "Commit(id='commit-dd03e58b622007c794189ba3c99ac2', name='review-candidate', phase='parts', variables=8, artifacts=2) final_review" }] } });
+    for (const delta of ["The first model ", "is built and ready ", "for inspection."]) this.emit("event", { type: "message_update", message: { role: "assistant", id: "demo-assistant" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta } });
     this.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "The first model is built and ready for inspection." }], id: "demo-assistant" } });
+    this.emit("event", { type: "agent_end" });
     this.status = { ...this.status, state: "ready" };
     this.emit("status", this.status);
   }

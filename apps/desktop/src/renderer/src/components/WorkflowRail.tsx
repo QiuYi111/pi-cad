@@ -1,42 +1,27 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, Circle } from "./icons";
-import type { WorkflowCurrent, WorkflowPhase } from "@shared/contracts";
-
-const fallback: WorkflowPhase[] = ["Grilling", "Spec", "Concept", "Parts", "Assembly", "Review", "Release"].map((title, index) => ({
-  id: title.toLowerCase(), title, purpose: "", status: index === 0 ? "active" : "pending", transitions: [], capabilities: [], obligations: [],
-}));
-
-function project(phases: WorkflowPhase[], current: WorkflowCurrent): WorkflowPhase[] {
-  const active = phases.findIndex((phase) => phase.id === current.phase);
-  if (active < 0) return phases;
-  return phases.map((phase, index) => ({ ...phase, status: index < active ? "complete" : index === active ? "active" : "pending" }));
-}
+import type { WorkflowCurrent } from "@shared/contracts";
 
 export function WorkflowRail() {
-  const [phases, setPhases] = useState(fallback);
+  const [current, setCurrent] = useState<WorkflowCurrent | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const refresh = useCallback(async () => {
+    try { setCurrent(await window.piCad.workflow.current()); setUnavailable(false); }
+    catch { setCurrent(null); setUnavailable(true); }
+  }, []);
   useEffect(() => {
     let alive = true;
-    let active = false;
-    let documents: Awaited<ReturnType<typeof window.piCad.workflow.list>> = [];
-    const refresh = async () => {
-      if (active) return;
-      active = true;
-      try {
-        const current = await window.piCad.workflow.current();
-        const document = documents.find((item) => item.id === current.workflowId) || documents[0];
-        if (alive && document) setPhases(project(document.phases, current));
-      } catch {} finally { active = false; }
-    };
-    const initialize = async () => {
-      try { documents = await window.piCad.workflow.list(); } catch {}
-      await refresh();
-    };
-    void initialize();
-    const timer = window.setInterval(refresh, 5000);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, []);
+    const update = () => { if (alive) void refresh(); };
+    void refresh();
+    const unsubscribe = window.piCad.runtime.onEvent(update);
+    window.addEventListener("focus", update);
+    return () => { alive = false; unsubscribe(); window.removeEventListener("focus", update); };
+  }, [refresh]);
+  const phases = current?.phases ?? [];
+  if (unavailable) return <div className="workflow-rail unavailable" data-testid="workflow-rail"><span>Workflow unavailable</span></div>;
+  if (!current?.runId || phases.length === 0) return <div className="workflow-rail idle" data-testid="workflow-rail"><span>No active workflow</span></div>;
   return <div className="workflow-rail" data-testid="workflow-rail">
-    {phases.map((phase, index) => <div className={`rail-step ${phase.status}`} key={phase.id}>
+    {phases.map((phase, index) => <div className={`rail-step ${phase.status}`} key={phase.id} aria-current={phase.status === "active" ? "step" : undefined} title={[phase.purpose, ...phase.transitions.map((item) => `${item.event} → ${item.target}`)].filter(Boolean).join("\n")}>
       <span className="rail-node">{phase.status === "complete" ? <Check size={11} /> : <Circle size={8} fill={phase.status === "active" ? "currentColor" : "none"} />}</span>
       <span>{phase.title}</span>
       {index < phases.length - 1 && <span className="rail-line" />}

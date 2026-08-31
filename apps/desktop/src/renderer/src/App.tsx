@@ -31,7 +31,7 @@ export function App() {
       <div className="titlebar-project">{settings.projectPath ? settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) : "No project"}</div>
     </header>
     <main className="page-host">
-      {page === "workbench" && <Workbench settings={settings} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}
+      {page === "workbench" && <Workbench key={settings.projectPath} settings={settings} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}
       {page === "workflow" && <WorkflowEditor />}
       {page === "traces" && <Traces />}
       {page === "settings" && <Settings value={settings} onChange={setSettings} />}

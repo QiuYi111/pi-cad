@@ -13,6 +13,7 @@ const api: DesktopApi = {
     get: () => ipcRenderer.invoke(IPC.settingsGet),
     update: (patch) => ipcRenderer.invoke(IPC.settingsUpdate, patch),
     chooseProject: () => ipcRenderer.invoke(IPC.settingsChooseProject),
+    createProject: (name) => ipcRenderer.invoke(IPC.settingsCreateProject, name),
   },
   runtime: {
     check: () => ipcRenderer.invoke(IPC.runtimeCheck),

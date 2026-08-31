@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, protocol, screen, shell } from "el
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { extname } from "node:path";
 import type { AppSettings, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
@@ -21,12 +21,7 @@ let runtime: PrimeRpc | DemoRuntime | null = null;
 let authController: AuthController | null = null;
 let wslBridge: WslBridge | null = null;
 let wslBridgeDistro = "";
-
-if (process.env.PI_CAD_DESKTOP_E2E === "1") {
-  app.disableHardwareAcceleration();
-  app.commandLine.appendSwitch("disable-gpu");
-  app.commandLine.appendSwitch("disable-gpu-compositing");
-}
+const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
 
 function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
@@ -73,7 +68,7 @@ async function bridge() {
 
 async function ensureRuntime() {
   if (runtime) return runtime;
-  runtime = process.env.PI_CAD_DESKTOP_E2E === "1" ? new DemoRuntime() : new PrimeRpc(await bridge());
+  runtime = desktopE2E ? new DemoRuntime() : new PrimeRpc(await bridge());
   runtime.on("event", (event) => send(IPC.runtimeEvent, event));
   runtime.on("status", (status) => send(IPC.runtimeStatus, status));
   runtime.on("ui-request", (request) => send(IPC.runtimeUiRequest, request));
@@ -89,7 +84,7 @@ async function ensureAuth() {
 }
 
 function registerIpc() {
-  const demo = process.env.PI_CAD_DESKTOP_E2E === "1";
+  const demo = desktopE2E;
   const demoWorkflow: WorkflowDocument = { id: "mechanical.one-shot", version: "1.0.0", description: "Design a verified mechanical assembly", phases: ["grilling", "spec", "concept", "parts", "assembly", "final_review", "release"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 2 ? "complete" : index === 2 ? "active" : "pending", transitions: [], capabilities: index === 2 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.one-shot\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/one-shot.yaml" };
   ipcMain.handle(IPC.settingsGet, () => settingsStore.get());
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
@@ -98,8 +93,18 @@ function registerIpc() {
     const result = await dialog.showOpenDialog(mainWindow!, { title: "Choose engineering project", defaultPath: settings.projectPath || undefined, properties: ["openDirectory", "createDirectory"] });
     return result.canceled ? null : result.filePaths[0] || null;
   });
+  ipcMain.handle(IPC.settingsCreateProject, async (_event, rawName: string) => {
+    const name = rawName.trim();
+    if (!name || name === "." || name === ".." || /[<>:"/\\|?*\u0000-\u001f]/.test(name)) throw new Error("Use a valid folder name.");
+    const settings = await settingsStore.get();
+    const result = await dialog.showOpenDialog(mainWindow!, { title: "Choose where to create the project", defaultPath: settings.projectPath || undefined, properties: ["openDirectory", "createDirectory"] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const path = join(result.filePaths[0], name);
+    await mkdir(path, { recursive: false });
+    return path;
+  });
   ipcMain.handle(IPC.runtimeCheck, async () => {
-    if (process.env.PI_CAD_DESKTOP_E2E === "1") return { state: "idle", checks: [] } satisfies RuntimeStatus;
+    if (desktopE2E) return { state: "idle", checks: [] } satisfies RuntimeStatus;
     return (await bridge()).check(await settingsStore.get());
   });
   ipcMain.handle(IPC.runtimeInstall, async () => {
@@ -129,7 +134,10 @@ function registerIpc() {
   ipcMain.handle(IPC.authLogin, async () => demo ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).login(await settingsStore.get()));
   ipcMain.handle(IPC.authManualCode, async (_event, value: string) => (await ensureAuth()).submitManualCode(value));
   ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
-  ipcMain.handle(IPC.workflowCurrent, async () => demo ? { workflowId: demoWorkflow.id, runId: "e2e", phase: "concept", status: "active", authoritative: false } : new WorkflowStore(await bridge()).current(await settingsStore.get()));
+  ipcMain.handle(IPC.workflowCurrent, async () => demo ? {
+    workflowId: demoWorkflow.id, workflowVersion: demoWorkflow.version, workflowHash: "demo", runId: "e2e", phase: "concept", status: "active",
+    phaseHistory: ["grilling", "spec", "concept"], phases: demoWorkflow.phases, authoritative: false,
+  } : new WorkflowStore(await bridge()).current(await settingsStore.get()));
   ipcMain.handle(IPC.workflowSave, async (_event, document: WorkflowDocument) => demo ? document : new WorkflowStore(await bridge()).save(await settingsStore.get(), document));
   ipcMain.handle(IPC.viewerChooseStep, async () => {
     const settings = await settingsStore.get();
