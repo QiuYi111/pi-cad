@@ -32,21 +32,29 @@ for (const name of ["package.json", "package-lock.json", "README.md", "README.zh
 }
 
 const primeDestination = join(destination, "prime-agent");
-await mkdir(join(primeDestination, "packages/coding-agent"), { recursive: true });
-await mkdir(join(primeDestination, "packages/ai"), { recursive: true });
+await mkdir(primeDestination, { recursive: true });
 await cp(join(prime, "prime-agent.sh"), join(primeDestination, "prime-agent.sh"));
 await cp(join(prime, "package.json"), join(primeDestination, "package.json"));
+await cp(join(prime, "package-lock.json"), join(primeDestination, "package-lock.json"));
 await cp(join(prime, "LICENSE"), join(primeDestination, "LICENSE"));
-await cp(join(prime, "packages/coding-agent/package.json"), join(primeDestination, "packages/coding-agent/package.json"));
-await cp(join(prime, "packages/coding-agent/dist"), join(primeDestination, "packages/coding-agent/dist"), { recursive: true });
-await cp(join(prime, "packages/ai/package.json"), join(primeDestination, "packages/ai/package.json"));
-await cp(join(prime, "packages/ai/dist"), join(primeDestination, "packages/ai/dist"), { recursive: true });
-for (const name of ["zeromq", "cmake-ts", "node-addon-api", "undici", "typebox"]) {
-  await mkdir(join(primeDestination, "node_modules"), { recursive: true });
-  await cp(join(prime, "node_modules", name), join(primeDestination, "node_modules", name), { recursive: true });
+for (const name of ["agent", "ai", "coding-agent", "tui"]) {
+  await mkdir(join(primeDestination, "packages", name), { recursive: true });
+  await cp(join(prime, "packages", name, "package.json"), join(primeDestination, "packages", name, "package.json"));
+  await cp(join(prime, "packages", name, "dist"), join(primeDestination, "packages", name, "dist"), { recursive: true });
 }
-await mkdir(join(primeDestination, "node_modules/@silvia-odwyer"), { recursive: true });
-await cp(join(prime, "node_modules/@silvia-odwyer/photon-node"), join(primeDestination, "node_modules/@silvia-odwyer/photon-node"), { recursive: true });
+await cp(join(prime, "node_modules"), join(primeDestination, "node_modules"), {
+  recursive: true,
+  filter: (path) =>
+    !/(^|[\\/])\.bin([\\/]|$)/.test(path) &&
+    !/(^|[\\/])@earendil-works([\\/]|$)/.test(path) &&
+    !/(^|[\\/])pi-extension-[^\\/]+$/.test(path),
+});
+for (const [packageName, directory] of [["pi-agent-core", "agent"], ["pi-ai", "ai"], ["pi-coding-agent", "coding-agent"], ["pi-tui", "tui"]]) {
+  const target = join(primeDestination, "node_modules/@earendil-works", packageName);
+  await mkdir(target, { recursive: true });
+  await cp(join(primeDestination, "packages", directory, "package.json"), join(target, "package.json"));
+  await cp(join(primeDestination, "packages", directory, "dist"), join(target, "dist"), { recursive: true });
+}
 
 const manifest = {
   schema: 1,

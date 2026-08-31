@@ -1,12 +1,21 @@
+import { useEffect, useState } from "react";
 import { Box, Braces, GitBranch, ShieldCheck } from "./icons";
 import type { AppSettings, RuntimeStatus } from "@shared/contracts";
 
 export function StatusBar({ settings, status }: { settings: AppSettings; status: RuntimeStatus }) {
   const [phase, setPhase] = useState("Not started");
   useEffect(() => {
-    const refresh = () => window.piCad.workflow.current().then((value) => setPhase(value.phase?.replaceAll("_", " ") || "Not started")).catch(() => undefined);
+    let active = false;
+    const refresh = async () => {
+      if (active) return;
+      active = true;
+      try {
+        const value = await window.piCad.workflow.current();
+        setPhase(value.phase?.replaceAll("_", " ") || "Not started");
+      } catch {} finally { active = false; }
+    };
     void refresh();
-    const timer = window.setInterval(refresh, 2500);
+    const timer = window.setInterval(refresh, 5000);
     return () => window.clearInterval(timer);
   }, []);
   return <footer className="status-bar">
@@ -17,4 +26,3 @@ export function StatusBar({ settings, status }: { settings: AppSettings; status:
     <div className="token-meter">Tokens <b>—</b></div>
   </footer>;
 }
-import { useEffect, useState } from "react";

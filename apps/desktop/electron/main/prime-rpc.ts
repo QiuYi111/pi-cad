@@ -20,6 +20,7 @@ export class PrimeRpc extends EventEmitter {
 
   async start(settings: AppSettings): Promise<RuntimeStatus> {
     if (this.child && !this.child.killed) return this.status;
+    await ensureRuntimeReady(this.bridge, settings, (status) => this.setStatus(status));
     const paths = await this.bridge.resolveRuntimePaths(settings);
     const home = await this.bridge.homeDirectory();
     const node = await this.bridge.commandPath("node");
@@ -133,4 +134,17 @@ export class PrimeRpc extends EventEmitter {
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear();
   }
+}
+
+export async function ensureRuntimeReady(
+  bridge: Pick<WslBridge, "check" | "install">,
+  settings: AppSettings,
+  onStatus?: (status: RuntimeStatus) => void,
+): Promise<RuntimeStatus> {
+  const current = await bridge.check(settings);
+  if (current.checks.every((check) => check.status === "ready")) return current;
+  const installed = await bridge.install(settings, onStatus);
+  const missing = installed.checks.filter((check) => check.status !== "ready");
+  if (missing.length) throw new Error(`Runtime setup incomplete: ${missing.map((check) => check.label).join(", ")}`);
+  return installed;
 }

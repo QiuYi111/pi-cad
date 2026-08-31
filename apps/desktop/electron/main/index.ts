@@ -19,6 +19,8 @@ let mainWindow: BrowserWindow | null = null;
 const settingsStore = new SettingsStore();
 let runtime: PrimeRpc | DemoRuntime | null = null;
 let authController: AuthController | null = null;
+let wslBridge: WslBridge | null = null;
+let wslBridgeDistro = "";
 
 if (process.env.PI_CAD_DESKTOP_E2E === "1") {
   app.disableHardwareAcceleration();
@@ -62,7 +64,11 @@ function createWindow() {
 async function bridge() {
   const settings = await settingsStore.get();
   const bundledRuntime = is.dev ? join(app.getAppPath(), "resources/runtime") : join(process.resourcesPath, "runtime");
-  return new WslBridge(settings.distro, bundledRuntime);
+  if (!wslBridge || wslBridgeDistro !== settings.distro) {
+    wslBridge = new WslBridge(settings.distro, bundledRuntime);
+    wslBridgeDistro = settings.distro;
+  }
+  return wslBridge;
 }
 
 async function ensureRuntime() {

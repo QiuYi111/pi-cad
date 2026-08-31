@@ -18,9 +18,12 @@ export class WorkflowStore {
   async current(settings: AppSettings): Promise<WorkflowCurrent> {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) return { authoritative: false };
-    const script = "const fs=require('fs'),p=process.argv[1];try{const x=JSON.parse(fs.readFileSync(p,'utf8')),r=x.run||{};process.stdout.write(JSON.stringify({workflowId:r.workflowId,runId:r.id,phase:r.phase,status:r.status,updatedAt:r.updatedAt,authoritative:false}))}catch{process.stdout.write(JSON.stringify({authoritative:false}))}";
-    const { stdout } = await this.bridge.exec([await this.bridge.commandPath("node"), "-e", script, `${projectPath}/.pi-cad/status.json`]);
-    return JSON.parse(stdout || "{\"authoritative\":false}") as WorkflowCurrent;
+    try {
+      const { stdout } = await this.bridge.exec(["cat", `${projectPath}/.pi-cad/status.json`]);
+      const state = JSON.parse(stdout) as any;
+      const run = state.run || {};
+      return { workflowId: run.workflowId, runId: run.id, phase: run.phase, status: run.status, updatedAt: run.updatedAt, authoritative: false };
+    } catch { return { authoritative: false }; }
   }
 
   private async read(path: string): Promise<WorkflowDocument> {

@@ -16,15 +16,23 @@ export function WorkflowRail() {
   const [phases, setPhases] = useState(fallback);
   useEffect(() => {
     let alive = true;
+    let active = false;
+    let documents: Awaited<ReturnType<typeof window.piCad.workflow.list>> = [];
     const refresh = async () => {
+      if (active) return;
+      active = true;
       try {
-        const [documents, current] = await Promise.all([window.piCad.workflow.list(), window.piCad.workflow.current()]);
+        const current = await window.piCad.workflow.current();
         const document = documents.find((item) => item.id === current.workflowId) || documents[0];
         if (alive && document) setPhases(project(document.phases, current));
-      } catch {}
+      } catch {} finally { active = false; }
     };
-    void refresh();
-    const timer = window.setInterval(refresh, 2500);
+    const initialize = async () => {
+      try { documents = await window.piCad.workflow.list(); } catch {}
+      await refresh();
+    };
+    void initialize();
+    const timer = window.setInterval(refresh, 5000);
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
   return <div className="workflow-rail" data-testid="workflow-rail">
