@@ -596,7 +596,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--width", type=int, default=640)
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--display", default="solid", choices=("solid",))
-    p.add_argument("--labels", action="store_true")
+    p.add_argument("--labels", action=argparse.BooleanOptionalAction, default=True, help="Render view names and the world-frame triad (use --no-labels for a clean render)")
     p.set_defaults(func=_cmd_render)
 
     p = sub.add_parser("measure", help="Return one deterministic measurement")

@@ -24,16 +24,25 @@ function attachments(result: any, id: string): MediaAttachment[] {
     ...(Array.isArray(result?.attachments) ? result.attachments : []),
     ...(Array.isArray(result?.content) ? result.content.filter((item: any) => item?.type === "image" || item?.mimeType?.startsWith?.("image/") || item?.mime_type?.startsWith?.("image/")) : []),
   ];
+  const seen = new Set<string>();
   return values.flatMap((item: any, index: number) => {
     const mimeType = item.mimeType || item.mime_type || "image/png";
     if (!mimeType?.startsWith("image/")) return [];
+    const dataUrl = item.data ? `data:${mimeType};base64,${item.data}` : item.dataUrl || item.image_url;
+    // Prime can expose the same inline image through both the tool content
+    // and its attachment details. Keep one tile per rendered view; identical
+    // pixels are duplicates, while the view-name banner makes distinct views
+    // remain distinct even for symmetric geometry.
+    const identity = dataUrl || item.path || `${mimeType}:${item.label || item.role || index}`;
+    if (seen.has(identity)) return [];
+    seen.add(identity);
     return [{
       id: `${id}-media-${index}`,
       mimeType,
       role: item.role || item.label || "Tool output",
-      dataUrl: item.data ? `data:${mimeType};base64,${item.data}` : item.dataUrl || item.image_url,
+      dataUrl,
       path: item.path,
-      label: item.label,
+      label: item.label || item.name || item.view,
     }];
   });
 }

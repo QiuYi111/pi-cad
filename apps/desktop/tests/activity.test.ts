@@ -35,6 +35,14 @@ describe("Prime activity projection", () => {
     expect(messages[0]?.activity?.details).toBeUndefined();
   });
 
+  it("deduplicates a build image exposed through content and attachment details", () => {
+    let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "b2", toolName: "ipython", args: { code: "await cad.model.build(source, output)" } });
+    const image = { type: "image", mimeType: "image/png", data: "aGVsbG8=", name: "iso" };
+    messages = reducePrimeEvent(messages, { type: "tool_execution_end", toolCallId: "b2", result: { details: { attachments: [image] }, content: [{ type: "text", text: "built" }, image] } });
+    expect(messages[0]?.activity?.media).toHaveLength(1);
+    expect(messages[0]?.activity?.media?.[0]?.label).toBe("iso");
+  });
+
   it("does not expose arbitrary Python as a product activity", () => {
     expect(reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "x", toolName: "ipython", args: { code: "print('hello')" } })).toEqual([]);
   });

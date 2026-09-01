@@ -152,7 +152,9 @@ export async function inspectVisual(
     "--display",
     options.display ?? "solid",
   ];
-  if (options.labels) args.push("--labels");
+  // Agent-facing build evidence needs view identity and a world-frame cue;
+  // callers can still pass labels:false for a clean presentation render.
+  if (options.labels ?? true) args.push("--labels");
   return runCadctl(args, { cwd, timeoutMs });
 }
 

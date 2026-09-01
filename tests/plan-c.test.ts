@@ -209,8 +209,9 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
     assert.equal(result.visual.ok, true);
     assert.equal(result.geometry.ok, true);
     assert.deepEqual(result.visual.payload.views.map((view: any) => view.name), ["iso", "front", "back", "left", "right", "top", "bottom"]);
-    assert.equal(result.images.length, 2);
+    assert.equal(result.images.length, 7);
     assert.ok(result.images.every((image: any) => image.mimeType === "image/png" && Buffer.from(image.data, "base64").subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))));
+    assert.deepEqual(result.images.map((image: any) => image.name), ["iso", "front", "back", "left", "right", "top", "bottom"]);
     const afterBuild = await new HarnessRunStoreV7(cwd, loaded.state.runId).load(mechanicalRegistries);
     assert.equal(afterBuild?.state.artifacts["candidate:authoritative"]?.path, "build/plate.step");
     assert.equal(afterBuild?.state.artifacts["candidate:source"]?.path, "plate.py");

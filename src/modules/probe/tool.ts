@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { probePython } from "../../shared/capability.ts";
+import { DEFAULT_VIEWS, probePython } from "../../shared/capability.ts";
 import { CadProjectStore } from "../../shared/store.ts";
 import { bundleFromEnvelope, type ObservationBundle } from "../../observations/bundle.ts";
 import { recordObservation } from "../../core/observation-index.ts";
@@ -150,7 +150,10 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
 }
 
 function applyPresetDefaults(preset: CadProbeParams["preset"], args: Record<string, unknown>): void {
-  if (preset === "visual") Object.assign(args, { views: args.views ?? ["iso"], width: args.width ?? 900, height: args.height ?? 700, labels: args.labels ?? false, display: args.display ?? "solid" });
+  // A visual probe is an engineering observation, not a presentation shot:
+  // always return the complete orthographic set unless the caller explicitly
+  // asks for a subset.  The renderer stamps each image with its view name.
+  if (preset === "visual") Object.assign(args, { views: args.views ?? [...DEFAULT_VIEWS], width: args.width ?? 900, height: args.height ?? 700, labels: args.labels ?? true, display: args.display ?? "solid" });
   if (preset === "surfaces") Object.assign(args, { labels: args.labels ?? false });
   if (preset === "section") Object.assign(args, { display: args.display ?? "solid", width: args.width ?? 900, height: args.height ?? 700, labels: args.labels ?? false });
 }

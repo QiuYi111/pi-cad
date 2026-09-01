@@ -13,7 +13,8 @@ VIEW_NAMES = ("iso", "front", "back", "left", "right", "top", "bottom")
 _VIEW_CAMERAS: dict[str, dict[str, tuple[float, float, float]]] = {
     "iso": {
         "forward": (-1.0, -1.0, 1.0),
-        "right": (-1.0, 1.0, 0.0),
+        # Camera is at (-X, -Y, +Z); right = view_direction × world_up.
+        "right": (1.0, -1.0, 0.0),
         "up": (1.0, 1.0, 2.0),
     },
     "front": {
@@ -109,7 +110,9 @@ def _render_view(
     center_x = (min_x + max_x) / 2.0
     center_y = (min_y + max_y) / 2.0
     sx = ((px - center_x) * scale) + (width / 2.0)
-    sy = ((py - center_y) * scale) + (height / 2.0)
+    # PIL rows grow downward.  Keep the declared camera up direction mapped
+    # to visual up instead of vertically mirroring every orthographic view.
+    sy = (height / 2.0) - ((py - center_y) * scale)
 
     light = np.asarray((0.45, 0.35, 0.82), dtype=np.float64)
     light = light / np.linalg.norm(light)
@@ -195,8 +198,25 @@ def render_views(
         img = _render_view(pts, tri, normals, _VIEW_CAMERAS[view], width, height)
         if labels:
             draw = ImageDraw.Draw(img)
-            draw.rectangle((0, 0, width - 1, 20), fill=(245, 245, 245))
-            draw.text((6, 4), view.upper(), fill=(20, 20, 20))
+            draw.rectangle((0, 0, width - 1, 22), fill=(245, 245, 245))
+            draw.text((7, 5), view.upper(), fill=(20, 20, 20))
+            # A small, explicit world-frame triad makes front/back and
+            # handedness unambiguous when several thumbnails look alike.
+            origin = (34, height - 32)
+            axis_length = max(22, min(width, height) // 15)
+            right_basis = np.asarray(_normalize(_VIEW_CAMERAS[view]["right"]), dtype=np.float64)
+            up_basis = np.asarray(_normalize(_VIEW_CAMERAS[view]["up"]), dtype=np.float64)
+            for name, axis, color in (
+                ("X", (1.0, 0.0, 0.0), (205, 55, 55)),
+                ("Y", (0.0, 1.0, 0.0), (45, 155, 75)),
+                ("Z", (0.0, 0.0, 1.0), (55, 95, 205)),
+            ):
+                dx = float(np.dot(np.asarray(axis), right_basis)) * axis_length
+                dy = -float(np.dot(np.asarray(axis), up_basis)) * axis_length
+                endpoint = (origin[0] + dx, origin[1] + dy)
+                draw.line((origin, endpoint), fill=color, width=2)
+                draw.ellipse((endpoint[0] - 2, endpoint[1] - 2, endpoint[0] + 2, endpoint[1] + 2), fill=color)
+                draw.text((endpoint[0] + 4, endpoint[1] - 7), name, fill=color)
         path = out_dir / f"{view}.png"
         img.save(path)
         camera = {

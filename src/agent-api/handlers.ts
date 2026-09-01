@@ -122,9 +122,9 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");
   }
 
-  // Keep the eager Prime attachment below as the immediate observation. When
-  // a workflow is active, also carry the principal views into later Phase
-  // Cards so mandatory visual context cannot silently disappear.
+  // Attach the complete seven-view set to the build result so both Prime and
+  // the desktop activity card can inspect the same orientation-complete
+  // observation.  Phase Cards still carry only the bounded ISO/FRONT pair.
   const byName = new Map(views.map((view) => [view.name, view.path]));
   const selected = [byName.get("iso") ?? images[0], byName.get("front") ?? images[1]].filter((path): path is string => Boolean(path));
   const contextRefs = Object.fromEntries(selected.map((path, index) => [index === 0 ? "mandatoryImageIso" : "mandatoryImageFront", phaseCardEvidenceRef(cwd, path)]));
@@ -165,8 +165,9 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
       event: { type: "ModelBuildObserved", data: { artifact: projectRelativePath(cwd, artifact), images: Object.values(contextRefs), evidence: [...envelopes.keys()] } },
     };
   });
-  const inlineImages = await Promise.all(selected.map(async (path) => ({
-    data: (await readFile(path)).toString("base64"),
+  const inlineImages = await Promise.all(views.map(async (view) => ({
+    name: view.name,
+    data: (await readFile(view.path)).toString("base64"),
     mimeType: "image/png",
   })));
   return { build, visual, geometry, images: inlineImages };

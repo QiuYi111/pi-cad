@@ -25,7 +25,9 @@ async def _attach_images(images: list[dict[str, str]]) -> None:
         for image in images:
             if image.get("mimeType") != "image/png" or not image.get("data"):
                 raise ValueError("mandatory build image is not an inline PNG")
-            display_inline_image(image, label="Pi-CAD mandatory build observation")
+            view = image.get("name") or image.get("view")
+            label = f"Pi-CAD mandatory build observation · {str(view).upper()}" if view else "Pi-CAD mandatory build observation"
+            display_inline_image(image, label=label)
     except Exception as error:
         raise CadApiError(f"Pi-CAD could not inject mandatory build images into Prime: {error}", error_type="ModelBuildError") from error
 
