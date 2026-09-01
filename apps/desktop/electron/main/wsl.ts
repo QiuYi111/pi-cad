@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
+import type { RuntimeBridge } from "./runtime-bridge.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -11,7 +12,8 @@ function uncWslPath(value: string): { distro: string; path: string } | null {
   return { distro: match[1]!, path: `/${match[2]!.replaceAll("\\", "/")}` };
 }
 
-export class WslBridge {
+export class WslBridge implements RuntimeBridge {
+  readonly kind = "wsl" as const;
   private homePromise?: Promise<string>;
   constructor(readonly distro: string, readonly bundledRuntimePath?: string) {}
 
@@ -63,6 +65,12 @@ export class WslBridge {
     return stdout.trim();
   }
 
+  async toRuntimePath(value: string): Promise<string> { return this.toLinuxPath(value); }
+
+  async revealPath(path: string): Promise<string> {
+    return path.startsWith("/") ? `\\\\wsl.localhost\\${this.distro}${path.replaceAll("/", "\\")}` : path;
+  }
+
   async homeDirectory(): Promise<string> {
     this.homePromise ??= this.exec(["sh", "-lc", "printf %s \"$HOME\""]).then(({ stdout }) => {
       const value = stdout.trim();
@@ -94,11 +102,14 @@ export class WslBridge {
     const add = (id: DependencyCheck["id"], label: string, ready: boolean, detail: string, installable = true) =>
       checks.push({ id, label, status: ready ? "ready" : "missing", detail, installable });
     try {
-      await execFileAsync("wsl.exe", ["-l", "-q"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
-      add("wsl", "Windows Subsystem for Linux", true, settings.distro, false);
+      const { stdout } = await execFileAsync("wsl.exe", ["-l", "-q"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
+      const distributions = String(stdout || "").replaceAll("\0", "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+      const found = distributions.some((item) => item.toLowerCase() === settings.distro.toLowerCase());
+      add("wsl", "WSL 2 and Ubuntu", found, found ? settings.distro : `${settings.distro} is not installed`, true);
+      if (!found) return { state: "error", checks, message: "Install WSL 2 and Ubuntu to continue." };
     } catch (error) {
-      add("wsl", "Windows Subsystem for Linux", false, String(error), false);
-      return { state: "error", checks, message: "WSL is required before Pi-CAD can install its engineering runtime." };
+      add("wsl", "WSL 2 and Ubuntu", false, String(error), true);
+      return { state: "error", checks, message: "Install WSL 2 and Ubuntu to continue." };
     }
     const paths = await this.resolveRuntimePaths(settings);
     const script = [
@@ -107,6 +118,7 @@ export class WslBridge {
       "node -p 'process.versions.node' 2>/dev/null || true",
       "printf 'uv=%s\\n' \"$(command -v uv || true)\"",
       "printf 'bwrap=%s\\n' \"$(command -v bwrap || true)\"",
+      "printf 'paraview=%s\\n' \"$(command -v paraview || true)\"",
       `test -f ${JSON.stringify(paths.primeAgentRepo)}/prime-agent.sh && printf 'prime=ready\\n' || printf 'prime=missing\\n'`,
       `test -f ${JSON.stringify(paths.piCadRepo)}/package.json && printf 'picad=ready\\n' || printf 'picad=missing\\n'`,
       "printf 'python=%s\\n' \"$(command -v python3 || true)\"",
@@ -118,10 +130,26 @@ export class WslBridge {
     add("python", "Python", Boolean(values.python), values.python || "Not installed");
     add("uv", "uv", Boolean(values.uv), values.uv || "Not installed");
     add("bwrap", "Bubblewrap", Boolean(values.bwrap), values.bwrap || "Not installed");
+    add("paraview", "ParaView", Boolean(values.paraview), values.paraview || "Not installed");
     add("prime", "Prime Agent", values.prime === "ready", paths.primeAgentRepo);
     add("picad", "Pi-CAD runtime", values.picad === "ready", paths.piCadRepo);
     const ready = checks.every((check) => check.status === "ready");
     return { state: ready ? "idle" : "error", checks, message: ready ? undefined : "Install the missing runtime dependencies." };
+  }
+
+  async installWsl(): Promise<RuntimeStatus> {
+    if (!/^[A-Za-z0-9._-]+$/.test(this.distro)) throw new Error("Invalid WSL distribution name.");
+    const distro = this.distro.replaceAll("'", "''");
+    const command = `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -Wait -PassThru -ArgumentList @('--install','--distribution','${distro}'); exit $process.ExitCode`;
+    try {
+      await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
+        encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
+      });
+      return { state: "checking", checks: [], message: "WSL installation finished. Restart Windows if requested, then continue setup." };
+    } catch (error: any) {
+      if (error?.code === 1223) throw new Error("Administrator approval was cancelled.");
+      throw new Error(`Windows could not install WSL. ${error?.stderr || error?.message || error}`);
+    }
   }
 
   async install(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
@@ -129,8 +157,8 @@ export class WslBridge {
     onStatus?.({ ...status, state: "installing" });
     if (status.checks.some((item) => item.id === "wsl" && item.status !== "ready")) return status;
     const missing = new Set(status.checks.filter((item) => item.status !== "ready").map((item) => item.id));
-    if (missing.has("python") || missing.has("bwrap")) {
-      await execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates"], {
+    if (missing.has("python") || missing.has("bwrap") || missing.has("paraview")) {
+      await execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates paraview python3-paraview"], {
         encoding: "utf8", timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
       });
     }
@@ -158,13 +186,20 @@ export class WslBridge {
       const source = await this.toLinuxPath(this.bundledRuntimePath);
       const home = await this.homeDirectory();
       const destination = `${home}/.local/share/pi-cad-desktop/runtime`;
-      await this.exec(["bash", "-lc", `set -e; mkdir -p ${JSON.stringify(destination)}; cp -a ${JSON.stringify(source)}/. ${JSON.stringify(destination)}/; chmod +x ${JSON.stringify(destination)}/prime-agent/prime-agent.sh`], { timeout: 15 * 60_000 });
+      const archive = `${source}/runtime-bundle.tar.gz`;
+      const installBundled = [
+        "set -e",
+        `mkdir -p ${JSON.stringify(destination)}`,
+        `if test -f ${JSON.stringify(archive)}; then tar -xzf ${JSON.stringify(archive)} -C ${JSON.stringify(destination)}; else cp -a ${JSON.stringify(source)}/. ${JSON.stringify(destination)}/; fi`,
+        `chmod +x ${JSON.stringify(destination)}/prime-agent/prime-agent.sh`,
+      ].join("; ");
+      await this.exec(["bash", "-lc", installBundled], { timeout: 15 * 60_000 });
       paths = await this.resolveRuntimePaths(settings);
     }
     if (missing.has("prime")) {
       throw new Error(`Bundled Prime runtime is not staged at ${paths.primeAgentRepo}. Reinstall Pi-CAD or select a Prime Agent checkout in Settings.`);
     }
-    await this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; cd ${JSON.stringify(paths.piCadRepo)} && npm install --omit=dev --legacy-peer-deps && npm run setup:python`], { timeout: 15 * 60_000 });
+    await this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; cd ${JSON.stringify(paths.piCadRepo)} && if ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi && npm run setup:python`], { timeout: 15 * 60_000 });
     await this.exec(["bash", "-lc", [
       "set -e",
       `mkdir -p ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works`,

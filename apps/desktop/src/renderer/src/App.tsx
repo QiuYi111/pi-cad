@@ -6,14 +6,17 @@ import { WorkflowEditor } from "./pages/WorkflowEditor";
 import { Traces } from "./pages/Traces";
 import { Settings } from "./pages/Settings";
 import { ExtensionDialog } from "./components/ExtensionDialog";
+import { FirstRun } from "./pages/FirstRun";
 
 type Page = "workbench" | "workflow" | "traces" | "settings";
 
 export function App() {
   const [page, setPage] = useState<Page>("workbench");
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [setupComplete, setSetupComplete] = useState(() => localStorage.getItem("pi-cad.setup-complete") === "1");
   useEffect(() => { void window.piCad.settings.get().then(setSettings); }, []);
   if (!settings) return <div className="boot-screen"><div className="boot-mark" />Loading Pi-CAD</div>;
+  if (!setupComplete) return <FirstRun settings={settings} onSettings={setSettings} onComplete={() => setSetupComplete(true)} />;
 
   const nav = [
     ["workbench", Boxes, "Workbench"],

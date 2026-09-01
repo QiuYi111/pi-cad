@@ -2,12 +2,12 @@ import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { shell } from "electron";
 import type { AppSettings, AuthStatus } from "../../src/shared/contracts.js";
-import { WslBridge } from "./wsl.js";
+import type { RuntimeBridge } from "./runtime-bridge.js";
 
 export class AuthController extends EventEmitter {
   private child?: ChildProcessWithoutNullStreams;
   private buffer = "";
-  constructor(private readonly bridge: WslBridge) { super(); }
+  constructor(private readonly bridge: RuntimeBridge) { super(); }
 
   async status(settings: AppSettings): Promise<AuthStatus> {
     const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);

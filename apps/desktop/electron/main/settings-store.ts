@@ -17,6 +17,7 @@ const defaults = (): AppSettings => ({
 
 export class SettingsStore {
   readonly path: string;
+  private mutation: Promise<void> = Promise.resolve();
 
   constructor(path = join(app.getPath("userData"), "settings.json")) {
     this.path = path;
@@ -33,16 +34,20 @@ export class SettingsStore {
   }
 
   async update(patch: Partial<AppSettings>): Promise<AppSettings> {
-    const current = await this.get();
-    const next: AppSettings = {
-      ...current,
-      ...patch,
-      reviewer: patch.reviewer ? { ...current.reviewer, ...patch.reviewer } : current.reviewer,
-    };
-    await mkdir(dirname(this.path), { recursive: true });
-    const temporary = `${this.path}.${process.pid}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(temporary, this.path);
-    return next;
+    const pending = this.mutation.then(async () => {
+      const current = await this.get();
+      const next: AppSettings = {
+        ...current,
+        ...patch,
+        reviewer: patch.reviewer ? { ...current.reviewer, ...patch.reviewer } : current.reviewer,
+      };
+      await mkdir(dirname(this.path), { recursive: true });
+      const temporary = `${this.path}.${process.pid}.${Date.now()}.tmp`;
+      await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      await rename(temporary, this.path);
+      return next;
+    });
+    this.mutation = pending.then(() => undefined, () => undefined);
+    return pending;
   }
 }

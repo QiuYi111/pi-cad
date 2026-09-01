@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Desktop engineering workspace for Pi-CAD and Prime Agent",
-  "author": "Pi-CAD contributors",
+  "author": { "name": "Pi-CAD contributors", "email": "maintainers@pi-cad.dev" },
+  "homepage": "https://github.com/QiuYi111/pi-cad",
+  "desktopName": "Pi-CAD.desktop",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -12,8 +14,13 @@
     "preview": "electron-vite preview",
     "test": "vitest run",
     "test:e2e": "npm run build && playwright test",
+    "test:package": "playwright test tests/e2e/package.spec.ts",
+    "test:windows:host": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Test-PiCadInstaller.ps1",
+    "test:windows:sandbox": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Open-PiCadSandbox.ps1",
     "stage:runtime": "node scripts/stage-runtime.mjs",
-    "package:win": "npm run stage:runtime && npm run build && electron-builder --win nsis"
+    "package:win": "npm run stage:runtime && npm run build && node scripts/package-windows.mjs",
+    "package:linux": "npm run stage:runtime && npm run build && electron-builder --linux AppImage deb",
+    "package:mac": "npm run stage:runtime && npm run build && electron-builder --mac dmg zip"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
@@ -64,12 +71,43 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "Pi-CAD-${version}-${arch}.${ext}"
+      "artifactName": "Pi-CAD-Setup-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Engineering",
+      "maintainer": "Pi-CAD contributors <maintainers@pi-cad.dev>",
+      "syncDesktopName": true,
+      "target": ["AppImage", "deb"],
+      "artifactName": "Pi-CAD-Linux-${arch}.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "Pi-CAD-macOS-${arch}.${ext}"
+    },
+    "dmg": {
+      "sign": false,
+      "backgroundColor": "#090a0b",
+      "window": { "width": 620, "height": 420 },
+      "contents": [
+        { "x": 170, "y": 210, "type": "file" },
+        { "x": 450, "y": 210, "type": "link", "path": "/Applications" }
+      ]
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Pi-CAD"
     }
   },
   "allowScripts": {}

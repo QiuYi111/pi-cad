@@ -19,12 +19,15 @@ test("complete desktop product path", async () => {
   let executablePath = join(process.cwd(), "node_modules/electron/dist/electron.exe");
   if (electronZip) { await extract(electronZip, { dir: electronRoot }); executablePath = join(electronRoot, "electron.exe"); }
   await writeFile(join(appRoot, "package.json"), JSON.stringify({ name: "pi-cad-e2e", version: "0.0.0", type: "module", main: "out/main/index.js" }));
-  const application = await electron.launch({ executablePath, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", appRoot, "--pi-cad-e2e"], env: { ...process.env, PI_CAD_DESKTOP_E2E: "1", PI_CAD_PROJECT_CWD: "/workspace/demo" } });
+  const application = await electron.launch({ executablePath, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", `--user-data-dir=${join(nativeRoot, "user-data")}`, appRoot, "--pi-cad-e2e"], env: { ...process.env, PI_CAD_DESKTOP_E2E: "1", PI_CAD_PROJECT_CWD: "/workspace/demo" } });
   const page = await application.firstWindow();
   const pageErrors: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") pageErrors.push(message.text()); console.log(`[renderer:${message.type()}] ${message.text()}`); });
   page.on("pageerror", (error) => { pageErrors.push(error.message); console.error(`[renderer:error] ${error.message}`); });
   await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
+  await expect(page.getByText("READY THE WORKBENCH")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Pi-CAD" })).toBeEnabled();
+  await page.getByRole("button", { name: "Open Pi-CAD" }).click();
   await expect(page.getByText("Pi-CAD").first()).toBeVisible();
   await expect(page.getByTestId("workflow-rail")).toBeVisible();
 
@@ -47,6 +50,8 @@ test("complete desktop product path", async () => {
   const composer = page.getByPlaceholder("Ask anything about the design");
   await composer.fill("Build a compact bracket");
   await composer.press("Enter");
+  await expect(page.getByText("Build a compact bracket", { exact: true })).toBeVisible();
+  await expect(page.getByText("Waiting for model", { exact: true })).toBeVisible();
   await expect(page.getByText("Building model")).toBeVisible();
   await expect(page.getByText("Model built")).toBeVisible();
   await expect(page.getByText("The first model is built and ready for inspection.")).toBeVisible();
@@ -62,6 +67,13 @@ test("complete desktop product path", async () => {
     await expect(page.locator(".cad-viewer-open-source .tcv_cad_body")).toBeVisible();
     await expect(page.locator(".cad-viewer-open-source canvas")).toBeVisible();
   }
+  await page.screenshot({ path: join(process.cwd(), "test-results", "workbench-model.png") });
+  await page.getByLabel("Viewer source").first().selectOption({ label: "static-check · stress" });
+  await expect(page.getByText("ParaView session ready")).toBeVisible();
+  await page.screenshot({ path: join(process.cwd(), "test-results", "workbench-simulation.png") });
+  await page.getByRole("button", { name: "Compare" }).click();
+  await expect(page.locator(".viewer-scene")).toHaveCount(2);
+  await page.screenshot({ path: join(process.cwd(), "test-results", "workbench-compare.png") });
 
   await page.getByRole("button", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "mechanical.one-shot" })).toBeVisible();
@@ -84,5 +96,5 @@ test("complete desktop product path", async () => {
   await expect(page.getByText("ChatGPT connected")).toBeVisible();
   expect(pageErrors).toEqual([]);
   await application.close();
-  await rm(nativeRoot, { recursive: true, force: true });
+  await rm(nativeRoot, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
 });

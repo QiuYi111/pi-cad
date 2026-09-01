@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Display, Viewer } from "three-cad-viewer";
+import type { Display, Viewer } from "three-cad-viewer";
 import { Box, FolderOpen } from "./icons";
 import type { MeshDocument } from "@shared/contracts";
 import { toThreeCadShapes } from "../lib/cad-scene";
@@ -11,19 +11,25 @@ export function CadViewer({ artifactPath }: { artifactPath?: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [viewerError, setViewerError] = useState("");
+  const viewerRequired = mesh !== null;
 
   useEffect(() => {
-    if (!host.current) return;
-    try {
-      const display = new CadDisplay(host.current);
+    if (!viewerRequired || !host.current || viewer.current) return;
+    let active = true;
+    let display: CadDisplay | null = null;
+    void import("three-cad-viewer").then((module) => {
+      if (!active || !host.current) return;
+      display = new CadDisplay(host.current, module);
       viewer.current = display;
-      return () => { viewer.current = null; display.dispose(); };
-    } catch (reason) {
+      if (mesh) display.render(mesh);
+    }).catch((reason) => {
+      if (!active || !host.current) return;
       host.current.replaceChildren();
       setViewerError(reason instanceof Error ? reason.message : String(reason));
-    }
-  }, []);
-  useEffect(() => { if (mesh) viewer.current?.render(mesh); }, [mesh]);
+    });
+    return () => { active = false; viewer.current = null; display?.dispose(); };
+  }, [viewerRequired]);
+  useEffect(() => { if (mesh && viewer.current) viewer.current.render(mesh); }, [mesh]);
   useEffect(() => {
     if (!artifactPath) return;
     let active = true;
@@ -56,17 +62,17 @@ class CadDisplay {
   private readonly resize: ResizeObserver;
   private rendered = false;
 
-  constructor(private readonly host: HTMLElement) {
+  constructor(private readonly host: HTMLElement, module: typeof import("three-cad-viewer")) {
     const width = Math.max(host.clientWidth, 320);
     const height = Math.max(host.clientHeight, 240);
-    const display = new Display(host, {
+    const display = new module.Display(host, {
       cadWidth: width, height, treeWidth: 260, treeHeight: Math.max(220, height - 80),
       theme: "dark", glass: true, pinning: true, tools: true,
       measureTools: false, externalMeasurementBackend: false, selectTool: true,
       explodeTool: true, zscaleTool: false, zebraTool: false, studioTool: false,
     });
     this.display = display;
-    try { this.viewer = new Viewer(display, { up: "Z", target: [0, 0, 0] }, () => undefined); }
+    try { this.viewer = new module.Viewer(display, { up: "Z", target: [0, 0, 0] }, () => undefined); }
     catch (error) { display.dispose(); throw error; }
     this.resize = new ResizeObserver(() => {
       if (!this.rendered) return;

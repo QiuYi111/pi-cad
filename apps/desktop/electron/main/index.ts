@@ -8,20 +8,29 @@ import type { AppSettings, RuntimeStatus, WorkflowDocument } from "../../src/sha
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
+import { NativeBridge } from "./native.js";
+import type { RuntimeBridge } from "./runtime-bridge.js";
 import { PrimeRpc } from "./prime-rpc.js";
 import { WorkflowStore } from "./workflows.js";
 import { ViewerBackend } from "./viewer.js";
 import { TraceStore } from "./traces.js";
 import { DemoRuntime } from "./demo-runtime.js";
 import { AuthController } from "./auth.js";
+import { ParaViewBackend } from "./paraview.js";
 
 let mainWindow: BrowserWindow | null = null;
 const settingsStore = new SettingsStore();
 let runtime: PrimeRpc | DemoRuntime | null = null;
 let authController: AuthController | null = null;
-let wslBridge: WslBridge | null = null;
-let wslBridgeDistro = "";
+let runtimeBridge: RuntimeBridge | null = null;
+let runtimeBridgeKey = "";
+let paraView: ParaViewBackend | null = null;
+let paraViewBridge: RuntimeBridge | null = null;
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
+const demoRuntimeStatus: RuntimeStatus = { state: "idle", checks: [
+  ["wsl", "Windows Subsystem for Linux"], ["node", "Node.js 22+"], ["python", "Python"],
+  ["uv", "uv"], ["bwrap", "Bubblewrap"], ["paraview", "ParaView"], ["prime", "Prime Agent"], ["picad", "Pi-CAD runtime"],
+].map(([id, label]) => ({ id: id as RuntimeStatus["checks"][number]["id"], label, status: "ready", detail: "Bundled", installable: false })) };
 
 function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
@@ -56,14 +65,17 @@ function createWindow() {
   else void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
 }
 
-async function bridge() {
+async function bridge(): Promise<RuntimeBridge> {
   const settings = await settingsStore.get();
   const bundledRuntime = is.dev ? join(app.getAppPath(), "resources/runtime") : join(process.resourcesPath, "runtime");
-  if (!wslBridge || wslBridgeDistro !== settings.distro) {
-    wslBridge = new WslBridge(settings.distro, bundledRuntime);
-    wslBridgeDistro = settings.distro;
+  const key = process.platform === "win32" ? `wsl:${settings.distro}` : `native:${process.platform}`;
+  if (!runtimeBridge || runtimeBridgeKey !== key) {
+    runtimeBridge = process.platform === "win32"
+      ? new WslBridge(settings.distro, bundledRuntime)
+      : new NativeBridge(bundledRuntime, process.execPath);
+    runtimeBridgeKey = key;
   }
-  return wslBridge;
+  return runtimeBridge;
 }
 
 async function ensureRuntime() {
@@ -81,6 +93,16 @@ async function ensureAuth() {
   authController = new AuthController(await bridge());
   authController.on("status", (status) => send(IPC.authStatus, status));
   return authController;
+}
+
+async function ensureParaView() {
+  const current = await bridge();
+  if (!paraView || paraViewBridge !== current) {
+    await paraView?.stop();
+    paraView = new ParaViewBackend(current);
+    paraViewBridge = current;
+  }
+  return paraView;
 }
 
 function registerIpc() {
@@ -104,8 +126,12 @@ function registerIpc() {
     return path;
   });
   ipcMain.handle(IPC.runtimeCheck, async () => {
-    if (desktopE2E) return { state: "idle", checks: [] } satisfies RuntimeStatus;
+    if (desktopE2E) return demoRuntimeStatus;
     return (await bridge()).check(await settingsStore.get());
+  });
+  ipcMain.handle(IPC.runtimeInstallWsl, async () => {
+    if (desktopE2E) return demoRuntimeStatus;
+    return (await bridge()).installWsl();
   });
   ipcMain.handle(IPC.runtimeInstall, async () => {
     const current = await settingsStore.get();
@@ -145,6 +171,16 @@ function registerIpc() {
     return result.canceled ? null : result.filePaths[0] || null;
   });
   ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? { source: path, parts: [{ name: "Demo", positions: [-1,-1,0,1,-1,0,0,1,0], indices: [0,1,2], color: "#7da8f7" }], bounds: { min: [-1,-1,0], max: [1,1,0] } } : new ViewerBackend(await bridge()).loadStep(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerCatalog, async () => demo ? {
+    projectId: "desktop-e2e",
+    projectHead: { updatedAt: new Date().toISOString(), artifacts: [] },
+    currentRun: { id: "e2e", phase: "concept", status: "active", updatedAt: new Date().toISOString(), artifacts: [{ id: "candidate:authoritative", path: "build/part.step", sha256: "demo-step", role: "authoritative-candidate-design" }] },
+    commits: [],
+    simulationRuns: [{ id: "demo-simulation", recipeId: "static-check", status: "completed", outputs: [{ name: "stress", type: "field", path: "simulation/stress.vtp", unit: "MPa", sha256: "demo-field" }] }],
+  } : new ViewerBackend(await bridge()).catalog(await settingsStore.get()));
+  ipcMain.handle(IPC.viewerOpenParaView, async (_event, path: string) => demo ? { state: "ready", sourcePath: path, url: "pi-cad://demo-paraview" } : (await ensureParaView()).open(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerStopParaView, async () => paraView?.stop());
+  ipcMain.handle(IPC.viewerOpenParaViewDesktop, async (_event, path: string) => (await ensureParaView()).openDesktop(await settingsStore.get(), path));
   ipcMain.handle(IPC.tracesList, async () => demo ? [{ id: "demo-trace", path: "/workspace/.prime-sessions/demo.jsonl", title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420 }] : new TraceStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(await settingsStore.get(), path));
   ipcMain.handle(IPC.tracesDistill, async (_event, paths: string[], evaluation: { quality: number; difficulty: number }) => {
@@ -156,8 +192,7 @@ function registerIpc() {
     return new TraceStore(await bridge()).distill(await settingsStore.get(), paths, evaluation, (status) => send(IPC.tracesDistillStatus, status));
   });
   ipcMain.handle(IPC.shellReveal, async (_event, path: string) => {
-    const settings = await settingsStore.get();
-    const target = path.startsWith("/") ? `\\\\wsl.localhost\\${settings.distro}${path.replaceAll("/", "\\")}` : path;
+    const target = await (await bridge()).revealPath(path);
     if (existsSync(target)) shell.showItemInFolder(target);
   });
 }
@@ -171,5 +206,5 @@ app.whenReady().then(() => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("before-quit", () => { void runtime?.stop(); });
+app.on("before-quit", () => { void runtime?.stop(); void paraView?.stop(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

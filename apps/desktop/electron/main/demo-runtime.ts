@@ -7,6 +7,9 @@ export class DemoRuntime extends EventEmitter {
   status: RuntimeStatus = { state: "idle", checks: [] };
 
   async start(_settings: AppSettings) {
+    this.status = { state: "starting", checks: [], message: "Starting Prime…" };
+    this.emit("status", this.status);
+    await wait(120);
     this.status = { state: "ready", checks: [], sessionId: "desktop-e2e" };
     this.emit("status", this.status);
     return this.status;

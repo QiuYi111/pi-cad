@@ -17,6 +17,7 @@ const api: DesktopApi = {
   },
   runtime: {
     check: () => ipcRenderer.invoke(IPC.runtimeCheck),
+    installWsl: () => ipcRenderer.invoke(IPC.runtimeInstallWsl),
     install: () => ipcRenderer.invoke(IPC.runtimeInstall),
     start: () => ipcRenderer.invoke(IPC.runtimeStart),
     stop: () => ipcRenderer.invoke(IPC.runtimeStop),
@@ -45,6 +46,10 @@ const api: DesktopApi = {
   viewer: {
     loadStep: (path) => ipcRenderer.invoke(IPC.viewerLoadStep, path),
     chooseStep: () => ipcRenderer.invoke(IPC.viewerChooseStep),
+    catalog: () => ipcRenderer.invoke(IPC.viewerCatalog),
+    openParaView: (path) => ipcRenderer.invoke(IPC.viewerOpenParaView, path),
+    stopParaView: () => ipcRenderer.invoke(IPC.viewerStopParaView),
+    openParaViewDesktop: (path) => ipcRenderer.invoke(IPC.viewerOpenParaViewDesktop, path),
   },
   traces: {
     list: () => ipcRenderer.invoke(IPC.tracesList),

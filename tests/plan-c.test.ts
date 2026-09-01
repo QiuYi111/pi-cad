@@ -254,6 +254,9 @@ test("a managed rebuild revises build evidence and exposes the transition only a
     await copyFile(resolve(import.meta.dirname, "fixtures", "plate.py"), sourcePath);
     assert.deepEqual((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.legalTransitions, []);
     await handleAgentApi(cwd, { schema: 1, op: "model-build", source: "plate.py", output: "build/plate.step", force: true });
+    const catalog = await handleAgentApi(cwd, { schema: 1, op: "viewer-catalog" }) as any;
+    assert.equal(catalog.currentRun.id, started.state.runId);
+    assert.equal(catalog.currentRun.artifacts.find((item: any) => item.id === "candidate:authoritative")?.path, "build/plate.step");
     const first = await new HarnessRunStoreV7(cwd, started.state.runId).load(mechanicalRegistries);
     assert.ok(first);
     assert.equal(first.state.evidence.length, 2);

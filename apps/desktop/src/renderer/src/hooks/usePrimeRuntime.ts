@@ -27,10 +27,13 @@ export function usePrimeRuntime() {
     return () => { offEvent(); offStatus(); if (frame.current !== undefined) window.cancelAnimationFrame(frame.current); };
   }, []);
 
-  const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>) => {
+  const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>, prepare?: () => Promise<void>) => {
     dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text });
     dispatch({ type: "desktop_agent_pending" });
-    try { await window.piCad.runtime.prompt(text, images); }
+    try {
+      await prepare?.();
+      await window.piCad.runtime.prompt(text, images);
+    }
     catch (error) {
       dispatch({ type: "desktop_agent_error", message: error instanceof Error ? error.message : String(error) });
       throw error;

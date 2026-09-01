@@ -1,22 +1,25 @@
 #!/usr/bin/env node
 
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repository = resolve(desktopRoot, "../..");
 const destination = resolve(desktopRoot, "resources/runtime");
 if (dirname(destination) !== resolve(desktopRoot, "resources")) throw new Error("Refusing to stage outside desktop resources.");
 
-function wslPath(value) {
-  const text = execFileSync("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO || "Ubuntu", "--", "wslpath", "-w", value], { encoding: "utf8", windowsHide: true }).trim();
-  if (!text) throw new Error(`Cannot map WSL path: ${value}`);
-  return text;
-}
-const primeLinux = process.env.PRIME_AGENT_REPO || execFileSync("wsl.exe", ["-d", process.env.PI_CAD_WSL_DISTRO || "Ubuntu", "--", "sh", "-lc", "printf %s \"${PRIME_AGENT_REPO:-$HOME/prime-agent-plan-c-upstream}\""], { encoding: "utf8", windowsHide: true }).trim();
-const prime = process.platform === "linux" ? primeLinux : wslPath(primeLinux);
+const candidates = [
+  process.env.PRIME_AGENT_REPO,
+  resolve(repository, "../prime-agent"),
+  resolve(repository, "../prime-agent-plan-c-upstream"),
+  join(homedir(), "prime-agent-plan-c-upstream"),
+].filter(Boolean);
+const prime = candidates.find((path) => existsSync(join(path, "prime-agent.sh")));
+if (!prime) throw new Error("Prime Agent checkout not found. Set PRIME_AGENT_REPO before staging the desktop runtime.");
 
 await rm(destination, { recursive: true, force: true });
 await mkdir(destination, { recursive: true });
@@ -29,6 +32,10 @@ for (const name of ["src", "scripts", "skills", "packages", "python", "workflow-
 }
 for (const name of ["package.json", "package-lock.json", "README.md", "README.zh-CN.md", "LICENSE"]) {
   await cp(join(repository, name), join(piCadDestination, name));
+}
+await mkdir(join(piCadDestination, "node_modules"), { recursive: true });
+for (const name of ["jiti", "typebox", "yaml"]) {
+  await cp(join(repository, "node_modules", name), join(piCadDestination, "node_modules", name), { recursive: true });
 }
 
 const primeDestination = join(destination, "prime-agent");
@@ -64,4 +71,7 @@ const manifest = {
   licenses: ["Pi-CAD: MIT", "Prime Agent: MIT", "zeromq: MIT AND MPL-2.0", "photon-node: Apache-2.0"],
 };
 await writeFile(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+execFileSync("tar", ["-czf", join(destination, "runtime-bundle.tar.gz"), "-C", destination, "pi-cad", "prime-agent"], { stdio: "inherit" });
+await rm(piCadDestination, { recursive: true, force: true });
+await rm(primeDestination, { recursive: true, force: true });
 console.log(`Staged desktop runtime at ${destination}`);

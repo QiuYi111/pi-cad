@@ -1,11 +1,13 @@
 import YAML from "yaml";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { AppSettings, WorkflowCurrent, WorkflowDocument, WorkflowPhase } from "../../src/shared/contracts.js";
-import { WslBridge } from "./wsl.js";
+import type { RuntimeBridge } from "./runtime-bridge.js";
 
 function quote(value: string): string { return `'${value.replaceAll("'", `'\\''`)}'`; }
 
 export class WorkflowStore {
-  constructor(private readonly bridge: WslBridge) {}
+  constructor(private readonly bridge: RuntimeBridge) {}
 
   async list(settings: AppSettings): Promise<WorkflowDocument[]> {
     const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
@@ -16,11 +18,11 @@ export class WorkflowStore {
   }
 
   async current(settings: AppSettings): Promise<WorkflowCurrent> {
-    const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
+    const projectPath = settings.projectPath;
     if (!projectPath) return { authoritative: false, phaseHistory: [], phases: [] };
     try {
-      const { stdout } = await this.bridge.exec(["cat", `${projectPath}/.pi-cad/status.json`]);
-      const state = JSON.parse(stdout) as any;
+      const nativePath = await this.bridge.revealPath(projectPath);
+      const state = JSON.parse(await readFile(join(nativePath, ".pi-cad", "status.json"), "utf8")) as any;
       const run = state.run || {};
       return {
         workflowId: run.workflowId, workflowVersion: run.workflowVersion, workflowHash: run.workflowHash, runId: run.id,

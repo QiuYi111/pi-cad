@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
-import { WslBridge } from "./wsl.js";
+import type { RuntimeBridge } from "./runtime-bridge.js";
 
 interface PendingRequest {
   accept: (value: any) => void;
@@ -16,7 +16,7 @@ export class PrimeRpc extends EventEmitter {
   private pending = new Map<string, PendingRequest>();
   status: RuntimeStatus = { state: "idle", checks: [] };
 
-  constructor(private readonly bridge: WslBridge) { super(); }
+  constructor(private readonly bridge: RuntimeBridge) { super(); }
 
   async start(settings: AppSettings): Promise<RuntimeStatus> {
     if (this.child && !this.child.killed) return this.status;
@@ -34,6 +34,7 @@ export class PrimeRpc extends EventEmitter {
       `PI_CAD_PROJECT_CWD=${paths.projectPath}`,
       `PRIME_AGENT_REPO=${paths.primeAgentRepo}`,
       `PRIME_AGENT_CODING_AGENT_DIR=${home}/.prime/agent`,
+      `PI_CAD_NODE_WRAPPER=${node}`,
       `PI_CAD_DESKTOP_PERMISSION=${settings.permission}`,
       node, `${paths.piCadRepo}/scripts/prime-cad-sidecar.mjs`,
       "--mode", "rpc",
@@ -137,7 +138,7 @@ export class PrimeRpc extends EventEmitter {
 }
 
 export async function ensureRuntimeReady(
-  bridge: Pick<WslBridge, "check" | "install">,
+  bridge: Pick<RuntimeBridge, "check" | "install">,
   settings: AppSettings,
   onStatus?: (status: RuntimeStatus) => void,
 ): Promise<RuntimeStatus> {

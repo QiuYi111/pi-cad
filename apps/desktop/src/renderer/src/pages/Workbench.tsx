@@ -5,7 +5,7 @@ import { usePrimeRuntime } from "../hooks/usePrimeRuntime";
 import { Conversation } from "../components/Conversation";
 import { Composer } from "../components/Composer";
 import { WorkflowRail } from "../components/WorkflowRail";
-import { CadViewer } from "../components/CadViewer";
+import { EngineeringViewer } from "../components/EngineeringViewer";
 import { StatusBar } from "../components/StatusBar";
 
 export function Workbench({ settings, onSettingsChange, onOpenSettings }: { settings: AppSettings; onSettingsChange: (settings: AppSettings) => void; onOpenSettings: () => void }) {
@@ -17,13 +17,14 @@ export function Workbench({ settings, onSettingsChange, onOpenSettings }: { sett
   const [projectError, setProjectError] = useState("");
   const project = settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || "Untitled project";
   const currentArtifact = [...prime.messages].reverse().find((message) => message.activity?.kind === "build" && message.activity.state === "success" && message.activity.artifactPath)?.activity?.artifactPath;
+  const viewerRevision = prime.messages.filter((message) => message.activity?.state === "success" && (message.activity.kind === "build" || message.activity.kind === "simulation")).length;
   const start = async () => {
-    if (!settings.projectPath) { onOpenSettings(); return; }
+    if (!settings.projectPath) { onOpenSettings(); throw new Error("Choose a project folder before starting Prime."); }
     await prime.start();
   };
   const send = async (text: string, images?: Array<{ data: string; mimeType: string }>) => {
-    if (prime.status.state !== "ready" && prime.status.state !== "streaming") await start();
-    await prime.prompt(text, images);
+    const needsStart = prime.status.state !== "ready" && prime.status.state !== "streaming";
+    await prime.prompt(text, images, needsStart ? start : undefined);
   };
   const updateSettings = async (patch: Partial<AppSettings>) => onSettingsChange(await window.piCad.settings.update(patch));
   const activateProject = async (path: string) => {
@@ -83,7 +84,7 @@ export function Workbench({ settings, onSettingsChange, onOpenSettings }: { sett
         <button className="share-button"><Share2 size={15} />Share</button>
       </header>
       <WorkflowRail />
-      <CadViewer artifactPath={currentArtifact} />
+      <EngineeringViewer projectPath={settings.projectPath} latestArtifact={currentArtifact} revision={viewerRevision} />
     </section>
     <StatusBar settings={settings} status={prime.status} />
   </div>;

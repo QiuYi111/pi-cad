@@ -23,7 +23,8 @@ export function Composer({ settings, status, onSettingsChange, onSend, onAbort }
     setText("");
     const attached = images.map(({ data, mimeType }) => ({ data, mimeType }));
     setImages([]);
-    await onSend(value, attached);
+    try { await onSend(value, attached); }
+    catch { /* The conversation renders the runtime error. */ }
   };
   const attach = async () => {
     const chosen = await window.piCad.runtime.chooseImages();

@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "n
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { assertLinuxRuntime } from "../shared/platform.ts";
+import { assertUnixRuntime } from "../shared/platform.ts";
 import { completionGate, startAuthoritySidecar } from "./sidecar.ts";
 import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
 import { experienceRoot, finalizeExperience } from "../experience/store.ts";
@@ -137,6 +137,7 @@ export interface LaunchPaths {
   runtimeDirectory: string;
   ephemeralAgentDir: string;
   authorSocketDirectory: string;
+  nodeExecutableRelative?: string;
 }
 
 // Prime's CLI requires positive autonomous limits. Max-safe values leave the
@@ -167,6 +168,7 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
   args.push(
     "--bind", input.reviewerWorkspace, "/workspace",
+    "--dir", "/opt/node-bin", "--symlink", `/opt/node/${paths.nodeExecutableRelative ?? "bin/node"}`, "/opt/node-bin/node",
     "--ro-bind", paths.primeRoot, "/opt/prime", "--ro-bind", paths.nodeRoot, "/opt/node",
     "--ro-bind", join(paths.repository, "skills", "cad"), "/opt/pi-cad/cad",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
@@ -175,7 +177,8 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--ro-bind", input.reviewerSocketDirectory, "/run/pi-cad/reviewer",
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime", "--setenv", "TMPDIR", "/tmp",
-    "--setenv", "PATH", "/opt/node/bin:/opt/prime:/opt/prime/node_modules/.bin:/usr/local/bin:/usr/bin:/bin",
+    "--setenv", "PATH", "/opt/node-bin:/opt/prime:/opt/prime/node_modules/.bin:/usr/local/bin:/usr/bin:/bin",
+    "--setenv", "ELECTRON_RUN_AS_NODE", process.env.ELECTRON_RUN_AS_NODE ?? "",
     "--setenv", "PI_CAD_REVIEWER_SOCKET", "/run/pi-cad/reviewer/authority.sock",
     "--setenv", "PI_CAD_REVIEW_ID", input.reviewId,
     "--setenv", "PI_CAD_REVIEWER_MODE", "1", "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
@@ -217,6 +220,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
   args.push(
     permission === "read-only" ? "--ro-bind" : "--bind", paths.project, "/workspace",
+    "--dir", "/opt/node-bin", "--symlink", `/opt/node/${paths.nodeExecutableRelative ?? "bin/node"}`, "/opt/node-bin/node",
     "--ro-bind", paths.primeRoot, "/opt/prime",
     "--ro-bind", paths.nodeRoot, "/opt/node",
     "--ro-bind", join(paths.repository, "src", "integrations", "prime"), "/opt/pi-cad/prime-extension",
@@ -231,7 +235,8 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime",
     "--setenv", "TMPDIR", "/tmp",
-    "--setenv", "PATH", "/opt/node/bin:/opt/prime:/opt/prime/node_modules/.bin:/usr/local/bin:/usr/bin:/bin",
+    "--setenv", "PATH", "/opt/node-bin:/opt/prime:/opt/prime/node_modules/.bin:/usr/local/bin:/usr/bin:/bin",
+    "--setenv", "ELECTRON_RUN_AS_NODE", process.env.ELECTRON_RUN_AS_NODE ?? "",
     "--setenv", "PI_CAD_AUTHOR_SOCKET", "/run/pi-cad/author/authority.sock",
     "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad",
@@ -420,14 +425,69 @@ function capturedChildExit(command: string, args: string[], env: NodeJS.ProcessE
   });
 }
 
+function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string, reviewer = false): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    HOME: dirname(dirname(agentDir)), TMPDIR: join(paths.runtimeDirectory, "tmp"),
+    PATH: `${process.env.PI_CAD_NODE_WRAPPER ? dirname(process.env.PI_CAD_NODE_WRAPPER) : join(paths.nodeRoot, "bin")}:${paths.primeRoot}:${join(paths.primeRoot, "node_modules", ".bin")}:/usr/local/bin:/usr/bin:/bin`,
+    PI_CAD_PROJECT_CWD: reviewer ? join(paths.runtimeDirectory, "reviewer-workspace") : paths.project,
+    PI_CAD_REPO: paths.repository,
+    PYTHONPATH: `${join(paths.primeKernelVenv, paths.kernelSitePackages)}:${join(paths.repository, "skills", "cad", "src")}`,
+    PYTHONDONTWRITEBYTECODE: "1", PRIME_AGENT_REPO: paths.primeRoot,
+    PRIME_AGENT_CODING_AGENT_DIR: agentDir,
+    PRIME_AGENT_SESSION_DIR: reviewer ? undefined : join(paths.project, ".prime-sessions"),
+    PRIME_AGENT_KERNEL_PYTHON: join(paths.kernelPythonRoot, "bin", paths.kernelPythonExecutable),
+    PI_OFFLINE: reviewer ? "1" : process.env.PI_OFFLINE ?? "1",
+    ...(reviewer ? { PI_CAD_REVIEWER_SOCKET: socket, PI_CAD_REVIEWER_MODE: "1" } : { PI_CAD_AUTHOR_SOCKET: socket }),
+  };
+}
+
+function macSandboxProfile(readable: string[], writable: string[]): string {
+  const literal = (value: string) => value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+  return [
+    "(version 1)", "(allow default)", "(deny file-write*)",
+    `(deny file-read* (subpath \"${literal(homedir())}\"))`,
+    ...readable.map((path) => `(allow file-read* (subpath \"${literal(path)}\"))`),
+    ...writable.map((path) => `(allow file-write* (subpath \"${literal(path)}\"))`),
+  ].join("\n");
+}
+
+async function macSandboxCommand(paths: LaunchPaths, command: string, args: string[], readable: string[], writable: string[]): Promise<{ command: string; args: string[] }> {
+  const profile = join(paths.runtimeDirectory, `sandbox-${Math.random().toString(16).slice(2)}.sb`);
+  await writeFile(profile, macSandboxProfile(readable, writable), { encoding: "utf8", mode: 0o600 });
+  return { command: "/usr/bin/sandbox-exec", args: ["-f", profile, command, ...args] };
+}
+
+function nativePrimeArgs(paths: LaunchPaths, primeArgs: string[]): string[] {
+  return ["--dist", "--cwd", paths.project, "--no-extensions", "--no-prompt-templates", "--no-themes", "--no-context-files",
+    "--tools", "ipython,codex_generate_image,cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read",
+    "--extension", join(paths.repository, "src", "integrations", "prime", "extension.ts"),
+    "--extension", join(paths.repository, "packages", "prime-codex-image-gen", "index.ts"),
+    "--skill", join(paths.repository, "skills", "cad", "SKILL.md"),
+    "--skill", join(paths.repository, "skills", "grill-me", "SKILL.md"),
+    "--skill", join(paths.repository, "packages", "prime-codex-image-gen", "skills", "imagegen", "SKILL.md"), ...primeArgs];
+}
+
+function nativeReviewerArgs(paths: LaunchPaths, input: { prompt: string; modelArgs?: string[] }): string[] {
+  return ["--dist", "--cwd", join(paths.runtimeDirectory, "reviewer-workspace"), "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
+    "--tools", "ipython", ...(input.modelArgs ?? []), "--autonomous", "--autonomous-max-continuations", REVIEWER_UNBOUNDED_LIMIT,
+    "--autonomous-max-turns", REVIEWER_UNBOUNDED_LIMIT, "--autonomous-max-tokens", REVIEWER_UNBOUNDED_LIMIT,
+    "--autonomous-timeout-ms", REVIEWER_UNBOUNDED_LIMIT, "--no-session", "--mode", "json", "--print", input.prompt];
+}
+
 export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
-  assertLinuxRuntime("Pi-CAD authority sidecar");
+  assertUnixRuntime("Pi-CAD authority sidecar");
   if (primeArgs.some((value) => value === "--cwd" || value.startsWith("--cwd="))) {
     throw new Error("prime-cad owns --cwd so the sandbox cannot escape its project root");
   }
   const repository = realpathSync(resolve(process.env.PI_CAD_REPO ?? resolve(import.meta.dirname, "..", "..")));
   const project = await realpath(resolve(process.env.PI_CAD_PROJECT_CWD ?? process.cwd()));
-  const nodeRoot = dirname(dirname(realpathSync(process.execPath)));
+  const nodeExecutable = realpathSync(process.execPath);
+  const electronNode = process.env.ELECTRON_RUN_AS_NODE === "1";
+  const nodeRoot = electronNode
+    ? (process.platform === "darwin" ? dirname(dirname(nodeExecutable)) : dirname(nodeExecutable))
+    : dirname(dirname(nodeExecutable));
+  const nodeExecutableRelative = electronNode ? nodeExecutable.slice(nodeRoot.length + 1) : "bin/node";
   const primeAgentDir = resolve(process.env.PRIME_AGENT_CODING_AGENT_DIR ?? join(homedir(), ".prime", "agent"));
   const reviewerLaunch = resolveReviewerLaunchOptions(primeArgs, primeAgentDir);
   primeArgs = withHeadlessEventContinuation(reviewerLaunch.primeArgs);
@@ -466,7 +526,15 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
       // running. Snapshot the live isolated author bootstrap at admission so
       // a late reviewer never starts with the stale launch-time copy.
       await copyPrimeBootstrap(ephemeralAgentDir, reviewerAgentDir);
-      const result = await capturedChildExit("/usr/bin/bwrap", buildReviewerBwrapArgs(launchPaths, { reviewId, reviewerAgentDir, reviewerWorkspace, reviewerSocketDirectory, prompt, modelArgs: reviewerModelArgs(reviewerLaunch.policy, currentAuthorModel) }), { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, signal);
+      const modelArgs = reviewerModelArgs(reviewerLaunch.policy, currentAuthorModel);
+      const result = process.platform === "darwin"
+        ? await (async () => {
+            const socket = join(reviewerSocketDirectory, "authority.sock");
+            const readable = [paths.primeRoot, paths.primeKernelVenv, paths.nodeRoot, join(paths.repository, "skills", "cad"), reviewerWorkspace, reviewerAgentDir, runtimeDirectory];
+            const launch = await macSandboxCommand(launchPaths, join(paths.primeRoot, "prime-agent.sh"), nativeReviewerArgs(paths, { prompt, modelArgs }), readable, [reviewerWorkspace, reviewerAgentDir, runtimeDirectory]);
+            return capturedChildExit(launch.command, launch.args, { ...nativeEnvironment(paths, reviewerAgentDir, socket, true), PI_CAD_REVIEW_ID: reviewId }, signal);
+          })()
+        : await capturedChildExit("/usr/bin/bwrap", buildReviewerBwrapArgs(launchPaths, { reviewId, reviewerAgentDir, reviewerWorkspace, reviewerSocketDirectory, prompt, modelArgs }), { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" }, signal);
       if (result.aborted) return;
       if (result.code !== 0) {
         const detail = result.diagnostic.trim().split("\n").slice(-3).join(" | ").replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]");
@@ -477,14 +545,22 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const paths: LaunchPaths = {
     repository, project, primeRoot, nodeRoot, primeAgentDir, primeKernelVenv, runtimeDirectory,
     kernelPythonRoot, kernelPythonExecutable, kernelSitePackages,
-    ephemeralAgentDir, authorSocketDirectory: resolve(sidecar.authorSocket, ".."),
+    ephemeralAgentDir, authorSocketDirectory: resolve(sidecar.authorSocket, ".."), nodeExecutableRelative,
   };
   launchPaths = paths;
   reviewerSocketDirectory = resolve(sidecar.reviewerSocket, "..");
   try {
-    const result = await childExit("/usr/bin/bwrap", buildPrimeBwrapArgs(paths, primeArgs, process.env.PI_CAD_DESKTOP_PERMISSION === "read-only" ? "read-only" : "workspace"), {
-      PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    });
+    const result = process.platform === "darwin"
+      ? await (async () => {
+          const socket = join(paths.authorSocketDirectory, "authority.sock");
+          const writable = [runtimeDirectory, ephemeralAgentDir, process.env.PI_CAD_CANONICAL_PROJECT_DIR!, ...(process.env.PI_CAD_DESKTOP_PERMISSION === "read-only" ? [] : [project])];
+          const readable = [paths.repository, paths.project, paths.primeRoot, paths.primeKernelVenv, paths.nodeRoot, paths.primeAgentDir, runtimeDirectory, process.env.PI_CAD_CANONICAL_PROJECT_DIR!];
+          const launch = await macSandboxCommand(paths, join(paths.primeRoot, "prime-agent.sh"), nativePrimeArgs(paths, primeArgs), readable, writable);
+          return childExit(launch.command, launch.args, nativeEnvironment(paths, ephemeralAgentDir, socket));
+        })()
+      : await childExit("/usr/bin/bwrap", buildPrimeBwrapArgs(paths, primeArgs, process.env.PI_CAD_DESKTOP_PERMISSION === "read-only" ? "read-only" : "workspace"), {
+          PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        });
 		// Persist credentials entered via /login before the runtime directory is
 		// removed in finally. This makes provider keys available to future tasks.
 		await persistPrimeCredentials(ephemeralAgentDir, primeAgentDir);

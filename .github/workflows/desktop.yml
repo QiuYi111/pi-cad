@@ -1,0 +1,97 @@
+name: desktop
+
+on:
+  pull_request:
+    paths: ["apps/desktop/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
+  push:
+    branches: [master]
+    paths: ["apps/desktop/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: ${{ matrix.os }} desktop
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+        working-directory: apps/desktop
+      - run: npm test
+        working-directory: apps/desktop
+      - run: npm run build
+        working-directory: apps/desktop
+
+  linux-package-smoke:
+    name: Linux native package smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: QiuYi111/prime-agent
+          ref: 9e49b73dd46908b3e400f4780b46a90daef69052
+          path: prime-agent
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --ignore-scripts
+      - run: npm ci && npm run build
+        working-directory: prime-agent
+      - run: npm ci
+        working-directory: apps/desktop
+      - run: npm run package:linux
+        working-directory: apps/desktop
+        env:
+          PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent
+      - run: PI_CAD_PACKAGED_EXE="$PWD/release/linux-unpacked/pi-cad-desktop" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
+        working-directory: apps/desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-cad-linux-smoke
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+
+  macos-package-smoke:
+    name: macOS native package smoke
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: QiuYi111/prime-agent
+          ref: 9e49b73dd46908b3e400f4780b46a90daef69052
+          path: prime-agent
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --ignore-scripts
+      - run: npm ci && npm run build
+        working-directory: prime-agent
+      - run: npm ci
+        working-directory: apps/desktop
+      - run: bash scripts/make-mac-icon.sh
+        working-directory: apps/desktop
+      - run: npm run package:mac
+        working-directory: apps/desktop
+        env:
+          PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - run: PI_CAD_PACKAGED_EXE="$PWD/release/mac-arm64/Pi-CAD.app/Contents/MacOS/Pi-CAD" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
+        working-directory: apps/desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pi-cad-macos-smoke
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip

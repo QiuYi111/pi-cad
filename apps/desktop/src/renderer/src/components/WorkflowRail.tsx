@@ -1,17 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Circle } from "./icons";
 import type { WorkflowCurrent } from "@shared/contracts";
 
 export function WorkflowRail() {
   const [current, setCurrent] = useState<WorkflowCurrent | null>(null);
   const [unavailable, setUnavailable] = useState(false);
+  const refreshing = useRef({ active: false, pending: false });
   const refresh = useCallback(async () => {
-    try { setCurrent(await window.piCad.workflow.current()); setUnavailable(false); }
-    catch { setCurrent(null); setUnavailable(true); }
+    if (refreshing.current.active) { refreshing.current.pending = true; return; }
+    refreshing.current.active = true;
+    try {
+      do {
+        refreshing.current.pending = false;
+        try { setCurrent(await window.piCad.workflow.current()); setUnavailable(false); }
+        catch { setCurrent(null); setUnavailable(true); }
+      } while (refreshing.current.pending);
+    } finally { refreshing.current.active = false; }
   }, []);
   useEffect(() => {
     let alive = true;
-    const update = () => { if (alive) void refresh(); };
+    const update = (event?: unknown) => { if (alive && (!event || shouldRefreshWorkflow(event))) void refresh(); };
     void refresh();
     const unsubscribe = window.piCad.runtime.onEvent(update);
     window.addEventListener("focus", update);
@@ -27,4 +35,11 @@ export function WorkflowRail() {
       {index < phases.length - 1 && <span className="rail-line" />}
     </div>)}
   </div>;
+}
+
+export function shouldRefreshWorkflow(input: any): boolean {
+  const event = input?.type === "session_event" ? input.event : input;
+  if (!event) return false;
+  if (event.type === "agent_end" || event.type === "tool_execution_end") return true;
+  return event.type === "message_end" && event.message?.role === "custom" && event.message?.customType === "pi-cad.review-completed";
 }

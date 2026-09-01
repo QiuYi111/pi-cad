@@ -1,10 +1,10 @@
 import { Box, Check, ChevronDown, GitCommit, Image, ScanLine, ShieldCheck, TriangleAlert, Waves } from "./icons";
 import type { CadActivity } from "@shared/contracts";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 const icons = { build: Box, probe: ScanLine, workflow: GitCommit, simulation: Waves, review: ShieldCheck, commit: GitCommit, image: Image };
 
-export function ActivityCard({ activity }: { activity: CadActivity }) {
+export const ActivityCard = memo(function ActivityCard({ activity }: { activity: CadActivity }) {
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const Icon = icons[activity.kind];
@@ -18,7 +18,10 @@ export function ActivityCard({ activity }: { activity: CadActivity }) {
         {failed ? <TriangleAlert size={17} /> : running ? <Icon size={17} /> : <Check size={17} />}
       </span>
       <div><strong>{activity.title}</strong>{activity.summary && <p>{activity.summary}</p>}</div>
-      <button onClick={() => setExpanded(!expanded)} aria-label="Toggle details"><ChevronDown size={15} className={expanded ? "rotated" : ""} /></button>
+      <div className="activity-actions">
+        {activity.artifactPath && <button onClick={() => window.dispatchEvent(new CustomEvent("pi-cad:open-viewer", { detail: { path: activity.artifactPath } }))}>{activity.kind === "simulation" ? "View result" : "View"}</button>}
+        {activity.details ? <button onClick={() => setExpanded(!expanded)} aria-label="Toggle details"><ChevronDown size={15} className={expanded ? "rotated" : ""} /></button> : null}
+      </div>
     </header>
     {running && <ActivityMotion kind={activity.kind} progress={activity.progress} />}
     {!!activity.metrics?.length && <div className="activity-metrics">{activity.metrics.map((metric) => <div key={metric.label}><span>{metric.label}</span><b>{metric.value}</b></div>)}</div>}
@@ -28,7 +31,7 @@ export function ActivityCard({ activity }: { activity: CadActivity }) {
     {expanded && <pre className="activity-details">{JSON.stringify(activity.details, null, 2)}</pre>}
     {preview && <div className="activity-preview" role="dialog" aria-label="Tool image preview" onClick={() => setPreview(null)}><img src={preview} alt="Tool output preview" /></div>}
   </section>;
-}
+});
 
 function ActivityMotion({ kind, progress = .4 }: { kind: CadActivity["kind"]; progress?: number }) {
   if (kind === "build") return <div className="build-motion"><span className="wire-cube" /><i /></div>;

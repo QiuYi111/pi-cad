@@ -20,7 +20,7 @@ export interface AppSettings {
 }
 
 export interface DependencyCheck {
-  id: "wsl" | "node" | "python" | "uv" | "bwrap" | "prime" | "picad";
+  id: "host" | "wsl" | "node" | "python" | "uv" | "sandbox" | "bwrap" | "prime" | "picad" | "paraview";
   label: string;
   status: "ready" | "missing" | "installing" | "failed";
   detail: string;
@@ -149,6 +149,60 @@ export interface MeshDocument {
   bounds: { min: [number, number, number]; max: [number, number, number] };
 }
 
+export interface ViewerArtifact {
+  id: string;
+  path: string;
+  sha256: string;
+  role: string;
+}
+
+export interface ViewerCommit {
+  id: string;
+  name: string;
+  parent: string | null;
+  phase: string;
+  createdAt: string;
+  artifacts: ViewerArtifact[];
+}
+
+export interface SimulationOutput {
+  name: string;
+  type: "image" | "scalar" | "timeseries" | "table" | "field" | "artifact";
+  value?: number;
+  unit?: string;
+  path?: string;
+  sha256?: string;
+}
+
+export interface ViewerSimulationRun {
+  id: string;
+  recipeId: string;
+  status: string;
+  observationId?: string | null;
+  createdAt?: string | null;
+  completedAt?: string | null;
+  outputs: SimulationOutput[];
+}
+
+export interface ViewerCatalog {
+  projectId: string;
+  projectHead: { updatedAt: string; artifacts: ViewerArtifact[] };
+  currentRun: null | { id: string; phase: string; status: string; updatedAt: string; artifacts: ViewerArtifact[] };
+  commits: ViewerCommit[];
+  simulationRuns: ViewerSimulationRun[];
+}
+
+export type ViewerSource =
+  | { kind: "cad"; id: string; label: string; path: string; role: string; sha256?: string; scope: "current" | "head" | "commit" | "manual"; commitId?: string }
+  | { kind: "simulation"; id: string; label: string; path: string; outputType: SimulationOutput["type"]; runId: string; unit?: string; sha256?: string };
+
+export interface ParaViewSession {
+  state: "unavailable" | "starting" | "ready" | "error";
+  url?: string;
+  sourcePath?: string;
+  message?: string;
+}
+
 export type ExtensionUiRequest =
   | { type: "extension_ui_request"; id: string; method: "select"; title: string; options: string[] }
   | { type: "extension_ui_request"; id: string; method: "confirm"; title: string; message: string }
@@ -164,6 +218,7 @@ export interface DesktopApi {
   };
   runtime: {
     check(): Promise<RuntimeStatus>;
+    installWsl(): Promise<RuntimeStatus>;
     install(): Promise<RuntimeStatus>;
     start(): Promise<RuntimeStatus>;
     stop(): Promise<void>;
@@ -192,6 +247,10 @@ export interface DesktopApi {
   viewer: {
     loadStep(path: string): Promise<MeshDocument>;
     chooseStep(): Promise<string | null>;
+    catalog(): Promise<ViewerCatalog>;
+    openParaView(path: string): Promise<ParaViewSession>;
+    stopParaView(): Promise<void>;
+    openParaViewDesktop(path: string): Promise<void>;
   };
   traces: {
     list(): Promise<TraceSummary[]>;
@@ -208,6 +267,7 @@ export const IPC = {
   settingsChooseProject: "settings:choose-project",
   settingsCreateProject: "settings:create-project",
   runtimeCheck: "runtime:check",
+  runtimeInstallWsl: "runtime:install-wsl",
   runtimeInstall: "runtime:install",
   runtimeStart: "runtime:start",
   runtimeStop: "runtime:stop",
@@ -230,6 +290,10 @@ export const IPC = {
   workflowSave: "workflow:save",
   viewerLoadStep: "viewer:load-step",
   viewerChooseStep: "viewer:choose-step",
+  viewerCatalog: "viewer:catalog",
+  viewerOpenParaView: "viewer:open-paraview",
+  viewerStopParaView: "viewer:stop-paraview",
+  viewerOpenParaViewDesktop: "viewer:open-paraview-desktop",
   tracesList: "traces:list",
   tracesRead: "traces:read",
   tracesDistill: "traces:distill",

@@ -32,6 +32,7 @@ describe("Prime activity projection", () => {
     expect(messages[0]?.activity).toMatchObject({ state: "success", title: "Model built" });
     expect(messages[0]?.activity?.media?.[0]?.dataUrl).toBe("data:image/png;base64,aGVsbG8=");
     expect(messages[0]?.activity?.artifactPath).toBe("/workspace/bracket.step");
+    expect(messages[0]?.activity?.details).toBeUndefined();
   });
 
   it("does not expose arbitrary Python as a product activity", () => {
@@ -41,6 +42,15 @@ describe("Prime activity projection", () => {
   it("shows the authoritative review result", () => {
     const messages = reducePrimeEvent([], { type: "message_end", message: { role: "custom", customType: "pi-cad.review-completed", details: { reviewId: "r1", status: "fail", result: { summary: "hinge collides" } } } });
     expect(messages[0]?.activity).toMatchObject({ kind: "review", state: "failed", summary: "hinge collides" });
+  });
+
+  it("keeps structured simulation results available to the viewer", () => {
+    let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "s1", toolName: "ipython", args: { code: "await cad.simulation.run(recipe='static')" } });
+    messages = reducePrimeEvent(messages, { type: "tool_execution_end", toolCallId: "s1", result: { details: { observation: { exports: [
+      { name: "stress", type: "field", path: "simulation/stress.vtp", unit: "MPa" },
+      { name: "peak", type: "scalar", value: 82, unit: "MPa" },
+    ] } } } });
+    expect(messages[0]?.activity).toMatchObject({ kind: "simulation", artifactPath: "simulation/stress.vtp", metrics: [{ label: "peak", value: "82 MPa" }] });
   });
 
   it("does not leak workflow result objects into the chat", () => {

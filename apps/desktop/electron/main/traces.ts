@@ -1,8 +1,8 @@
 import type { AppSettings, DistillationStatus, TraceSummary } from "../../src/shared/contracts.js";
-import { WslBridge } from "./wsl.js";
+import type { RuntimeBridge } from "./runtime-bridge.js";
 
 export class TraceStore {
-  constructor(private readonly bridge: WslBridge) {}
+  constructor(private readonly bridge: RuntimeBridge) {}
 
   async list(settings: AppSettings): Promise<TraceSummary[]> {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);

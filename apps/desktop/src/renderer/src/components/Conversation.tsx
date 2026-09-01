@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Box } from "./icons";
 import type { ChatMessage } from "@shared/contracts";
 import { ActivityCard } from "./ActivityCard";
@@ -6,7 +6,7 @@ import { ActivityCard } from "./ActivityCard";
 export function Conversation({ messages }: { messages: ChatMessage[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
-  useEffect(() => { if (follow.current) ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: "smooth" }); }, [messages]);
+  useEffect(() => { if (follow.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [messages]);
   return <div ref={ref} className="conversation" data-testid="conversation" onScroll={() => {
     const node = ref.current;
     if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
@@ -19,7 +19,7 @@ export function Conversation({ messages }: { messages: ChatMessage[] }) {
   </div>;
 }
 
-function AssistantMessage({ message }: { message: ChatMessage }) {
+const AssistantMessage = memo(function AssistantMessage({ message }: { message: ChatMessage }) {
   const [, tick] = useState(0);
   const active = Boolean(message.stream && !["complete", "aborted", "error"].includes(message.stream.state));
   useEffect(() => {
@@ -33,4 +33,4 @@ function AssistantMessage({ message }: { message: ChatMessage }) {
     {label && <div className={`stream-state ${message.stream?.state}`}><i /><span>{label}</span>{seconds > 0 && <time>{seconds}s</time>}</div>}
     {message.text && <div className="assistant-text">{message.text}{active && message.stream?.state === "responding" && <span className="stream-caret" />}</div>}
   </div></div>;
-}
+});

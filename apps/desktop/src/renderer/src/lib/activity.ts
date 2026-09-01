@@ -57,6 +57,28 @@ function stepArtifact(value: unknown, depth = 0): string | undefined {
   return undefined;
 }
 
+function simulationOutputs(value: unknown, depth = 0): Array<{ name: string; type: string; path?: string; value?: number; unit?: string }> {
+  if (depth > 8 || value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    const declared = value.filter((item: any) => item && typeof item === "object" && typeof item.name === "string" && typeof item.type === "string" && ["image", "scalar", "timeseries", "table", "field", "artifact"].includes(item.type));
+    if (declared.length) return declared;
+    return value.flatMap((item) => simulationOutputs(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    for (const [key, item] of Object.entries(value)) {
+      if (/exports|outputs|selected/i.test(key)) {
+        const found = simulationOutputs(item, depth + 1);
+        if (found.length) return found;
+      }
+    }
+    for (const item of Object.values(value)) {
+      const found = simulationOutputs(item, depth + 1);
+      if (found.length) return found;
+    }
+  }
+  return [];
+}
+
 export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessage[] {
   if (input?.type === "desktop_event_batch") return (input.events || []).reduce((state: ChatMessage[], event: unknown) => reducePrimeEvent(state, event), messages);
   if (input?.type === "desktop_user_message") {
@@ -116,6 +138,7 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
       if (!activity || activity.id !== event.toolCallId) return message;
       const media = attachments(event.result, event.toolCallId);
       const content = textOf(event.result?.content || event.result);
+      const outputs = activity.kind === "simulation" ? simulationOutputs(event.result) : [];
       return {
         ...message,
         activity: {
@@ -126,8 +149,9 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
           progress: 1,
           finishedAt: Date.now(),
           media,
-          artifactPath: activity.kind === "build" ? stepArtifact(event.result) : undefined,
-          details: event.result,
+          artifactPath: activity.kind === "build" ? stepArtifact(event.result) : activity.kind === "simulation" ? outputs.find((output) => output.path)?.path : undefined,
+          metrics: activity.kind === "simulation" ? outputs.filter((output) => output.type === "scalar" && typeof output.value === "number").slice(0, 4).map((output) => ({ label: output.name, value: `${output.value}${output.unit ? ` ${output.unit}` : ""}` })) : activity.metrics,
+          details: activity.kind === "simulation" && outputs.length ? { outputs } : undefined,
         },
       };
     });
@@ -150,7 +174,7 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
         id: details.reviewId || crypto.randomUUID(), kind: "review",
         state: details.status === "pass" ? "success" : details.status === "fail" ? "failed" : "denied",
         title: details.status === "pass" ? "Review passed" : details.status === "fail" ? "Changes requested" : "Review unresolved",
-        summary: result.summary || textOf(message.content), startedAt: Date.now(), finishedAt: Date.now(), details,
+        summary: result.summary || textOf(message.content), startedAt: Date.now(), finishedAt: Date.now(),
       };
       return [...messages, { id: `review-${activity.id}`, role: "system", text: "", createdAt: Date.now(), activity }];
     }

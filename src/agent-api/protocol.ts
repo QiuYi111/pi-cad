@@ -16,6 +16,7 @@ export type AgentApiRequest =
   | { schema: 1; op: "commit"; name: string; parent?: string | null; variables?: Record<string, EncodedVariable>; artifacts?: Array<string | { path: string; role?: string }>; session?: string }
   | { schema: 1; op: "load"; id: string }
   | { schema: 1; op: "history" }
+  | { schema: 1; op: "viewer-catalog" }
   | { schema: 1; op: "probe"; subject: "current" | "baseline" | AgentArtifactSubject; purpose: string; code: string }
   | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean }
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }

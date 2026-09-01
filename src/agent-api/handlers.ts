@@ -38,6 +38,51 @@ async function current(cwd: string) {
   return workflowCurrentView(loaded, mechanicalRegistries);
 }
 
+async function viewerCatalog(cwd: string) {
+  const project = new HarnessProjectStoreV7(cwd);
+  const [{ state: projectState }, active] = await Promise.all([
+    project.load(),
+    project.currentRun(mechanicalRegistries),
+  ]);
+  const commits = active ? await workspaceHistory(cwd, mechanicalRegistries) : [];
+  const simulationRuns: JsonValue[] = [];
+  if (active) {
+    for (const [key, resultId] of Object.entries(active.state.domainMetadata ?? {})) {
+      if (!key.startsWith("recipe-result:") || typeof resultId !== "string") continue;
+      const result = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<{
+        run?: { runId?: string; recipeId?: string; recipeKind?: string; status?: string; createdAt?: string; completedAt?: string };
+        observation?: { observationId?: string; exports?: Array<{ name: string; type: string; value?: number; unit?: string; path?: string; sha256?: string }> };
+      }>(`records/recipe-results/${resultId}.json`);
+      if (!result?.run || result.run.recipeKind !== "simulation") continue;
+      simulationRuns.push(jsonValue({
+        id: result.run.runId ?? key.slice("recipe-result:".length),
+        recipeId: result.run.recipeId ?? "simulation",
+        status: result.run.status ?? "completed",
+        observationId: result.observation?.observationId ?? null,
+        createdAt: result.run.createdAt ?? null,
+        completedAt: result.run.completedAt ?? null,
+        outputs: (result.observation?.exports ?? []).map((output) => ({
+          ...output,
+          ...(output.path ? { path: `.pi-cad/runs/${active.state.runId}/recipe-runs/${result.run!.runId}/workspace/${output.path}` } : {}),
+        })),
+      }));
+    }
+  }
+  return jsonValue({
+    projectId: projectState.projectId,
+    projectHead: { updatedAt: projectState.head.updatedAt, artifacts: Object.values(projectState.head.artifacts) },
+    currentRun: active ? {
+      id: active.state.runId,
+      phase: active.state.phase,
+      status: active.state.status,
+      updatedAt: active.state.updatedAt,
+      artifacts: Object.values(active.state.artifacts),
+    } : null,
+    commits,
+    simulationRuns,
+  });
+}
+
 function projectRelativePath(cwd: string, path: string): string {
   const value = relative(resolve(cwd), resolve(cwd, path));
   if (value === ".." || value.startsWith(`..${sep}`) || isAbsolute(value)) {
@@ -159,6 +204,7 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
     }
     case "load": return jsonValue(await loadWorkspaceCommit(cwd, mechanicalRegistries, request.id));
     case "history": return jsonValue(await workspaceHistory(cwd, mechanicalRegistries));
+    case "viewer-catalog": return viewerCatalog(cwd);
     case "probe": {
       const rendered = await executeCadProbe(cwd, { preset: "python", subject: request.subject, purpose: request.purpose, code: request.code });
       const details = "details" in rendered ? rendered.details as any : undefined;
