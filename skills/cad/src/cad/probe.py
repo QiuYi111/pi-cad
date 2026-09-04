@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from .client import request
 from .refs import ArtifactRef, ProbeResult
+from ._attachments import display_inline_image
+from .client import CadApiError
 
 
 def _captured_source(function: Callable[..., Any]) -> str:
@@ -76,20 +78,49 @@ def probe(*, subject: str | ArtifactRef = "current", purpose: str = "") -> Calla
 
 async def run(
     *,
-    subject: str | ArtifactRef = "current",
-    purpose: str,
-    code: str,
+    subject: str | ArtifactRef | None = "current",
+    preset: str = "python",
+    purpose: str = "",
+    code: str | None = None,
+    args: dict[str, Any] | None = None,
 ) -> ProbeResult:
-    """Run an explicit fenced probe program without Python source capture."""
-    if not isinstance(subject, ArtifactRef) and subject not in {"current", "baseline"}:
+    """Run a registered read-only preset or an explicit fenced probe program."""
+    if not isinstance(subject, ArtifactRef) and subject not in {"current", "baseline", None}:
         raise ValueError("cad.probe.run subject must be 'current', 'baseline', or an ArtifactRef")
-    if not isinstance(purpose, str) or not purpose.strip():
-        raise ValueError("cad.probe.run purpose must be non-empty")
-    if not isinstance(code, str) or not code.strip():
-        raise ValueError("cad.probe.run code must be non-empty")
+    if not isinstance(preset, str) or not preset.strip():
+        raise ValueError("cad.probe.run preset must be non-empty")
+    selected = preset.strip()
+    if selected == "python":
+        if not isinstance(purpose, str) or not purpose.strip():
+            raise ValueError("cad.probe.run purpose must be non-empty for preset='python'")
+        if not isinstance(code, str) or not code.strip():
+            raise ValueError("cad.probe.run code must be non-empty for preset='python'")
+        if args is not None:
+            raise ValueError("cad.probe.run args are not used by preset='python'")
+    else:
+        if code is not None:
+            raise ValueError("cad.probe.run code is only valid for preset='python'")
+        if args is not None and not isinstance(args, dict):
+            raise TypeError("cad.probe.run args must be a dict")
     wire_subject = subject.__cad_snapshot__() if isinstance(subject, ArtifactRef) else subject
-    payload = await request("probe", subject=wire_subject, purpose=purpose.strip(), code=code)
+    kwargs: dict[str, Any] = {"preset": selected, "purpose": purpose.strip(), "args": args or {}}
+    if wire_subject is not None:
+        kwargs["subject"] = wire_subject
+    if code is not None:
+        kwargs["code"] = code
+    payload = await request("probe", **kwargs)
+    images = payload.get("images") or []
+    if images:
+        await _attach_images(images)
     return ProbeResult(payload["value"], payload.get("artifactHash"), payload.get("scriptHash"), payload.get("observationId"))
+
+
+async def _attach_images(images: list[dict[str, Any]]) -> None:
+    if not images:
+        raise CadApiError("visual probe produced no images")
+    for image in images:
+        view = str(image.get("name") or "view").upper()
+        display_inline_image(image, label=f"Pi-CAD reviewer visual probe · {view}")
 
 
 # Preserve @cad.probe while making cad.probe.run the canonical live-IPython API.

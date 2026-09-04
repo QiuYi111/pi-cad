@@ -1,17 +1,31 @@
 import { describe, expect, it } from "vitest";
 import { ViewerBackend } from "../electron/main/viewer";
 import { toThreeCadShapes } from "../src/renderer/src/lib/cad-scene";
-import { preferredSource, sourcesFromCatalog } from "../src/renderer/src/lib/viewer-catalog";
+import { preferredSource, sourceForArtifact, sourcesFromCatalog } from "../src/renderer/src/lib/viewer-catalog";
+
+const emptyCatalog = {
+  projectId: "", projectHead: { updatedAt: "", artifacts: [] }, currentRun: null, commits: [], simulationRuns: [], parameterManifests: [],
+};
 
 describe("desktop viewer bridge", () => {
   it("projects canonical artifacts and simulation observations without inventing identities", () => {
     const sources = sourcesFromCatalog({
       projectId: "phone", projectHead: { updatedAt: "now", artifacts: [{ id: "head", path: "release.step", sha256: "h", role: "authoritative-design" }] },
       currentRun: { id: "r", phase: "build", status: "active", updatedAt: "now", artifacts: [{ id: "candidate:authoritative", path: "candidate.step", sha256: "c", role: "authoritative-candidate-design" }] },
-      commits: [], simulationRuns: [{ id: "s", recipeId: "static", status: "completed", outputs: [{ name: "stress", type: "field", path: "stress.vtp", sha256: "f", unit: "MPa" }] }],
+      commits: [], simulationRuns: [{ id: "s", recipeId: "static", status: "completed", outputs: [{ name: "stress", type: "field", path: "stress.vtp", sha256: "f", unit: "MPa" }] }], parameterManifests: [],
     });
     expect(sources.map((source) => source.path)).toEqual(["candidate.step", "release.step", "stress.vtp"]);
     expect(preferredSource(sources)?.path).toBe("candidate.step");
+  });
+
+  it("selects the artifact returned by the latest build", () => {
+    const sources = sourcesFromCatalog(emptyCatalog, "new-build.step");
+    expect(sourceForArtifact(sources, "new-build.step")?.path).toBe("new-build.step");
+  });
+
+  it("matches build paths across slash styles", () => {
+    const sources = sourcesFromCatalog(emptyCatalog, "C:\\project\\candidate.step");
+    expect(sourceForArtifact(sources, "C:/project/candidate.step")?.path).toBe("C:\\project\\candidate.step");
   });
   it("adapts STEP tessellation to the open-source Z-up CAD scene protocol", () => {
     const scene = toThreeCadShapes({

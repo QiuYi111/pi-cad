@@ -53,3 +53,14 @@ export function preferredSource(sources: ViewerSource[]): ViewerSource | undefin
     ?? sources.find((source) => source.kind === "cad")
     ?? sources[0];
 }
+
+function normalizedPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+export function sourceForArtifact(sources: ViewerSource[], artifactPath?: string): ViewerSource | undefined {
+  if (!artifactPath) return undefined;
+  const wanted = normalizedPath(artifactPath);
+  return sources.find((source) => normalizedPath(source.path) === wanted)
+    ?? sources.find((source) => source.kind === "cad" && source.role === "latest-build");
+}

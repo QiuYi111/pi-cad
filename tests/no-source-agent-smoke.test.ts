@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { renderCurrentActionCard } from "../src/core/agent-contract.ts";
-import { persistedReviewNotificationIds } from "../src/integrations/prime/extension.ts";
+import { isCurrentReviewCompletion, persistedReviewNotificationIds } from "../src/integrations/prime/extension.ts";
 
 function nextActionFromInstalledContext(actionCard: string): string {
   const line = actionCard.split(/\r?\n/).find((item) => item.startsWith("Recommended next action:"));
@@ -87,6 +87,15 @@ test("Prime review notification identity survives resume and imported legacy mes
       details: { reviewId: "review-ignore" },
     },
   ]), ["review-structured", "review-legacy"]);
+});
+
+test("Prime suppresses late completion events from superseded reviews", () => {
+  const first = { reviewId: "review-1", subjectCommit: "commit-1", status: "fail" };
+  const second = { reviewId: "review-2", subjectCommit: "commit-2", status: "pass" };
+  assert.equal(isCurrentReviewCompletion(first, second), false);
+  assert.equal(isCurrentReviewCompletion(first, null), false);
+  assert.equal(isCurrentReviewCompletion(first, { ...first, status: "running" }), false);
+  assert.equal(isCurrentReviewCompletion(first, first), true);
 });
 
 test("published Prime entrypoints contain no development-plan or checkout-specific defaults", async () => {

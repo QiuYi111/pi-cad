@@ -40,7 +40,13 @@ def _vec(values: Any, digits: int = 9) -> list[float]:
     return [round(float(values[0]), digits), round(float(values[1]), digits), round(float(values[2]), digits)]
 
 
-def surface_id(artifact_hash: str, area: float, bbox: list[list[float]]) -> str:
+def surface_id(
+    artifact_hash: str,
+    area: float,
+    bbox: list[list[float]],
+    *,
+    scope: str = "",
+) -> str:
     """Deterministic selector ID for one face of one artifact version.
 
     Rounded to 9 significant decimals so tessellation noise cannot flip the
@@ -49,7 +55,7 @@ def surface_id(artifact_hash: str, area: float, bbox: list[list[float]]) -> str:
     which is seam-dependent).
     """
     identity = (
-        f"{artifact_hash}:"
+        f"{artifact_hash}:{scope}:"
         f"a={float(area):.9g}:"
         f"b=[{float(bbox[0][0]):.9g},{float(bbox[0][1]):.9g},{float(bbox[0][2]):.9g}"
         f"|{float(bbox[1][0]):.9g},{float(bbox[1][1]):.9g},{float(bbox[1][2]):.9g}]"
@@ -97,38 +103,79 @@ def _face_facts(face: Any) -> dict[str, Any]:
     return facts
 
 
-def enumerate_surfaces(artifact: str | Path) -> dict[str, Any]:
-    """Enumerate deterministic boundary-surface facts for a STEP artifact."""
+def _enumerate_surface_shapes(
+    artifact: str | Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return public facts plus the in-process id-to-face lookup."""
     import build123d as bd
 
     artifact = Path(artifact)
     artifact_hash = _hash_file(artifact)
     shape = bd.import_step(artifact)
+    from ..assembly import assembly_tree_from_shape
 
-    solids = shape.solids()
-    if len(solids) != 1:
-        raise ValueError(
-            f"surface inspection expects exactly one solid in V1; {artifact.name} has {len(solids)}"
-        )
+    occurrence_report = assembly_tree_from_shape(shape, artifact_hash)
+    occurrence_refs = {
+        int(item["solidIndex"]): str(item["ref"])
+        for item in occurrence_report.get("occurrences", [])
+        if isinstance(item.get("solidIndex"), int) and isinstance(item.get("ref"), str)
+    }
 
     surfaces: list[dict[str, Any]] = []
-    for face in shape.faces():
-        facts = _face_facts(face)
-        facts["id"] = surface_id(artifact_hash, facts["area"], facts["bbox"])
-        facts["area"] = round(facts["area"], 9)
-        facts["centroid"] = _vec(facts["centroid"])
-        surfaces.append(facts)
+    by_id: dict[str, Any] = {}
+    solids = list(shape.solids())
+    groups = [(f"solid-{index}", index, list(solid.faces())) for index, solid in enumerate(solids)]
+    if not groups:
+        groups = [("shape", None, list(shape.faces()))]
+    for scope, solid_index, faces in groups:
+        for face in faces:
+            facts = _face_facts(face)
+            sid = surface_id(artifact_hash, facts["area"], facts["bbox"], scope=scope)
+            if sid in by_id:
+                raise ValueError(
+                    f"duplicate surface identity inside {scope}; geometry is ambiguous"
+                )
+            facts["id"] = sid
+            facts["solidIndex"] = solid_index
+            facts["occurrenceRef"] = occurrence_refs.get(solid_index if solid_index is not None else 0)
+            facts["area"] = round(facts["area"], 9)
+            facts["centroid"] = _vec(facts["centroid"])
+            surfaces.append(facts)
+            by_id[sid] = face
 
     ids = [s["id"] for s in surfaces]
     if len(set(ids)) != len(ids):
         raise ValueError("duplicate surface IDs derived from geometrically identical faces")
 
-    return {
+    report = {
         "units": "mm",
         "artifactHash": artifact_hash,
+        "solidCount": len(solids),
         "surfaceCount": len(surfaces),
         "surfaces": surfaces,
     }
+    return report, by_id
+
+
+def enumerate_surfaces(artifact: str | Path) -> dict[str, Any]:
+    """Enumerate hash-bound boundary-surface facts for any STEP artifact."""
+    report, _ = _enumerate_surface_shapes(artifact)
+    return report
+
+
+def resolve_surface_shapes(
+    artifact: str | Path,
+    requested: list[str],
+) -> dict[str, Any]:
+    """Resolve surface IDs to faces, failing closed on another artifact version."""
+    report, by_id = _enumerate_surface_shapes(artifact)
+    unknown = [sid for sid in requested if sid not in by_id]
+    if unknown:
+        raise ValueError(
+            f"unknown surface IDs {unknown} for artifact {report['artifactHash'][:12]}; "
+            f"run preset='surfaces' again"
+        )
+    return {sid: by_id[sid] for sid in requested}
 
 
 def resolve_surface_ids(

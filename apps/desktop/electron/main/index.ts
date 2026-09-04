@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import type { AppSettings, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
+import type { AppSettings, ModelParameterValue, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
@@ -26,7 +26,11 @@ let runtimeBridge: RuntimeBridge | null = null;
 let runtimeBridgeKey = "";
 let paraView: ParaViewBackend | null = null;
 let paraViewBridge: RuntimeBridge | null = null;
+let viewer: ViewerBackend | null = null;
+let viewerBridge: RuntimeBridge | null = null;
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
+const realTraceE2E = desktopE2E && process.env.PI_CAD_DESKTOP_E2E_REAL_TRACES === "1";
+const authE2E = desktopE2E || process.env.PI_CAD_DESKTOP_E2E_AUTH === "1" || process.argv.includes("--pi-cad-e2e-auth");
 const demoRuntimeStatus: RuntimeStatus = { state: "idle", checks: [
   ["wsl", "Windows Subsystem for Linux"], ["node", "Node.js 22+"], ["python", "Python"],
   ["uv", "uv"], ["bwrap", "Bubblewrap"], ["paraview", "ParaView"], ["prime", "Prime Agent"], ["picad", "Pi-CAD runtime"],
@@ -90,7 +94,11 @@ async function ensureRuntime() {
 
 async function ensureAuth() {
   if (authController) return authController;
-  authController = new AuthController(await bridge());
+  authController = new AuthController(await bridge(), async () => {
+    const current = runtime;
+    runtime = null;
+    await current?.stop();
+  });
   authController.on("status", (status) => send(IPC.authStatus, status));
   return authController;
 }
@@ -105,8 +113,37 @@ async function ensureParaView() {
   return paraView;
 }
 
+async function ensureViewer() {
+  const current = await bridge();
+  if (!viewer || viewerBridge !== current) {
+    viewer?.stop();
+    viewer = new ViewerBackend(current);
+    viewerBridge = current;
+  }
+  return viewer;
+}
+
+function demoMesh(path: string, values: Record<string, ModelParameterValue> = {}) {
+  const width = Number(values.width ?? 40);
+  const depth = Number(values.depth ?? 24);
+  const height = Number(values.height ?? 12);
+  const x = width / 2; const y = depth / 2; const z = height;
+  return {
+    source: path,
+    parts: [{
+      name: "Adjustable body",
+      positions: [-x,-y,0, x,-y,0, x,y,0, -x,y,0, -x,-y,z, x,-y,z, x,y,z, -x,y,z],
+      indices: [0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7],
+      color: "#cbd2da",
+    }],
+    bounds: { min: [-x,-y,0] as [number, number, number], max: [x,y,z] as [number, number, number] },
+  };
+}
+
 function registerIpc() {
   const demo = desktopE2E;
+  const demoParameterValues: Record<string, ModelParameterValue> = { width: 40, depth: 24, height: 12 };
+  let demoEvaluation: { quality: number; difficulty: number; feedback?: string } | undefined;
   const demoWorkflow: WorkflowDocument = { id: "mechanical.one-shot", version: "1.0.0", description: "Design a verified mechanical assembly", phases: ["grilling", "spec", "concept", "parts", "assembly", "final_review", "release"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 2 ? "complete" : index === 2 ? "active" : "pending", transitions: [], capabilities: index === 2 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.one-shot\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/one-shot.yaml" };
   ipcMain.handle(IPC.settingsGet, () => settingsStore.get());
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
@@ -131,7 +168,7 @@ function registerIpc() {
   });
   ipcMain.handle(IPC.runtimeInstallWsl, async () => {
     if (desktopE2E) return demoRuntimeStatus;
-    return (await bridge()).installWsl();
+    return (await bridge()).installWsl((status) => send(IPC.runtimeStatus, status));
   });
   ipcMain.handle(IPC.runtimeInstall, async () => {
     const current = await settingsStore.get();
@@ -140,6 +177,9 @@ function registerIpc() {
   ipcMain.handle(IPC.runtimeStart, async () => (await ensureRuntime()).start(await settingsStore.get()));
   ipcMain.handle(IPC.runtimeStop, async () => { await runtime?.stop(); runtime = null; });
   ipcMain.handle(IPC.runtimePrompt, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).prompt(message, images));
+  ipcMain.handle(IPC.runtimeSteer, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).steer(message, images));
+  ipcMain.handle(IPC.runtimeNewSession, async () => (await ensureRuntime()).newSession());
+  ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => (await ensureRuntime()).switchSession(path));
   ipcMain.handle(IPC.runtimeAbort, async () => (await ensureRuntime()).abort());
   ipcMain.handle(IPC.runtimeModels, async () => (await ensureRuntime()).getModels());
   ipcMain.handle(IPC.runtimeSetModel, async (_event, provider: string, model: string) => (await ensureRuntime()).setModel(provider, model));
@@ -156,8 +196,8 @@ function registerIpc() {
     }));
   });
   ipcMain.handle(IPC.runtimeUiResponse, async (_event, id: string, response: Record<string, unknown>) => (await ensureRuntime()).respondToUi(id, response));
-  ipcMain.handle(IPC.authStatusGet, async () => demo ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).status(await settingsStore.get()));
-  ipcMain.handle(IPC.authLogin, async () => demo ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).login(await settingsStore.get()));
+  ipcMain.handle(IPC.authStatusGet, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).status(await settingsStore.get()));
+  ipcMain.handle(IPC.authLogin, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).login(await settingsStore.get()));
   ipcMain.handle(IPC.authManualCode, async (_event, value: string) => (await ensureAuth()).submitManualCode(value));
   ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.workflowCurrent, async () => demo ? {
@@ -170,21 +210,44 @@ function registerIpc() {
     const result = await dialog.showOpenDialog(mainWindow!, { title: "Open STEP model", defaultPath: settings.projectPath || undefined, properties: ["openFile"], filters: [{ name: "STEP model", extensions: ["step", "stp"] }] });
     return result.canceled ? null : result.filePaths[0] || null;
   });
-  ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? { source: path, parts: [{ name: "Demo", positions: [-1,-1,0,1,-1,0,0,1,0], indices: [0,1,2], color: "#7da8f7" }], bounds: { min: [-1,-1,0], max: [1,1,0] } } : new ViewerBackend(await bridge()).loadStep(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? demoMesh(path) : (await ensureViewer()).loadStep(await settingsStore.get(), path));
   ipcMain.handle(IPC.viewerCatalog, async () => demo ? {
     projectId: "desktop-e2e",
     projectHead: { updatedAt: new Date().toISOString(), artifacts: [] },
     currentRun: { id: "e2e", phase: "concept", status: "active", updatedAt: new Date().toISOString(), artifacts: [{ id: "candidate:authoritative", path: "build/part.step", sha256: "demo-step", role: "authoritative-candidate-design" }] },
     commits: [],
     simulationRuns: [{ id: "demo-simulation", recipeId: "static-check", status: "completed", outputs: [{ name: "stress", type: "field", path: "simulation/stress.vtp", unit: "MPa", sha256: "demo-field" }] }],
-  } : new ViewerBackend(await bridge()).catalog(await settingsStore.get()));
+    parameterManifests: [{
+      path: "build/part.step.parameters.json",
+      sha256: "demo-parameters",
+      manifest: {
+        schema: 1, modelId: "demo-adjustable", source: { path: "part.py", sha256: "demo-source", entrypoint: "build" },
+        output: { path: "build/part.step", sha256: "demo-step" },
+        parameters: [
+          { id: "width", type: "number", default: 40, value: demoParameterValues.width, min: 24, max: 80, step: 1, unit: "mm", label: "Width", group: "Envelope" },
+          { id: "depth", type: "number", default: 24, value: demoParameterValues.depth, min: 12, max: 48, step: 1, unit: "mm", label: "Depth", group: "Envelope" },
+          { id: "height", type: "number", default: 12, value: demoParameterValues.height, min: 4, max: 30, step: 1, unit: "mm", label: "Height", group: "Envelope" },
+        ],
+      },
+    }],
+  } : (await ensureViewer()).catalog(await settingsStore.get()));
+  ipcMain.handle(IPC.viewerPreviewParameters, async (_event, path: string, values: Record<string, ModelParameterValue>) => demo
+    ? demoMesh(`preview:${path}`, { ...demoParameterValues, ...values })
+    : (await ensureViewer()).previewParameters(await settingsStore.get(), path, values));
+  ipcMain.handle(IPC.viewerApplyParameters, async (_event, path: string, values: Record<string, ModelParameterValue>) => {
+    if (demo) { Object.assign(demoParameterValues, values); return; }
+    await (await ensureViewer()).applyParameters(await settingsStore.get(), path, values);
+  });
   ipcMain.handle(IPC.viewerOpenParaView, async (_event, path: string) => demo ? { state: "ready", sourcePath: path, url: "pi-cad://demo-paraview" } : (await ensureParaView()).open(await settingsStore.get(), path));
   ipcMain.handle(IPC.viewerStopParaView, async () => paraView?.stop());
   ipcMain.handle(IPC.viewerOpenParaViewDesktop, async (_event, path: string) => (await ensureParaView()).openDesktop(await settingsStore.get(), path));
-  ipcMain.handle(IPC.tracesList, async () => demo ? [{ id: "demo-trace", path: "/workspace/.prime-sessions/demo.jsonl", title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420 }] : new TraceStore(await bridge()).list(await settingsStore.get()));
-  ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(await settingsStore.get(), path));
+  ipcMain.handle(IPC.tracesList, async () => demo && !realTraceE2E ? [{ id: "demo-trace", path: "/workspace/.prime-sessions/demo.jsonl", title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420, ...(demoEvaluation ? { evaluation: demoEvaluation } : {}) }] : new TraceStore(await bridge()).list(await settingsStore.get()));
+  ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo && !realTraceE2E ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(await settingsStore.get(), path));
+  ipcMain.handle(IPC.tracesRate, async (_event, paths: string[], evaluation: { quality: number; difficulty: number; feedback?: string }) => demo && !realTraceE2E
+    ? (demoEvaluation = { ...evaluation }, { rated: paths.length, triggered: false, pendingTokens: 8_420, thresholdTokens: 250_000, message: "Rating saved." })
+    : new TraceStore(await bridge()).rate(await settingsStore.get(), paths, evaluation));
   ipcMain.handle(IPC.tracesDistill, async (_event, paths: string[], evaluation: { quality: number; difficulty: number }) => {
-    if (demo) {
+    if (demo && !realTraceE2E) {
       const status = { state: "complete", processed: paths.length, total: paths.length, message: `Experience updated · quality ${evaluation.quality}/5` } as const;
       send(IPC.tracesDistillStatus, status);
       return status;
@@ -206,5 +269,5 @@ app.whenReady().then(() => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("before-quit", () => { void runtime?.stop(); void paraView?.stop(); });
+app.on("before-quit", () => { void runtime?.stop(); void paraView?.stop(); viewer?.stop(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

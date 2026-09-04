@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ensureRuntimeReady } from "../electron/main/prime-rpc";
+import { ensureRuntimeReady, PrimeRpc, sandboxSessionPath } from "../electron/main/prime-rpc";
 import type { AppSettings, RuntimeStatus } from "../src/shared/contracts";
 
 const settings: AppSettings = {
@@ -13,6 +13,19 @@ const ready: RuntimeStatus = { state: "idle", checks: [
 ] };
 
 describe("Prime runtime setup", () => {
+  it("maps host session files into the sandbox workspace", () => {
+    expect(sandboxSessionPath("C:\\project\\.prime-sessions\\abc-123.jsonl"))
+      .toBe("/workspace/.prime-sessions/abc-123.jsonl");
+    expect(() => sandboxSessionPath("../escape.txt")).toThrow("Invalid session path");
+  });
+  it("recovers the first prompt after abort through Prime steering", async () => {
+    const runtime = new PrimeRpc({} as never);
+    const request = vi.spyOn(runtime, "request")
+      .mockRejectedValueOnce(new Error("Cannot admit a session action while queued session input is suspended."))
+      .mockResolvedValueOnce(undefined);
+    await expect(runtime.prompt("continue")).resolves.toBeUndefined();
+    expect(request.mock.calls.map(([type]) => type)).toEqual(["prompt", "steer"]);
+  });
   it("uses an existing runtime without reinstalling", async () => {
     const bridge = { check: vi.fn().mockResolvedValue(ready), install: vi.fn() };
     await expect(ensureRuntimeReady(bridge as any, settings)).resolves.toEqual(ready);

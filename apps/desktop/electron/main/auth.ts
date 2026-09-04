@@ -7,7 +7,10 @@ import type { RuntimeBridge } from "./runtime-bridge.js";
 export class AuthController extends EventEmitter {
   private child?: ChildProcessWithoutNullStreams;
   private buffer = "";
-  constructor(private readonly bridge: RuntimeBridge) { super(); }
+  constructor(
+    private readonly bridge: RuntimeBridge,
+    private readonly onAuthenticated: () => Promise<void> = async () => {},
+  ) { super(); }
 
   async status(settings: AppSettings): Promise<AuthStatus> {
     const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);
@@ -17,9 +20,11 @@ export class AuthController extends EventEmitter {
     const script = "const fs=require('fs'),p=process.argv[1];try{const x=JSON.parse(fs.readFileSync(p,'utf8'))['openai-codex'];process.stdout.write(JSON.stringify(x?{ok:true,expires:x.expires||0}:{ok:false}))}catch{process.stdout.write(JSON.stringify({ok:false}))}";
     const { stdout } = await this.bridge.exec([node, "-e", script, authPath]);
     const value = JSON.parse(stdout || "{}");
-    return value.ok
+    const expires = Number(value.expires || 0);
+    const active = Boolean(value.ok) && (!expires || expires > Date.now() + 60_000);
+    return active
       ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected", expiresAt: value.expires }
-      : { provider: "openai-codex", state: "signed-out", message: `Sign in to use OpenAI Codex with ${piCadRepo}.` };
+      : { provider: "openai-codex", state: "signed-out", message: value.ok ? "ChatGPT login expired. Sign in again." : `Sign in to use OpenAI Codex with ${piCadRepo}.` };
   }
 
   async login(settings: AppSettings): Promise<AuthStatus> {
@@ -28,7 +33,7 @@ export class AuthController extends EventEmitter {
     const home = await this.bridge.homeDirectory();
     const node = await this.bridge.commandPath("node");
     const agentDir = `${home}/.prime/agent`;
-    this.child = this.bridge.spawn([node, `${piCadRepo}/scripts/desktop-openai-oauth.mjs`, primeAgentRepo, agentDir]);
+    this.child = this.bridge.spawn([node, "--use-env-proxy", `${piCadRepo}/scripts/desktop-openai-oauth.mjs`, primeAgentRepo, agentDir]);
     this.child.stdout.on("data", (chunk: Buffer) => this.consume(chunk.toString("utf8")));
     this.child.stderr.on("data", (chunk: Buffer) => this.update({ provider: "openai-codex", state: "waiting", message: chunk.toString("utf8").trim() }));
     this.child.once("error", (error) => this.update({ provider: "openai-codex", state: "error", message: error.message }));
@@ -60,7 +65,7 @@ export class AuthController extends EventEmitter {
         void shell.openExternal(event.url);
         this.update({ provider: "openai-codex", state: "waiting", message: event.instructions || "Complete sign-in in your browser." });
       } else if (event.type === "auth_complete") {
-        this.update({ provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" });
+        void this.finishLogin();
       } else if (event.type === "auth_error") {
         this.update({ provider: "openai-codex", state: "error", message: event.message });
       } else if (event.type === "auth_input" || event.type === "auth_select") {
@@ -73,6 +78,15 @@ export class AuthController extends EventEmitter {
       } else if (event.type === "auth_progress") {
         this.update({ provider: "openai-codex", state: "waiting", message: event.message });
       }
+    }
+  }
+
+  private async finishLogin() {
+    try {
+      await this.onAuthenticated();
+      this.update({ provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" });
+    } catch (error) {
+      this.update({ provider: "openai-codex", state: "error", message: error instanceof Error ? error.message : String(error) });
     }
   }
 

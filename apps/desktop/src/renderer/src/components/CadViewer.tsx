@@ -4,7 +4,7 @@ import { Box, FolderOpen } from "./icons";
 import type { MeshDocument } from "@shared/contracts";
 import { toThreeCadShapes } from "../lib/cad-scene";
 
-export function CadViewer({ artifactPath }: { artifactPath?: string }) {
+export function CadViewer({ artifactPath, revision = 0, meshDocument }: { artifactPath?: string; revision?: number; meshDocument?: MeshDocument | null }) {
   const host = useRef<HTMLDivElement>(null);
   const viewer = useRef<CadDisplay | null>(null);
   const [mesh, setMesh] = useState<MeshDocument | null>(null);
@@ -31,6 +31,12 @@ export function CadViewer({ artifactPath }: { artifactPath?: string }) {
   }, [viewerRequired]);
   useEffect(() => { if (mesh && viewer.current) viewer.current.render(mesh); }, [mesh]);
   useEffect(() => {
+    if (meshDocument) {
+      setError("");
+      setLoading(false);
+      setMesh(meshDocument);
+      return;
+    }
     if (!artifactPath) return;
     let active = true;
     setError(""); setLoading(true);
@@ -39,7 +45,7 @@ export function CadViewer({ artifactPath }: { artifactPath?: string }) {
       .catch((reason) => { if (active) setError(String(reason)); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [artifactPath]);
+  }, [artifactPath, revision, meshDocument]);
 
   const open = async () => {
     const path = await window.piCad.viewer.chooseStep();

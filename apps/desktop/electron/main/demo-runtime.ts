@@ -16,6 +16,9 @@ export class DemoRuntime extends EventEmitter {
   }
   async stop() { this.status = { state: "idle", checks: [] }; this.emit("status", this.status); }
   async abort() { this.status = { ...this.status, state: "ready" }; this.emit("status", this.status); }
+  async steer(message: string) { this.emit("event", { type: "message_start", message: { role: "user", content: message } }); }
+  async newSession() { return []; }
+  async switchSession() { return []; }
   async getModels(): Promise<ModelChoice[]> { return [{ provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true }]; }
   async setModel(_provider: string, _model: string) {}
   async setThinking(_level: ThinkingLevel) {}

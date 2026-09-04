@@ -519,6 +519,20 @@ export interface GeometryPayload {
   volume?: number;
   surfaceArea?: number;
   solidCount?: number;
+  validity?: {
+    ok: boolean;
+    failureCount: number;
+    reasons: string[];
+    checks: { topology: boolean; closedShells: boolean; positiveVolume: boolean };
+    solids: Array<{
+      solidIndex: number;
+      topologyValid: boolean;
+      closedShells: boolean;
+      signedVolume: number;
+      positiveVolume: boolean;
+      reasons: string[];
+    }>;
+  };
   occurrenceCount?: number;
   cylinders?: Array<Record<string, unknown>>;
   planes?: Array<Record<string, unknown>>;

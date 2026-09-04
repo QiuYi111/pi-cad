@@ -9,7 +9,8 @@ export function Composer({ settings, status, onSettingsChange, onSend, onAbort }
   const [text, setText] = useState("");
   const [images, setImages] = useState<Array<{ name: string; data: string; mimeType: string }>>([]);
   const [availableModels, setAvailableModels] = useState(models);
-  const busy = status.state === "streaming" || status.state === "starting";
+  const streaming = status.state === "streaming";
+  const starting = status.state === "starting";
   useEffect(() => {
     if (status.state !== "ready") return;
     void window.piCad.runtime.getModels().then((choices) => {
@@ -19,7 +20,7 @@ export function Composer({ settings, status, onSettingsChange, onSend, onAbort }
   }, [status.state, settings.provider]);
   const send = async () => {
     const value = text.trim();
-    if (!value || busy) return;
+    if (!value || starting) return;
     setText("");
     const attached = images.map(({ data, mimeType }) => ({ data, mimeType }));
     setImages([]);
@@ -53,8 +54,8 @@ export function Composer({ settings, status, onSettingsChange, onSend, onAbort }
       <label className="composer-chip"><Box size={14} /><select aria-label="Model" value={settings.model} onChange={(event) => void changeModel(event.target.value)}>{[...new Set([settings.model, ...availableModels])].map((model) => <option key={model} value={model}>{shortModel(model)}</option>)}</select></label>
       <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={settings.thinking} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{efforts.map((level) => <option key={level}>{level}</option>)}</select></label>
       <span className="composer-spacer" />
-      <button className={`send-button ${busy ? "busy" : ""}`} onClick={() => busy ? void onAbort() : void send()} aria-label={busy ? "Stop" : "Send"}>
-        {busy ? <Square size={13} fill="currentColor" /> : <ArrowUp size={18} />}
+      <button className={`send-button ${starting || (streaming && !text.trim()) ? "busy" : ""}`} onClick={() => streaming && !text.trim() ? void onAbort() : void send()} aria-label={streaming && !text.trim() ? "Stop" : streaming ? "Steer" : "Send"} disabled={starting}>
+        {streaming && !text.trim() ? <Square size={13} fill="currentColor" /> : <ArrowUp size={18} />}
       </button>
     </div>
   </div>;

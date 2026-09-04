@@ -5,7 +5,7 @@ import type { AppSettings } from "../../src/shared/contracts.js";
 
 const defaults = (): AppSettings => ({
   distro: process.env.PI_CAD_WSL_DISTRO || "Ubuntu",
-  projectPath: process.env.PI_CAD_PROJECT_CWD || "",
+  projectPath: process.env.PI_CAD_PROJECT_CWD || (process.argv.includes("--pi-cad-e2e") ? "/workspace/demo" : ""),
   piCadRepo: process.env.PI_CAD_REPO || (app.isPackaged ? "" : resolve(app.getAppPath(), "../..")),
   primeAgentRepo: process.env.PRIME_AGENT_REPO || "",
   provider: "openai-codex",

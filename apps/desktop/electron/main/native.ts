@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
-import type { RuntimeBridge, RuntimePaths } from "./runtime-bridge.js";
+import { engineeringKnowledgeProbe, type RuntimeBridge, type RuntimePaths } from "./runtime-bridge.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,9 +55,12 @@ export class NativeBridge implements RuntimeBridge {
 
   async resolveRuntimePaths(settings: AppSettings): Promise<RuntimePaths> {
     const home = homedir();
+    const runtimeRoot = process.env.PI_CAD_DESKTOP_RUNTIME_ROOT
+      ? resolve(process.env.PI_CAD_DESKTOP_RUNTIME_ROOT)
+      : `${home}/.local/share/pi-cad-desktop/runtime`;
     return {
-      piCadRepo: settings.piCadRepo ? await this.toRuntimePath(settings.piCadRepo) : `${home}/.local/share/pi-cad-desktop/runtime/pi-cad`,
-      primeAgentRepo: settings.primeAgentRepo ? await this.toRuntimePath(settings.primeAgentRepo) : `${home}/.local/share/pi-cad-desktop/runtime/prime-agent`,
+      piCadRepo: settings.piCadRepo ? await this.toRuntimePath(settings.piCadRepo) : `${runtimeRoot}/pi-cad`,
+      primeAgentRepo: settings.primeAgentRepo ? await this.toRuntimePath(settings.primeAgentRepo) : `${runtimeRoot}/prime-agent`,
       projectPath: settings.projectPath ? await this.toRuntimePath(settings.projectPath) : "",
     };
   }
@@ -67,6 +70,11 @@ export class NativeBridge implements RuntimeBridge {
     const add = (id: DependencyCheck["id"], label: string, ready: boolean, detail: string, installable = true) => checks.push({ id, label, status: ready ? "ready" : "missing", detail, installable });
     add("host", process.platform === "darwin" ? "macOS runtime" : "Linux runtime", true, `${process.platform}-${process.arch}`, false);
     const paths = await this.resolveRuntimePaths(settings);
+    const usesBundledRuntime = !settings.piCadRepo && !settings.primeAgentRepo && Boolean(this.bundledRuntimePath);
+    const installedRoot = process.env.PI_CAD_DESKTOP_RUNTIME_ROOT
+      ? resolve(process.env.PI_CAD_DESKTOP_RUNTIME_ROOT)
+      : `${homedir()}/.local/share/pi-cad-desktop/runtime`;
+    const knowledge = engineeringKnowledgeProbe(paths.piCadRepo);
     const sandbox = process.platform === "darwin" ? "sandbox-exec" : "bwrap";
     const script = [
       "export PATH=\"$HOME/.local/bin:$PATH\"",
@@ -75,6 +83,10 @@ export class NativeBridge implements RuntimeBridge {
       "printf 'paraview=%s\\n' \"$(command -v paraview || true)\"",
       `test -f ${JSON.stringify(paths.primeAgentRepo)}/prime-agent.sh && printf 'prime=ready\\n' || printf 'prime=missing\\n'`,
       `test -f ${JSON.stringify(paths.piCadRepo)}/package.json && printf 'picad=ready\\n' || printf 'picad=missing\\n'`,
+      knowledge.command,
+      usesBundledRuntime
+        ? `cmp -s ${JSON.stringify(this.bundledRuntimePath!)}/manifest.json ${JSON.stringify(installedRoot)}/manifest.json && printf 'bundle=ready\\n' || printf 'bundle=missing\\n'`
+        : "printf 'bundle=ready\\n'",
     ].join("; ");
     const { stdout } = await this.exec(["bash", "-lc", script], { timeout: 30_000 });
     const values = Object.fromEntries(stdout.trim().split("\n").map((line) => line.split(/=(.*)/s).slice(0, 2))) as Record<string, string>;
@@ -82,13 +94,16 @@ export class NativeBridge implements RuntimeBridge {
     add("uv", "uv and managed Python", Boolean(values.uv), values.uv || "Not installed");
     add("sandbox", process.platform === "darwin" ? "macOS Sandbox" : "Bubblewrap", Boolean(values.sandbox), values.sandbox || "Not installed", process.platform !== "darwin");
     add("paraview", "ParaView", Boolean(values.paraview), values.paraview || "Install ParaView 6", false);
-    add("prime", "Prime Agent", values.prime === "ready", paths.primeAgentRepo);
-    add("picad", "Pi-CAD runtime", values.picad === "ready", paths.piCadRepo);
+    const bundleReady = values.bundle === "ready";
+    add("prime", "Prime Agent", values.prime === "ready" && bundleReady, bundleReady ? paths.primeAgentRepo : "Bundled runtime update available");
+    const knowledgeReady = values.knowledge === String(knowledge.count);
+    add("picad", "Pi-CAD runtime", values.picad === "ready" && knowledgeReady && bundleReady,
+      !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
     const ready = checks.every((check) => check.status === "ready");
     return { state: ready ? "idle" : "error", checks, message: ready ? undefined : "Install the missing runtime dependencies." };
   }
 
-  async installWsl(): Promise<RuntimeStatus> { throw new Error("WSL installation is available only on Windows."); }
+  async installWsl(_onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> { throw new Error("WSL installation is available only on Windows."); }
 
   async install(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
     let status = await this.check(settings);
@@ -104,9 +119,12 @@ export class NativeBridge implements RuntimeBridge {
     }
     const paths = await this.resolveRuntimePaths(settings);
     if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath) {
-      const destination = `${homedir()}/.local/share/pi-cad-desktop/runtime`;
+      const destination = process.env.PI_CAD_DESKTOP_RUNTIME_ROOT
+        ? resolve(process.env.PI_CAD_DESKTOP_RUNTIME_ROOT)
+        : `${homedir()}/.local/share/pi-cad-desktop/runtime`;
       await mkdir(destination, { recursive: true });
       await this.exec(["tar", "-xzf", `${this.bundledRuntimePath}/runtime-bundle.tar.gz`, "-C", destination], { timeout: 15 * 60_000 });
+      await this.exec(["cp", `${this.bundledRuntimePath}/manifest.json`, `${destination}/manifest.json`]);
       await chmod(`${destination}/prime-agent/prime-agent.sh`, 0o755);
     }
     const updated = await this.resolveRuntimePaths(settings);

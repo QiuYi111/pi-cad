@@ -32,12 +32,22 @@ async def _attach_images(images: list[dict[str, str]]) -> None:
         raise CadApiError(f"Pi-CAD could not inject mandatory build images into Prime: {error}", error_type="ModelBuildError") from error
 
 
-async def build(source: str | Path, output: str | Path | None = None, *, force: bool = False) -> ArtifactRef:
+async def build(
+    source: str | Path,
+    output: str | Path | None = None,
+    *,
+    force: bool = False,
+    parameters: dict[str, dict[str, Any]] | None = None,
+) -> ArtifactRef:
     source_path, source_relative = _project_path(source)
     requested_output = Path(output) if output is not None else Path("build") / f"{source_path.stem}.step"
     output_path, output_relative = _project_path(requested_output)
     response: dict[str, Any] = await request(
-        "model-build", source=source_relative.as_posix(), output=output_relative.as_posix(), force=force
+        "model-build",
+        source=source_relative.as_posix(),
+        output=output_relative.as_posix(),
+        force=force,
+        **({"parameters": parameters} if parameters is not None else {}),
     )
     envelope = response.get("build") or {}
     if not envelope.get("ok"):

@@ -89,6 +89,15 @@ function simulationOutputs(value: unknown, depth = 0): Array<{ name: string; typ
 }
 
 export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessage[] {
+  if (input?.type === "desktop_session_loaded") {
+    const loaded = (input.messages || []).flatMap((message: any, index: number): ChatMessage[] => {
+      if (message?.role !== "user" && message?.role !== "assistant") return [];
+      const text = textOf(message.content).trim();
+      if (!text) return [];
+      return [{ id: message.id || `history-${index}`, role: message.role, text, createdAt: message.timestamp || Date.now() }];
+    });
+    return loaded.length ? loaded : [{ id: "welcome", role: "assistant", createdAt: Date.now(), text: "Welcome. I can help define requirements, explore concepts, build, inspect, and release this design." }];
+  }
   if (input?.type === "desktop_event_batch") return (input.events || []).reduce((state: ChatMessage[], event: unknown) => reducePrimeEvent(state, event), messages);
   if (input?.type === "desktop_user_message") {
     return [...messages, { id: input.id, role: "user", text: input.text, createdAt: Date.now() }];
@@ -169,12 +178,22 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
     const message = event.message;
     if (message?.role === "assistant") {
       const text = textOf(message.content).trim();
+      const failed = message.stopReason === "error" || Boolean(message.errorMessage);
+      const aborted = message.stopReason === "aborted";
+      const state = failed ? "error" : aborted ? "aborted" : "complete";
+      const fallback = String(message.errorMessage || (failed ? "Prime failed to respond." : aborted ? "Request was stopped." : ""));
       const index = findOpenAssistant(messages);
       if (index >= 0) {
         const now = Date.now();
-        return messages.map((existing, current) => current === index ? { ...existing, id: message.id || existing.id, text: text || existing.text, stream: { ...existing.stream!, state: "complete", finishedAt: now } } : existing);
+        return messages.map((existing, current) => current === index ? { ...existing, id: message.id || existing.id, text: text || existing.text || fallback, stream: { ...existing.stream!, state, finishedAt: now } } : existing);
       }
-      if (text) { const now = Date.now(); return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text, createdAt: now, stream: { state: "complete", startedAt: now, finishedAt: now } }]; }
+      const visible = text || fallback;
+      if (visible) {
+        const previous = messages.at(-1);
+        if (previous?.role === "assistant" && previous.text === visible && previous.stream?.state === state) return messages;
+        const now = Date.now();
+        return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text: visible, createdAt: now, stream: { state, startedAt: now, finishedAt: now } }];
+      }
     }
     if (message?.role === "custom" && message.customType === "pi-cad.review-completed") {
       const details = message.details || {};
@@ -211,7 +230,7 @@ function finishOpenAssistant(messages: ChatMessage[], state: "complete" | "abort
 
 function completedTitle(kind: CadActivity["kind"], failed: boolean): string {
   if (failed) return `${kind[0]!.toUpperCase()}${kind.slice(1)} failed`;
-  return ({ build: "Model built", probe: "Geometry inspected", simulation: "Simulation complete", workflow: "Workflow advanced", review: "Review complete", commit: "Design state frozen", image: "Concept image generated" })[kind];
+  return ({ build: "Model built", probe: "Geometry inspected", simulation: "Simulation complete", workflow: "Workflow advanced", review: "Review requested", commit: "Design state frozen", image: "Concept image generated" })[kind];
 }
 
 function concise(value: string): string {

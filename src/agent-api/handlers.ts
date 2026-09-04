@@ -1,6 +1,6 @@
 import { canonicalDigest, jsonValue, type JsonValue } from "../harness/canonical.ts";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { commitWorkspace, loadWorkspaceCommit, workspaceHistory } from "../harness/commit.ts";
 import { reviseEvidenceRef, transitionRun } from "../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
@@ -17,6 +17,11 @@ import type { Operation, OperationAuthority } from "../harness/permissions.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
 import { workflowCurrentView } from "../harness/card.ts";
 import { sha256File } from "../shared/store.ts";
+import {
+  normalizeModelParameterDefinitions,
+  type ModelParameterManifestV1,
+  type StoredModelParameterManifest,
+} from "../shared/model-parameters.ts";
 
 /**
  * Every Agent API operation that can mutate an active run is admitted here,
@@ -46,6 +51,7 @@ async function viewerCatalog(cwd: string) {
   ]);
   const commits = active ? await workspaceHistory(cwd, mechanicalRegistries) : [];
   const simulationRuns: JsonValue[] = [];
+  const parameterManifests: StoredModelParameterManifest[] = [];
   if (active) {
     for (const [key, resultId] of Object.entries(active.state.domainMetadata ?? {})) {
       if (!key.startsWith("recipe-result:") || typeof resultId !== "string") continue;
@@ -68,6 +74,31 @@ async function viewerCatalog(cwd: string) {
       }));
     }
   }
+  const parameterArtifacts = [
+    ...Object.values(active?.state.artifacts ?? {}),
+    ...Object.values(projectState.head.artifacts),
+  ];
+  const seenParameterArtifacts = new Set<string>();
+  for (const artifact of parameterArtifacts) {
+    const identity = `${artifact.path}\0${artifact.sha256}`;
+    if (seenParameterArtifacts.has(identity)) continue;
+    seenParameterArtifacts.add(identity);
+    if (artifact.role !== "model-parameter-manifest") continue;
+    try {
+      const path = projectRelativePath(cwd, artifact.path);
+      const absolute = resolve(cwd, path);
+      if (await sha256File(absolute) !== artifact.sha256) continue;
+      const manifest = JSON.parse(await readFile(absolute, "utf8")) as ModelParameterManifestV1;
+      if (manifest.schema !== 1 || !Array.isArray(manifest.parameters)) continue;
+      const sourcePath = resolve(cwd, projectRelativePath(cwd, manifest.source.path));
+      const outputPath = resolve(cwd, projectRelativePath(cwd, manifest.output.path));
+      if (await sha256File(sourcePath) !== manifest.source.sha256) continue;
+      if (await sha256File(outputPath) !== manifest.output.sha256) continue;
+      parameterManifests.push({ path, sha256: artifact.sha256, manifest });
+    } catch {
+      // A loose, stale, or user-edited sidecar has no workflow authority.
+    }
+  }
   return jsonValue({
     projectId: projectState.projectId,
     projectHead: { updatedAt: projectState.head.updatedAt, artifacts: Object.values(projectState.head.artifacts) },
@@ -80,6 +111,7 @@ async function viewerCatalog(cwd: string) {
     } : null,
     commits,
     simulationRuns,
+    parameterManifests,
   });
 }
 
@@ -101,13 +133,45 @@ function phaseCardEvidenceRef(cwd: string, path: string): string {
   return `@canonical/${storage.replaceAll("\\", "/")}`;
 }
 
+async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+    await rename(temporary, path);
+  } finally {
+    await unlink(temporary).catch(() => {});
+  }
+}
+
 async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
   const activeBeforeBuild = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
   if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
-  const build = await buildStep(cwd, { source: request.source, output: request.output, force: request.force });
+  const parameterContract = request.parameters
+    ? normalizeModelParameterDefinitions(request.parameters)
+    : undefined;
+  const build = await buildStep(cwd, {
+    source: request.source,
+    output: request.output,
+    force: request.force,
+    parameters: parameterContract?.values,
+  });
   if (!build.ok) return { build, visual: null, images: [] };
 
   const artifact = artifactPathForKind(build, "step") ?? request.output;
+  const geometry = await inspectGeometry(cwd, artifact, runGeometryEvidencePath(cwd, activeBeforeBuild.state.runId, artifact));
+  if (!geometry.ok) {
+    const payload = geometry.payload as { error?: string } | undefined;
+    throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");
+  }
+  const validity = (geometry.payload as { validity?: { ok?: boolean; reasons?: string[]; solids?: Array<{ reasons?: string[] }> } }).validity;
+  if (!validity?.ok) {
+    const reasons = [
+      ...(validity?.reasons ?? []),
+      ...(validity?.solids ?? []).flatMap((solid) => solid.reasons ?? []),
+    ];
+    throw new Error(`Pi-CAD built the model but generic B-Rep validation failed${reasons.length ? `: ${[...new Set(reasons)].join(", ")}` : ""}`);
+  }
   const visual = await inspectVisual(cwd, artifact, runVisualEvidenceDir(cwd, activeBeforeBuild.state.runId, artifact));
   if (!visual.ok) {
     const payload = visual.payload as { error?: string } | undefined;
@@ -116,22 +180,37 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   const views = visualPayload(visual).views ?? [];
   if (!views.length) throw new Error("Pi-CAD built the model but mandatory visual inspection produced no images");
   const images = views.map((view) => view.path);
-  const geometry = await inspectGeometry(cwd, artifact, runGeometryEvidencePath(cwd, activeBeforeBuild.state.runId, artifact));
-  if (!geometry.ok) {
-    const payload = geometry.payload as { error?: string } | undefined;
-    throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");
-  }
 
   // Attach the complete seven-view set to the build result so both Prime and
   // the desktop activity card can inspect the same orientation-complete
   // observation.  Phase Cards still carry only the bounded ISO/FRONT pair.
-  const byName = new Map(views.map((view) => [view.name, view.path]));
-  const selected = [byName.get("iso") ?? images[0], byName.get("front") ?? images[1]].filter((path): path is string => Boolean(path));
-  const contextRefs = Object.fromEntries(selected.map((path, index) => [index === 0 ? "mandatoryImageIso" : "mandatoryImageFront", phaseCardEvidenceRef(cwd, path)]));
+  const contextRefs = Object.fromEntries(views.map((view) => [
+    `mandatoryImage${view.name.charAt(0).toUpperCase()}${view.name.slice(1)}`,
+    phaseCardEvidenceRef(cwd, view.path),
+  ]));
   const artifactHash = envelopeArtifactHash(build, "step");
   if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
   const sourcePath = projectRelativePath(cwd, request.source);
   const sourceHash = await sha256File(resolve(cwd, request.source));
+  let parameterManifest: StoredModelParameterManifest | undefined;
+  if (parameterContract) {
+    const outputPath = projectRelativePath(cwd, artifact);
+    const modelId = `model-${canonicalDigest({ source: sourcePath, output: outputPath }).slice(0, 20)}`;
+    const manifest: ModelParameterManifestV1 = {
+      schema: 1,
+      modelId,
+      source: { path: sourcePath, sha256: sourceHash, entrypoint: "build" },
+      output: { path: outputPath, sha256: artifactHash },
+      parameters: parameterContract.parameters,
+    };
+    const manifestPath = `${resolve(cwd, artifact)}.parameters.json`;
+    await writeJsonAtomic(manifestPath, manifest);
+    parameterManifest = {
+      path: projectRelativePath(cwd, manifestPath),
+      sha256: await sha256File(manifestPath),
+      manifest,
+    };
+  }
   await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
     let state = {
       ...loaded.state,
@@ -139,6 +218,14 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
         ...loaded.state.artifacts,
         "candidate:authoritative": { id: "candidate:authoritative", path: projectRelativePath(cwd, artifact), sha256: artifactHash, role: "authoritative-candidate-design" },
         "candidate:source": { id: "candidate:source", path: sourcePath, sha256: sourceHash, role: "candidate-source" },
+        ...(parameterManifest ? {
+          [`model-parameters:${parameterManifest.manifest.modelId}`]: {
+            id: `model-parameters:${parameterManifest.manifest.modelId}`,
+            path: parameterManifest.path,
+            sha256: parameterManifest.sha256,
+            role: "model-parameter-manifest",
+          },
+        } : {}),
       },
       contextRefs: { ...loaded.state.contextRefs, ...contextRefs },
     };
@@ -170,7 +257,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     data: (await readFile(view.path)).toString("base64"),
     mimeType: "image/png",
   })));
-  return { build, visual, geometry, images: inlineImages };
+  return { build, visual, geometry, images: inlineImages, ...(parameterManifest ? { parameterManifest } : {}) };
 }
 
 export async function handleAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {
@@ -207,11 +294,31 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
     case "history": return jsonValue(await workspaceHistory(cwd, mechanicalRegistries));
     case "viewer-catalog": return viewerCatalog(cwd);
     case "probe": {
-      const rendered = await executeCadProbe(cwd, { preset: "python", subject: request.subject, purpose: request.purpose, code: request.code });
+      const preset = request.preset?.trim() || "python";
+      const rendered = await executeCadProbe(cwd, {
+        preset,
+        subject: request.subject ?? "current",
+        purpose: request.purpose,
+        code: request.code,
+        args: request.args,
+      });
       const details = "details" in rendered ? rendered.details as any : undefined;
-      const result = details?.envelope?.payload?.result;
-      if (details?.presetFailed || result === undefined) throw new Error(rendered.content.map((item) => item.type === "text" ? item.text : "").join("\n") || "programmable probe failed");
-      return jsonValue({ value: result, artifactHash: details.artifactHash ?? details.envelope?.inputHashes?.artifact, scriptHash: details.envelope?.inputHashes?.script, observationId: details.observationId });
+      const value = preset === "python" ? details?.envelope?.payload?.result : details?.envelope?.payload;
+      if (details?.presetFailed || value === undefined) throw new Error(rendered.content.map((item) => item.type === "text" ? item.text : "").join("\n") || `probe preset ${preset} failed`);
+      const visuals = Array.isArray(details?.observation?.visuals) ? details.observation.visuals : [];
+      const images = rendered.content.filter((item) => item.type === "image").map((item, index) => ({
+        name: visuals[index]?.name ?? `view-${index + 1}`,
+        data: item.data,
+        mimeType: item.mimeType,
+      }));
+      return jsonValue({
+        preset,
+        value,
+        ...(images.length ? { images } : {}),
+        artifactHash: details.artifactHash ?? details.envelope?.inputHashes?.artifact,
+        scriptHash: details.envelope?.inputHashes?.script,
+        observationId: details.observationId,
+      });
     }
     case "model-build": {
       return jsonValue(await buildAndObserve(cwd, request));

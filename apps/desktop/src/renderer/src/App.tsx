@@ -7,6 +7,7 @@ import { Traces } from "./pages/Traces";
 import { Settings } from "./pages/Settings";
 import { ExtensionDialog } from "./components/ExtensionDialog";
 import { FirstRun } from "./pages/FirstRun";
+import { usePrimeRuntime } from "./hooks/usePrimeRuntime";
 
 type Page = "workbench" | "workflow" | "traces" | "settings";
 
@@ -14,6 +15,7 @@ export function App() {
   const [page, setPage] = useState<Page>("workbench");
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [setupComplete, setSetupComplete] = useState(() => localStorage.getItem("pi-cad.setup-complete") === "1");
+  const prime = usePrimeRuntime();
   useEffect(() => { void window.piCad.settings.get().then(setSettings); }, []);
   if (!settings) return <div className="boot-screen"><div className="boot-mark" />Loading Pi-CAD</div>;
   if (!setupComplete) return <FirstRun settings={settings} onSettings={setSettings} onComplete={() => setSetupComplete(true)} />;
@@ -34,7 +36,7 @@ export function App() {
       <div className="titlebar-project">{settings.projectPath ? settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) : "No project"}</div>
     </header>
     <main className="page-host">
-      {page === "workbench" && <Workbench key={settings.projectPath} settings={settings} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}
+      {page === "workbench" && <Workbench settings={settings} prime={prime} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}
       {page === "workflow" && <WorkflowEditor />}
       {page === "traces" && <Traces />}
       {page === "settings" && <Settings value={settings} onChange={setSettings} />}

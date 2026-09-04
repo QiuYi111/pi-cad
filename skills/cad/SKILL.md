@@ -30,6 +30,7 @@ cad.model.build(
     output: str | Path | None = None,
     *,
     force: bool = False,
+    parameters: dict[str, dict] | None = None,
 ) -> ArtifactRef
 cad.probe.run(
     *,
@@ -87,6 +88,12 @@ reason to call `inspect.signature()` before using them.
   legacy task asks for CadQuery, preserve its requested geometry and dimensions
   but implement the managed candidate with build123d; do not probe for or try
   to install CadQuery.
+- When the user should tune dimensions in the desktop Viewer, expose
+  `build(parameters) -> Shape` instead of `result` and pass the small UI
+  declaration once through `cad.model.build(..., parameters={"width":
+  {"default": 40, "min": 20, "max": 80, "step": 1, "unit": "mm"}})`.
+  Keep derived dimensions inside that function. This registers the panel;
+  ordinary models need no parameter declaration.
 - Before construction, make the acceptance contract independent of the source:
   name authoritative dimensions, datums, axes, alignment, attachment planes,
   and intended Boolean effects, plus one plausible wrong interpretation that
@@ -111,6 +118,16 @@ reason to call `inspect.signature()` before using them.
   function defined in a real source file, where Python can capture its source.
   The legacy `"current"` and `"baseline"` subjects remain available for
   state-bound v7 runs; unrestricted imports do not cross the effect fence.
+- Use `await cad.probe.run(subject=artifact_ref, preset="visual",
+  args={"views": ["right", "top"]})` when another direction would resolve a
+  visual question. Choose only the views needed from `iso`, `front`, `back`,
+  `left`, `right`, `top`, `bottom`, and `iso_opposite`. For a crowded
+  assembly, keep the same call and add `focus`, `hide`, `explode`, or
+  `display="solid_with_edges"` inside `args`; use occurrence refs returned by
+  `preset="assembly"` rather than guessing part order.
+  The read-only render is hash-bound, recorded as an immutable observation,
+  and attached directly to Prime. Do not ask the author or user for another
+  screenshot when this operation can answer the question.
 - Submit an immutable final handoff with `handle = await cad.review.submit(commit)`.
   After the managed build and probes, create this handoff as a separate commit
   whose `artifacts` include the returned STEP `ArtifactRef` and its deterministic

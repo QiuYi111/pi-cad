@@ -20,12 +20,18 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   useEffect(() => {
     void check();
     void window.piCad.auth.status().then(setAuth).catch(() => setAuth({ provider: "openai-codex", state: "signed-out" }));
-    return window.piCad.auth.onStatus(setAuth);
+    const offAuth = window.piCad.auth.onStatus(setAuth);
+    const offRuntime = window.piCad.runtime.onStatus(setRuntime);
+    return () => { offAuth(); offRuntime(); };
   }, []);
 
   const installWsl = async () => {
     setWorking("wsl");
-    try { setRuntime(await window.piCad.runtime.installWsl()); await check(); }
+    try {
+      const result = await window.piCad.runtime.installWsl();
+      setRuntime(result);
+      if (result.state === "checking") await check();
+    }
     catch (error) { setRuntime({ state: "error", checks: [], message: String(error) }); }
     finally { setWorking(""); }
   };
@@ -52,14 +58,16 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   return <main className="first-run">
     <header className="first-run-titlebar"><div className="wordmark"><span className="wordmark-glyph" />Pi-CAD</div><span>Setup</span></header>
     <section className="setup-stage">
-      <div className="setup-progress" aria-label={`Setup ${progress} of 3`}><i style={{ width: `${(progress / 3) * 100}%` }} /></div>
+      <div className={`setup-progress ${runtime.state === "installing" ? "indeterminate" : ""}`} aria-label={`Setup ${progress} of 3`}><i style={{ width: `${Math.min(100, ((progress + (runtimeReady ? 0 : runtime.progress || 0)) / 3) * 100)}%` }} /></div>
       <div className="setup-hero"><span>READY THE WORKBENCH</span><h1>One workspace.<br />Everything it needs.</h1><p>Pi-CAD prepares an isolated engineering runtime, connects your ChatGPT account, and opens a project.</p></div>
       <div className="setup-grid">
         <SetupCard index="01" title="Engineering runtime" ready={runtimeReady} active={!runtimeReady} icon={<Wrench size={17} />}>
           <p>{runtime.message || (runtimeReady ? "WSL and the bundled CAD runtime are ready." : "Checking WSL and bundled components.")}</p>
-          {runtime.state === "checking" && <SetupMotion label="Inspecting system" />}
-          {wslMissing ? <button className="primary" disabled={Boolean(working)} onClick={() => void installWsl()}>{working === "wsl" ? "Waiting for Windows…" : "Install WSL and Ubuntu"}<ChevronRight size={14} /></button>
-            : !runtimeReady && runtime.state !== "checking" ? <button className="primary" disabled={Boolean(working)} onClick={() => void installRuntime()}>{working === "runtime" ? "Preparing runtime…" : "Install bundled runtime"}<ChevronRight size={14} /></button> : null}
+          {(runtime.state === "checking" || runtime.state === "installing") && <SetupMotion label={runtime.state === "installing" ? `Installing · ${runtime.elapsedSeconds || 0}s` : "Inspecting system"} />}
+          {runtime.state === "action-required"
+            ? <button className="setup-secondary" disabled={Boolean(working)} onClick={() => void check()}>{runtime.action === "restart-windows" ? "Check after restart" : "I initialized Ubuntu — check again"}</button>
+            : wslMissing ? <button className="primary" disabled={Boolean(working)} onClick={() => void installWsl()}>{working === "wsl" ? "Waiting for Windows…" : "Install WSL and Ubuntu"}<ChevronRight size={14} /></button>
+              : !runtimeReady && runtime.state !== "checking" && runtime.state !== "installing" ? <button className="primary" disabled={Boolean(working)} onClick={() => void installRuntime()}>{working === "runtime" ? "Preparing runtime…" : "Install bundled runtime"}<ChevronRight size={14} /></button> : null}
         </SetupCard>
         <SetupCard index="02" title="ChatGPT" ready={auth.state === "signed-in"} active={runtimeReady && auth.state !== "signed-in"} icon={<span className="provider-mark" />}>
           <p>{auth.message || (auth.state === "signed-in" ? "Connected through OpenAI Codex OAuth." : "Use your ChatGPT account. No API key required.")}</p>

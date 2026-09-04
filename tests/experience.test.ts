@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -20,6 +22,8 @@ import {
 import type { ExperienceIndexEntry } from "../src/experience/types.ts";
 import { renderExperienceView } from "../src/experience/view.ts";
 import { dispatchSidecarRequest } from "../src/authority/sidecar.ts";
+
+const execFileAsync = promisify(execFile);
 
 test("experience index supports evaluation, retrieval, bounded reads, and atomic distillation cutoffs", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-cad-experience-"));
@@ -57,10 +61,14 @@ test("experience index supports evaluation, retrieval, bounded reads, and atomic
     };
     await writeFile(join(root, "index.jsonl"), `${JSON.stringify(entry)}\n`, "utf8");
 
-    const evaluated = await recordEvaluation({ seq: 1 }, 5, 4);
+    const evaluated = await recordEvaluation({ seq: 1 }, 5, 4, "The hinge repair worked.");
     assert.equal(evaluated.evaluation_status, "evaluated");
     assert.ok((evaluated.score || 0) > 80);
+    assert.equal(evaluated.feedback, "The hinge repair worked.");
     assert.equal((await getExperience({ sha: "sha-one" })).quality, 5);
+
+    const reevaluated = await recordEvaluation({ seq: 1 }, 5, 4);
+    assert.equal(reevaluated.feedback, "The hinge repair worked.");
 
     const benchmarked = await recordBenchmarkEvaluation({ seq: 1 }, {
       benchmark: "CADTestBench",
@@ -245,4 +253,67 @@ test("configured distillation runs in a detached supervisor and advances the cur
     if (previousCommand === undefined) delete process.env.PI_CAD_DISTILL_COMMAND_JSON; else process.env.PI_CAD_DISTILL_COMMAND_JSON = previousCommand;
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("built-in distillation uses the packaged Prime dist entrypoint", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-cad-distill-packaged-prime-"));
+  const request = join(root, "distill-1-1.json");
+  const prime = join(root, "prime-agent");
+  const previousPrime = process.env.PRIME_AGENT_REPO;
+  try {
+    await mkdir(prime, { recursive: true });
+    await writeFile(join(prime, "prime-agent.sh"), [
+      "#!/usr/bin/env bash",
+      "if [[ \"${1:-}\" != \"--dist\" ]]; then",
+      "  echo 'tsx unavailable in packaged runtime' >&2",
+      "  exit 9",
+      "fi",
+      "exit 0",
+      "",
+    ].join("\n"), "utf8");
+    await chmod(join(prime, "prime-agent.sh"), 0o755);
+    await writeFile(join(root, "index.jsonl"), `${JSON.stringify({ seq: 1, evaluation_status: "evaluated", transcript_tokens: 20 })}\n`, "utf8");
+    await writeFile(join(root, "distill_state.json"), `${JSON.stringify({
+      schema_version: 1,
+      last_distilled_seq: 0,
+      pending_transcript_tokens: 20,
+      threshold_tokens: 10,
+      last_distilled_at: null,
+      active_cutoff_seq: 1,
+      active_started_at: new Date().toISOString(),
+    })}\n`, "utf8");
+    await writeFile(join(root, "distill.lock"), "", "utf8");
+    await writeFile(request, `${JSON.stringify({ schema_version: 1, from_seq: 1, cutoff_seq: 1, transcript_tokens: 20 })}\n`, "utf8");
+    process.env.PRIME_AGENT_REPO = prime;
+
+    await execFileAsync(process.execPath, [join(process.cwd(), "scripts", "distill-experience.mjs"), request, root]);
+    const status = JSON.parse(await readFile(join(root, "distill-jobs", "distill-1-1.job.json"), "utf8"));
+    assert.equal(status.status, "complete");
+    assert.equal(status.exit_code, 0);
+  } finally {
+    if (previousPrime === undefined) delete process.env.PRIME_AGENT_REPO; else process.env.PRIME_AGENT_REPO = previousPrime;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("real-task checkpoint replay runs only one bounded next action and an independent judgement", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-cad-checkpoint-replay-"));
+  try {
+    const candidate = join(root, "candidate");
+    await mkdir(join(candidate, "workflow-packages", "mechanical"), { recursive: true });
+    await writeFile(join(candidate, "workflow-packages", "mechanical", "one-shot.yaml"), "schema: 1\nid: mechanical.one-shot\nversion: 1\nworkflow: {}\n");
+    await writeFile(join(root, "index.jsonl"), `${JSON.stringify({ seq: 1, evaluation_status: "evaluated", model: null, reasoning: "low", workflow: "mechanical.one-shot" })}\n`);
+    const replay = join(root, "replay.json");
+    await writeFile(replay, `${JSON.stringify({ cases: [{
+      kind: "repair", seq: 1, task: "Make a stand", checkpoint: "The support faces backward", evidence: "wrong orientation",
+      failureSignature: "wrong orientation", expectedRepair: "inspect the support direction", regressionGuard: "retain the hinge",
+    }] })}\n`);
+    const fakePrime = join(root, "fake-prime.mjs");
+    await writeFile(fakePrime, "const prompt=process.argv.at(-1)||''; process.stdout.write(/^Judge/.test(prompt)?'PASS\\nChecks orientation before rebuilding.\\n':'Inspect the support direction against the phone datum.\\n');\n");
+    const report = join(root, "report.json");
+    await execFileAsync(process.execPath, [join(process.cwd(), "scripts", "evaluate-distillation-checkpoints.mjs"), replay, root, candidate, report, JSON.stringify([process.execPath, fakePrime])]);
+    const result = JSON.parse(await readFile(report, "utf8"));
+    assert.equal(result.passed, true);
+    assert.equal(result.results[0].kind, "repair");
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

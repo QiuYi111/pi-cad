@@ -8,23 +8,10 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__
-from .assembly import assembly_tree
-from .analysis_model import run_derivation
-from .interference import inspect_interference
-from .sections import scan_sections
-from .capability import capabilities
 from .common import emit, emit_error, sha256_file, write_json
-from .doctor import doctor
-from .compare import compare_geometry
-from .drawing import generate_drawing, validate_drawing_spec
-from .export import export_artifact
-from .geometry import inspect_geometry, measure
-from .model import run_source
-from .probe import ProbeError, run_probe
-from .presentation import run_presentation
-from .render import VIEW_NAMES, render_views
-from .section import render_section
-from .simulation.topology import run_topology
+
+
+VIEW_NAMES = ("iso", "front", "back", "left", "right", "top", "bottom", "iso_opposite")
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -32,36 +19,95 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 
 
 def _cmd_build(args: argparse.Namespace) -> int:
+    from .build_cache import (
+        canonical_parameters_hash,
+        current_manifest,
+        exclusive_build,
+        make_manifest,
+        write_manifest,
+    )
+    from .model import run_source
+
     started = time.monotonic()
     source = Path(args.source)
     output = Path(args.output)
     try:
-        result = run_source(source, output)
-        if result.get("exitCode", 1) != 0:
-            emit_error(
-                "cad_build_step",
-                result.get("error", "model execution failed"),
-                input_hashes={"source": sha256_file(source)},
-                duration_ms=int((time.monotonic() - started) * 1000),
-                stderr=result.get("stderr", ""),
+        parameters = json.loads(args.parameters_json) if args.parameters_json else None
+        if parameters is not None and not isinstance(parameters, dict):
+            raise TypeError("--parameters-json must contain an object")
+        input_hashes = {"source": sha256_file(source)}
+        parameters_hash = canonical_parameters_hash(parameters)
+        if parameters is not None:
+            input_hashes["parameters"] = parameters_hash
+        with exclusive_build(Path.cwd(), output):
+            cached = None if args.force else current_manifest(
+                Path.cwd(), output, parameters_hash=parameters_hash
             )
-            return 0
+            if cached is not None:
+                input_hashes["sourceClosure"] = cached["sourceClosureHash"]
+                input_artifacts = [
+                    {"path": item["path"], "role": f"source:{index}", "sha256": sha256_file(item["path"])}
+                    for index, item in enumerate(cached["dependencies"])
+                ]
+                emit(
+                    "cad_build_step",
+                    {
+                        "step": str(output),
+                        "sidecars": [],
+                        "exitCode": 0,
+                        "stdout": "",
+                        "stderr": "",
+                        "cache": "hit",
+                        "sourceFiles": [item["path"] for item in cached["dependencies"]],
+                    },
+                    input_hashes=input_hashes,
+                    input_artifacts=input_artifacts,
+                    artifacts=[{"path": str(output), "kind": "step", "sha256": cached["outputHash"]}],
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                )
+                return 0
 
-        emit(
-            "cad_build_step",
-            {
-                "step": str(output),
-                "sidecars": [],
-                "exitCode": 0,
-                "stdout": result.get("stdout", ""),
-                "stderr": result.get("stderr", ""),
-            },
-            input_hashes={"source": sha256_file(source)},
-            artifacts=[
-                {"path": str(output), "kind": "step", "sha256": sha256_file(output)}
-            ],
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
+            result = run_source(source, output, parameters=parameters)
+            if result.get("exitCode", 1) != 0:
+                emit_error(
+                    "cad_build_step",
+                    result.get("error", "model execution failed"),
+                    input_hashes=input_hashes,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    stderr=result.get("stderr", ""),
+                )
+                return 0
+
+            manifest = make_manifest(
+                source_files=result.get("sourceFiles") or [str(source.resolve())],
+                root=Path.cwd(),
+                output=output,
+                parameters_hash=parameters_hash,
+            )
+            write_manifest(Path.cwd(), output, manifest)
+            input_hashes["sourceClosure"] = manifest["sourceClosureHash"]
+            input_artifacts = [
+                {"path": item["path"], "role": f"source:{index}", "sha256": sha256_file(item["path"])}
+                for index, item in enumerate(manifest["dependencies"])
+            ]
+            emit(
+                "cad_build_step",
+                {
+                    "step": str(output),
+                    "sidecars": [],
+                    "exitCode": 0,
+                    "stdout": result.get("stdout", ""),
+                    "stderr": result.get("stderr", ""),
+                    "cache": "miss",
+                    "sourceFiles": result.get("sourceFiles", []),
+                },
+                input_hashes=input_hashes,
+                input_artifacts=input_artifacts,
+                artifacts=[
+                    {"path": str(output), "kind": "step", "sha256": manifest["outputHash"]}
+                ],
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
         return 0
     except Exception as exc:  # pragma: no cover - best-effort envelope
         emit_error(
@@ -74,6 +120,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect(args: argparse.Namespace) -> int:
+    from .geometry import inspect_geometry
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
@@ -101,7 +149,30 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
         return 0
 
 
+def _cmd_mesh(args: argparse.Namespace) -> int:
+    from .mesh import mesh_document
+
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    try:
+        emit(
+            "cad_mesh_document",
+            mesh_document(artifact),
+            input_hashes={"artifact": sha256_file(artifact)},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            "cad_mesh_document",
+            str(exc),
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
 def _cmd_render(args: argparse.Namespace) -> int:
+    from .render import render_views
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     views = args.views.split(",") if args.views else None
@@ -114,6 +185,10 @@ def _cmd_render(args: argparse.Namespace) -> int:
             height=args.height,
             display=args.display,
             labels=args.labels,
+            focus=json.loads(args.focus_json) if args.focus_json else None,
+            hide=json.loads(args.hide_json) if args.hide_json else None,
+            explode=args.explode,
+            ghost_others=args.ghost_others,
         )
         artifacts = [
             {"path": view["path"], "kind": "visual", "sha256": sha256_file(view["path"])}
@@ -138,6 +213,8 @@ def _cmd_render(args: argparse.Namespace) -> int:
 
 
 def _cmd_probe(args: argparse.Namespace) -> int:
+    from .probe import ProbeError, run_probe
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
@@ -177,6 +254,8 @@ def _cmd_probe(args: argparse.Namespace) -> int:
 
 
 def _cmd_measure(args: argparse.Namespace) -> int:
+    from .geometry import measure
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
@@ -200,6 +279,8 @@ def _cmd_measure(args: argparse.Namespace) -> int:
 
 
 def _cmd_section(args: argparse.Namespace) -> int:
+    from .section import render_section
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
@@ -236,6 +317,8 @@ def _cmd_section(args: argparse.Namespace) -> int:
 
 
 def _cmd_compare(args: argparse.Namespace) -> int:
+    from .compare import compare_geometry
+
     started = time.monotonic()
     before, after = Path(args.before), Path(args.after)
     try:
@@ -279,6 +362,8 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 
 
 def _cmd_assembly_tree(args: argparse.Namespace) -> int:
+    from .assembly import assembly_tree
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
@@ -306,6 +391,8 @@ def _cmd_assembly_tree(args: argparse.Namespace) -> int:
 
 
 def _cmd_inspect_interference(args: argparse.Namespace) -> int:
+    from .interference import inspect_interference
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
@@ -334,6 +421,8 @@ def _cmd_inspect_interference(args: argparse.Namespace) -> int:
 
 
 def _cmd_scan_sections(args: argparse.Namespace) -> int:
+    from .sections import scan_sections
+
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
@@ -364,6 +453,8 @@ def _cmd_scan_sections(args: argparse.Namespace) -> int:
 
 
 def _cmd_derive_analysis_model(args: argparse.Namespace) -> int:
+    from .analysis_model import run_derivation
+
     started = time.monotonic()
     try:
         record = run_derivation(args.spec, args.output_dir)
@@ -393,6 +484,8 @@ def _cmd_derive_analysis_model(args: argparse.Namespace) -> int:
 
 
 def _cmd_export(args: argparse.Namespace) -> int:
+    from .export import export_artifact
+
     started = time.monotonic()
     source = Path(args.source)
     try:
@@ -417,6 +510,8 @@ def _cmd_export(args: argparse.Namespace) -> int:
 
 
 def _cmd_capability(args: argparse.Namespace) -> int:
+    from .capability import capabilities
+
     started = time.monotonic()
     emit(
         "cadctl_capability",
@@ -432,6 +527,8 @@ def _load_spec(spec_path: str) -> dict:
 
 
 def _cmd_drawing(args: argparse.Namespace) -> int:
+    from .drawing import generate_drawing, validate_drawing_spec
+
     started = time.monotonic()
     try:
         spec = _load_spec(args.spec)
@@ -501,6 +598,8 @@ def _cmd_inspect_surfaces(args: argparse.Namespace) -> int:
 
 
 def _cmd_present(args: argparse.Namespace) -> int:
+    from .presentation import run_presentation
+
     started = time.monotonic()
     try:
         payload = run_presentation(args.spec, args.output_dir, stage=args.stage)
@@ -546,6 +645,8 @@ def _cmd_present(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
+    from .doctor import doctor
+
     started = time.monotonic()
     payload = doctor()
     if args.json:
@@ -556,6 +657,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
 
 def _cmd_optimize(args: argparse.Namespace) -> int:
+    from .simulation.topology import run_topology
+
     started = time.monotonic()
     try:
         import json as _json
@@ -582,6 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source", required=True)
     p.add_argument("--output", required=True)
     p.add_argument("--force", action="store_true")
+    p.add_argument("--parameters-json")
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("inspect", help="Return STEP geometry facts")
@@ -589,13 +693,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
     p.set_defaults(func=_cmd_inspect)
 
+    p = sub.add_parser("mesh", help="Return a compact desktop preview mesh")
+    p.add_argument("--artifact", required=True)
+    p.set_defaults(func=_cmd_mesh)
+
     p = sub.add_parser("render", help="Render orthographic STEP views")
     p.add_argument("--artifact", required=True)
     p.add_argument("--out-dir", required=True)
     p.add_argument("--views", default=None, help="Comma-separated subset of " + ",".join(VIEW_NAMES))
     p.add_argument("--width", type=int, default=640)
     p.add_argument("--height", type=int, default=480)
-    p.add_argument("--display", default="solid", choices=("solid",))
+    p.add_argument("--display", default="solid", choices=("solid", "solid_with_edges", "hidden_edges", "wireframe"))
+    p.add_argument("--focus-json", default=None, help="JSON array of occurrence refs or unique aliases")
+    p.add_argument("--hide-json", default=None, help="JSON array of occurrence refs or unique aliases")
+    p.add_argument("--explode", type=float, default=0.0, help="Exploded-view distance, 0..5")
+    p.add_argument("--ghost-others", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--labels", action=argparse.BooleanOptionalAction, default=True, help="Render view names and the world-frame triad (use --no-labels for a clean render)")
     p.set_defaults(func=_cmd_render)
 

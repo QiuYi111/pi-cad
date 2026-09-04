@@ -1,9 +1,11 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
 import YAML from "yaml";
 import { createJiti } from "jiti";
 
 const chunks = [];
-for await (const chunk of process.stdin) chunks.push(chunk);
+if (process.argv[2]) chunks.push(await readFile(process.argv[2]));
+else for await (const chunk of process.stdin) chunks.push(chunk);
 const source = Buffer.concat(chunks).toString("utf8");
 const value = YAML.parse(source);
 if (!value || value.schema !== 1 || typeof value.id !== "string" || typeof value.version !== "string" || !value.workflow) {

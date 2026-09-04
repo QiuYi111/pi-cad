@@ -65,6 +65,9 @@ const PROFILES: Record<string, ObservationProfile> = {
       { key: "bbox", value: bboxFact(p) },
       { key: "units", value: String(p.units ?? "mm") },
       ...(p.solidCount !== undefined ? [{ key: "solids", value: String(p.solidCount) }] : []),
+      ...(p.validity && typeof p.validity === "object"
+        ? [{ key: "validity", value: (p.validity as { ok?: unknown }).ok === true ? "valid" : "invalid" }]
+        : []),
       ...(p.occurrenceCount !== undefined
         ? [{ key: "occurrences", value: String(p.occurrenceCount) }]
         : []),

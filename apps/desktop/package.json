@@ -69,7 +69,8 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        "nsis"
+        "nsis",
+        "portable"
       ],
       "artifactName": "Pi-CAD-Setup-${arch}.${ext}"
     },
@@ -108,6 +109,9 @@
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "shortcutName": "Pi-CAD"
+    },
+    "portable": {
+      "artifactName": "Pi-CAD-Portable-${arch}.${ext}"
     }
   },
   "allowScripts": {}

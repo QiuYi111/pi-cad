@@ -24,6 +24,37 @@ describe("Prime activity projection", () => {
     ] });
     expect(messages[0]).toMatchObject({ text: "Done", stream: { state: "complete" } });
   });
+
+  it("replaces the visible conversation when a saved session is selected", () => {
+    const messages = reducePrimeEvent([{ id: "old", role: "user", text: "old", createdAt: 1 }], {
+      type: "desktop_session_loaded",
+      messages: [
+        { id: "u1", role: "user", content: "build a bracket", timestamp: 2 },
+        { id: "a1", role: "assistant", content: [{ type: "text", text: "Starting now" }], timestamp: 3 },
+      ],
+    });
+    expect(messages.map((message) => message.text)).toEqual(["build a bracket", "Starting now"]);
+  });
+
+  it("shows provider failures instead of completing an empty assistant row", () => {
+    let messages = reducePrimeEvent([], { type: "agent_start" });
+    messages = reducePrimeEvent(messages, {
+      type: "message_end",
+      message: {
+        id: "expired",
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "Provided authentication token is expired.",
+      },
+    });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      id: "expired",
+      text: "Provided authentication token is expired.",
+      stream: { state: "error" },
+    });
+  });
   it("turns a CAD build call into one completed semantic card", () => {
     let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "b1", toolName: "ipython", args: { code: "await cad.model.build(source, output)" } });
     expect(messages[0]?.activity).toMatchObject({ kind: "build", state: "running" });
@@ -50,6 +81,12 @@ describe("Prime activity projection", () => {
   it("shows the authoritative review result", () => {
     const messages = reducePrimeEvent([], { type: "message_end", message: { role: "custom", customType: "pi-cad.review-completed", details: { reviewId: "r1", status: "fail", result: { summary: "hinge collides" } } } });
     expect(messages[0]?.activity).toMatchObject({ kind: "review", state: "failed", summary: "hinge collides" });
+  });
+
+  it("labels review submission as requested until the verdict arrives", () => {
+    let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "r1", toolName: "ipython", args: { code: "await cad.review.submit(final_commit)" } });
+    messages = reducePrimeEvent(messages, { type: "tool_execution_end", toolCallId: "r1", result: { details: { reviewId: "review-1", status: "running" } } });
+    expect(messages[0]?.activity).toMatchObject({ kind: "review", state: "success", title: "Review requested" });
   });
 
   it("keeps structured simulation results available to the viewer", () => {

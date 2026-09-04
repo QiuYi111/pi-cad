@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -63,15 +64,18 @@ for (const [packageName, directory] of [["pi-agent-core", "agent"], ["pi-ai", "a
   await cp(join(primeDestination, "packages", directory, "dist"), join(target, "dist"), { recursive: true });
 }
 
+const archivePath = join(destination, "runtime-bundle.tar.gz");
+execFileSync("tar", ["-czf", archivePath, "-C", destination, "pi-cad", "prime-agent"], { stdio: "inherit" });
+const runtimeId = createHash("sha256").update(await readFile(archivePath)).digest("hex");
 const manifest = {
   schema: 1,
+  runtimeId,
   stagedAt: new Date().toISOString(),
   piCadVersion: JSON.parse(await readFile(join(repository, "package.json"), "utf8")).version,
   primeVersion: JSON.parse(await readFile(join(prime, "packages/coding-agent/package.json"), "utf8")).version,
   licenses: ["Pi-CAD: MIT", "Prime Agent: MIT", "zeromq: MIT AND MPL-2.0", "photon-node: Apache-2.0"],
 };
 await writeFile(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-execFileSync("tar", ["-czf", join(destination, "runtime-bundle.tar.gz"), "-C", destination, "pi-cad", "prime-agent"], { stdio: "inherit" });
 await rm(piCadDestination, { recursive: true, force: true });
 await rm(primeDestination, { recursive: true, force: true });
 console.log(`Staged desktop runtime at ${destination}`);

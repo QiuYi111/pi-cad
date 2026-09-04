@@ -51,7 +51,7 @@ const typed = (
 };
 
 export const CadProbeParametersSchema = Type.Union([
-  typed("visual", target({ views: Type.Optional(Type.Array(Type.String())), width: Type.Optional(Type.Integer({ minimum: 64 })), height: Type.Optional(Type.Integer({ minimum: 64 })), labels: Type.Optional(Type.Boolean()), display: Type.Optional(Type.Literal("solid")) })),
+  typed("visual", target({ views: Type.Optional(Type.Array(Type.String())), width: Type.Optional(Type.Integer({ minimum: 64 })), height: Type.Optional(Type.Integer({ minimum: 64 })), labels: Type.Optional(Type.Boolean()), display: Type.Optional(Type.Enum({ solid: "solid", solid_with_edges: "solid_with_edges", hidden_edges: "hidden_edges", wireframe: "wireframe" })), focus: Type.Optional(Type.Array(Type.String({ minLength: 1 }))), hide: Type.Optional(Type.Array(Type.String({ minLength: 1 }))), explode: Type.Optional(Type.Number({ minimum: 0, maximum: 5 })), ghostOthers: Type.Optional(Type.Boolean()) })),
   typed("geometry", target({ output: Type.Optional(Type.String()) })),
   typed("surfaces", target({ labels: Type.Optional(Type.Boolean()), views: Type.Optional(Type.Array(Type.String())) })),
   typed("measure", target({ metric: Type.String({ minLength: 1 }), a: Type.String({ minLength: 1 }), b: Type.Optional(Type.String()) }), true, true),
@@ -87,7 +87,7 @@ export const CadRecallObservationParametersSchema = Type.Object(
 );
 
 export interface CadProbeParams {
-  preset: (typeof CAD_PROBE_PRESET_NAMES)[keyof typeof CAD_PROBE_PRESET_NAMES];
+  preset: string;
   args?: Record<string, unknown>;
   subject?: "current" | "baseline" | AgentArtifactSubject;
   purpose?: string;
@@ -149,7 +149,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
   return persistProbeObservation(cwd, params.preset, rendered);
 }
 
-function applyPresetDefaults(preset: CadProbeParams["preset"], args: Record<string, unknown>): void {
+function applyPresetDefaults(preset: string, args: Record<string, unknown>): void {
   // A visual probe is an engineering observation, not a presentation shot:
   // always return the complete orthographic set unless the caller explicitly
   // asks for a subset.  The renderer stamps each image with its view name.

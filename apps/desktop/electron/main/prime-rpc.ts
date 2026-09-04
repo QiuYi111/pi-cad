@@ -99,7 +99,32 @@ export class PrimeRpc extends EventEmitter {
   }
 
   async prompt(message: string, images?: Array<{ data: string; mimeType: string }>) {
-    await this.request("prompt", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
+    const payload = { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) };
+    try {
+      await this.request("prompt", payload);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("queued session input is suspended")) throw error;
+      await this.request("steer", payload);
+    }
+  }
+
+  async steer(message: string, images?: Array<{ data: string; mimeType: string }>) {
+    await this.request("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
+  }
+
+  async newSession(): Promise<unknown[]> {
+    await this.request("new_session");
+    const state = await this.request("get_state");
+    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    return (await this.request("get_messages"))?.messages || [];
+  }
+
+  async switchSession(path: string): Promise<unknown[]> {
+    const result = await this.request("switch_session", { sessionPath: sandboxSessionPath(path) });
+    if (result?.cancelled) throw new Error("Session switch was cancelled.");
+    const state = await this.request("get_state");
+    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    return (await this.request("get_messages"))?.messages || [];
   }
 
   async getModels(): Promise<ModelChoice[]> {
@@ -135,6 +160,12 @@ export class PrimeRpc extends EventEmitter {
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear();
   }
+}
+
+export function sandboxSessionPath(path: string): string {
+  const name = path.replaceAll("\\", "/").split("/").at(-1) || "";
+  if (!/^[A-Za-z0-9._-]+\.jsonl$/.test(name)) throw new Error("Invalid session path.");
+  return `/workspace/.prime-sessions/${name}`;
 }
 
 export async function ensureRuntimeReady(

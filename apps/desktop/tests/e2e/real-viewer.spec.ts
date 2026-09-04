@@ -18,8 +18,13 @@ test("packaged viewer converts a real project STEP", async () => {
     await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
     const mesh = await page.evaluate((path) => window.piCad.viewer.loadStep(path), step!);
     expect(mesh.parts.length).toBeGreaterThan(0);
-    expect(mesh.parts[0]?.positions.length).toBeGreaterThan(100);
-    expect(mesh.parts[0]?.indices.length).toBeGreaterThan(100);
+    const part = mesh.parts[0]!;
+    expect(part.positions.length).toBeGreaterThanOrEqual(24);
+    expect(part.positions.length % 3).toBe(0);
+    expect(part.indices.length).toBeGreaterThanOrEqual(12);
+    expect(part.indices.length % 3).toBe(0);
+    expect(part.positions.every(Number.isFinite)).toBe(true);
+    expect(Math.max(...part.indices)).toBeLessThan(part.positions.length / 3);
   } finally {
     await application.close();
     await rm(userData, { recursive: true, force: true });

@@ -16,7 +16,9 @@ import { CadProjectStore, sha256File } from "./store.ts";
 import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
 import { assertLinuxRuntime } from "./platform.ts";
 import { runProcess } from "./process-runner.ts";
+import { isWarmCadctlCommand, runWarmCadctl } from "./cadctl-worker.ts";
 import { harnessRunDirectory, harnessStorageRoot } from "../authority/storage.ts";
+import type { ModelParameterValue } from "./model-parameters.ts";
 
 export const DEFAULT_VIEWS = ["iso", "front", "back", "left", "right", "top", "bottom"];
 
@@ -57,15 +59,30 @@ async function runCadctl(
   options: CadctlOptions,
 ): Promise<CadEventEnvelope> {
   const python = pythonInvocation(options.extra, options.cwd);
-  const result = await runProcess({
-    command: python.command,
-    args: [...python.prefixArgs, "-m", "cadctl", ...args],
-    cwd: options.cwd,
-    env: cadctlEnv(options.cwd),
-    timeoutMs: options.timeoutMs ?? 180_000,
-    maxStdoutBytes: 16 * 1024 * 1024,
-    maxStderrBytes: 1024 * 1024,
-  });
+  const timeoutMs = options.timeoutMs ?? 180_000;
+  const maxStdoutBytes = 16 * 1024 * 1024;
+  const maxStderrBytes = 1024 * 1024;
+  const useWorker = process.env.PI_CAD_CADCTL_TRANSPORT !== "process" && isWarmCadctlCommand(args[0]);
+  const result = useWorker
+    ? await runWarmCadctl(
+        {
+          key: `${python.command}\0${python.prefixArgs.join("\0")}`,
+          command: python.command,
+          args: [...python.prefixArgs, "-m", "cadctl.worker"],
+          cwd: packageRoot(),
+          env: cadctlEnv(),
+        },
+        { args, cwd: options.cwd, timeoutMs, maxStdoutBytes, maxStderrBytes },
+      )
+    : await runProcess({
+        command: python.command,
+        args: [...python.prefixArgs, "-m", "cadctl", ...args],
+        cwd: options.cwd,
+        env: cadctlEnv(options.cwd),
+        timeoutMs,
+        maxStdoutBytes,
+        maxStderrBytes,
+      });
   if (result.exitCode !== 0 || result.terminationReason) {
     const diagnostic = [result.stderr, result.stdout].filter(Boolean).join("\n").slice(-8192);
     throw new Error(
@@ -89,6 +106,7 @@ export interface CapabilityBuildInput {
   source: string;
   output: string;
   force?: boolean;
+  parameters?: Record<string, ModelParameterValue>;
 }
 
 export async function buildStep(
@@ -105,6 +123,7 @@ export async function buildStep(
     "--output",
     output,
   ];
+  if (input.parameters) args.push("--parameters-json", JSON.stringify(input.parameters));
   if (input.force) args.push("--force");
   return runCadctl(args, { cwd, timeoutMs });
 }
@@ -125,8 +144,12 @@ export interface VisualOptions {
   views?: string[];
   width?: number;
   height?: number;
-  display?: "solid";
+  display?: "solid" | "solid_with_edges" | "hidden_edges" | "wireframe";
   labels?: boolean;
+  focus?: string[];
+  hide?: string[];
+  explode?: number;
+  ghostOthers?: boolean;
 }
 
 export async function inspectVisual(
@@ -155,6 +178,10 @@ export async function inspectVisual(
   // Agent-facing build evidence needs view identity and a world-frame cue;
   // callers can still pass labels:false for a clean presentation render.
   if (options.labels ?? true) args.push("--labels");
+  if (options.focus?.length) args.push("--focus-json", JSON.stringify(options.focus));
+  if (options.hide?.length) args.push("--hide-json", JSON.stringify(options.hide));
+  if (options.explode !== undefined) args.push("--explode", String(options.explode));
+  if (options.ghostOthers === false) args.push("--no-ghost-others");
   return runCadctl(args, { cwd, timeoutMs });
 }
 

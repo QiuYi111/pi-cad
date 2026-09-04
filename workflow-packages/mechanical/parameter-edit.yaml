@@ -1,0 +1,36 @@
+schema: 1
+id: mechanical.parameter-edit
+description: Apply user-selected values to an existing registered parametric model.
+tags: [cad, mechanical, parameters]
+version: 1.0.0
+workflow:
+  schema: 1
+  id: mechanical.parameter-edit
+  version: 1.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: adjust
+  phases:
+    adjust:
+      purpose: Rebuild the registered model with the values selected by the user.
+      guidance: Apply the selected values to the registered deterministic source, then preserve the validated STEP and complete seven-view observation.
+      actions: [cad_build_step, transition]
+      grants: [file_read, model_build, observe, transition]
+      writeScopes: [project:deliverable, run:observation]
+      recordObligations: []
+      evidenceObligations:
+        - {ref: parameter-visual, type: visual, closeWith: cad_build_step}
+        - {ref: parameter-geometry, type: geometry, closeWith: cad_build_step}
+      contextProviders: [kernel.current-action, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions: {applied: {target: done, requiresPhaseObligations: true}}
+    done:
+      purpose: Preserve the rebuilt parametric model.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

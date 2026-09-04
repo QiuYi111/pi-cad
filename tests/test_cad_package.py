@@ -204,6 +204,37 @@ class CadPackageTests(unittest.TestCase):
             self.assertEqual(artifact.path, Path("build/part.step"))
             attach.assert_awaited_once_with(response["images"])
 
+    def test_model_build_forwards_parameter_definitions(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "build" / "part.step"
+            output.parent.mkdir()
+            output.write_bytes(b"STEP")
+            response = {
+                "build": {"ok": True, "artifacts": [{"kind": "step", "sha256": "b" * 64}]},
+                "images": [{"data": base64.b64encode(b"PNG").decode(), "mimeType": "image/png"}],
+            }
+            request = AsyncMock(return_value=response)
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), \
+                    patch.object(model_module, "request", request), \
+                    patch.object(model_module, "_attach_images", AsyncMock()):
+                asyncio.run(cad.model.build(
+                    "part.py",
+                    "build/part.step",
+                    parameters={
+                        "width": {"default": 40, "min": 20, "max": 80, "step": 1, "unit": "mm"},
+                    },
+                ))
+            request.assert_awaited_once_with(
+                "model-build",
+                source="part.py",
+                output="build/part.step",
+                force=False,
+                parameters={
+                    "width": {"default": 40, "min": 20, "max": 80, "step": 1, "unit": "mm"},
+                },
+            )
+
     def test_model_build_emits_prime_rich_image_output(self) -> None:
         model_module = importlib.import_module("cad.model")
         attach = Mock()
@@ -240,6 +271,48 @@ class CadPackageTests(unittest.TestCase):
         self.assertEqual(context["candidate"].sha256, "c" * 64)
         self.assertEqual(attach.call_count, 1)
         self.assertTrue(attach.call_args.kwargs["raw"])
+
+    def test_probe_visual_preset_uses_the_generic_interface_and_attaches_results(self) -> None:
+        probe_module = importlib.import_module("cad.probe")
+        artifact = cad.ArtifactRef(Path("build/candidate.step"), "c" * 64, "candidate")
+        response = {
+            "value": {"viewCount": 1},
+            "observationId": "observation-1",
+            "artifactHash": "c" * 64,
+            "images": [{"name": "right", "mimeType": "image/png", "data": base64.b64encode(b"view").decode()}],
+        }
+        request = AsyncMock(return_value=response)
+        attach = AsyncMock()
+        with patch.object(probe_module, "request", request), patch.object(probe_module, "_attach_images", attach):
+            result = asyncio.run(cad.probe.run(
+                subject=artifact,
+                preset="visual",
+                args={"views": ["right"], "width": 800, "height": 600, "labels": True},
+            ))
+        request.assert_awaited_once_with(
+            "probe", subject=artifact.__cad_snapshot__(), preset="visual",
+            purpose="", args={"views": ["right"], "width": 800, "height": 600, "labels": True},
+        )
+        attach.assert_awaited_once_with(response["images"])
+        self.assertEqual(result.value, {"viewCount": 1})
+        self.assertEqual(result.observation_id, "observation-1")
+        self.assertFalse(hasattr(cad.probe, "render"))
+
+    def test_probe_registered_preset_needs_no_program(self) -> None:
+        probe_module = importlib.import_module("cad.probe")
+        artifact = cad.ArtifactRef(Path("build/candidate.step"), "c" * 64, "candidate")
+        request = AsyncMock(return_value={"value": {"value": 12.5, "units": "mm"}, "observationId": "observation-2"})
+        with patch.object(probe_module, "request", request):
+            result = asyncio.run(cad.probe.run(
+                subject=artifact,
+                preset="measure",
+                args={"metric": "distance", "a": "#f0", "b": "#f1"},
+            ))
+        self.assertEqual(result.value["value"], 12.5)
+        request.assert_awaited_once_with(
+            "probe", subject=artifact.__cad_snapshot__(), preset="measure", purpose="",
+            args={"metric": "distance", "a": "#f0", "b": "#f1"},
+        )
 
     def test_model_build_fails_on_inner_backend_error(self) -> None:
         model_module = importlib.import_module("cad.model")

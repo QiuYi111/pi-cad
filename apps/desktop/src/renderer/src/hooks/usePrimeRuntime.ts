@@ -29,10 +29,12 @@ export function usePrimeRuntime() {
 
   const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>, prepare?: () => Promise<void>) => {
     dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text });
-    dispatch({ type: "desktop_agent_pending" });
+    const steering = status.state === "streaming";
+    if (!steering) dispatch({ type: "desktop_agent_pending" });
     try {
       await prepare?.();
-      await window.piCad.runtime.prompt(text, images);
+      if (steering) await window.piCad.runtime.steer(text, images);
+      else await window.piCad.runtime.prompt(text, images);
     }
     catch (error) {
       dispatch({ type: "desktop_agent_error", message: error instanceof Error ? error.message : String(error) });
@@ -40,5 +42,18 @@ export function usePrimeRuntime() {
     }
   };
 
-  return { messages, status, prompt, start: () => window.piCad.runtime.start(), stop: () => window.piCad.runtime.stop(), abort: () => window.piCad.runtime.abort() };
+  const newSession = async () => {
+    const loaded = await window.piCad.runtime.newSession();
+    dispatch({ type: "desktop_session_loaded", messages: loaded });
+  };
+
+  const switchSession = async (path: string) => {
+    const loaded = await window.piCad.runtime.switchSession(path);
+    dispatch({ type: "desktop_session_loaded", messages: loaded });
+  };
+  const clearConversation = () => dispatch({ type: "desktop_session_loaded", messages: [] });
+
+  return { messages, status, prompt, newSession, switchSession, clearConversation, start: () => window.piCad.runtime.start(), stop: () => window.piCad.runtime.stop(), abort: () => window.piCad.runtime.abort() };
 }
+
+export type PrimeRuntimeController = ReturnType<typeof usePrimeRuntime>;

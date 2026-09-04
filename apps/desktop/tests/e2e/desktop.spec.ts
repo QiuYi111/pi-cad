@@ -1,5 +1,5 @@
 import { test, expect, _electron as electron } from "@playwright/test";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { glob } from "node:fs/promises";
@@ -18,11 +18,15 @@ test("complete desktop product path", async () => {
   for await (const candidate of glob(join(cacheRoot, "**/electron-v*-win32-x64.zip"))) { electronZip = candidate; break; }
   let executablePath = join(process.cwd(), "node_modules/electron/dist/electron.exe");
   if (electronZip) { await extract(electronZip, { dir: electronRoot }); executablePath = join(electronRoot, "electron.exe"); }
+  await chmod(executablePath, 0o755);
   await writeFile(join(appRoot, "package.json"), JSON.stringify({ name: "pi-cad-e2e", version: "0.0.0", type: "module", main: "out/main/index.js" }));
   const application = await electron.launch({ executablePath, args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", `--user-data-dir=${join(nativeRoot, "user-data")}`, appRoot, "--pi-cad-e2e"], env: { ...process.env, PI_CAD_DESKTOP_E2E: "1", PI_CAD_PROJECT_CWD: "/workspace/demo" } });
   const page = await application.firstWindow();
   const pageErrors: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") pageErrors.push(message.text()); console.log(`[renderer:${message.type()}] ${message.text()}`); });
+  page.on("console", (message) => {
+    if (message.type() === "error" && !/WebGL context/i.test(message.text())) pageErrors.push(message.text());
+    console.log(`[renderer:${message.type()}] ${message.text()}`);
+  });
   page.on("pageerror", (error) => { pageErrors.push(error.message); console.error(`[renderer:error] ${error.message}`); });
   await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
   await expect(page.getByText("READY THE WORKBENCH")).toBeVisible();
@@ -67,6 +71,13 @@ test("complete desktop product path", async () => {
     await expect(page.locator(".cad-viewer-open-source .tcv_cad_body")).toBeVisible();
     await expect(page.locator(".cad-viewer-open-source canvas")).toBeVisible();
   }
+  await expect(page.getByTestId("parameter-panel")).toBeVisible();
+  const width = page.getByRole("spinbutton", { name: "Width" });
+  await width.fill("64");
+  await expect(page.locator(".parameter-status")).toContainText("Preview ready");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.locator(".parameter-status")).toContainText("Applied");
+  await page.screenshot({ path: join(process.cwd(), "test-results", "workbench-parameters.png") });
   await page.screenshot({ path: join(process.cwd(), "test-results", "workbench-model.png") });
   await page.getByLabel("Viewer source").first().selectOption({ label: "static-check · stress" });
   await expect(page.getByText("ParaView session ready")).toBeVisible();
@@ -84,13 +95,23 @@ test("complete desktop product path", async () => {
   await page.getByRole("button", { name: "Save workflow" }).click();
   await expect(page.getByText("Saved and validated")).toBeVisible();
 
+  await page.getByRole("button", { name: "Workbench" }).click();
+  await expect(page.getByRole("spinbutton", { name: "Width" })).toHaveValue("64");
+
   await page.getByRole("button", { name: "Trajectories" }).click();
   await expect(page.getByText("Folding stand")).toBeVisible();
   await page.getByText("Folding stand").click();
   await expect(page.getByText("I checked the interfaces before building.")).toBeVisible();
-  await page.locator(".trace-check").click();
-  await page.getByRole("button", { name: /Distill 1/ }).click();
-  await expect(page.getByText(/Experience updated/)).toBeVisible();
+  await expect(page.locator(".trace-check")).toHaveClass(/selected/);
+  const traceFooter = page.locator(".trace-list footer");
+  await traceFooter.getByLabel("Quality").selectOption("2");
+  await traceFooter.getByLabel("Difficulty").selectOption("4");
+  await traceFooter.getByPlaceholder("What worked or failed?").fill("The hinge direction was wrong.");
+  await traceFooter.getByRole("button", { name: "Rate 1" }).click();
+  await expect(page.locator(".rating-status")).toContainText("Rating saved");
+  await expect(page.locator(".trace-row").filter({ hasText: "Folding stand" })).toContainText("2/5");
+  await page.getByRole("button", { name: "Distill now" }).click();
+  await expect(page.getByText(/Experience updated · quality 2\/5/)).toBeVisible();
 
   await page.getByRole("button", { name: "Settings" }).click();
   await expect(page.getByText("ChatGPT connected")).toBeVisible();

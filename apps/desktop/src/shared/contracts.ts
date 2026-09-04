@@ -28,9 +28,12 @@ export interface DependencyCheck {
 }
 
 export interface RuntimeStatus {
-  state: "idle" | "checking" | "installing" | "starting" | "ready" | "streaming" | "error";
+  state: "idle" | "checking" | "installing" | "action-required" | "starting" | "ready" | "streaming" | "error";
   checks: DependencyCheck[];
   message?: string;
+  progress?: number;
+  elapsedSeconds?: number;
+  action?: "restart-windows" | "initialize-ubuntu" | "retry";
   sessionId?: string;
 }
 
@@ -126,7 +129,10 @@ export interface TraceSummary {
   toolCalls: number;
   tokens?: number;
   outcome?: string;
+  evaluation?: { quality: number; difficulty: number; feedback?: string | null };
 }
+
+export interface RatingStatus { rated: number; triggered: boolean; pendingTokens: number; thresholdTokens: number; message: string }
 
 export interface DistillationStatus {
   state: "idle" | "running" | "complete" | "failed";
@@ -190,6 +196,37 @@ export interface ViewerCatalog {
   currentRun: null | { id: string; phase: string; status: string; updatedAt: string; artifacts: ViewerArtifact[] };
   commits: ViewerCommit[];
   simulationRuns: ViewerSimulationRun[];
+  parameterManifests: StoredModelParameterManifest[];
+}
+
+export type ModelParameterValue = number | string | boolean;
+export type ModelParameterType = "number" | "integer" | "boolean" | "enum";
+export interface ModelParameterOption { value: string; label?: string }
+export interface ModelParameterDefinition {
+  id: string;
+  type: ModelParameterType;
+  default: ModelParameterValue;
+  value: ModelParameterValue;
+  min?: number;
+  max?: number;
+  step?: number;
+  options?: ModelParameterOption[];
+  unit?: string;
+  label?: string;
+  description?: string;
+  group?: string;
+}
+export interface ModelParameterManifestV1 {
+  schema: 1;
+  modelId: string;
+  source: { path: string; sha256: string; entrypoint: "build" };
+  output: { path: string; sha256: string };
+  parameters: ModelParameterDefinition[];
+}
+export interface StoredModelParameterManifest {
+  path: string;
+  sha256: string;
+  manifest: ModelParameterManifestV1;
 }
 
 export type ViewerSource =
@@ -223,6 +260,9 @@ export interface DesktopApi {
     start(): Promise<RuntimeStatus>;
     stop(): Promise<void>;
     prompt(message: string, images?: Array<{ data: string; mimeType: string }>): Promise<void>;
+    steer(message: string, images?: Array<{ data: string; mimeType: string }>): Promise<void>;
+    newSession(): Promise<unknown[]>;
+    switchSession(path: string): Promise<unknown[]>;
     abort(): Promise<void>;
     getModels(): Promise<ModelChoice[]>;
     setModel(provider: string, model: string): Promise<void>;
@@ -248,6 +288,8 @@ export interface DesktopApi {
     loadStep(path: string): Promise<MeshDocument>;
     chooseStep(): Promise<string | null>;
     catalog(): Promise<ViewerCatalog>;
+    previewParameters(manifestPath: string, values: Record<string, ModelParameterValue>): Promise<MeshDocument>;
+    applyParameters(manifestPath: string, values: Record<string, ModelParameterValue>): Promise<void>;
     openParaView(path: string): Promise<ParaViewSession>;
     stopParaView(): Promise<void>;
     openParaViewDesktop(path: string): Promise<void>;
@@ -255,6 +297,7 @@ export interface DesktopApi {
   traces: {
     list(): Promise<TraceSummary[]>;
     read(path: string): Promise<unknown[]>;
+    rate(paths: string[], evaluation: { quality: number; difficulty: number; feedback?: string }): Promise<RatingStatus>;
     distill(paths: string[], evaluation: { quality: number; difficulty: number }): Promise<DistillationStatus>;
     onDistillation(listener: (status: DistillationStatus) => void): () => void;
   };
@@ -272,6 +315,9 @@ export const IPC = {
   runtimeStart: "runtime:start",
   runtimeStop: "runtime:stop",
   runtimePrompt: "runtime:prompt",
+  runtimeSteer: "runtime:steer",
+  runtimeNewSession: "runtime:new-session",
+  runtimeSwitchSession: "runtime:switch-session",
   runtimeAbort: "runtime:abort",
   runtimeModels: "runtime:models",
   runtimeSetModel: "runtime:set-model",
@@ -291,11 +337,14 @@ export const IPC = {
   viewerLoadStep: "viewer:load-step",
   viewerChooseStep: "viewer:choose-step",
   viewerCatalog: "viewer:catalog",
+  viewerPreviewParameters: "viewer:preview-parameters",
+  viewerApplyParameters: "viewer:apply-parameters",
   viewerOpenParaView: "viewer:open-paraview",
   viewerStopParaView: "viewer:stop-paraview",
   viewerOpenParaViewDesktop: "viewer:open-paraview-desktop",
   tracesList: "traces:list",
   tracesRead: "traces:read",
+  tracesRate: "traces:rate",
   tracesDistill: "traces:distill",
   tracesDistillStatus: "traces:distill-status",
   shellReveal: "shell:reveal",

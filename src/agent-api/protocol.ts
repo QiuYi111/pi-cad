@@ -1,5 +1,6 @@
 import type { JsonValue } from "../harness/canonical.ts";
 import type { EncodedVariable } from "../harness/commit.ts";
+import type { ModelParameterDefinitionInput } from "../shared/model-parameters.ts";
 
 export interface AgentArtifactSubject {
   kind: "artifact";
@@ -17,8 +18,8 @@ export type AgentApiRequest =
   | { schema: 1; op: "load"; id: string }
   | { schema: 1; op: "history" }
   | { schema: 1; op: "viewer-catalog" }
-  | { schema: 1; op: "probe"; subject: "current" | "baseline" | AgentArtifactSubject; purpose: string; code: string }
-  | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean }
+  | { schema: 1; op: "probe"; preset?: string; subject?: "current" | "baseline" | AgentArtifactSubject; purpose?: string; code?: string; args?: Record<string, JsonValue> }
+  | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean; parameters?: Record<string, ModelParameterDefinitionInput> }
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }
   | { schema: 1; op: "review-submit"; subjectCommit: string }
   | { schema: 1; op: "review-current"; reviewId?: string }

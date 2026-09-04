@@ -47,7 +47,11 @@ for (;;) {
     state: terminal ? job.status : "running",
     processed: terminal ? sessionPaths.length : Math.max(0, sessionPaths.length - 1),
     total: sessionPaths.length,
-    message: terminal ? (job.status === "complete" ? "Reusable experience updated." : job.error || "Distillation failed.") : "Prime is extracting reusable engineering experience…",
+    message: terminal
+      ? (job.status === "complete"
+          ? (job.changed ? "Reusable experience updated." : "Validation complete. No reusable change was published.")
+          : job.error || "Distillation failed.")
+      : "Prime is extracting reusable engineering experience…",
     outputPath: job.log_path || dirname(jobPath),
   });
   if (terminal) process.exit(job.status === "complete" ? 0 : 1);

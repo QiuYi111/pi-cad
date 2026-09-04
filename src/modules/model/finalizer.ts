@@ -88,7 +88,7 @@ export async function buildProposal(
   if (!existsSync(sourceAbs)) return { ok: false, text: `candidate source does not exist: ${source}` };
   const sourceHash = await sha256File(sourceAbs);
   const output = defaultBuildOutput(cwd, source);
-  const envelope = await backend.build(cwd, { source, output, force: true });
+  const envelope = await backend.build(cwd, { source, output });
   if (!envelope.ok) {
     return {
       ok: false,

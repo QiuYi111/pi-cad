@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "plate.py"
@@ -69,6 +70,85 @@ class CadctlBackendTests(unittest.TestCase):
         self.assertEqual(envelope["artifacts"][0]["kind"], "step")
         self.assertEqual(envelope["artifacts"][0]["sha256"], envelope["outputHashes"][str(step)])
 
+    def test_parameterized_build_calls_explicit_entrypoint(self) -> None:
+        source = self.cwd / "parameterized.py"
+        source.write_text(
+            "import build123d as bd\n"
+            "def build(parameters):\n"
+            "    return bd.Box(parameters['width'], parameters['depth'], parameters['height'])\n",
+            encoding="utf-8",
+        )
+        step = self.build / "parameterized.step"
+
+        envelope = run_cadctl(
+            "build",
+            "--source",
+            str(source),
+            "--output",
+            str(step),
+            "--parameters-json",
+            json.dumps({"width": 42, "depth": 17, "height": 9}),
+            cwd=self.cwd,
+        )
+
+        self.assertTrue(envelope["ok"], envelope)
+        inspected = run_cadctl("inspect", "--artifact", str(step), cwd=self.cwd)
+        self.assertEqual(inspected["payload"]["bbox"], {"x": 42.0, "y": 17.0, "z": 9.0})
+        self.assertIn("parameters", envelope["inputHashes"])
+
+    def test_build_cache_tracks_imported_local_source(self) -> None:
+        helper = self.cwd / "dimensions.py"
+        helper.write_text("WIDTH = 31\n", encoding="utf-8")
+        source = self.cwd / "cached.py"
+        source.write_text(
+            "import build123d as bd\nfrom dimensions import WIDTH\nresult = bd.Box(WIDTH, 12, 7)\n",
+            encoding="utf-8",
+        )
+        output = self.build / "cached.step"
+
+        first = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        second = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        self.assertEqual(first["payload"]["cache"], "miss")
+        self.assertEqual(second["payload"]["cache"], "hit")
+        self.assertEqual(first["inputHashes"]["sourceClosure"], second["inputHashes"]["sourceClosure"])
+        self.assertIn(str(helper.resolve()), first["payload"]["sourceFiles"])
+
+        helper.write_text("WIDTH = 47\n", encoding="utf-8")
+        third = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        self.assertEqual(third["payload"]["cache"], "miss")
+        self.assertNotEqual(first["inputHashes"]["sourceClosure"], third["inputHashes"]["sourceClosure"])
+        inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
+        self.assertEqual(inspected["payload"]["bbox"]["x"], 47.0)
+
+    def test_build_cache_ignores_comment_only_edits_and_force_bypasses_it(self) -> None:
+        source = self.cwd / "comments.py"
+        source.write_text("import build123d as bd\nresult = bd.Box(8, 9, 10)\n", encoding="utf-8")
+        output = self.build / "comments.step"
+        first = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        source.write_text("# harmless\nimport build123d as bd\nresult = bd.Box(8, 9, 10)\n", encoding="utf-8")
+        second = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        forced = run_cadctl("build", "--source", str(source), "--output", str(output), "--force", cwd=self.cwd)
+        self.assertEqual(first["payload"]["cache"], "miss")
+        self.assertEqual(second["payload"]["cache"], "hit")
+        self.assertEqual(forced["payload"]["cache"], "miss")
+
+    def test_concurrent_builds_share_one_serialized_result(self) -> None:
+        source = self.cwd / "slow.py"
+        source.write_text(
+            "import time\nimport build123d as bd\ntime.sleep(0.4)\nresult = bd.Box(11, 12, 13)\n",
+            encoding="utf-8",
+        )
+        output = self.build / "shared.step"
+
+        def invoke() -> dict:
+            return run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: invoke(), range(2)))
+        self.assertEqual(sorted(item["payload"]["cache"] for item in results), ["hit", "miss"])
+        self.assertEqual(results[0]["artifacts"][0]["sha256"], results[1]["artifacts"][0]["sha256"])
+        self.assertTrue(all(item["inputArtifacts"] for item in results))
+
     def test_inspect_geometry_matches_plate(self) -> None:
         self._build_plate()
         envelope = run_cadctl(
@@ -85,9 +165,143 @@ class CadctlBackendTests(unittest.TestCase):
         self.assertEqual(payload["bbox"]["y"], 80.0)
         self.assertEqual(payload["bbox"]["z"], 5.0)
         self.assertEqual(payload["solidCount"], 1)
+        self.assertEqual(
+            payload["validity"],
+            {
+                "ok": True,
+                "failureCount": 0,
+                "reasons": [],
+                "checks": {
+                    "topology": True,
+                    "closedShells": True,
+                    "positiveVolume": True,
+                    "selfIntersectionFree": True,
+                },
+                "solids": [
+                    {
+                        "solidIndex": 0,
+                        "topologyValid": True,
+                        "closedShells": True,
+                        "signedVolume": payload["validity"]["solids"][0]["signedVolume"],
+                        "positiveVolume": True,
+                        "selfIntersecting": False,
+                        "reasons": [],
+                    }
+                ],
+            },
+        )
+        self.assertGreater(payload["validity"]["solids"][0]["signedVolume"], 0)
         self.assertEqual(len(payload["cylinders"]), 4)
         self.assertAlmostEqual(payload["volume"], 40000 - 4 * 3.141592653589793 * 9 * 5, places=1)
         self.assertTrue((self.evidence / "geometry.json").exists())
+
+    def test_inspect_geometry_reports_an_open_surface_without_guessing_design_intent(self) -> None:
+        source = self.cwd / "surface.py"
+        source.write_text(
+            "import build123d as bd\n"
+            "result = bd.Face.make_rect(10, 20)\n",
+            encoding="utf-8",
+        )
+        built = run_cadctl(
+            "build",
+            "--source",
+            str(source),
+            "--output",
+            str(self.build / "surface.step"),
+            cwd=self.cwd,
+        )
+        self.assertTrue(built["ok"])
+
+        inspected = run_cadctl(
+            "inspect",
+            "--artifact",
+            str(self.build / "surface.step"),
+            cwd=self.cwd,
+        )
+        self.assertTrue(inspected["ok"])
+        validity = inspected["payload"]["validity"]
+        self.assertFalse(validity["ok"])
+        self.assertEqual(validity["failureCount"], 1)
+        self.assertEqual(validity["reasons"], ["noSolid"])
+        self.assertEqual(validity["solids"], [])
+        self.assertEqual(validity["checks"]["positiveVolume"], False)
+        self.assertIsNone(validity["checks"]["selfIntersectionFree"])
+
+    def test_self_intersection_is_reported_without_semantic_guessing(self) -> None:
+        from unittest.mock import patch
+
+        import build123d as bd
+        from cadctl.geometry import _validity
+
+        with patch("cadctl.geometry._is_self_intersecting", return_value=True):
+            validity = _validity(bd.Box(10, 10, 10))
+        self.assertFalse(validity["ok"])
+        self.assertFalse(validity["checks"]["selfIntersectionFree"])
+        self.assertIn("selfIntersecting", validity["solids"][0]["reasons"])
+
+    def test_surface_ids_are_hash_bound_and_measureable(self) -> None:
+        self._build_plate()
+        step = self.build / "plate.step"
+        surfaces = run_cadctl(
+            "inspect-surfaces", "--artifact", str(step), cwd=self.cwd
+        )
+        self.assertTrue(surfaces["ok"], surfaces)
+        cylinder = next(
+            item for item in surfaces["payload"]["surfaces"] if item["type"] == "cylinder"
+        )
+        measured = run_cadctl(
+            "measure",
+            "--artifact",
+            str(step),
+            "--metric",
+            "diameter",
+            "--a",
+            cylinder["id"],
+            cwd=self.cwd,
+        )
+        self.assertTrue(measured["ok"], measured)
+        self.assertEqual(measured["payload"]["value"], 6.0)
+
+        changed_source = self.cwd / "changed.py"
+        changed_source.write_text(
+            "import build123d as bd\nresult = bd.Box(20, 20, 20)\n",
+            encoding="utf-8",
+        )
+        changed = self.build / "changed.step"
+        run_cadctl(
+            "build", "--source", str(changed_source), "--output", str(changed), cwd=self.cwd
+        )
+        stale = run_cadctl(
+            "measure",
+            "--artifact",
+            str(changed),
+            "--metric",
+            "area",
+            "--a",
+            cylinder["id"],
+            cwd=self.cwd,
+        )
+        self.assertFalse(stale["ok"])
+        self.assertIn("run preset='surfaces' again", stale["payload"]["error"])
+
+    def test_surface_inspection_supports_multi_solid_artifacts(self) -> None:
+        artifact = Path(__file__).resolve().parent / "fixtures" / "interference_clearance.step"
+        inspected = run_cadctl(
+            "inspect-surfaces",
+            "--artifact",
+            str(artifact),
+            cwd=self.cwd,
+        )
+        self.assertTrue(inspected["ok"], inspected)
+        self.assertGreaterEqual(inspected["payload"]["solidCount"], 2)
+        ids = [item["id"] for item in inspected["payload"]["surfaces"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        tree = run_cadctl("assembly-tree", "--artifact", str(artifact), cwd=self.cwd)
+        occurrence_refs = {item["ref"] for item in tree["payload"]["occurrences"]}
+        self.assertTrue(occurrence_refs)
+        self.assertTrue(
+            all(item["occurrenceRef"] in occurrence_refs for item in inspected["payload"]["surfaces"])
+        )
 
     def test_render_seven_views_are_not_blank(self) -> None:
         self._build_plate()
@@ -114,6 +328,37 @@ class CadctlBackendTests(unittest.TestCase):
             colors = image.getcolors(maxcolors=1_000_000)
             nonwhite = sum(count for count, color in colors if color != (255, 255, 255))
             self.assertGreater(nonwhite, 1000, f"view {view['name']} looks blank")
+
+    def test_targeted_visual_modes_and_occurrence_selection(self) -> None:
+        artifact = Path(__file__).resolve().parent / "fixtures" / "interference_clearance.step"
+        tree = run_cadctl("assembly-tree", "--artifact", str(artifact), cwd=self.cwd)
+        target = tree["payload"]["occurrences"][0]["ref"]
+        out = self.evidence / "diagnostic"
+        rendered = run_cadctl(
+            "render",
+            "--artifact",
+            str(artifact),
+            "--out-dir",
+            str(out),
+            "--views",
+            "iso,iso_opposite",
+            "--display",
+            "hidden_edges",
+            "--focus-json",
+            json.dumps([target]),
+            "--explode",
+            "0.5",
+            "--width",
+            "320",
+            "--height",
+            "240",
+            cwd=self.cwd,
+        )
+        self.assertTrue(rendered["ok"], rendered)
+        self.assertEqual([item["name"] for item in rendered["payload"]["views"]], ["iso", "iso_opposite"])
+        self.assertEqual(rendered["payload"]["focus"], [target])
+        self.assertEqual(rendered["payload"]["display"], "hidden_edges")
+        self.assertTrue(all(Path(item["path"]).stat().st_size > 1000 for item in rendered["payload"]["views"]))
 
     def test_measure_diameter_and_hole_centers(self) -> None:
         self._build_plate()
@@ -195,6 +440,13 @@ class CadctlBackendTests(unittest.TestCase):
         tree = run_cadctl("assembly-tree", "--artifact", str(step), cwd=self.cwd)
         self.assertTrue(tree["ok"])
         self.assertGreaterEqual(tree["payload"]["leafCount"], 1)
+        self.assertEqual(len(tree["payload"]["artifactHash"]), 64)
+        self.assertTrue(all(item["ref"].startswith("occ-") for item in tree["payload"]["occurrences"]))
+
+        flat = Path(__file__).resolve().parent / "fixtures" / "interference_clearance.step"
+        flat_tree = run_cadctl("assembly-tree", "--artifact", str(flat), cwd=self.cwd)
+        self.assertEqual(flat_tree["payload"]["leafCount"], 2)
+        self.assertEqual(len(flat_tree["payload"]["occurrences"]), 2)
 
     def test_export_and_capability(self) -> None:
         self._build_plate()

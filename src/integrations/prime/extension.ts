@@ -29,6 +29,17 @@ interface ReviewHandle {
   result?: ReviewResult;
 }
 
+/** A late watcher must not wake the author for a superseded review. */
+export function isCurrentReviewCompletion(completed: ReviewHandle, latest: ReviewHandle | null): boolean {
+  return Boolean(
+    latest
+    && latest.reviewId === completed.reviewId
+    && latest.subjectCommit === completed.subjectCommit
+    && latest.status === completed.status
+    && latest.status !== "running",
+  );
+}
+
 /**
  * Recover durable notification identities from the Prime transcript. Extension
  * module state is recreated on resume, while displayed custom messages remain
@@ -104,6 +115,16 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   };
   const notifyReview = async (review: ReviewHandle) => {
     if (review.status === "running" || notifiedReviews.has(review.reviewId)) return;
+    let latest: ReviewHandle | null;
+    try {
+      latest = await requestAuthority<null | ReviewHandle>({ op: "review-current" });
+    } catch {
+      return;
+    }
+    if (!isCurrentReviewCompletion(review, latest)) {
+      notifiedReviews.add(review.reviewId);
+      return;
+    }
     const message = reviewCompletionMessage(review);
     pi.sendMessage(message, { triggerTurn: true, deliverAs: "followUp" });
     notifiedReviews.add(review.reviewId);

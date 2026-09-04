@@ -114,6 +114,7 @@ test("Plan C discovers and pins a workflow package before mutation", async () =>
       "mechanical.benchmark-triage",
       "mechanical.modify",
       "mechanical.one-shot",
+      "mechanical.parameter-edit",
     ]);
     assert.deepEqual(Object.keys(packages[0]).sort(), ["description", "id", "tags", "version"]);
     const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" }) as any;
@@ -208,6 +209,7 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
     assert.equal(result.build.ok, true);
     assert.equal(result.visual.ok, true);
     assert.equal(result.geometry.ok, true);
+    assert.equal(result.geometry.payload.validity.ok, true);
     assert.deepEqual(result.visual.payload.views.map((view: any) => view.name), ["iso", "front", "back", "left", "right", "top", "bottom"]);
     assert.equal(result.images.length, 7);
     assert.ok(result.images.every((image: any) => image.mimeType === "image/png" && Buffer.from(image.data, "base64").subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))));
@@ -216,11 +218,102 @@ test("Plan C model build reuses the v7 visual chain and pins mandatory Phase Car
     assert.equal(afterBuild?.state.artifacts["candidate:authoritative"]?.path, "build/plate.step");
     assert.equal(afterBuild?.state.artifacts["candidate:source"]?.path, "plate.py");
     assert.equal(afterBuild?.state.artifacts["candidate:source"]?.sha256, createHash("sha256").update(await readFile(join(cwd, "plate.py"))).digest("hex"));
+    assert.equal(Object.keys(afterBuild?.state.contextRefs ?? {}).filter((key) => /^mandatoryImage/.test(key)).length, 7);
     const card = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
     assert.deepEqual(card?.images.map((image) => image.path), [
       `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/iso.png`,
       `@canonical/runs/${loaded.state.runId}/evidence/visual/plate/front.png`,
     ]);
+    const reviewerView = await handleAgentApi(cwd, {
+      schema: 1,
+      op: "probe",
+      preset: "visual",
+      subject: {
+        kind: "artifact",
+        path: "build/plate.step",
+        sha256: afterBuild!.state.artifacts["candidate:authoritative"]!.sha256,
+      },
+      purpose: "inspect the right side",
+      args: { views: ["right"], width: 640, height: 480, labels: true },
+    }, "reviewer") as any;
+    assert.equal(reviewerView.images.length, 1);
+    assert.equal(reviewerView.images[0].name, "right");
+    assert.ok(Buffer.from(reviewerView.images[0].data, "base64").subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])));
+    assert.match(reviewerView.observationId, /^observation-/);
+  } finally {
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});
+
+test("parameterized builds publish a hash-bound viewer manifest", async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-parameter-build-canonical-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  const { cwd, loaded } = await projectFixture();
+  try {
+    await writeFile(join(cwd, "box.py"), [
+      "import build123d as bd",
+      "def build(parameters):",
+      "    return bd.Box(parameters['width'], parameters['depth'], parameters['height'])",
+      "",
+    ].join("\n"));
+    const result = await handleAgentApi(cwd, {
+      schema: 1,
+      op: "model-build",
+      source: "box.py",
+      output: "build/box.step",
+      parameters: {
+        width: { default: 40, min: 20, max: 80, step: 1, unit: "mm", label: "Width" },
+        depth: { default: 20, min: 10, max: 50, step: 1, unit: "mm" },
+        height: { default: 10, min: 5, max: 30, step: 1, unit: "mm" },
+      },
+    }) as any;
+    assert.equal(result.build.ok, true);
+    assert.match(result.build.inputHashes.parameters, /^[a-f0-9]{64}$/);
+    assert.equal(result.parameterManifest.manifest.parameters[0].id, "width");
+    assert.equal(result.parameterManifest.manifest.parameters[0].value, 40);
+    assert.equal(result.parameterManifest.manifest.source.entrypoint, "build");
+    assert.equal(result.parameterManifest.manifest.output.path, "build/box.step");
+    assert.match(result.parameterManifest.sha256, /^[a-f0-9]{64}$/);
+    const stored = JSON.parse(await readFile(join(cwd, result.parameterManifest.path), "utf8"));
+    assert.deepEqual(stored, result.parameterManifest.manifest);
+    const afterBuild = await new HarnessRunStoreV7(cwd, loaded.state.runId).load(mechanicalRegistries);
+    assert.equal(
+      Object.values(afterBuild!.state.artifacts).filter((artifact) => artifact.role === "model-parameter-manifest").length,
+      1,
+    );
+    const catalog = await handleAgentApi(cwd, { schema: 1, op: "viewer-catalog" }) as any;
+    assert.equal(catalog.parameterManifests.length, 1);
+    assert.deepEqual(catalog.parameterManifests[0], {
+      path: result.parameterManifest.path,
+      sha256: result.parameterManifest.sha256,
+      manifest: result.parameterManifest.manifest,
+    });
+  } finally {
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});
+
+test("managed build rejects an objectively invalid B-Rep before it becomes workflow evidence", async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-invalid-build-canonical-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  const { cwd, loaded } = await projectFixture();
+  try {
+    await writeFile(join(cwd, "surface.py"), "import build123d as bd\nresult = bd.Face.make_rect(10, 20)\n");
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "model-build", source: "surface.py", output: "build/surface.step", force: true }),
+      /generic B-Rep validation failed: noSolid/,
+    );
+    const current = await new HarnessRunStoreV7(cwd, loaded.state.runId).load(mechanicalRegistries);
+    assert.equal(current?.state.artifacts["candidate:authoritative"], undefined);
+    assert.equal(current?.state.evidence.length, 0);
   } finally {
     if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
     else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;

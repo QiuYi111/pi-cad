@@ -16,11 +16,13 @@
  */
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
 import { buildStep, exportArtifact } from "../../shared/capability.ts";
+import type { ModelParameterValue } from "../../shared/model-parameters.ts";
 
 export interface ModelBuildInput {
   source: string;
   output: string;
   force?: boolean;
+  parameters?: Record<string, ModelParameterValue>;
 }
 
 export interface ModelExportInput {

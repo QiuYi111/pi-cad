@@ -232,7 +232,7 @@ function validateRating(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 1 || value > 5) throw new Error(`${name} must be an integer from 1 to 5`);
 }
 
-export async function recordEvaluation(identifier: { seq?: number; sha?: string }, quality: number, difficulty: number): Promise<ExperienceIndexEntry> {
+export async function recordEvaluation(identifier: { seq?: number; sha?: string }, quality: number, difficulty: number, feedback?: string): Promise<ExperienceIndexEntry> {
   validateRating("quality", quality);
   validateRating("difficulty", difficulty);
   const root = experienceRoot();
@@ -240,6 +240,9 @@ export async function recordEvaluation(identifier: { seq?: number; sha?: string 
   const entry = entries.find((candidate) => identifier.seq !== undefined ? candidate.seq === identifier.seq : candidate.sha === identifier.sha);
   if (!entry) throw new Error("experience trajectory not found");
   const wasPending = entry.evaluation_status === "pending";
+  const nextFeedback = feedback === undefined
+    ? entry.feedback ?? null
+    : feedback.trim().slice(0, 4_000) || null;
   const evaluation: HumanEvaluation = {
     schema_version: EXPERIENCE_SCHEMA_VERSION,
     quality,
@@ -247,6 +250,7 @@ export async function recordEvaluation(identifier: { seq?: number; sha?: string 
     score: computeScore(entry, quality, difficulty),
     score_version: SCORE_VERSION,
     evaluated_at: nowIso(),
+    feedback: nextFeedback,
   };
   await atomicWrite(join(entry.archive_path, "evaluation.json"), JSON.stringify(evaluation, null, 2) + "\n");
   const updated = { ...entry, ...evaluation, evaluation_status: "evaluated" as const };

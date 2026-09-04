@@ -8,7 +8,8 @@ import build123d as bd
 import numpy as np
 from PIL import Image, ImageDraw
 
-VIEW_NAMES = ("iso", "front", "back", "left", "right", "top", "bottom")
+DEFAULT_VIEW_NAMES = ("iso", "front", "back", "left", "right", "top", "bottom")
+VIEW_NAMES = (*DEFAULT_VIEW_NAMES, "iso_opposite")
 
 _VIEW_CAMERAS: dict[str, dict[str, tuple[float, float, float]]] = {
     "iso": {
@@ -16,6 +17,11 @@ _VIEW_CAMERAS: dict[str, dict[str, tuple[float, float, float]]] = {
         # Camera is at (-X, -Y, +Z); right = view_direction × world_up.
         "right": (1.0, -1.0, 0.0),
         "up": (1.0, 1.0, 2.0),
+    },
+    "iso_opposite": {
+        "forward": (1.0, 1.0, 1.0),
+        "right": (-1.0, 1.0, 0.0),
+        "up": (-1.0, -1.0, 2.0),
     },
     "front": {
         "forward": (0.0, -1.0, 0.0),
@@ -90,7 +96,8 @@ def _render_view(
     camera: dict[str, tuple[float, float, float]],
     width: int,
     height: int,
-) -> Image.Image:
+    base_colors: np.ndarray | None = None,
+) -> tuple[Image.Image, np.ndarray, dict[str, float | np.ndarray]]:
     forward = np.asarray(_normalize(camera["forward"]), dtype=np.float64)
     right = np.asarray(_normalize(camera["right"]), dtype=np.float64)
     up = np.asarray(_normalize(camera["up"]), dtype=np.float64)
@@ -117,8 +124,9 @@ def _render_view(
     light = np.asarray((0.45, 0.35, 0.82), dtype=np.float64)
     light = light / np.linalg.norm(light)
     intensity = 0.46 + 0.54 * np.abs(normals @ light)
-    base = np.asarray((207, 212, 220), dtype=np.float64)
-    colors = base[None, :] * intensity[:, None]
+    if base_colors is None:
+        base_colors = np.repeat(np.asarray([[207, 212, 220]], dtype=np.float64), tri.shape[0], axis=0)
+    colors = base_colors * intensity[:, None]
 
     z_buffer = np.full((height, width), -np.inf, dtype=np.float64)
     color_buffer = np.full((height, width, 3), 255.0, dtype=np.float64)
@@ -165,7 +173,138 @@ def _render_view(
         color_slice = color_buffer[min_py : max_py + 1, min_px : max_px + 1, :]
         color_slice[candidate] = colors[i]
 
-    return Image.fromarray(np.clip(color_buffer, 0, 255).astype(np.uint8), "RGB")
+    image = Image.fromarray(np.clip(color_buffer, 0, 255).astype(np.uint8), "RGB")
+    return image, z_buffer, {
+        "right": right,
+        "up": up,
+        "forward": forward,
+        "scale": scale,
+        "centerX": center_x,
+        "centerY": center_y,
+    }
+
+
+def _part_meshes(shape: bd.Shape, tolerance: float) -> list[tuple[np.ndarray, np.ndarray, np.ndarray, bd.Shape]]:
+    parts = list(shape.solids()) or [shape]
+    return [(*_tessellate(part, tolerance), part) for part in parts]
+
+
+def _selection_index(artifact: Path, part_count: int) -> tuple[dict[str, int], dict[str, list[str]], list[dict[str, Any]]]:
+    from .assembly import assembly_tree
+
+    report = assembly_tree(artifact)
+    occurrences = list(report.get("occurrences") or [])
+    lookup: dict[str, int] = {}
+    for index in range(part_count):
+        lookup[f"#s{index}"] = index
+        lookup[f"solid-{index}"] = index
+        lookup[f"solid-{index + 1}"] = index
+        if index >= len(occurrences):
+            continue
+        occurrence = occurrences[index]
+        for key in (occurrence.get("ref"), occurrence.get("alias")):
+            if isinstance(key, str) and key:
+                lookup[key] = index
+    for alias, ref in (report.get("aliases") or {}).items():
+        if ref in lookup:
+            lookup[str(alias)] = lookup[ref]
+    ambiguous = {
+        str(label): [str(item) for item in aliases]
+        for label, aliases in (report.get("ambiguousLabels") or {}).items()
+    }
+    return lookup, ambiguous, occurrences
+
+
+def _resolve_parts(
+    requested: list[str] | None,
+    lookup: dict[str, int],
+    ambiguous: dict[str, list[str]],
+    field: str,
+) -> set[int]:
+    resolved: set[int] = set()
+    for raw in requested or []:
+        token = str(raw).strip()
+        if token in ambiguous:
+            raise ValueError(f"{field} label {token!r} is ambiguous; use one of {ambiguous[token]}")
+        if token not in lookup:
+            raise ValueError(f"unknown {field} occurrence {token!r}; run preset='assembly' again")
+        resolved.add(lookup[token])
+    return resolved
+
+
+def _explode_offsets(meshes: list[tuple[np.ndarray, np.ndarray, np.ndarray, bd.Shape]], amount: float) -> list[np.ndarray]:
+    if amount <= 0 or len(meshes) <= 1:
+        return [np.zeros(3, dtype=np.float64) for _ in meshes]
+    all_points = np.concatenate([mesh[0] for mesh in meshes], axis=0)
+    center = all_points.mean(axis=0)
+    diagonal = float(np.linalg.norm(all_points.max(axis=0) - all_points.min(axis=0)))
+    offsets: list[np.ndarray] = []
+    fallback = (
+        np.asarray((1.0, 0.0, 0.0)),
+        np.asarray((0.0, 1.0, 0.0)),
+        np.asarray((0.0, 0.0, 1.0)),
+    )
+    for index, (points, _triangles, _normals, _part) in enumerate(meshes):
+        direction = points.mean(axis=0) - center
+        length = float(np.linalg.norm(direction))
+        if length < 1e-9:
+            direction = fallback[index % len(fallback)]
+        else:
+            direction = direction / length
+        offsets.append(direction * diagonal * 0.15 * amount)
+    return offsets
+
+
+def _edge_polylines(part: bd.Shape, offset: np.ndarray) -> list[np.ndarray]:
+    polylines: list[np.ndarray] = []
+    for edge in part.edges():
+        samples = min(128, max(2, int(math.ceil(float(edge.length) / 0.75)) + 1))
+        points = []
+        for index in range(samples):
+            point = edge @ (index / max(samples - 1, 1))
+            points.append((float(point.X), float(point.Y), float(point.Z)))
+        polylines.append(np.asarray(points, dtype=np.float64) + offset[None, :])
+    return polylines
+
+
+def _draw_edges(
+    image: Image.Image,
+    z_buffer: np.ndarray,
+    projection: dict[str, float | np.ndarray],
+    polylines: list[np.ndarray],
+    display: str,
+) -> None:
+    if display == "solid":
+        return
+    right = projection["right"]
+    up = projection["up"]
+    forward = projection["forward"]
+    scale = float(projection["scale"])
+    center_x = float(projection["centerX"])
+    center_y = float(projection["centerY"])
+    width, height = image.size
+    finite_depth = z_buffer[np.isfinite(z_buffer)]
+    depth_tolerance = max(float(np.ptp(finite_depth)) * 0.003, 1e-5) if finite_depth.size else 1e-5
+    draw = ImageDraw.Draw(image)
+    for polyline in polylines:
+        px = polyline @ right
+        py = polyline @ up
+        pz = polyline @ forward
+        sx = (px - center_x) * scale + width / 2.0
+        sy = height / 2.0 - (py - center_y) * scale
+        for index in range(len(polyline) - 1):
+            x0, y0, z0 = float(sx[index]), float(sy[index]), float(pz[index])
+            x1, y1, z1 = float(sx[index + 1]), float(sy[index + 1]), float(pz[index + 1])
+            mx = int(round((x0 + x1) / 2.0))
+            my = int(round((y0 + y1) / 2.0))
+            visible = 0 <= mx < width and 0 <= my < height and (z0 + z1) / 2.0 >= z_buffer[my, mx] - depth_tolerance
+            if display == "solid_with_edges" and not visible:
+                continue
+            if display == "hidden_edges" and not visible:
+                if index % 2 == 0:
+                    draw.line((x0, y0, x1, y1), fill=(180, 184, 190), width=1)
+                continue
+            draw.line((x0, y0, x1, y1), fill=(45, 49, 55), width=1)
 
 
 def render_views(
@@ -176,6 +315,10 @@ def render_views(
     height: int = 480,
     display: str = "solid",
     labels: bool = False,
+    focus: list[str] | None = None,
+    hide: list[str] | None = None,
+    explode: float = 0.0,
+    ghost_others: bool = True,
 ) -> dict[str, Any]:
     artifact = Path(artifact)
     out_dir = Path(out_dir)
@@ -186,16 +329,62 @@ def render_views(
     size = bb.size
     diagonal = math.sqrt(size.X**2 + size.Y**2 + size.Z**2)
     tolerance = max(diagonal * 0.0025, 0.05)
-    pts, tri, normals = _tessellate(shape, tolerance)
+    if display not in {"solid", "solid_with_edges", "hidden_edges", "wireframe"}:
+        raise ValueError("display must be solid, solid_with_edges, hidden_edges, or wireframe")
+    if explode < 0 or explode > 5:
+        raise ValueError("explode must be between 0 and 5")
+    meshes = _part_meshes(shape, tolerance)
+    if focus or hide:
+        lookup, ambiguous, occurrences = _selection_index(artifact, len(meshes))
+    else:
+        lookup, ambiguous, occurrences = {}, {}, []
+    focused = _resolve_parts(focus, lookup, ambiguous, "focus")
+    hidden = _resolve_parts(hide, lookup, ambiguous, "hide")
+    if focused and not ghost_others:
+        hidden.update(set(range(len(meshes))) - focused)
+    offsets = _explode_offsets(meshes, explode)
 
-    selected = list(views or VIEW_NAMES)
+    point_chunks: list[np.ndarray] = []
+    triangle_chunks: list[np.ndarray] = []
+    normal_chunks: list[np.ndarray] = []
+    color_chunks: list[np.ndarray] = []
+    edge_polylines: list[np.ndarray] = []
+    vertex_offset = 0
+    palette = np.asarray(
+        ((198, 205, 214), (174, 191, 210), (205, 194, 178), (185, 202, 189), (203, 183, 194)),
+        dtype=np.float64,
+    )
+    for index, (points, triangles, part_normals, part) in enumerate(meshes):
+        if index in hidden:
+            continue
+        translated = points + offsets[index][None, :]
+        point_chunks.append(translated)
+        triangle_chunks.append(triangles + vertex_offset)
+        normal_chunks.append(part_normals)
+        base = np.asarray((235, 237, 240), dtype=np.float64) if focused and index not in focused else palette[index % len(palette)]
+        color_chunks.append(np.repeat(base[None, :], len(triangles), axis=0))
+        if display != "solid":
+            edge_polylines.extend(_edge_polylines(part, offsets[index]))
+        vertex_offset += len(points)
+    if not point_chunks:
+        raise ValueError("focus/hide selection removed every occurrence")
+    pts = np.concatenate(point_chunks, axis=0)
+    tri = np.concatenate(triangle_chunks, axis=0)
+    normals = np.concatenate(normal_chunks, axis=0)
+    base_colors = np.concatenate(color_chunks, axis=0)
+
+    selected = list(views or DEFAULT_VIEW_NAMES)
     for view in selected:
         if view not in _VIEW_CAMERAS:
             raise ValueError(f"unsupported view: {view}; expected one of {', '.join(VIEW_NAMES)}")
 
     rendered: list[dict[str, Any]] = []
     for view in selected:
-        img = _render_view(pts, tri, normals, _VIEW_CAMERAS[view], width, height)
+        solid_image, z_buffer, projection = _render_view(
+            pts, tri, normals, _VIEW_CAMERAS[view], width, height, base_colors
+        )
+        img = Image.new("RGB", (width, height), (255, 255, 255)) if display in {"wireframe", "hidden_edges"} else solid_image
+        _draw_edges(img, z_buffer, projection, edge_polylines, display)
         if labels:
             draw = ImageDraw.Draw(img)
             draw.rectangle((0, 0, width - 1, 22), fill=(245, 245, 245))
@@ -234,4 +423,9 @@ def render_views(
         "occurrenceCount": max(len(solids), 1),
         "solidCount": len(solids),
         "display": display,
+        "focus": list(focus or []),
+        "hide": list(hide or []),
+        "explode": explode,
+        "ghostOthers": ghost_others,
+        "occurrences": occurrences,
     }

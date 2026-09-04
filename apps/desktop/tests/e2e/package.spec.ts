@@ -9,7 +9,7 @@ test("packaged desktop app starts", async () => {
   const userData = await mkdtemp(join(tmpdir(), "pi-cad-package-user-"));
   const application = await electron.launch({
     executablePath: executablePath!,
-    args: [`--user-data-dir=${userData}`],
+    args: [`--user-data-dir=${userData}`, "--pi-cad-e2e"],
     env: { ...process.env, PI_CAD_DESKTOP_E2E: "1", PI_CAD_PROJECT_CWD: "/workspace/package-smoke" },
   });
   try {
