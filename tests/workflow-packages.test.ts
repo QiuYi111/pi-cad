@@ -71,7 +71,9 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.equal(loaded.workflow.phases.concept!.actions.includes("cad_build_step"), false);
     assert.equal(loaded.workflow.phases.parts!.actions.includes("cad_build_step"), true);
     assert.deepEqual(loaded.workflow.phases.final_review!.reviewProfile, "mechanical.final-review");
-    assert.equal(loaded.workflow.version, "1.0.6");
+    assert.equal(loaded.workflow.version, "1.0.7");
+    assert.equal(loaded.workflow.phases.parts!.rebuildContextOnExit, true);
+    assert.equal(loaded.workflow.phases.assembly!.rebuildContextOnExit, true);
     assert.deepEqual(Object.keys(loaded.workflow.phases.final_review!.transitions), ["accepted", "revise_architecture_bom", "revise_assembly", "revise_concept", "revise_interface", "revise_parts", "revise_spec"]);
     assert.equal(loaded.workflow.phases.done!.terminal, true);
 

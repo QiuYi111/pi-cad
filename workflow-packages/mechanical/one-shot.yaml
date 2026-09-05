@@ -2,11 +2,11 @@ schema: 1
 id: mechanical.one-shot
 description: Design and release a greenfield mechanical part or assembly with independent final review.
 tags: [cad, design, mechanical, release]
-version: 1.0.6
+version: 1.0.7
 workflow:
   schema: 1
   id: mechanical.one-shot
-  version: 1.0.6
+  version: 1.0.7
   parametersSchema: {type: object, additionalProperties: false}
   initialPhase: grilling
   phases:
@@ -69,6 +69,7 @@ workflow:
       hooks: []
       transitions: {allocated: {target: parts, requiresPhaseObligations: true}}
     parts:
+      rebuildContextOnExit: true
       purpose: Author deterministic part geometry and inspect the built candidate.
       guidance: >-
         Root may use ordinary Prime RLM fan-out, but every result must return through one authoritative workspace commit and managed build. In PARTS call cad.commit only for the parts workspace obligation; never commit parts-geometry or parts-visual because cad.model.build closes both evidence obligations. If inspection reveals a defect, edit and rebuild normally: the new build atomically revises this evidence and invalidates every older ArtifactRef. Keep only the latest returned ArtifactRef, then probe it, create review-candidate from it plus deterministic source, and take a transition shown in NEXT; FINAL_REVIEW cannot create commits.
@@ -85,6 +86,7 @@ workflow:
         single_part_complete: {target: final_review, requiresPhaseObligations: true}
         assembly_parts_complete: {target: assembly, requiresPhaseObligations: true}
     assembly:
+      rebuildContextOnExit: true
       purpose: Integrate parts and verify the complete assembly candidate.
       guidance: First close the assembly workspace obligation with assembly = await cad.commit("assembly", ...). Then call artifact = await cad.model.build(source, output, force=True); that managed build closes both assembly-geometry and assembly-visual. Never try to close those evidence obligations with cad.commit. If inspection reveals a defect, edit and rebuild into the same artifact variable. Probe fit and the motion envelope at required positions. For every moving body pair, check both common volume and minimum distance, distinguishing named intentional contacts. In the exact manufacturing orientation, verify that every print-in-place body reaches the build plane or has a self-supporting path, and inspect functional-face direction and access openings. Create review-candidate from the latest artifact plus deterministic source, and take assembled only when it appears in NEXT.
       actions: [cad_build_step, cad_commit, transition]

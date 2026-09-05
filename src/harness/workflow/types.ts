@@ -32,6 +32,8 @@ export interface WorkflowPhaseDefinition {
   recommendedTemplates?: string[];
   /** Non-authoritative Prime skills suggested for this phase. */
   recommendedSkills?: string[];
+  /** Rebuild the Agent context after leaving this phase. */
+  rebuildContextOnExit?: boolean;
   actions: string[];
   grants: string[];
   writeScopes: string[];

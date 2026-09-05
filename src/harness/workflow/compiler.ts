@@ -33,11 +33,12 @@ function obligation(value: unknown, where: string): WorkflowObligationDefinition
 function phase(value: unknown, phaseId: string, registries: RegistrySet): WorkflowPhaseDefinition {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`phase ${phaseId} must be an object`);
   const raw = value as Record<string, unknown>;
-  exactKeys(raw, ["purpose", "guidance", "recommendedTemplates", "recommendedSkills", "actions", "grants", "writeScopes", "recordObligations", "evidenceObligations", "contextProviders", "hooks", "reviewProfile", "transitions", "terminal"], `phase ${phaseId}`);
+  exactKeys(raw, ["purpose", "guidance", "recommendedTemplates", "recommendedSkills", "rebuildContextOnExit", "actions", "grants", "writeScopes", "recordObligations", "evidenceObligations", "contextProviders", "hooks", "reviewProfile", "transitions", "terminal"], `phase ${phaseId}`);
   if (typeof raw.purpose !== "string" || !raw.purpose.trim()) throw new Error(`phase ${phaseId}.purpose is required`);
   if (raw.guidance !== undefined && (typeof raw.guidance !== "string" || !raw.guidance.trim())) throw new Error(`phase ${phaseId}.guidance must be a non-empty string`);
   const recommendedTemplates = raw.recommendedTemplates === undefined ? undefined : stringArray(raw.recommendedTemplates, `phase ${phaseId}.recommendedTemplates`);
   const recommendedSkills = raw.recommendedSkills === undefined ? undefined : stringArray(raw.recommendedSkills, `phase ${phaseId}.recommendedSkills`);
+  if (raw.rebuildContextOnExit !== undefined && typeof raw.rebuildContextOnExit !== "boolean") throw new Error(`phase ${phaseId}.rebuildContextOnExit must be boolean`);
   const actions = stringArray(raw.actions ?? [], `phase ${phaseId}.actions`);
   const grants = stringArray(raw.grants ?? [], `phase ${phaseId}.grants`);
   const writeScopes = stringArray(raw.writeScopes ?? [], `phase ${phaseId}.writeScopes`);
@@ -111,6 +112,7 @@ function phase(value: unknown, phaseId: string, registries: RegistrySet): Workfl
     ...(raw.guidance ? { guidance: (raw.guidance as string).trim() } : {}),
     ...(recommendedTemplates?.length ? { recommendedTemplates } : {}),
     ...(recommendedSkills?.length ? { recommendedSkills } : {}),
+    ...(raw.rebuildContextOnExit === true ? { rebuildContextOnExit: true } : {}),
     actions, grants, writeScopes,
     recordObligations: records.sort((a, b) => a.ref.localeCompare(b.ref)),
     evidenceObligations: evidence.sort((a, b) => a.ref.localeCompare(b.ref)),
