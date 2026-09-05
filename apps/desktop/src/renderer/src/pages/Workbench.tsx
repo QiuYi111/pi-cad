@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, MoreHorizontal, Play, Plus, Share2 } from "../components/icons";
 import type { AppSettings, TraceSummary } from "@shared/contracts";
 import type { PrimeRuntimeController } from "../hooks/usePrimeRuntime";
@@ -21,6 +21,8 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   const [ratingDifficulty, setRatingDifficulty] = useState(3);
   const [ratingFeedback, setRatingFeedback] = useState("");
   const [ratingMessage, setRatingMessage] = useState("");
+  const [ratingBusy, setRatingBusy] = useState(false);
+  const workflowState = useRef<{ initialized: boolean; terminal: boolean; runId?: string }>({ initialized: false, terminal: false });
   const project = settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || "Untitled project";
   const currentArtifact = [...prime.messages].reverse().find((message) => message.activity?.kind === "build" && message.activity.state === "success" && message.activity.artifactPath)?.activity?.artifactPath;
   const viewerRevision = prime.messages.filter((message) => message.activity?.state === "success" && (message.activity.kind === "build" || message.activity.kind === "simulation")).length;
@@ -68,12 +70,39 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     setSessionMenu(false);
   };
   const rateCurrent = async () => {
-    const available = await window.piCad.traces.list();
-    const current = available.find((item) => item.id === prime.status.sessionId) || available[0];
-    if (!current) { setRatingMessage("No saved conversation yet."); return; }
-    const result = await window.piCad.traces.rate([current.path], { quality: ratingQuality, difficulty: ratingDifficulty, feedback: ratingFeedback });
-    setRatingMessage(result.message);
+    setRatingBusy(true);
+    setRatingMessage("Saving rating and preparing the trajectory…");
+    try {
+      const available = await window.piCad.traces.list();
+      const current = available.find((item) => item.id === prime.status.sessionId) || available[0];
+      if (!current) { setRatingMessage("No saved conversation yet."); return; }
+      const result = await window.piCad.traces.rate([current.path], { quality: ratingQuality, difficulty: ratingDifficulty, feedback: ratingFeedback });
+      setRatingMessage(result.message);
+    } catch (error) { setRatingMessage(`Rating failed: ${error instanceof Error ? error.message : String(error)}`); }
+    finally { setRatingBusy(false); }
   };
+  useEffect(() => {
+    workflowState.current = { initialized: false, terminal: false };
+    let alive = true;
+    const refresh = async (event?: any) => {
+      const inner = event?.type === "session_event" ? event.event : event;
+      if (inner && inner.type !== "tool_execution_end" && inner.type !== "agent_end") return;
+      try {
+        const current = await window.piCad.workflow.current();
+        if (!alive) return;
+        const terminal = current?.status === "done" || current?.phases?.some((phase) => phase.status === "active" && phase.id === "done") === true;
+        const previous = workflowState.current;
+        if (shouldOpenWorkflowRating(previous, { terminal, runId: current?.runId })) {
+          setRatingMessage("");
+          setRatingOpen(true);
+        }
+        workflowState.current = { initialized: true, terminal, runId: current?.runId };
+      } catch { /* The workflow rail reports availability separately. */ }
+    };
+    void refresh();
+    const unsubscribe = window.piCad.runtime.onEvent((event) => { void refresh(event); });
+    return () => { alive = false; unsubscribe(); };
+  }, [settings.projectPath, prime.status.sessionId]);
   const resizeChat = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const shell = event.currentTarget.parentElement;
@@ -91,7 +120,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   };
   return <div className="workbench-page" style={{ "--chat-width": `${chatWidth}px` } as React.CSSProperties}>
     <section className="chat-pane">
-      <header className="chat-header"><strong>{project}</strong><span /><button className="rate-current" onClick={() => setRatingOpen((open) => !open)}>Rate</button><button aria-label="New conversation" title="New conversation" onClick={() => void newSession()}><Plus size={18} /></button><button aria-label="Conversations" title="Conversations" onClick={() => void openSessions()}><MoreHorizontal size={18} /></button>{ratingOpen && <div className="conversation-rating"><strong>Rate this conversation</strong><div className="rating-row"><label>Quality<select value={ratingQuality} onChange={(event) => setRatingQuality(Number(event.target.value))}>{[1,2,3,4,5].map((value) => <option key={value}>{value}</option>)}</select></label><label>Difficulty<select value={ratingDifficulty} onChange={(event) => setRatingDifficulty(Number(event.target.value))}>{[1,2,3,4,5].map((value) => <option key={value}>{value}</option>)}</select></label></div><textarea value={ratingFeedback} onChange={(event) => setRatingFeedback(event.target.value)} placeholder="What worked or failed?" /><button className="primary" onClick={() => void rateCurrent()}>Save rating</button>{ratingMessage && <small>{ratingMessage}</small>}</div>}{sessionMenu && <div className="session-menu"><button className="session-new" onClick={() => void newSession()}><Plus size={15} />New conversation</button><div className="session-list">{sessions.length ? sessions.map((session) => <button key={session.path} onClick={() => void switchSession(session.path)}><strong>{session.title}</strong><small>{new Date(session.updatedAt).toLocaleString()} · {session.evaluation ? `${session.evaluation.quality}/5` : "Unrated"}</small></button>) : <p>No previous conversations</p>}</div></div>}</header>
+      <header className="chat-header"><strong>{project}</strong><span /><button className="rate-current" onClick={() => setRatingOpen((open) => !open)}>Rate</button><button aria-label="New conversation" title="New conversation" onClick={() => void newSession()}><Plus size={18} /></button><button aria-label="Conversations" title="Conversations" onClick={() => void openSessions()}><MoreHorizontal size={18} /></button>{ratingOpen && <div className="conversation-rating"><strong>Rate this conversation</strong><div className="rating-row"><label>Quality<select value={ratingQuality} onChange={(event) => setRatingQuality(Number(event.target.value))}>{[1,2,3,4,5].map((value) => <option key={value}>{value}</option>)}</select></label><label>Difficulty<select value={ratingDifficulty} onChange={(event) => setRatingDifficulty(Number(event.target.value))}>{[1,2,3,4,5].map((value) => <option key={value}>{value}</option>)}</select></label></div><textarea value={ratingFeedback} onChange={(event) => setRatingFeedback(event.target.value)} placeholder="What worked or failed?" /><button className="primary" disabled={ratingBusy} onClick={() => void rateCurrent()}>{ratingBusy ? "Saving…" : "Save rating"}</button>{ratingMessage && <small>{ratingMessage}</small>}</div>}{sessionMenu && <div className="session-menu"><button className="session-new" onClick={() => void newSession()}><Plus size={15} />New conversation</button><div className="session-list">{sessions.length ? sessions.map((session) => <button key={session.path} onClick={() => void switchSession(session.path)}><strong>{session.title}</strong><small>{new Date(session.updatedAt).toLocaleString()} · {session.evaluation ? `${session.evaluation.quality}/5` : "Unrated"}</small></button>) : <p>No previous conversations</p>}</div></div>}</header>
       <Conversation messages={prime.messages} />
       <Composer settings={settings} status={prime.status} onSettingsChange={updateSettings} onSend={send} onAbort={prime.abort} />
     </section>
@@ -118,4 +147,11 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     </section>
     <StatusBar settings={settings} status={prime.status} />
   </div>;
+}
+
+export function shouldOpenWorkflowRating(
+  previous: { initialized: boolean; terminal: boolean; runId?: string },
+  current: { terminal: boolean; runId?: string },
+): boolean {
+  return previous.initialized && !previous.terminal && current.terminal && Boolean(current.runId) && current.runId === previous.runId;
 }

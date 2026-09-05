@@ -145,6 +145,15 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   // waiting. Hold the final assistant message only for an admitted, running
   // review; the sidecar completion event then queues the sole follow-up turn.
   pi.on("message_end", async (event, ctx) => {
+    if (event.message.role === "toolResult" && event.message.toolName === "codex_generate_image" && !event.message.isError) {
+      const text = Array.isArray(event.message.content)
+        ? event.message.content.filter((item: any) => item?.type === "text").map((item: any) => item.text || "").join("\n")
+        : String(event.message.content || "");
+      const path = text.match(/saved it to\s+(.+?\.png)(?:\.|\s|$)/i)?.[1];
+      if (path) await requestAuthority({ op: "image-generated", path }).catch((error) => {
+        process.stderr.write(`[pi-cad] generated image evidence was not recorded: ${error instanceof Error ? error.message : String(error)}\n`);
+      });
+    }
     if (
       event.message.role === "toolResult" &&
       event.message.toolName === "ipython" &&

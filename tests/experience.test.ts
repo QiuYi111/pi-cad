@@ -304,10 +304,12 @@ test("real-task checkpoint replay runs only one bounded next action and an indep
     await writeFile(join(candidate, "workflow-packages", "mechanical", "one-shot.yaml"), "schema: 1\nid: mechanical.one-shot\nversion: 1\nworkflow: {}\n");
     await writeFile(join(root, "index.jsonl"), `${JSON.stringify({ seq: 1, evaluation_status: "evaluated", model: null, reasoning: "low", workflow: "mechanical.one-shot" })}\n`);
     const replay = join(root, "replay.json");
-    await writeFile(replay, `${JSON.stringify({ cases: [{
+    // Direct arrays were emitted by an early real distillation run and are
+    // accepted for backward compatibility.
+    await writeFile(replay, `${JSON.stringify([{
       kind: "repair", seq: 1, task: "Make a stand", checkpoint: "The support faces backward", evidence: "wrong orientation",
       failureSignature: "wrong orientation", expectedRepair: "inspect the support direction", regressionGuard: "retain the hinge",
-    }] })}\n`);
+    }])}\n`);
     const fakePrime = join(root, "fake-prime.mjs");
     await writeFile(fakePrime, "const prompt=process.argv.at(-1)||''; process.stdout.write(/^Judge/.test(prompt)?'PASS\\nChecks orientation before rebuilding.\\n':'Inspect the support direction against the phone datum.\\n');\n");
     const report = join(root, "report.json");

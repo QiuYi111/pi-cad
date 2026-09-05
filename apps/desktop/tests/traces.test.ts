@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { desktopDistillationEnvironment, desktopDistillationPath, TraceStore } from "../electron/main/traces";
 import { distillationTitle } from "../src/renderer/src/lib/distillation";
+import { shouldOpenWorkflowRating } from "../src/renderer/src/pages/Workbench";
 
 describe("trajectory confinement", () => {
   it("rejects a trajectory outside the selected project", async () => {
@@ -67,5 +70,36 @@ describe("distillation status", () => {
     expect(desktopDistillationPath("/home/tester/.local/bin/node")).toBe(
       "PATH=/home/tester/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     );
+  });
+
+  it("preserves the worker's useful failure instead of replacing it with an exit-code error", async () => {
+    const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    const bridge = {
+      resolveRuntimePaths: async () => ({ projectPath: "/projects/a", piCadRepo: "/pi-cad", primeAgentRepo: "/prime" }),
+      commandPath: async () => "/usr/bin/node",
+      exec: async (args: string[]) => ({ stdout: args.at(-1)?.endsWith("run.jsonl") ? "/projects/a/.prime-sessions/run.jsonl\n" : "/projects/a/.prime-sessions\n", stderr: "" }),
+      spawn: () => {
+        queueMicrotask(() => {
+          child.stdout.write(`${JSON.stringify({ state: "failed", processed: 1, total: 1, message: "checkpoint replay schema mismatch" })}\n`);
+          child.emit("exit", 1);
+        });
+        return child;
+      },
+    };
+    const updates: string[] = [];
+    const result = await new TraceStore(bridge as never).distill({ provider: "openai-codex", model: "gpt-5.6-sol", thinking: "low" } as never, ["/projects/a/.prime-sessions/run.jsonl"], { quality: 2, difficulty: 4 }, (status) => updates.push(status.message || ""));
+    expect(result).toMatchObject({ state: "failed", message: "checkpoint replay schema mismatch" });
+    expect(updates).toContain("checkpoint replay schema mismatch");
+  });
+});
+
+describe("completion rating", () => {
+  it("opens only on a live transition to the terminal phase", () => {
+    expect(shouldOpenWorkflowRating({ initialized: true, terminal: false, runId: "run-1" }, { terminal: true, runId: "run-1" })).toBe(true);
+    expect(shouldOpenWorkflowRating({ initialized: false, terminal: false }, { terminal: true, runId: "run-1" })).toBe(false);
+    expect(shouldOpenWorkflowRating({ initialized: true, terminal: true, runId: "run-1" }, { terminal: true, runId: "run-1" })).toBe(false);
+    expect(shouldOpenWorkflowRating({ initialized: true, terminal: false, runId: "run-1" }, { terminal: true, runId: "run-2" })).toBe(false);
   });
 });

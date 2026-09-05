@@ -429,6 +429,11 @@
       "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
       "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
     },
+    "concept_image": {
+      "version": "1.0.0",
+      "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
+      "semanticsDigest": "9b6e14d1ad2f75235465acd6fc094cd3f8bae41ba8d929d9984bd1b6df166d3b"
+    },
     "convert": {
       "version": "1.0.0",
       "schemaDigest": "56af03545b8390ebfd2159078eb751e48bf3babfeb2595a4cf28154c5463ec0a",
@@ -539,5 +544,5 @@
       "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
     }
   },
-  "hash": "1e2eb966593d3945c4a12537f6de82c003edc9e949b36898c6b15e224dca8312"
+  "hash": "a12c140a7662fcde57d2961c585476fca9d72dc4c31e3eb07aa7fa33b7c264c4"
 }

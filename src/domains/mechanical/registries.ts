@@ -115,7 +115,7 @@ simple("recordTypes", {
   interface_contracts: { freshness: "assembly-design-and-requirements", closure: "cad_commit_interface_contracts" },
 });
 
-for (const id of ["visual", "geometry", "surfaces", "build", "compare", "section", "drawing", "simulation", "presentation", "convert", "assembly", "interference", "sections", "optimization"]) {
+for (const id of ["visual", "concept_image", "geometry", "surfaces", "build", "compare", "section", "drawing", "simulation", "presentation", "convert", "assembly", "interference", "sections", "optimization"]) {
   mechanicalRegistries.evidenceTypes.registerIdempotent(staticRegistration(id, { protocol: "evidence-ref-v1" }, { freshness: "subject-and-declared-input-hashes", explicitCommit: id === "simulation" }));
 }
 

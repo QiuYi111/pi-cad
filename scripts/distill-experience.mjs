@@ -87,7 +87,7 @@ function defaultPrompt(request) {
     "Extract only recurring, generalizable CAD strategies, failure modes, tool-use patterns, verification habits, and workflow defects supported by the trajectories.",
     "Change a workflow only when repeated evidence identifies a phase, transition, obligation, capability, or SOP defect. Keep its id stable and increment its version.",
     "For each low-rated real task, identify the earliest reproducible failure node and a minimal checkpoint immediately before it. Prefer tool errors, denied operations, review failures, stuck workflow state, and explicit user feedback over speculative judgement.",
-    `Write checkpoint replay cases to ${join(jobsDir, `${jobStem}.replay.json`)}. Each case must contain kind (repair or guard), seq, task, checkpoint, evidence, failureSignature, expectedRepair, and regressionGuard. Evidence must be a short exact quote from that trajectory or its human feedback. Include at most three low-rated repairs and one high-rated guard case.`,
+    `Write checkpoint replay cases to ${join(jobsDir, `${jobStem}.replay.json`)} as one JSON object with exactly this outer shape: {"cases":[...]}. Each case must contain kind (repair or guard), seq, task, checkpoint, evidence, failureSignature, expectedRepair, and regressionGuard. Evidence must be a short exact quote from that trajectory or its human feedback. Include at most three low-rated repairs and one high-rated guard case.`,
     "Preserve unrelated working-tree changes. Do not copy project-specific dimensions unless they express reusable domain knowledge.",
     "Validate every changed skill and compile every changed workflow. If evidence does not justify a change, leave that file unchanged and explain why.",
     `Write a concise audit note to ${join(jobsDir, `${jobStem}.audit.md`)} describing evidence used, files changed, validation, model, and sequence range.`,
@@ -168,7 +168,14 @@ async function run() {
     const replayPath = join(jobsDir, `${jobStem}.replay.json`);
     if (!validationError) {
       try {
-        const replay = await readJson(replayPath);
+        let replay = await readJson(replayPath);
+        // Older prompts and otherwise valid distillers sometimes emitted the
+        // case array directly. Normalize that harmless representation before
+        // validation and replay instead of discarding a completed job.
+        if (Array.isArray(replay)) {
+          replay = { cases: replay };
+          await atomicWrite(replayPath, replay);
+        }
         if (!Array.isArray(replay.cases) || replay.cases.length < 1 || replay.cases.length > 4) throw new Error("checkpoint replay must contain 1-4 cases");
         const sourceEntries = (await readFile(join(root, "index.jsonl"), "utf8")).split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
           .filter((entry) => entry.seq >= request.from_seq && entry.seq <= request.cutoff_seq && entry.evaluation_status === "evaluated");

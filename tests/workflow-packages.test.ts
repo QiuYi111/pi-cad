@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
-import { completionGate } from "../src/authority/sidecar.ts";
+import { completionGate, dispatchSidecarRequest } from "../src/authority/sidecar.ts";
 import { commitWorkspace } from "../src/harness/commit.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { canonicalDigest } from "../src/harness/canonical.ts";
@@ -65,10 +65,13 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.match(grillingView.text, /Use the grill-me skill in this phase/);
     assert.deepEqual(Object.keys(loaded.workflow.phases.concept!.transitions), ["assembly", "single_part"]);
     assert.ok(loaded.workflow.phases.concept!.grants.includes("image_generate"));
+    assert.deepEqual(loaded.workflow.phases.concept!.evidenceObligations, [{
+      ref: "concept-image", type: "concept_image", closeWith: "codex_generate_image", dependsOn: ["spec"],
+    }]);
     assert.equal(loaded.workflow.phases.concept!.actions.includes("cad_build_step"), false);
     assert.equal(loaded.workflow.phases.parts!.actions.includes("cad_build_step"), true);
     assert.deepEqual(loaded.workflow.phases.final_review!.reviewProfile, "mechanical.final-review");
-    assert.equal(loaded.workflow.version, "1.0.4");
+    assert.equal(loaded.workflow.version, "1.0.6");
     assert.deepEqual(Object.keys(loaded.workflow.phases.final_review!.transitions), ["accepted", "revise_architecture_bom", "revise_assembly", "revise_concept", "revise_interface", "revise_parts", "revise_spec"]);
     assert.equal(loaded.workflow.phases.done!.terminal, true);
 
@@ -109,6 +112,29 @@ test("installed Mechanical packages expose metadata only and compile branchable 
       { event: "revise_parts", target: "parts" },
       { event: "revise_spec", target: "spec" },
     ]);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("one-shot cannot leave concept until a real generated PNG is recorded", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-concept-image-"));
+  try {
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
+    await handleAgentApi(cwd, { schema: 1, op: "commit", name: "grill" });
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "clarified" });
+    await handleAgentApi(cwd, { schema: 1, op: "commit", name: "spec" });
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "specified" });
+    await handleAgentApi(cwd, { schema: 1, op: "commit", name: "concept" });
+    await assert.rejects(
+      () => handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "single_part" }),
+      /concept-image/,
+    );
+    const image = join(cwd, ".pi", "generated-images", "concept.png");
+    await mkdir(join(cwd, ".pi", "generated-images"), { recursive: true });
+    await writeFile(image, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]));
+    const recorded = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "image-generated", path: image });
+    assert.equal(recorded.ok, true);
+    const next = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "single_part" }) as any;
+    assert.equal(next.phase, "parts");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 

@@ -50,7 +50,7 @@ for (;;) {
     message: terminal
       ? (job.status === "complete"
           ? (job.changed ? "Reusable experience updated." : "Validation complete. No reusable change was published.")
-          : job.error || "Distillation failed.")
+          : job.validation_error || job.error || "Distillation failed.")
       : "Prime is extracting reusable engineering experience…",
     outputPath: job.log_path || dirname(jobPath),
   });

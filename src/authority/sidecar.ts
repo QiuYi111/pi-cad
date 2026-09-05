@@ -1,6 +1,6 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { chmod, mkdir, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { chmod, mkdir, readFile, realpath, rm } from "node:fs/promises";
+import { extname, join, relative, resolve, sep } from "node:path";
 
 import { canonicalDigest, jsonValue } from "../harness/canonical.ts";
 import { loadWorkspaceCommit } from "../harness/commit.ts";
@@ -16,6 +16,8 @@ import { writeStatusProjection } from "./storage.ts";
 import { ReviewRuntime, type ReviewerExecutor } from "./review-runtime.ts";
 import { findExperience, getExperience, readExperience, searchExperience } from "../experience/store.ts";
 import type { ExperienceSearchOptions } from "../experience/types.ts";
+import { sha256File } from "../shared/store.ts";
+import { commitEvidenceRef } from "../harness/reducer.ts";
 
 export type SidecarRole = "author" | "reviewer";
 type AuthorModelSelection = { provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" };
@@ -25,6 +27,7 @@ export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "completion-gate" }
   | { schema: 1; op: "mission-capture"; mission: string }
   | { schema: 1; op: "author-model"; provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
+  | { schema: 1; op: "image-generated"; path: string }
   | { schema: 1; op: "review-evidence"; reviewId?: string }
   | { schema: 1; op: "authorize"; operation: Operation }
   | { schema: 1; op: "experience-search"; options?: ExperienceSearchOptions }
@@ -33,10 +36,10 @@ export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "experience-read"; identifier: { seq?: number; sha?: string }; startLine?: number; endLine?: number };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "author-model", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
-const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture"]);
+const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture", "image-generated"]);
 const READ_ONLY_OPERATIONS = new Set<Operation>(["workspace.commit", "model.build", "simulation.run", "image.generate", "review.submit", "workflow.transition"]);
 
 function errorResponse(error: unknown): AgentApiResponse {
@@ -131,6 +134,9 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
     } else if (value.op === "mission-capture") {
       if (role !== "author") throw new Error("mission capture is author-scoped");
       result = await captureMission(cwd, value.mission);
+    } else if (value.op === "image-generated") {
+      if (role !== "author") throw new Error("generated image evidence is author-scoped");
+      result = await recordGeneratedImage(cwd, value.path);
     } else if (value.op === "phase-card") {
       if (role !== "author") throw new Error("phase-card is author-scoped");
       bootstrapAgentApiContracts();
@@ -164,6 +170,42 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
     await refreshProjectionSafely(cwd);
     return errorResponse(error);
   }
+}
+
+async function recordGeneratedImage(cwd: string, requestedPath: string): Promise<{ recorded: boolean; path: string }> {
+  if (typeof requestedPath !== "string" || !requestedPath.trim()) throw new Error("generated image path is required");
+  const root = await realpath(cwd);
+  const mapped = requestedPath.startsWith("/workspace/")
+    ? resolve(root, requestedPath.slice("/workspace/".length))
+    : resolve(requestedPath);
+  const image = await realpath(mapped);
+  if (image !== root && !image.startsWith(`${root}${sep}`)) throw new Error("generated image must remain inside the project");
+  if (extname(image).toLowerCase() !== ".png") throw new Error("concept image evidence must be a PNG");
+  const bytes = await readFile(image);
+  if (bytes.length < 8 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error("concept image evidence has an invalid PNG signature");
+  const active = await new HarnessProjectStoreV7(root).currentRun(mechanicalRegistries);
+  if (!active) throw new Error("generated image evidence requires an active workflow");
+  const obligation = active.workflow.phases[active.state.phase]?.evidenceObligations.find((item) => item.closeWith === "codex_generate_image");
+  if (!obligation) throw new Error("the current phase does not require generated image evidence");
+  const digest = await sha256File(image);
+  const evidencePath = `evidence/concept-image/evidence-${digest.slice(0, 20)}.json`;
+  const createdAt = new Date().toISOString();
+  await new HarnessRunStoreV7(root, active.state.runId).mutate(mechanicalRegistries, (loaded) => ({
+    state: commitEvidenceRef(loaded.state, loaded.workflow, loaded.registryContract, {
+      id: `evidence-concept-image-${digest.slice(0, 20)}`,
+      obligationRef: obligation.ref,
+      type: obligation.type,
+      path: evidencePath,
+      sha256: digest,
+      workflowHash: loaded.workflow.hash,
+      registryContractHash: loaded.registryContract.hash,
+      computeIdentity: canonicalDigest({ tool: "codex_generate_image", output: digest }),
+      createdAt,
+    }),
+    payloads: { [evidencePath]: jsonValue({ schema: 1, tool: "codex_generate_image", path: relative(root, image), sha256: digest, createdAt }) },
+    event: { type: "ConceptImageGenerated", data: { path: relative(root, image), sha256: digest } },
+  }));
+  return { recorded: true, path: relative(root, image) };
 }
 
 async function captureMission(cwd: string, requested: string): Promise<{ captured: boolean }> {

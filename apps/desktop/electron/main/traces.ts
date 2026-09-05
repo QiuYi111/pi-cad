@@ -103,7 +103,9 @@ export class TraceStore {
     child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
     await new Promise<void>((accept, reject) => {
       child.once("error", reject);
-      child.once("exit", (code) => code === 0 ? accept() : reject(new Error(stderr.trim() || `Distillation exited with code ${code}`)));
+      child.once("exit", (code) => code === 0 || last.state === "failed"
+        ? accept()
+        : reject(new Error(stderr.trim() || `Distillation exited with code ${code}`)));
     });
     return last;
   }
