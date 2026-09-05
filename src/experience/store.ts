@@ -475,14 +475,36 @@ async function defaultDistillState(): Promise<DistillState> {
 }
 
 export async function readDistillState(root = experienceRoot()): Promise<DistillState> {
-  return await readJson<DistillState>(join(root, "distill_state.json")) || await defaultDistillState();
+  const state = await readJson<DistillState>(join(root, "distill_state.json")) || await defaultDistillState();
+  const pending = pendingTokenCount(await readIndex(root), state.last_distilled_seq);
+  if (state.pending_transcript_tokens !== pending) {
+    state.pending_transcript_tokens = pending;
+    await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
+  }
+  return state;
+}
+
+function pendingEvaluatedEntries(entries: ExperienceIndexEntry[], lastDistilledSeq: number): ExperienceIndexEntry[] {
+  const latestByRun = new Map<string, ExperienceIndexEntry>();
+  for (const entry of entries) {
+    if (entry.seq <= lastDistilledSeq || entry.evaluation_status !== "evaluated") continue;
+    const identity = entry.run_id || entry.session_path || entry.sha;
+    const current = latestByRun.get(identity);
+    if (!current || entry.seq > current.seq) latestByRun.set(identity, entry);
+  }
+  return [...latestByRun.values()].sort((a, b) => a.seq - b.seq);
+}
+
+function pendingTokenCount(entries: ExperienceIndexEntry[], lastDistilledSeq: number): number {
+  return pendingEvaluatedEntries(entries, lastDistilledSeq)
+    .reduce((sum, entry) => sum + entry.transcript_tokens, 0);
 }
 
 async function addPendingTokens(seq: number, tokens: number, root: string): Promise<void> {
   const state = await readDistillState(root);
   if (seq <= state.last_distilled_seq) return;
   const entries = await readIndex(root);
-  state.pending_transcript_tokens = entries.filter((entry) => entry.seq > state.last_distilled_seq && entry.evaluation_status === "evaluated").reduce((sum, entry) => sum + entry.transcript_tokens, 0);
+  state.pending_transcript_tokens = pendingTokenCount(entries, state.last_distilled_seq);
   await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
 }
 
@@ -493,13 +515,22 @@ async function beginDistillation(root: string, requireThreshold: boolean): Promi
   let lock;
   try { lock = await open(lockPath, "wx"); } catch { return { triggered: false }; }
   await lock.close();
-  const evaluated = (await readIndex(root)).filter((entry) => entry.seq > state.last_distilled_seq && entry.evaluation_status === "evaluated");
+  const allEntries = await readIndex(root);
+  const evaluated = pendingEvaluatedEntries(allEntries, state.last_distilled_seq);
   const cutoff = Math.max(state.last_distilled_seq, ...evaluated.map((entry) => entry.seq));
   state.active_cutoff_seq = cutoff;
   state.active_started_at = nowIso();
   await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
   const requestPath = join(root, `distill-${state.last_distilled_seq + 1}-${cutoff}.json`);
-  await atomicWrite(requestPath, JSON.stringify({ schema_version: 1, from_seq: state.last_distilled_seq + 1, cutoff_seq: cutoff, transcript_tokens: state.pending_transcript_tokens, created_at: state.active_started_at }, null, 2) + "\n");
+  await atomicWrite(requestPath, JSON.stringify({
+    schema_version: 1,
+    from_seq: state.last_distilled_seq + 1,
+    cutoff_seq: cutoff,
+    selected_seqs: evaluated.map((entry) => entry.seq),
+    selected_run_ids: evaluated.map((entry) => entry.run_id),
+    transcript_tokens: state.pending_transcript_tokens,
+    created_at: state.active_started_at,
+  }, null, 2) + "\n");
   return { triggered: true, cutoff_seq: cutoff, request_path: requestPath };
 }
 
@@ -521,7 +552,7 @@ export async function completeDistillation(success: boolean, root = experienceRo
   state.active_cutoff_seq = null;
   state.active_started_at = null;
   const entries = await readIndex(root);
-  state.pending_transcript_tokens = entries.filter((entry) => entry.seq > state.last_distilled_seq && entry.evaluation_status === "evaluated").reduce((sum, entry) => sum + entry.transcript_tokens, 0);
+  state.pending_transcript_tokens = pendingTokenCount(entries, state.last_distilled_seq);
   await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
   await rm(join(root, "distill.lock"), { force: true });
   return state;

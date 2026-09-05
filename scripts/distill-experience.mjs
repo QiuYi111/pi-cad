@@ -68,8 +68,14 @@ async function finishDistillation(success) {
   const indexPath = join(root, "index.jsonl");
   const rawIndex = await readFile(indexPath, "utf8").catch(() => "");
   const entries = rawIndex.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line));
-  state.pending_transcript_tokens = entries
-    .filter((entry) => entry.seq > state.last_distilled_seq && entry.evaluation_status === "evaluated")
+  const latestByRun = new Map();
+  for (const entry of entries) {
+    if (entry.seq <= state.last_distilled_seq || entry.evaluation_status !== "evaluated") continue;
+    const identity = entry.run_id || entry.session_path || entry.sha;
+    const current = latestByRun.get(identity);
+    if (!current || entry.seq > current.seq) latestByRun.set(identity, entry);
+  }
+  state.pending_transcript_tokens = [...latestByRun.values()]
     .reduce((sum, entry) => sum + entry.transcript_tokens, 0);
   await atomicWrite(statePath, state);
   await rm(join(root, "distill.lock"), { force: true });
@@ -78,10 +84,11 @@ async function finishDistillation(success) {
 
 function defaultPrompt(request) {
   return [
-    "Run a Pi-CAD experience distillation job.",
+    "Run a Reify experience distillation job.",
     `The immutable request manifest is: ${requestPath}`,
     `The experience index is: ${join(root, "index.jsonl")}`,
-    `Process complete evaluated trajectories from seq ${request.from_seq} through ${request.cutoff_seq}.`,
+    `Process the global evaluated trajectory set selected by seq: ${(request.selected_seqs || []).join(", ") || `${request.from_seq}-${request.cutoff_seq}`}.`,
+    "Treat records with the same run_id as one trajectory; never infer project-local scope from archive folders.",
     "Read canonical transcript.md files and deterministic metrics from the archive; do not invent or replace human ratings.",
     `Edit only the candidate skill tree under ${join(candidateRoot, "skills")} and candidate workflow packages under ${join(candidateRoot, "workflow-packages")}.`,
     "Extract only recurring, generalizable CAD strategies, failure modes, tool-use patterns, verification habits, and workflow defects supported by the trajectories.",

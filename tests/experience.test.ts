@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
+  beginDistillationNow,
   completeDistillation,
   finalizeExperience,
   findExperience,
@@ -24,6 +25,30 @@ import { renderExperienceView } from "../src/experience/view.ts";
 import { dispatchSidecarRequest } from "../src/authority/sidecar.ts";
 
 const execFileAsync = promisify(execFile);
+
+test("distillation accumulates globally and counts each run once", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-cad-distill-global-"));
+  try {
+    const entries = [
+      { seq: 1, run_id: "run-a", session_path: "/projects/a/run.jsonl", sha: "a1", project_name: "a", evaluation_status: "evaluated", transcript_tokens: 100 },
+      { seq: 2, run_id: "run-a", session_path: "/projects/a/run.jsonl", sha: "a2", project_name: "a", evaluation_status: "evaluated", transcript_tokens: 110 },
+      { seq: 3, run_id: "run-b", session_path: "/projects/b/run.jsonl", sha: "b1", project_name: "b", evaluation_status: "evaluated", transcript_tokens: 70 },
+    ];
+    await writeFile(join(root, "index.jsonl"), entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    await writeFile(join(root, "distill_state.json"), `${JSON.stringify({
+      schema_version: 1, last_distilled_seq: 0, pending_transcript_tokens: 280,
+      threshold_tokens: 250_000, last_distilled_at: null, active_cutoff_seq: null, active_started_at: null,
+    })}\n`);
+
+    assert.equal((await readDistillState(root)).pending_transcript_tokens, 180);
+    const request = await beginDistillationNow(root);
+    assert.equal(request.triggered, true);
+    const manifest = JSON.parse(await readFile(request.request_path!, "utf8"));
+    assert.deepEqual(manifest.selected_seqs, [2, 3]);
+    assert.deepEqual(manifest.selected_run_ids, ["run-a", "run-b"]);
+    assert.equal(manifest.transcript_tokens, 180);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("experience index supports evaluation, retrieval, bounded reads, and atomic distillation cutoffs", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-cad-experience-"));

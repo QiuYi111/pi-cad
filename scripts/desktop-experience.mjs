@@ -17,13 +17,16 @@ const entries = [];
 for (let index = 0; index < sessionPaths.length; index++) {
   const sessionPath = sessionPaths[index];
   emit({ state: "running", processed: index, total: sessionPaths.length, message: `Archiving ${basename(sessionPath)}…` });
-  const entry = await store.finalizeExperience({
-    runId: basename(sessionPath, ".jsonl"),
+  const runId = basename(sessionPath, ".jsonl");
+  const existing = (await store.readIndex()).filter((candidate) => candidate.run_id === runId)
+    .sort((a, b) => b.seq - a.seq)[0];
+  const entry = existing || await store.finalizeExperience({
+    runId,
     workflow: "desktop.selection",
     projectPath,
     sessionPath,
     outcome: "complete",
-    outcomeReason: "Selected for distillation in Pi-CAD Desktop",
+    outcomeReason: "Selected for distillation in Reify Desktop",
   });
   entries.push(await store.recordEvaluation({ sha: entry.sha }, quality, difficulty));
   emit({ state: "running", processed: index + 1, total: sessionPaths.length, message: `Archived ${index + 1} of ${sessionPaths.length} trajectories.` });
