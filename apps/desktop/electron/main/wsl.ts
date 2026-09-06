@@ -64,7 +64,7 @@ export function classifyWslInstallResult(result: { exitCode: number; distroPrese
 
 export function wslInstallPowerShellCommand(distro: string): string {
   const escaped = distro.replaceAll("'", "''");
-  return `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -Wait -PassThru -ArgumentList @('--install','--distribution','${escaped}','--no-launch'); exit $process.ExitCode`;
+  return `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -PassThru -ArgumentList @('--install','--distribution','${escaped}','--no-launch'); $process.WaitForExit(); exit $process.ExitCode`;
 }
 
 function uncWslPath(value: string): { distro: string; path: string } | null {

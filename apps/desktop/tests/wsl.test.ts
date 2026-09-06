@@ -100,7 +100,10 @@ describe("bundled engineering knowledge", () => {
 
 describe("WSL first-install status", () => {
   it("does not let the hidden installer wait for Ubuntu's interactive user setup", () => {
-    expect(wslInstallPowerShellCommand("Ubuntu")).toContain("'--no-launch'");
+    const command = wslInstallPowerShellCommand("Ubuntu");
+    expect(command).toContain("'--no-launch'");
+    expect(command).toContain(".WaitForExit()");
+    expect(command).not.toMatch(/Start-Process.+\s-Wait(?:\s|;)/);
   });
 
   it("keeps a silent Windows installer visibly alive", () => {
