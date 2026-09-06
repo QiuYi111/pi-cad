@@ -18,7 +18,7 @@ cad.workflow.list() -> list[dict]
 cad.workflow.start(workflow_id: str, *, interaction_mode: str = "interactive") -> dict
 cad.workflow.current() -> dict | None
 cad.workflow.advance(event: str) -> dict
-cad.save_and_check(record: str, source: str | Path, output: str | Path | None = None, *, variables=None, artifacts=None, force=False, parameters=None) -> SaveAndCheckResult
+cad.save_and_check(record: str, source: str | Path, output: str | Path | None = None, *, variables=None, artifacts=None, force=False, validation="auto", parameters=None) -> SaveAndCheckResult
 cad.commit(
     name: str,
     *,
@@ -31,6 +31,7 @@ cad.model.build(
     output: str | Path | None = None,
     *,
     force: bool = False,
+    validation: str = "auto",
     parameters: dict[str, dict] | None = None,
 ) -> ArtifactRef
 cad.probe.run(
@@ -89,6 +90,10 @@ reason to call `inspect.signature()` before using them.
   legacy task asks for CadQuery, preserve its requested geometry and dimensions
   but implement the managed candidate with build123d; do not probe for or try
   to install CadQuery.
+- Choose build validation deliberately: `validation="auto"` fully checks small
+  parts and defers expensive per-solid self-intersection checks for large
+  assemblies; `validation="fast"` is for iteration; `validation="full"` runs
+  every check and is required before release when an earlier build deferred one.
 - When the user should tune dimensions in the desktop Viewer, expose
   `build(parameters) -> Shape` instead of `result` and pass the small UI
   declaration once through `cad.model.build(..., parameters={"width":

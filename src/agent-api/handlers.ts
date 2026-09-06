@@ -6,7 +6,7 @@ import { reviseEvidenceRef, transitionRun } from "../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { executeCadProbe } from "../modules/probe/tool.ts";
-import { artifactPathForKind, buildStep, envelopeArtifactHash, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
+import { artifactPathForKind, buildStep, envelopeArtifactHash, FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
 import { executeMechanicalRecipeV7 } from "../domains/mechanical/recipe-actions-v7.ts";
 import { cadStartSnapshot } from "../harness/kernel.ts";
 import { discoverWorkflowPackages, resolveWorkflowPackage } from "../harness/workflow/packages.ts";
@@ -180,7 +180,13 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   if (!build.ok) return { build, visual: null, images: [] };
 
   const artifact = artifactPathForKind(build, "step") ?? request.output;
-  const geometry = await inspectGeometry(cwd, artifact, runGeometryEvidencePath(cwd, activeBeforeBuild.state.runId, artifact));
+  const geometry = await inspectGeometry(
+    cwd,
+    artifact,
+    runGeometryEvidencePath(cwd, activeBeforeBuild.state.runId, artifact),
+    request.validation === "full" ? FULL_GEOMETRY_VALIDATION_TIMEOUT_MS : undefined,
+    request.validation ?? "auto",
+  );
   if (!geometry.ok) {
     const payload = geometry.payload as { error?: string } | undefined;
     throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");

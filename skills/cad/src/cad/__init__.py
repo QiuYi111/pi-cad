@@ -60,11 +60,12 @@ async def save_and_check(
     variables: dict[str, Any] | None = None,
     artifacts: list[str | Path | ArtifactRef] | None = None,
     force: bool = False,
+    validation: str = "auto",
     parameters: dict[str, dict[str, Any]] | None = None,
 ) -> SaveAndCheckResult:
     """Close the current workspace record, then run the managed build and checks."""
     saved = await commit(record, parent=parent, variables=variables, artifacts=artifacts)
-    candidate = await model.build(source, output, force=force, parameters=parameters)
+    candidate = await model.build(source, output, force=force, validation=validation, parameters=parameters)
     return SaveAndCheckResult(saved, candidate)
 
 

@@ -21,6 +21,9 @@ import { harnessRunDirectory, harnessStorageRoot } from "../authority/storage.ts
 import type { ModelParameterValue } from "./model-parameters.ts";
 
 export const DEFAULT_VIEWS = ["iso", "front", "back", "left", "right", "top", "bottom"];
+export const DEFAULT_CADCTL_TIMEOUT_MS = 180_000;
+export const FULL_GEOMETRY_VALIDATION_TIMEOUT_MS = 15 * 60_000;
+export type GeometryValidationMode = "auto" | "fast" | "full";
 
 export function packageRoot(): string {
   // <package>/src/shared/capability.ts -> <package>
@@ -59,7 +62,7 @@ async function runCadctl(
   options: CadctlOptions,
 ): Promise<CadEventEnvelope> {
   const python = pythonInvocation(options.extra, options.cwd);
-  const timeoutMs = options.timeoutMs ?? 180_000;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_CADCTL_TIMEOUT_MS;
   const maxStdoutBytes = 16 * 1024 * 1024;
   const maxStderrBytes = 1024 * 1024;
   const useWorker = process.env.PI_CAD_CADCTL_TRANSPORT !== "process" && isWarmCadctlCommand(args[0]);
@@ -133,9 +136,10 @@ export async function inspectGeometry(
   artifact: string,
   output: string,
   timeoutMs?: number,
+  validation: GeometryValidationMode = "auto",
 ): Promise<CadEventEnvelope> {
   return runCadctl(
-    ["inspect", "--artifact", resolve(cwd, artifact), "--output", resolve(cwd, output)],
+    ["inspect", "--artifact", resolve(cwd, artifact), "--output", resolve(cwd, output), "--validation", validation],
     { cwd, timeoutMs },
   );
 }

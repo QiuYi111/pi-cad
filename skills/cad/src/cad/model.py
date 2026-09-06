@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+import warnings
 
 from ._attachments import display_inline_image
 from .client import CadApiError, project_path, request
@@ -37,8 +38,11 @@ async def build(
     output: str | Path | None = None,
     *,
     force: bool = False,
+    validation: str = "auto",
     parameters: dict[str, dict[str, Any]] | None = None,
 ) -> ArtifactRef:
+    if validation not in {"auto", "fast", "full"}:
+        raise CadApiError("validation must be auto, fast, or full", error_type="ModelBuildError")
     source_path, source_relative = _project_path(source)
     requested_output = Path(output) if output is not None else Path("build") / f"{source_path.stem}.step"
     output_path, output_relative = _project_path(requested_output)
@@ -47,6 +51,7 @@ async def build(
         source=source_relative.as_posix(),
         output=output_relative.as_posix(),
         force=force,
+        validation=validation,
         **({"parameters": parameters} if parameters is not None else {}),
     )
     envelope = response.get("build") or {}
@@ -57,6 +62,13 @@ async def build(
     artifact = next((item for item in artifacts if item.get("kind") == "step"), artifacts[0] if artifacts else None)
     if not artifact or not output_path.is_file():
         raise CadApiError(f"Pi-CAD model build did not create {output_relative.as_posix()}", error_type="ModelBuildError")
+    deferred = ((response.get("geometry") or {}).get("payload") or {}).get("validity", {}).get("deferredChecks") or []
+    if deferred:
+        warnings.warn(
+            f"Pi-CAD deferred expensive checks for this build: {', '.join(deferred)}; use validation='full' before release",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     await _attach_images(response.get("images") or [])
     digest = artifact.get("sha256") if artifact else None
     return ArtifactRef(output_relative, digest, "candidate")

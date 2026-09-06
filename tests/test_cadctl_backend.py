@@ -201,6 +201,7 @@ class CadctlBackendTests(unittest.TestCase):
                     "positiveVolume": True,
                     "selfIntersectionFree": True,
                 },
+                "validation": {"requested": "auto", "selfIntersection": "full"},
                 "solids": [
                     {
                         "solidIndex": 0,
@@ -262,6 +263,30 @@ class CadctlBackendTests(unittest.TestCase):
         self.assertFalse(validity["ok"])
         self.assertFalse(validity["checks"]["selfIntersectionFree"])
         self.assertIn("selfIntersecting", validity["solids"][0]["reasons"])
+
+    def test_large_assembly_defers_exhaustive_self_intersection_checks(self) -> None:
+        from unittest.mock import patch
+
+        import build123d as bd
+        from cadctl.geometry import MAX_EXHAUSTIVE_SELF_INTERSECTION_SOLIDS, _validity
+
+        shape = bd.Compound(
+            children=[
+                bd.Box(1, 1, 1).translate((index * 2, 0, 0))
+                for index in range(MAX_EXHAUSTIVE_SELF_INTERSECTION_SOLIDS + 1)
+            ]
+        )
+        with patch("cadctl.geometry._is_self_intersecting") as check:
+            validity = _validity(shape)
+        check.assert_not_called()
+        self.assertTrue(validity["ok"])
+        self.assertEqual(validity["deferredChecks"], ["selfIntersection"])
+        self.assertIsNone(validity["checks"]["selfIntersectionFree"])
+
+        with patch("cadctl.geometry._is_self_intersecting", return_value=False) as check:
+            full = _validity(shape, "full")
+        self.assertEqual(check.call_count, MAX_EXHAUSTIVE_SELF_INTERSECTION_SOLIDS + 1)
+        self.assertEqual(full["validation"]["selfIntersection"], "full")
 
     def test_surface_ids_are_hash_bound_and_measureable(self) -> None:
         self._build_plate()

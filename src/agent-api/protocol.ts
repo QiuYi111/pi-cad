@@ -20,7 +20,7 @@ export type AgentApiRequest =
   | { schema: 1; op: "viewer-catalog" }
   | { schema: 1; op: "evidence-read"; path: string }
   | { schema: 1; op: "probe"; preset?: string; subject?: "current" | "baseline" | AgentArtifactSubject; purpose?: string; code?: string; args?: Record<string, JsonValue> }
-  | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean; parameters?: Record<string, ModelParameterDefinitionInput> }
+  | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean; validation?: "auto" | "fast" | "full"; parameters?: Record<string, ModelParameterDefinitionInput> }
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }
   | { schema: 1; op: "review-submit"; subjectCommit: string }
   | { schema: 1; op: "review-current"; reviewId?: string }

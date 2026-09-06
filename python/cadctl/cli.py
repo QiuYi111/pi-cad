@@ -125,7 +125,7 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     started = time.monotonic()
     artifact = Path(args.artifact)
     try:
-        payload = inspect_geometry(artifact)
+        payload = inspect_geometry(artifact, validation=args.validation)
         artifacts = []
         if args.output:
             out = Path(args.output)
@@ -691,6 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("inspect", help="Return STEP geometry facts")
     p.add_argument("--artifact", required=True)
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
+    p.add_argument("--validation", choices=("auto", "fast", "full"), default="auto")
     p.set_defaults(func=_cmd_inspect)
 
     p = sub.add_parser("mesh", help="Return a compact desktop preview mesh")

@@ -130,7 +130,7 @@ class CadPackageTests(unittest.TestCase):
         self.assertIs(result.commit, saved)
         self.assertIs(result.artifact, artifact)
         commit.assert_awaited_once_with("parts", parent=None, variables={"width": 40}, artifacts=None)
-        build.assert_awaited_once_with("bracket.py", "build/bracket.step", force=True, parameters=None)
+        build.assert_awaited_once_with("bracket.py", "build/bracket.step", force=True, validation="auto", parameters=None)
 
     def test_save_and_check_does_not_build_when_authorized_commit_fails(self) -> None:
         with (
@@ -246,6 +246,7 @@ class CadPackageTests(unittest.TestCase):
                 asyncio.run(cad.model.build(
                     "part.py",
                     "build/part.step",
+                    validation="full",
                     parameters={
                         "width": {"default": 40, "min": 20, "max": 80, "step": 1, "unit": "mm"},
                     },
@@ -255,6 +256,7 @@ class CadPackageTests(unittest.TestCase):
                 source="part.py",
                 output="build/part.step",
                 force=False,
+                validation="full",
                 parameters={
                     "width": {"default": 40, "min": 20, "max": 80, "step": 1, "unit": "mm"},
                 },

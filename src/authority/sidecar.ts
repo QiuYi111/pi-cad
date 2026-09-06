@@ -20,6 +20,9 @@ import { sha256File } from "../shared/store.ts";
 import { commitEvidenceRef } from "../harness/reducer.ts";
 
 export type SidecarRole = "author" | "reviewer";
+// Long, explicit full validation remains bounded by its inner command. The
+// transport must stay open long enough to return that command's real result.
+export const SIDECAR_REQUEST_TIMEOUT_MS = 30 * 60_000;
 type AuthorModelSelection = { provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" };
 
 export type SidecarRequest = AgentApiRequest
@@ -257,7 +260,7 @@ async function captureMission(cwd: string, requested: string): Promise<{ capture
 async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<void> {
   const chunks: Buffer[] = [];
   let size = 0;
-  socket.setTimeout(150_000, () => socket.destroy(new Error("sidecar request timeout")));
+  socket.setTimeout(SIDECAR_REQUEST_TIMEOUT_MS, () => socket.destroy(new Error("sidecar request timeout")));
   socket.on("data", (chunk: Buffer) => {
     size += chunk.length;
     if (size > MAX_REQUEST_BYTES) socket.destroy(new Error("sidecar request exceeds byte limit"));

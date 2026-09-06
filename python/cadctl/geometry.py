@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import build123d as bd
+
+MAX_EXHAUSTIVE_SELF_INTERSECTION_SOLIDS = 64
+ValidationMode = Literal["auto", "fast", "full"]
 
 
 def _wrapped_solids(shape: bd.Shape) -> list[Any]:
@@ -71,19 +74,25 @@ def _is_self_intersecting(wrapped: Any) -> bool | None:
         return None
 
 
-def _validity(shape: bd.Shape) -> dict[str, Any]:
+def _validity(shape: bd.Shape, validation: ValidationMode = "auto") -> dict[str, Any]:
     """Objective B-Rep health only; no dimensions or design intent."""
     from OCP.BRepCheck import BRepCheck_Analyzer
 
+    if validation not in {"auto", "fast", "full"}:
+        raise ValueError("validation must be auto, fast, or full")
     topology_valid = bool(BRepCheck_Analyzer(shape.wrapped, True).IsValid())
+    wrapped_solids = _wrapped_solids(shape)
+    exhaustive_self_intersection = validation == "full" or (
+        validation == "auto" and len(wrapped_solids) <= MAX_EXHAUSTIVE_SELF_INTERSECTION_SOLIDS
+    )
     solids: list[dict[str, Any]] = []
-    for index, solid in enumerate(_wrapped_solids(shape)):
+    for index, solid in enumerate(wrapped_solids):
         solid_topology = bool(BRepCheck_Analyzer(solid, True).IsValid())
         shells = _solid_shells(solid)
         closed_shells = bool(shells) and all(_shell_is_closed(shell) for shell in shells)
         signed_volume = _signed_volume(solid)
         positive_volume = signed_volume > 0
-        self_intersecting = _is_self_intersecting(solid)
+        self_intersecting = _is_self_intersecting(solid) if exhaustive_self_intersection else None
         reasons = [
             reason
             for failed, reason in (
@@ -132,6 +141,11 @@ def _validity(shape: bd.Shape) -> dict[str, Any]:
             "selfIntersectionFree": self_intersection_free,
         },
         "solids": solids,
+        "validation": {
+            "requested": validation,
+            "selfIntersection": "full" if exhaustive_self_intersection else "deferred",
+        },
+        **({"deferredChecks": ["selfIntersection"]} if not exhaustive_self_intersection else {}),
     }
 
 
@@ -193,7 +207,7 @@ def _solid_selector(shape: bd.Shape, token: str) -> bd.Solid:
     return solids[index]
 
 
-def inspect_geometry(artifact: str | Path) -> dict[str, Any]:
+def inspect_geometry(artifact: str | Path, validation: ValidationMode = "auto") -> dict[str, Any]:
     artifact = Path(artifact)
     shape = bd.import_step(artifact)
 
@@ -242,7 +256,7 @@ def inspect_geometry(artifact: str | Path) -> dict[str, Any]:
         "volume": round(float(shape.volume), 6),
         "surfaceArea": round(float(shape.area), 6),
         "solidCount": len(solids),
-        "validity": _validity(shape),
+        "validity": _validity(shape, validation),
         "occurrenceCount": max(len(solids), 1),
         "occurrences": [
             {
