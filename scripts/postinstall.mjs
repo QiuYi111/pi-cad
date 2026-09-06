@@ -13,7 +13,7 @@ function uv(args, options = {}) {
 }
 
 if (process.platform !== "linux" && process.platform !== "darwin") {
-  throw new Error("Pi-CAD installation requires Linux, macOS, or Linux through WSL");
+  throw new Error("Reify installation requires Linux, macOS, or Linux through WSL");
 }
 
 // macOS ships the CAD core. Linux additionally qualifies the managed

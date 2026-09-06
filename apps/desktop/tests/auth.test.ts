@@ -11,6 +11,7 @@ const settings: AppSettings = {
 
 class FakeChild extends EventEmitter {
   killed = false;
+  kill() { this.killed = true; return true; }
   stdout = new EventEmitter();
   stderr = new EventEmitter();
   stdin = { writable: true, write: vi.fn() };
@@ -56,5 +57,12 @@ describe("desktop OAuth", () => {
     const runtime = bridge(JSON.stringify({ ok: true, expires: Date.now() - 1 }));
     const controller = new AuthController(runtime.value as any);
     await expect(controller.status(settings)).resolves.toMatchObject({ state: "signed-out" });
+  });
+
+  it("cancels and signs out without touching the project", async () => {
+    const runtime = bridge(); const controller = new AuthController(runtime.value as any); await controller.login(settings);
+    await expect(controller.cancel()).resolves.toMatchObject({ state: "signed-out" });
+    await expect(controller.signOut(settings)).resolves.toMatchObject({ state: "signed-out", message: expect.stringContaining("Project files were kept") });
+    expect(runtime.value.exec).toHaveBeenCalledWith(["rm", "-f", "/home/prime/.prime/agent/auth.json"]);
   });
 });

@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Desktop engineering workspace for Pi-CAD and Prime Agent",
-  "author": { "name": "Pi-CAD contributors", "email": "maintainers@pi-cad.dev" },
+  "description": "Reify turns ideas into inspectable mechanical designs with Prime Agent",
+  "author": { "name": "Reify contributors", "email": "maintainers@pi-cad.dev" },
   "homepage": "https://github.com/QiuYi111/pi-cad",
-  "desktopName": "Pi-CAD.desktop",
+  "desktopName": "Reify.desktop",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -20,7 +20,8 @@
     "stage:runtime": "node scripts/stage-runtime.mjs",
     "package:win": "npm run stage:runtime && npm run build && node scripts/package-windows.mjs",
     "package:linux": "npm run stage:runtime && npm run build && electron-builder --linux AppImage deb",
-    "package:mac": "npm run stage:runtime && npm run build && electron-builder --mac dmg zip"
+    "package:mac": "node scripts/check-mac-release.mjs && npm run stage:runtime && npm run build && electron-builder --mac dmg zip",
+    "test:linux:packages": "bash tests/linux/Test-ReifyPackages.sh"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",
@@ -48,7 +49,8 @@
   },
   "build": {
     "appId": "com.picad.desktop",
-    "productName": "Pi-CAD",
+    "productName": "Reify",
+    "executableName": "Reify",
     "asar": true,
     "directories": {
       "output": "release"
@@ -72,15 +74,15 @@
         "nsis",
         "portable"
       ],
-      "artifactName": "Pi-CAD-Setup-${arch}.${ext}"
+      "artifactName": "Reify-Setup-${arch}.${ext}"
     },
     "linux": {
       "icon": "build/icon.png",
       "category": "Engineering",
-      "maintainer": "Pi-CAD contributors <maintainers@pi-cad.dev>",
+      "maintainer": "Reify contributors <maintainers@pi-cad.dev>",
       "syncDesktopName": true,
       "target": ["AppImage", "deb"],
-      "artifactName": "Pi-CAD-Linux-${arch}.${ext}"
+      "artifactName": "Reify-Linux-${arch}.${ext}"
     },
     "mac": {
       "icon": "build/icon.icns",
@@ -90,7 +92,7 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "artifactName": "Pi-CAD-macOS-${arch}.${ext}"
+      "artifactName": "Reify-macOS-${arch}.${ext}"
     },
     "dmg": {
       "sign": false,
@@ -108,10 +110,10 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "Pi-CAD"
+      "shortcutName": "Reify"
     },
     "portable": {
-      "artifactName": "Pi-CAD-Portable-${arch}.${ext}"
+      "artifactName": "Reify-Portable-${arch}.${ext}"
     }
   },
   "allowScripts": {}

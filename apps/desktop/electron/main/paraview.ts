@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import type { AppSettings, ParaViewSession } from "../../src/shared/contracts.js";
+import type { AppSettings, ParaViewSession, SimulationMetadata } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
 import { ViewerBackend } from "./viewer.js";
 
@@ -65,6 +65,15 @@ export class ParaViewBackend {
       this.session = { state: "error", sourcePath: source, message: error instanceof Error ? error.message : String(error) };
       return this.session;
     }
+  }
+
+  async inspect(settings: AppSettings, path: string): Promise<SimulationMetadata> {
+    const viewer = new ViewerBackend(this.bridge);
+    const source = await viewer.resolveProjectPath(settings, path);
+    const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);
+    const python = `${piCadRepo}/python/.venv/bin/python`;
+    const result = await this.bridge.exec([python, `${piCadRepo}/scripts/desktop-inspect-vtk.py`, source], { timeout: 60_000 });
+    return JSON.parse(result.stdout) as SimulationMetadata;
   }
 
   async openDesktop(settings: AppSettings, path: string): Promise<void> {

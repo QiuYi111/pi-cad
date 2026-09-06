@@ -52,7 +52,18 @@ export interface WorkflowDefinitionV1 {
   version: string;
   parametersSchema: JsonValue;
   initialPhase: string;
+  versionControl?: WorkflowVersionControlDefinition;
   phases: Record<string, WorkflowPhaseDefinition>;
+}
+
+export type WorkflowGitAction = "commit" | "pull" | "push";
+
+export interface WorkflowVersionControlDefinition {
+  init?: boolean;
+  allowRemote?: boolean;
+  sourceExtensions?: string[];
+  onWorkflowStart?: WorkflowGitAction[];
+  phases?: Record<string, { onEnter?: WorkflowGitAction[]; onExit?: WorkflowGitAction[] }>;
 }
 
 export interface WorkflowSnapshotV1 extends WorkflowDefinitionV1 {

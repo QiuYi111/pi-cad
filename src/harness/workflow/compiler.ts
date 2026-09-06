@@ -1,6 +1,6 @@
 import { canonicalDigest, jsonValue } from "../canonical.ts";
 import type { RegistrySet } from "../registry.ts";
-import type { WorkflowDefinitionV1, WorkflowObligationDefinition, WorkflowPhaseDefinition, WorkflowSnapshotV1 } from "./types.ts";
+import type { WorkflowDefinitionV1, WorkflowGitAction, WorkflowObligationDefinition, WorkflowPhaseDefinition, WorkflowSnapshotV1, WorkflowVersionControlDefinition } from "./types.ts";
 
 const ID = /^[a-z][a-z0-9_]*(?:[.:/-][a-z0-9_]+)*$/;
 const VERSION = /^\d+\.\d+\.\d+(?:-[a-z0-9.-]+)?$/;
@@ -126,7 +126,7 @@ function phase(value: unknown, phaseId: string, registries: RegistrySet): Workfl
 export function compileWorkflowDefinition(value: unknown, registries: RegistrySet): WorkflowSnapshotV1 {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("workflow must be an object");
   const raw = value as Record<string, unknown>;
-  exactKeys(raw, ["schema", "id", "version", "parametersSchema", "initialPhase", "phases"], "workflow");
+  exactKeys(raw, ["schema", "id", "version", "parametersSchema", "initialPhase", "versionControl", "phases"], "workflow");
   if (raw.schema !== 1) throw new Error("unsupported workflow schema");
   if (typeof raw.id !== "string" || !ID.test(raw.id)) throw new Error("workflow.id is invalid");
   if (typeof raw.version !== "string" || !VERSION.test(raw.version)) throw new Error("workflow.version is invalid");
@@ -169,13 +169,54 @@ export function compileWorkflowDefinition(value: unknown, registries: RegistrySe
   const unreachable = Object.keys(phases).filter((id) => !reachable.has(id));
   if (unreachable.length) throw new Error(`workflow contains unreachable phases: ${unreachable.join(", ")}`);
   if (![...reachable].some((id) => phases[id]!.terminal)) throw new Error("workflow has no reachable terminal phase");
+  const versionControl = compileVersionControl(raw.versionControl, phases);
   const body: WorkflowDefinitionV1 = {
     schema: 1,
     id: raw.id,
     version: raw.version,
     parametersSchema: jsonValue(raw.parametersSchema ?? { type: "object", additionalProperties: false }),
     initialPhase: raw.initialPhase,
+    ...(versionControl ? { versionControl } : {}),
     phases,
   };
   return { ...body, hash: canonicalDigest(body) };
+}
+
+function compileVersionControl(value: unknown, phases: Record<string, WorkflowPhaseDefinition>): WorkflowVersionControlDefinition | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("workflow.versionControl must be an object");
+  const raw = value as Record<string, unknown>;
+  exactKeys(raw, ["init", "allowRemote", "sourceExtensions", "onWorkflowStart", "phases"], "workflow.versionControl");
+  if (raw.init !== undefined && typeof raw.init !== "boolean") throw new Error("workflow.versionControl.init must be boolean");
+  if (raw.allowRemote !== undefined && typeof raw.allowRemote !== "boolean") throw new Error("workflow.versionControl.allowRemote must be boolean");
+  const actions = (input: unknown, where: string): WorkflowGitAction[] | undefined => {
+    if (input === undefined) return undefined;
+    if (!Array.isArray(input) || input.some((item) => typeof item !== "string" || !item)) throw new Error(`${where} must be a string array`);
+    if (new Set(input).size !== input.length) throw new Error(`${where} contains duplicates`);
+    const result = [...input] as WorkflowGitAction[];
+    if (result.some((item) => !["commit", "pull", "push"].includes(item))) throw new Error(`${where} contains an unsupported Git action`);
+    return result;
+  };
+  const sourceExtensions = raw.sourceExtensions === undefined ? undefined : stringArray(raw.sourceExtensions, "workflow.versionControl.sourceExtensions");
+  if (sourceExtensions?.some((item) => !/^\.[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(item))) throw new Error("workflow.versionControl.sourceExtensions must contain file extensions such as .py");
+  const phaseRules: NonNullable<WorkflowVersionControlDefinition["phases"]> = {};
+  if (raw.phases !== undefined) {
+    if (!raw.phases || typeof raw.phases !== "object" || Array.isArray(raw.phases)) throw new Error("workflow.versionControl.phases must be an object");
+    for (const [phaseId, candidate] of Object.entries(raw.phases as Record<string, unknown>)) {
+      if (!phases[phaseId]) throw new Error(`workflow.versionControl references unknown phase ${phaseId}`);
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error(`workflow.versionControl.phases.${phaseId} must be an object`);
+      const rule = candidate as Record<string, unknown>;
+      exactKeys(rule, ["onEnter", "onExit"], `workflow.versionControl.phases.${phaseId}`);
+      const onEnter = actions(rule.onEnter, `workflow.versionControl.phases.${phaseId}.onEnter`);
+      const onExit = actions(rule.onExit, `workflow.versionControl.phases.${phaseId}.onExit`);
+      phaseRules[phaseId] = { ...(onEnter ? { onEnter } : {}), ...(onExit ? { onExit } : {}) };
+    }
+  }
+  return {
+    ...(raw.init === true ? { init: true } : {}),
+    ...(raw.allowRemote === true ? { allowRemote: true } : {}),
+    ...(sourceExtensions?.length ? { sourceExtensions } : {}),
+    ...(actions(raw.onWorkflowStart, "workflow.versionControl.onWorkflowStart") ? { onWorkflowStart: actions(raw.onWorkflowStart, "workflow.versionControl.onWorkflowStart") } : {}),
+    ...(Object.keys(phaseRules).length ? { phases: phaseRules } : {}),
+  };
 }

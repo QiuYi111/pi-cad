@@ -4,7 +4,7 @@ import { memo, useState } from "react";
 
 const icons = { build: Box, probe: ScanLine, workflow: GitCommit, simulation: Waves, review: ShieldCheck, commit: GitCommit, image: Image };
 
-export const ActivityCard = memo(function ActivityCard({ activity }: { activity: CadActivity }) {
+export const ActivityCard = memo(function ActivityCard({ activity, onReference }: { activity: CadActivity; onReference?: (text: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const Icon = icons[activity.kind];
@@ -20,6 +20,7 @@ export const ActivityCard = memo(function ActivityCard({ activity }: { activity:
       <div><strong>{activity.title}</strong>{activity.summary && <p>{activity.summary}</p>}</div>
       <div className="activity-actions">
         {activity.artifactPath && <button onClick={() => window.dispatchEvent(new CustomEvent("pi-cad:open-viewer", { detail: { path: activity.artifactPath } }))}>{activity.kind === "simulation" ? "View result" : "View"}</button>}
+        {activity.state === "success" && (activity.artifactPath || activity.media?.length) ? <button onClick={() => onReference?.(`Use the ${activity.kind} result from tool call ${activity.id}${activity.artifactPath ? ` at ${activity.artifactPath}` : ""}. ${activity.summary || "Keep this exact artifact identity and version in context."}`)}>Reference</button> : null}
         {activity.details ? <button onClick={() => setExpanded(!expanded)} aria-label="Toggle details"><ChevronDown size={15} className={expanded ? "rotated" : ""} /></button> : null}
       </div>
     </header>

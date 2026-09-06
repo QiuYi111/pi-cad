@@ -15,6 +15,11 @@ from vtkmodules.vtkIOLegacy import vtkDataSetReader
 from vtkmodules.vtkIOXML import vtkXMLPolyDataReader, vtkXMLUnstructuredGridReader
 from vtkmodules.vtkRenderingAnnotation import vtkScalarBarActor
 from vtkmodules.vtkRenderingCore import vtkActor, vtkColorTransferFunction, vtkDataSetMapper, vtkRenderer, vtkRenderWindow
+from vtkmodules.vtkFiltersGeneral import vtkWarpVector
+from vtkmodules.vtkFiltersCore import vtkClipDataSet
+from vtkmodules.vtkCommonDataModel import vtkPlane
+from vtkmodules.vtkIOImage import vtkPNGWriter
+from vtkmodules.vtkRenderingCore import vtkWindowToImageFilter
 import vtkmodules.vtkInteractionStyle  # noqa: F401
 import vtkmodules.vtkRenderingOpenGL2  # noqa: F401
 
@@ -45,7 +50,15 @@ class PiCadParaView:
         self.reader = reader_for(source)
         self.data = self.reader.GetOutputDataObject(0)
         self.mapper = vtkDataSetMapper()
-        self.mapper.SetInputConnection(self.reader.GetOutputPort())
+        self.warp = vtkWarpVector()
+        self.warp.SetInputConnection(self.reader.GetOutputPort())
+        self.warp.SetScaleFactor(0.0)
+        self.clip_plane = vtkPlane()
+        self.clip = vtkClipDataSet()
+        self.clip.SetInputConnection(self.warp.GetOutputPort())
+        self.clip.SetClipFunction(self.clip_plane)
+        self.clip.InsideOutOn()
+        self.mapper.SetInputConnection(self.warp.GetOutputPort())
         self.actor = vtkActor()
         self.actor.SetMapper(self.mapper)
         self.actor.GetProperty().SetColor(0.67, 0.72, 0.78)
@@ -76,6 +89,13 @@ class PiCadParaView:
         ]]
         self.state.active_field = f"{self._fields[0][1]}:{self._fields[0][0]}" if self._fields else "Solid color"
         self.state.representation = "Surface with edges"
+        self.state.deformation_scale = 0.0
+        self.state.slice_enabled = False
+        self.state.slice_axis = "X"
+        self.state.slice_position = float(sum(self.data.GetBounds()[0:2]) / 2)
+        self.state.probe_point = 0
+        self.state.probe_result = "Choose a point index to inspect field values."
+        self.state.screenshot_status = ""
         self.state.source_name = source.name
         self._apply_field(self.state.active_field)
         self.renderer.ResetCamera()
@@ -102,6 +122,8 @@ class PiCadParaView:
         if not array:
             return
         value_range = array.GetRange(-1 if array.GetNumberOfComponents() > 1 else 0)
+        self.state.color_min = float(value_range[0])
+        self.state.color_max = float(value_range[1])
         colors = vtkColorTransferFunction()
         colors.SetColorSpaceToDiverging()
         colors.AddRGBPoint(value_range[0], 0.231, 0.298, 0.753)
@@ -119,6 +141,16 @@ class PiCadParaView:
         self.scalar_bar.SetTitle(name)
         self.scalar_bar.SetVisibility(True)
 
+    @change("color_min", "color_max")
+    def color_range_changed(self, color_min: float, color_max: float, **_kwargs) -> None:
+        if color_min is None or color_max is None or float(color_min) >= float(color_max):
+            return
+        self.mapper.SetScalarRange(float(color_min), float(color_max))
+        table = self.mapper.GetLookupTable()
+        if table:
+            table.SetRange(float(color_min), float(color_max))
+        self.ctrl.view_update()
+
     @change("active_field")
     def field_changed(self, active_field: str, **_kwargs) -> None:
         self._apply_field(active_field)
@@ -135,6 +167,50 @@ class PiCadParaView:
             prop.SetRepresentationToSurface()
         prop.SetEdgeVisibility(representation == "Surface with edges")
         self.ctrl.view_update()
+
+    @change("deformation_scale")
+    def deformation_changed(self, deformation_scale: float, **_kwargs) -> None:
+        self.warp.SetScaleFactor(float(deformation_scale or 0))
+        self.warp.Update()
+        self.ctrl.view_update()
+
+    @change("slice_enabled", "slice_axis", "slice_position")
+    def slice_changed(self, slice_enabled: bool, slice_axis: str, slice_position: float, **_kwargs) -> None:
+        axis = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(slice_axis, (1, 0, 0))
+        origin = [0.0, 0.0, 0.0]
+        origin["XYZ".index(slice_axis if slice_axis in "XYZ" else "X")] = float(slice_position or 0)
+        self.clip_plane.SetNormal(*axis)
+        self.clip_plane.SetOrigin(*origin)
+        self.mapper.SetInputConnection(self.clip.GetOutputPort() if slice_enabled else self.warp.GetOutputPort())
+        self.renderer.ResetCameraClippingRange()
+        self.ctrl.view_update()
+
+    @change("probe_point")
+    def probe_changed(self, probe_point: int, **_kwargs) -> None:
+        count = self.data.GetNumberOfPoints()
+        index = max(0, min(int(probe_point or 0), count - 1)) if count else 0
+        values = []
+        attributes = self.data.GetPointData()
+        for offset in range(attributes.GetNumberOfArrays()):
+            array = attributes.GetArray(offset)
+            if array and array.GetName() and index < array.GetNumberOfTuples():
+                value = array.GetTuple(index)
+                rendered = ", ".join(f"{item:.6g}" for item in value)
+                values.append(f"{array.GetName()}: {rendered}")
+        point = self.data.GetPoint(index) if count else (0, 0, 0)
+        self.state.probe_result = f"Point {index} @ ({point[0]:.4g}, {point[1]:.4g}, {point[2]:.4g})" + (" · " + " · ".join(values) if values else " · no point fields")
+
+    def save_screenshot(self) -> None:
+        output = self.source.with_suffix(self.source.suffix + ".reify-view.png")
+        capture = vtkWindowToImageFilter()
+        capture.SetInput(self.window)
+        capture.SetScale(2)
+        capture.Update()
+        writer = vtkPNGWriter()
+        writer.SetFileName(str(output))
+        writer.SetInputConnection(capture.GetOutputPort())
+        writer.Write()
+        self.state.screenshot_status = f"Saved {output.name}"
 
     def reset_camera(self) -> None:
         self.renderer.ResetCamera()
@@ -173,13 +249,25 @@ class PiCadParaView:
             with layout.toolbar:
                 vuetify3.VSpacer()
                 vuetify3.VSelect(v_model=("active_field", "Solid color"), items=("field_items", []), density="compact", hide_details=True, variant="outlined", style="max-width:220px")
+                vuetify3.VTextField(v_model=("color_min", 0), label="Min", type="number", density="compact", hide_details=True, variant="outlined", style="max-width:100px")
+                vuetify3.VTextField(v_model=("color_max", 1), label="Max", type="number", density="compact", hide_details=True, variant="outlined", style="max-width:100px")
                 vuetify3.VSelect(v_model=("representation", "Surface with edges"), items=("['Surface', 'Surface with edges', 'Wireframe', 'Points']",), density="compact", hide_details=True, variant="outlined", style="max-width:190px")
+                vuetify3.VTextField(v_model=("deformation_scale", 0), label="Deform", type="number", density="compact", hide_details=True, variant="outlined", style="max-width:110px")
+                vuetify3.VSwitch(v_model=("slice_enabled", False), label="Slice", density="compact", hide_details=True, color="primary")
+                vuetify3.VSelect(v_model=("slice_axis", "X"), items=("['X', 'Y', 'Z']",), density="compact", hide_details=True, variant="outlined", style="max-width:80px")
+                vuetify3.VTextField(v_model=("slice_position", 0), label="Position", type="number", density="compact", hide_details=True, variant="outlined", style="max-width:110px")
+                vuetify3.VTextField(v_model=("probe_point", 0), label="Probe point", type="number", min=0, density="compact", hide_details=True, variant="outlined", style="max-width:120px")
+                vuetify3.VBtn("Screenshot", click=self.save_screenshot, variant="text", size="small")
                 vuetify3.VBtn("Reset", click=self.reset_camera, variant="text", size="small")
             with layout.content:
                 with html.Div(style="height:100%;background:#090a0b"):
                     view = vtk_widgets.VtkRemoteLocalView(self.window, interactive_ratio=1)
                     self.ctrl.view_update = view.update
                     self.ctrl.view_reset_camera = view.reset_camera
+                    with html.Div(style="position:absolute;left:12px;bottom:10px;z-index:4;padding:6px 8px;background:#0c0e10dd;border:1px solid #30353a;border-radius:6px;color:#aeb5af;font:10px Inter,sans-serif;max-width:75%"):
+                        html.Div("{{ probe_result }}")
+                        html.Div("Static result · time-step controls unavailable for this file")
+                        html.Div("{{ screenshot_status }}")
 
     def start(self) -> None:
         self.server.start(host="127.0.0.1", port=self.port, open_browser=False, show_connection_info=False)

@@ -120,6 +120,30 @@ class CadctlBackendTests(unittest.TestCase):
         inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
         self.assertEqual(inspected["payload"]["bbox"]["x"], 47.0)
 
+    def test_build_cache_tracks_project_data_files(self) -> None:
+        dimensions = self.cwd / "dimensions.json"
+        dimensions.write_text('{"width": 13}', encoding="utf-8")
+        source = self.cwd / "data_driven.py"
+        source.write_text(
+            "import json\nfrom pathlib import Path\nimport build123d as bd\n"
+            "data = json.loads(Path('dimensions.json').read_text())\n"
+            "result = bd.Box(data['width'], 8, 5)\n",
+            encoding="utf-8",
+        )
+        output = self.build / "data-driven.step"
+
+        first = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        second = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        self.assertEqual(first["payload"]["cache"], "miss")
+        self.assertEqual(second["payload"]["cache"], "hit")
+        self.assertIn(str(dimensions.resolve()), first["payload"]["sourceFiles"])
+
+        dimensions.write_text('{"width": 29}', encoding="utf-8")
+        third = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        self.assertEqual(third["payload"]["cache"], "miss")
+        inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
+        self.assertEqual(inspected["payload"]["bbox"]["x"], 29.0)
+
     def test_build_cache_ignores_comment_only_edits_and_force_bypasses_it(self) -> None:
         source = self.cwd / "comments.py"
         source.write_text("import build123d as bd\nresult = bd.Box(8, 9, 10)\n", encoding="utf-8")

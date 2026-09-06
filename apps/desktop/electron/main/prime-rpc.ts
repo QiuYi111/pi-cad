@@ -22,9 +22,16 @@ export class PrimeRpc extends EventEmitter {
     if (this.child && !this.child.killed) return this.status;
     await ensureRuntimeReady(this.bridge, settings, (status) => this.setStatus(status));
     const paths = await this.bridge.resolveRuntimePaths(settings);
+    if (!paths.projectPath) throw new Error("Choose a project folder before starting Prime.");
+    try {
+      await this.bridge.exec(["test", "-d", "--", paths.projectPath]);
+    } catch {
+      const error = new Error("Project folder no longer exists. Choose another project.");
+      this.setStatus({ state: "error", checks: [], message: error.message });
+      throw error;
+    }
     const home = await this.bridge.homeDirectory();
     const node = await this.bridge.commandPath("node");
-    if (!paths.projectPath) throw new Error("Choose a project folder before starting Prime.");
     const reviewer = settings.reviewer.mode === "fixed"
       ? ["--reviewer-provider", settings.reviewer.provider!, "--reviewer-model", settings.reviewer.model!, "--reviewer-thinking", settings.reviewer.thinking || "medium"]
       : ["--reviewer-inherit-author"];
@@ -43,7 +50,7 @@ export class PrimeRpc extends EventEmitter {
       "--thinking", settings.thinking,
       ...reviewer,
     ];
-    this.setStatus({ state: "starting", checks: [], message: "Starting Prime and the Pi-CAD authority runtime…" });
+    this.setStatus({ state: "starting", checks: [], message: "Starting Prime and the Reify engineering runtime…" });
     this.child = this.bridge.spawn(args);
     this.child.stdout.on("data", (chunk: Buffer) => this.consume(chunk.toString("utf8")));
     this.child.stderr.on("data", (chunk: Buffer) => this.emit("diagnostic", chunk.toString("utf8")));
@@ -116,6 +123,9 @@ export class PrimeRpc extends EventEmitter {
     await this.request("new_session");
     const state = await this.request("get_state");
     this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    return (await this.request("get_messages"))?.messages || [];
+  }
+  async getMessages(): Promise<unknown[]> {
     return (await this.request("get_messages"))?.messages || [];
   }
 

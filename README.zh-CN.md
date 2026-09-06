@@ -1,13 +1,15 @@
-# Pi-CAD
+<p align="center">
+  <img src="docs/assets/reify-lockup.svg" alt="Reify · 器成 — Make ideas real." width="520" />
+</p>
 
-**从设计意图，到可检查的机械模型。**
+<p align="center"><strong>从想象到成器。</strong></p>
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/QiuYi111/pi-cad/actions/workflows/ci.yml/badge.svg)](https://github.com/QiuYi111/pi-cad/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Pi-CAD 是一款基于 [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent)
+Reify（器成）是一款基于 [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent)
 的桌面机械设计 Agent。描述一个零件、装配体、修改或分析任务，它可以澄清需求、探索
 概念、编写确定性 CAD、构建 STEP、检查结果，并让源码、模型、测量和审查始终对应。
 
@@ -17,7 +19,7 @@ Pi-CAD 是一款基于 [Prime Agent](https://github.com/PrimeIntellect-ai/prime-
 
 模型适合搜索设计空间，工程工作还需要可靠、可延续的事实。
 
-Pi-CAD 为模型提供持久的 Python 工作台。需求、产物、计算和观察结果可以在长任务中
+Reify 为模型提供持久的 Python 工作台。需求、产物、计算和观察结果可以在长任务中
 持续使用。简短的工作流卡片只展示当前目标、可用操作、必须交付的内容和合法下一步。
 模型仍可自由推理和写代码；运行时负责判断什么才是有效的构建、测量、审查和发布。
 
@@ -34,7 +36,7 @@ Pi-CAD 为模型提供持久的 Python 工作台。需求、产物、计算和�
 > 设计一块 100 × 80 × 5 mm 的安装板，四角各有一个 5 mm 孔。孔边距至少 8 mm，
 > 增加适合打印的圆角，并导出 STEP。
 
-Pi-CAD 会把需求变成确定性源码和几何，返回视觉反馈，测量真实模型，并将最终文件留在
+Reify 会把需求变成确定性源码和几何，返回视觉反馈，测量真实模型，并将最终文件留在
 项目目录。
 
 ### 设计装配体
@@ -53,17 +55,17 @@ Agent 可以探索概念、定义接口、构建零件、检查装配体，并�
 
 ## Windows 安装
 
-从最新 Release 下载 **`Pi-CAD-Setup-x64.exe`**，双击打开。
+从最新 Release 下载 **`Reify-Setup-x64.exe`**，双击打开。
 
 首次设置与主工作台使用同一套界面。它会：
 
 1. 检查 WSL 2 和 Ubuntu；
 2. 缺失时提供 Windows 官方 WSL 安装；
-3. 安装包内置的 Prime 和 Pi-CAD 运行环境；
+3. 安装包内置的 Prime 和 Reify 运行环境；
 4. 登录 ChatGPT；
 5. 选择项目目录。
 
-只有 Windows 需要启用 WSL 时才申请管理员权限。Windows 可能要求重启一次。Pi-CAD
+只有 Windows 需要启用 WSL 时才申请管理员权限。Windows 可能要求重启一次。Reify
 会保留已安装文件，重启后继续设置。
 
 要求：
@@ -73,23 +75,23 @@ Agent 可以探索概念、定义接口、构建零件、检查装配体，并�
 - 缺少 WSL 时，有权限启用它；
 - ChatGPT 登录和模型调用需要网络。
 
-安装包包含匹配的 Prime Agent 和 Pi-CAD 运行环境。正常安装不会克隆仓库。
+安装包包含匹配的 Prime Agent 和 Reify 运行环境。正常安装不会克隆仓库。
 
 ## Linux 安装
 
-下载 `Pi-CAD-Linux-x86_64.AppImage` 或对应的 `.deb`。Linux 直接运行 Agent，
-不经过 WSL。首次启动前，用系统包管理器安装 Bubblewrap。应用内置 Prime、Pi-CAD
+下载 `Reify-Linux-x86_64.AppImage` 或对应的 `.deb`。Linux 直接运行 Agent，
+不经过 WSL。首次启动前，用系统包管理器安装 Bubblewrap。应用内置 Prime、Reify
 和 Node，再通过 `uv` 准备 Python 环境。
 
 ## macOS 安装
 
-下载 `Pi-CAD-macOS-arm64.dmg`，把 Pi-CAD 拖入 Applications。Apple Silicon
-版本直接在 macOS 运行 Prime 和 Pi-CAD，作者和 Reviewer 进程使用系统
+下载 `Reify-macOS-arm64.dmg`，把 Reify 拖入 Applications。Apple Silicon
+版本直接在 macOS 运行 Prime 和 Reify，作者和 Reviewer 进程使用系统
 `sandbox-exec` 隔离。公开版本需要 Developer ID 签名和公证；未签名 CI 产物只供测试。
 
 ## 第一个任务
 
-打开 Pi-CAD，选择目录、登录，然后在工作台输入需求。Provider、模型、推理等级、
+打开 Reify，选择目录、登录，然后在工作台输入需求。Provider、模型、推理等级、
 Reviewer 和目录权限都可在设置中修改。
 
 桌面端包含流式 Agent 状态、工作流状态条和编辑器、交互式 STEP 查看器、工具消息卡、
@@ -121,9 +123,13 @@ PRIME_AGENT_REPO="$PWD/../prime-agent" npm run prime:setup
 | `mechanical.modify` | 修改已有设计 |
 | `mechanical.analysis` | 只读几何分析 |
 
+工作流可以在开始、进入阶段或离开阶段时触发 Git 操作。Reify 可以初始化仓库，
+并只提交本轮修改的源码；STEP 和图片不进入 Git。`pull`、`push` 默认关闭，必须由
+工作流显式开启。每个工作流提交会记录对应的 Git 版本。
+
 ## 当前范围
 
-Pi-CAD 当前支持 Windows + WSL 2 和 Ubuntu，提供 STEP-first build123d 建模、B-Rep
+Reify 当前支持 Windows + WSL 2 和 Ubuntu，提供 STEP-first build123d 建模、B-Rep
 检查、受管理的视觉反馈、工作流包、隔离审查、概念图生成和工程计算方案。
 
 它不能替代物理测试、制造审查或专业工程签字。

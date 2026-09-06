@@ -10,14 +10,14 @@ import { commitWorkspace } from "../src/harness/commit.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { canonicalDigest } from "../src/harness/canonical.ts";
 import { legalWorkflowTransitions, transitionRun } from "../src/harness/reducer.ts";
-import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { resolveWorkflowPackage } from "../src/harness/workflow/packages.ts";
 
 test("installed Mechanical packages expose metadata only and compile branchable kernel-generic snapshots", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
   try {
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.modify", "mechanical.one-shot", "mechanical.parameter-edit"]);
+    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.modify", "mechanical.one-shot", "mechanical.parameter-edit", "mechanical.quick-build", "mechanical.quick-check"]);
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
 
     const benchmark = await resolveWorkflowPackage(cwd, "mechanical.benchmark", mechanicalRegistries);
@@ -56,6 +56,29 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.deepEqual(parameterEdit.workflow.phases.adjust!.evidenceObligations.map((item) => item.ref), ["parameter-geometry", "parameter-visual"]);
     assert.deepEqual(Object.keys(parameterEdit.workflow.phases.adjust!.transitions), ["applied"]);
 
+    const quickBuild = await resolveWorkflowPackage(cwd, "mechanical.quick-build", mechanicalRegistries);
+    assert.equal(quickBuild.workflow.initialPhase, "build");
+    assert.equal(quickBuild.workflow.phases.concept, undefined);
+    assert.equal(quickBuild.workflow.phases.assembly, undefined);
+    assert.deepEqual(quickBuild.workflow.phases.build!.recordObligations.map((item) => item.ref), ["quick-build"]);
+    assert.deepEqual(quickBuild.workflow.phases.build!.evidenceObligations.map((item) => item.ref), ["candidate-geometry", "candidate-visual"]);
+    assert.deepEqual(Object.keys(quickBuild.workflow.phases.build!.transitions), ["delivered", "review_requested"]);
+    assert.equal(quickBuild.workflow.phases.final_review!.reviewProfile, "mechanical.final-review");
+
+    const quickCheck = await resolveWorkflowPackage(cwd, "mechanical.quick-check", mechanicalRegistries);
+    assert.equal(quickCheck.workflow.initialPhase, "inspect");
+    assert.deepEqual(Object.keys(quickCheck.workflow.phases), ["done", "inspect"]);
+    assert.deepEqual(quickCheck.workflow.phases.inspect!.actions, ["transition"]);
+    assert.equal(quickCheck.workflow.phases.inspect!.actions.includes("cad_build_step"), false);
+    assert.deepEqual(quickCheck.workflow.phases.inspect!.writeScopes, ["run:observation"]);
+    assert.equal(quickCheck.workflow.phases.done!.terminal, true);
+
+    const checking = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.quick-check", interactionMode: "headless" }) as any;
+    assert.equal(checking.phase, "inspect");
+    const checked = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "checked" }) as any;
+    assert.equal(checked.phase, "done");
+    assert.equal(checked.status, "done");
+
     await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
     const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
     assert.ok(loaded);
@@ -75,6 +98,7 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.equal(loaded.workflow.phases.parts!.rebuildContextOnExit, true);
     assert.equal(loaded.workflow.phases.assembly!.rebuildContextOnExit, true);
     assert.deepEqual(Object.keys(loaded.workflow.phases.final_review!.transitions), ["accepted", "revise_architecture_bom", "revise_assembly", "revise_concept", "revise_interface", "revise_parts", "revise_spec"]);
+    assert.deepEqual(loaded.workflow.phases.final_review!.transitions.revise_concept?.invalidate, ["concept", "concept-image"]);
     assert.equal(loaded.workflow.phases.done!.terminal, true);
 
     const record = (ref: string) => ({ obligationRef: ref, type: "workspace_commit", path: `workspace/commits/${ref}.json`, sha256: "a".repeat(64), workflowHash: loaded.workflow.hash, createdAt: "now" });
@@ -133,6 +157,9 @@ test("one-shot cannot leave concept until a real generated PNG is recorded", asy
     const image = join(cwd, ".pi", "generated-images", "concept.png");
     await mkdir(join(cwd, ".pi", "generated-images"), { recursive: true });
     await writeFile(image, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]));
+    const malformed = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "image-generated", path: image });
+    assert.equal(malformed.ok, false);
+    await writeFile(image, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYElEQVR4nO3PQQ0AIBDAMMC/50MEj4ZkVbDtmVk/OzrgVQNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgNaA1oDWgPaBXKqA31N0fbGAAAAAElFTkSuQmCC", "base64"));
     const recorded = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "image-generated", path: image });
     assert.equal(recorded.ok, true);
     const next = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "single_part" }) as any;
@@ -211,4 +238,25 @@ workflow:
     assert.equal(current.workflowHash, pinnedHash);
     assert.equal(current.purpose, "Original pinned purpose.");
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("administrator adoption selects an exact workflow version while existing runs retain their snapshot", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-adoption-"));
+  const upgradedCwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-adoption-next-"));
+  const packageSource = (version: string, purpose: string) => `schema: 1\nid: custom.versioned\ndescription: Versioned workflow.\ntags: [custom]\nversion: ${version}\nworkflow:\n  schema: 1\n  id: custom.versioned\n  version: ${version}\n  parametersSchema: {type: object, additionalProperties: false}\n  initialPhase: work\n  phases:\n    work:\n      purpose: ${purpose}\n      actions: []\n      grants: [file_read]\n      writeScopes: []\n      recordObligations: []\n      evidenceObligations: []\n      contextProviders: [kernel.current-action]\n      hooks: []\n      transitions: {}\n      terminal: true\n`;
+  try {
+    await mkdir(join(cwd, "workflows")); await writeFile(join(cwd, "workflows", "v1.yaml"), packageSource("1.0.0", "Version one.")); await writeFile(join(cwd, "workflows", "v2.yaml"), packageSource("2.0.0", "Version two."));
+    await assert.rejects(resolveWorkflowPackage(cwd, "custom.versioned", mechanicalRegistries), /administrator adoption is required/);
+    await mkdir(join(cwd, ".pi-cad", "admin"), { recursive: true });
+    const policy = (version: string) => ({ schema: 1, globalSafetyPolicyVersion: "safety-1", adopted: { "custom.versioned": { version, adoptedBy: "admin", adoptedAt: "2026-03-10T00:00:00.000Z" } }, history: [{ id: "custom.versioned", to: version, adoptedBy: "admin", adoptedAt: "2026-03-10T00:00:00.000Z" }] });
+    await writeFile(join(cwd, ".pi-cad", "admin", "workflow-adoptions.json"), JSON.stringify(policy("1.0.0")));
+    const first = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "custom.versioned" }) as any; const firstRun = first.runId;
+    assert.equal(first.workflowVersion, "1.0.0");
+    await mkdir(join(upgradedCwd, "workflows")); await writeFile(join(upgradedCwd, "workflows", "v1.yaml"), packageSource("1.0.0", "Version one.")); await writeFile(join(upgradedCwd, "workflows", "v2.yaml"), packageSource("2.0.0", "Version two.")); await mkdir(join(upgradedCwd, ".pi-cad", "admin"), { recursive: true });
+    await writeFile(join(upgradedCwd, ".pi-cad", "admin", "workflow-adoptions.json"), JSON.stringify(policy("2.0.0")));
+    const second = await handleAgentApi(upgradedCwd, { schema: 1, op: "workflow-start", id: "custom.versioned" }) as any;
+    assert.equal(second.workflowVersion, "2.0.0");
+    const restored = await new HarnessRunStoreV7(cwd, firstRun).load(mechanicalRegistries);
+    assert.equal(restored?.workflow.version, "1.0.0"); assert.equal(restored?.workflow.phases.work?.purpose, "Version one.");
+  } finally { await rm(cwd, { recursive: true, force: true }); await rm(upgradedCwd, { recursive: true, force: true }); }
 });

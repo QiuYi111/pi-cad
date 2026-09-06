@@ -206,19 +206,19 @@ export async function simulationRuntimeProjection(): Promise<Array<{
   return (await registrations).map(({ backend, runtime, kind, developmentOnly, limits, agentCapabilities }) => ({ backend, runtime, kind, limits, agentCapabilities, ...(developmentOnly ? { developmentOnly } : {}) }));
 }
 
-async function commandOutput(command: string, args: string[], cwd: string): Promise<string> {
+async function commandOutput(command: string, args: string[], cwd: string, timeoutMs = 30_000): Promise<string> {
   assertLinuxRuntime("Pi-CAD managed runtime");
   const result = await runProcess({
     command,
     args,
     cwd,
     env: process.env,
-    timeoutMs: 30_000,
+    timeoutMs,
     maxStdoutBytes: 1024 * 1024,
     maxStderrBytes: 256 * 1024,
   });
-  if (result.exitCode !== 0 || result.terminationReason !== "exit") {
-    throw new Error(result.stderr.trim() || `${command} exited ${result.exitCode}`);
+  if (result.exitCode !== 0 || result.terminationReason) {
+    throw new Error(result.stderr.trim() || result.terminationDetail || `${command} exited ${result.exitCode}`);
   }
   return result.stdout.trim();
 }
@@ -411,7 +411,7 @@ export class ManagedSimulationRunner implements SimulationCommandRunner {
     const roots = registration.immutableRoots.map((root) => `'${root.replaceAll("'", "'\\''")}'`).join(" ");
     const packageFiles = registration.kind === "apt" ? `dpkg-query -L ${registration.package};` : "";
     const hashScript = `set -e; { ${packageFiles} find ${roots} -type f -print; } | sort -u | while IFS= read -r f; do test -f "$f" && sha256sum "$f" || true; done | sha256sum | cut -d' ' -f1`;
-    const executableHash = await linux("bash", ["-lc", hashScript]);
+    const executableHash = await commandOutput("bash", ["-lc", hashScript], cwd, 5 * 60_000);
     const environment = { PATH: "/usr/local/bin:/usr/bin:/bin", HOME: "/tmp", TMPDIR: "/tmp", network: registration.network, ...registration.environment };
     const probeScriptHash = registration.kind === "uv"
       ? createHash("sha256").update(await readFile(fileURLToPath(new URL(`../../../${registration.probe.script}`, import.meta.url)))).digest("hex")

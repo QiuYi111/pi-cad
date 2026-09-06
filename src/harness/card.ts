@@ -57,6 +57,7 @@ export interface WorkflowObligationView {
 export interface WorkflowCurrentView {
   runId: string;
   workflowId: string;
+  workflowVersion: string;
   workflowHash: string;
   phase: string;
   purpose: string;
@@ -216,6 +217,7 @@ export function workflowCurrentView(loaded: LoadedHarnessRunV7, registries: Regi
     `registry contract: ${loaded.registryContract.hash}`,
     `phase history: ${loaded.state.phaseHistory.slice(-8).join(" -> ")}`,
     `records: ${Object.keys(loaded.state.records).length}; evidence: ${loaded.state.evidence.length}; stale evidence: ${loaded.state.staleEvidence.length}; artifacts: ${Object.keys(loaded.state.artifacts).length}`,
+    ...(loaded.workflow.versionControl ? [`Git policy: repository init ${loaded.workflow.versionControl.init ? "enabled" : "disabled"}; remote actions ${loaded.workflow.versionControl.allowRemote ? "enabled" : "disabled"}; phase hooks are executed by the authority sidecar`] : []),
     "filesystem files, arbitrary STEP/JSON/images, and natural-language completion have no workflow effect until admitted by the State Engine",
     "generated concept images are spatial hypotheses, never geometry authority; only a referencing commit can place them in workflow history",
     "all engineering mutations are checked against this pinned workflow snapshot and Registry Contract and fail closed on mismatch",
@@ -230,6 +232,7 @@ export function workflowCurrentView(loaded: LoadedHarnessRunV7, registries: Regi
   const base = {
     runId: loaded.state.runId,
     workflowId: loaded.workflow.id,
+    workflowVersion: loaded.workflow.version,
     workflowHash: loaded.workflow.hash,
     phase: loaded.state.phase,
     purpose: phase.purpose,

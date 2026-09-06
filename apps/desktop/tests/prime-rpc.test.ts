@@ -40,4 +40,26 @@ describe("Prime runtime setup", () => {
     await expect(ensureRuntimeReady(bridge as any, settings)).resolves.toEqual(ready);
     expect(bridge.install).toHaveBeenCalledOnce();
   });
+
+  it("rejects a missing saved project before spawning Prime", async () => {
+    const spawn = vi.fn(() => { throw new Error("spawned missing project"); });
+    const bridge = {
+      check: vi.fn().mockResolvedValue(ready),
+      install: vi.fn(),
+      resolveRuntimePaths: vi.fn().mockResolvedValue({
+        piCadRepo: "/runtime/pi-cad",
+        primeAgentRepo: "/runtime/prime-agent",
+        projectPath: "/tmp/deleted-project",
+      }),
+      exec: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
+      homeDirectory: vi.fn().mockResolvedValue("/home/tester"),
+      commandPath: vi.fn().mockResolvedValue("/usr/bin/node"),
+      spawn,
+    };
+
+    await expect(new PrimeRpc(bridge as any).start(settings))
+      .rejects.toThrow("Project folder no longer exists");
+    expect(bridge.exec).toHaveBeenCalledWith(["test", "-d", "--", "/tmp/deleted-project"]);
+    expect(spawn).not.toHaveBeenCalled();
+  });
 });

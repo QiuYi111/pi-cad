@@ -26,6 +26,12 @@ export function usePrimeRuntime() {
     const offStatus = window.piCad.runtime.onStatus(setStatus);
     return () => { offEvent(); offStatus(); if (frame.current !== undefined) window.cancelAnimationFrame(frame.current); };
   }, []);
+  useEffect(() => {
+    void window.piCad.runtime.restore().then((snapshot) => {
+      setStatus(snapshot.status);
+      if (snapshot.messages.length) dispatch({ type: "desktop_session_loaded", messages: snapshot.messages });
+    }).catch(() => undefined);
+  }, []);
 
   const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>, prepare?: () => Promise<void>) => {
     dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text });
@@ -52,8 +58,9 @@ export function usePrimeRuntime() {
     dispatch({ type: "desktop_session_loaded", messages: loaded });
   };
   const clearConversation = () => dispatch({ type: "desktop_session_loaded", messages: [] });
+  const note = (text: string) => dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text: `Note · ${text}` });
 
-  return { messages, status, prompt, newSession, switchSession, clearConversation, start: () => window.piCad.runtime.start(), stop: () => window.piCad.runtime.stop(), abort: () => window.piCad.runtime.abort() };
+  return { messages, status, prompt, note, newSession, switchSession, clearConversation, start: () => window.piCad.runtime.start(), stop: () => window.piCad.runtime.stop(), abort: () => window.piCad.runtime.abort() };
 }
 
 export type PrimeRuntimeController = ReturnType<typeof usePrimeRuntime>;

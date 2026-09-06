@@ -13,6 +13,10 @@ export interface EncodedVariable {
   sha256: string;
   metadata?: JsonValue;
 }
+export interface AcceptanceSummaryInput {
+  requirements: Array<{ id: string; category: "geometry" | "engineering" | "machine"; status: "verified" | "unverified" | "not-applicable"; method: string; evidenceRef?: string }>;
+  assumptions?: string[];
+}
 
 export interface WorkspaceCommitManifestV1 {
   schema: 1;
@@ -23,6 +27,13 @@ export interface WorkspaceCommitManifestV1 {
   phase: string;
   variables: Record<string, { codec: string; sha256: string; path: string; metadata?: JsonValue }>;
   artifacts: Array<{ path: string; sha256: string; role: string }>;
+  artifactSnapshots?: Record<string, { path: string; sha256: string }>;
+  acceptanceSummary?: {
+    requirements: Array<{ id: string; category: "geometry" | "engineering" | "machine"; status: "verified" | "unverified" | "not-applicable"; method: string; evidence?: { path: string; sha256: string } }>;
+    assumptions: string[];
+  };
+  sourceRevision?: string;
+  acceptance?: AcceptanceSummaryInput;
   producer: { transport: "json-cli"; session?: string };
   createdAt: string;
 }
@@ -80,6 +91,7 @@ export async function commitWorkspace(input: {
   variables?: Record<string, EncodedVariable>;
   artifacts?: Array<string | { path: string; role?: string }>;
   session?: string;
+  sourceRevision?: string;
 }): Promise<WorkspaceCommitManifestV1> {
   const name = safeName(input.name);
   const project = new HarnessProjectStoreV7(input.cwd);
@@ -89,6 +101,12 @@ export async function commitWorkspace(input: {
     Object.entries(input.variables ?? {}).map(([key, value]) => [key, normalizeEncodedVariable(key, value)]),
   );
   const artifacts = await Promise.all((input.artifacts ?? []).map((item) => typeof item === "string" ? hashArtifact(input.cwd, item) : hashArtifact(input.cwd, item.path, item.role)));
+  const artifactSnapshotContent = new Map<string, string>();
+  for (const artifact of artifacts.filter((item) => item.role === "model-parameter-manifest" || /\.parameters\.json$/i.test(item.path))) {
+    const content = await readFile(resolve(input.cwd, artifact.path), "utf8");
+    if (Buffer.byteLength(content) > 1024 * 1024) throw new Error(`parameter manifest is too large to preserve: ${artifact.path}`);
+    artifactSnapshotContent.set(artifact.sha256, content);
+  }
   const run = new HarnessRunStoreV7(input.cwd, active.state.runId);
   let result: WorkspaceCommitManifestV1 | null = null;
   await run.mutate(input.registries, async (loaded) => {
@@ -97,12 +115,36 @@ export async function commitWorkspace(input: {
     if (parent !== null && !index.commits.includes(parent)) throw new Error(`workspace commit parent not found: ${parent}`);
     const variableRefs: WorkspaceCommitManifestV1["variables"] = {};
     const payloads: Record<string, string | Buffer | JsonValue> = {};
+    const artifactSnapshots = Object.fromEntries([...artifactSnapshotContent].map(([digest, content]) => {
+      const path = `workspace/artifact-snapshots/${digest}.json`;
+      payloads[path] = content;
+      return [digest, { path, sha256: digest }];
+    }));
     for (const [key, encoded] of Object.entries(variables).sort(([a], [b]) => a.localeCompare(b))) {
       const path = `workspace/snapshots/${encoded.sha256}.json`;
       variableRefs[key] = { codec: encoded.codec, sha256: encoded.sha256, path, ...(encoded.metadata === undefined ? {} : { metadata: encoded.metadata }) };
       payloads[path] = { schema: 1, codec: encoded.codec, value: encoded.value, ...(encoded.metadata === undefined ? {} : { metadata: encoded.metadata }) };
     }
-    const identity = { schema: 1, name, parent, workflowHash: loaded.workflow.hash, phase: loaded.state.phase, variables: variableRefs, artifacts };
+    const sourceRevision = input.sourceRevision?.trim();
+    if (sourceRevision && !/^[a-f0-9]{40,64}$/.test(sourceRevision)) throw new Error("workspace commit source revision is invalid");
+    const phase = loaded.workflow.phases[loaded.state.phase]!;
+    const requirements = phase.evidenceObligations.map((obligation) => {
+      const evidence = loaded.state.evidence.find((item) => item.obligationRef === obligation.ref);
+      const category = obligation.type === "geometry" || obligation.type === "visual" ? "geometry" : "engineering";
+      return { id: obligation.ref, category, status: evidence ? "verified" : "unverified", method: obligation.closeWith, ...(evidence ? { evidence: { path: evidence.path, sha256: evidence.sha256 } } : {}) } as const;
+    });
+    const review = loaded.state.latestReview;
+    if (phase.reviewProfile || review) requirements.push({ id: phase.reviewProfile || "independent-review", category: "machine", status: review?.verdict === "pass" ? "verified" : "unverified", method: "independent reviewer", ...(review ? { evidence: { path: review.path, sha256: review.sha256 } } : {}) } as never);
+    const acceptanceSummary = input.acceptance ? {
+      requirements: input.acceptance.requirements.map((requirement) => {
+        if (!requirement.id.trim() || !requirement.method.trim()) throw new Error("acceptance requirement needs an id and check method");
+        const evidence = requirement.evidenceRef ? loaded.state.evidence.find((item) => item.obligationRef === requirement.evidenceRef || item.path === requirement.evidenceRef) : undefined;
+        if (requirement.status === "verified" && !evidence) throw new Error(`verified requirement lacks current-version evidence: ${requirement.id}`);
+        return { id: requirement.id.trim(), category: requirement.category, status: requirement.status, method: requirement.method.trim(), ...(evidence ? { evidence: { path: evidence.path, sha256: evidence.sha256 } } : {}) };
+      }),
+      assumptions: (input.acceptance.assumptions ?? []).map((item) => item.trim()).filter(Boolean),
+    } : { requirements, assumptions: [] as string[] };
+    const identity = { schema: 1, name, parent, workflowHash: loaded.workflow.hash, phase: loaded.state.phase, variables: variableRefs, artifacts, acceptanceSummary, ...(Object.keys(artifactSnapshots).length ? { artifactSnapshots } : {}), ...(sourceRevision ? { sourceRevision } : {}) };
     const id = `commit-${canonicalDigest(identity).slice(0, 32)}`;
     if (index.commits.includes(id)) {
       const existing = await run.transactions.readJson<WorkspaceCommitManifestV1>(`workspace/commits/${id}.json`);

@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if (-not $Installer) { $Installer = Join-Path $PSScriptRoot '..\..\release\Pi-CAD-Setup-x64.exe' }
+if (-not $Installer) { $Installer = Join-Path $PSScriptRoot '..\..\release\Reify-Setup-x64.exe' }
 if (-not $ResultPath) { $ResultPath = Join-Path $PSScriptRoot '..\..\release\windows-host-result.json' }
 $installerPath = [IO.Path]::GetFullPath($Installer)
 if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) {
@@ -39,25 +39,25 @@ $result = [ordered]@{
 }
 
 if ($item.Length -lt 50MB) { throw 'Installer is unexpectedly small; the bundled runtime is missing.' }
-if ($item.VersionInfo.ProductName -ne 'Pi-CAD') { throw 'Installer product metadata is invalid.' }
+if ($item.VersionInfo.ProductName -ne 'Reify') { throw 'Installer product metadata is invalid.' }
 if ($signature.Status -ne 'Valid') { $result.notes += 'Unsigned development build. Sign before public release.' }
 
 if ($Install) {
   $stage = Join-Path $env:TEMP ("pi-cad-installer-" + [guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $stage -Force | Out-Null
-  $localInstaller = Join-Path $stage 'Pi-CAD-Setup-x64.exe'
+  $localInstaller = Join-Path $stage 'Reify-Setup-x64.exe'
   try {
     Copy-Item -LiteralPath $installerPath -Destination $localInstaller
     Unblock-File -LiteralPath $localInstaller
     $process = Start-Process -FilePath $localInstaller -ArgumentList '/S' -Wait -PassThru
     if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)." }
-    $app = Join-Path $env:LOCALAPPDATA 'Programs\pi-cad-desktop\Pi-CAD.exe'
+    $app = Join-Path $env:LOCALAPPDATA 'Programs\pi-cad-desktop\Reify.exe'
     if (-not (Test-Path -LiteralPath $app)) { throw "Installed app not found: $app" }
     $result.installed = $true
-    $result.shortcuts = (Test-Path -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Pi-CAD.lnk')) -or
-      (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Pi-CAD.lnk'))
+    $result.shortcuts = (Test-Path -LiteralPath (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Reify.lnk')) -or
+      (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Reify.lnk'))
     $uninstall = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-      Where-Object DisplayName -like 'Pi-CAD*' | Select-Object -First 1
+      Where-Object DisplayName -like 'Reify*' | Select-Object -First 1
     $result.uninstallEntry = $null -ne $uninstall
     $started = Start-Process -FilePath $app -ArgumentList '--pi-cad-e2e' -PassThru
     Start-Sleep -Seconds 4

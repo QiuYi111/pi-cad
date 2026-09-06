@@ -9,6 +9,16 @@ workflow:
   version: 1.0.7
   parametersSchema: {type: object, additionalProperties: false}
   initialPhase: grilling
+  versionControl:
+    init: true
+    allowRemote: false
+    phases:
+      grilling: {onExit: [commit]}
+      spec: {onExit: [commit]}
+      concept: {onExit: [commit]}
+      parts: {onExit: [commit]}
+      assembly: {onExit: [commit]}
+      release: {onEnter: [commit]}
   phases:
     grilling:
       purpose: Resolve the task intent, missing constraints, and user-owned decisions.
@@ -113,7 +123,7 @@ workflow:
       transitions:
         accepted: {target: release, reviewVerdicts: [pass]}
         revise_spec: {target: spec, reviewVerdicts: [fail], invalidate: [spec]}
-        revise_concept: {target: concept, reviewVerdicts: [fail], invalidate: [concept]}
+        revise_concept: {target: concept, reviewVerdicts: [fail], invalidate: [concept, concept-image]}
         revise_interface: {target: interface, reviewVerdicts: [fail], requiresVisited: [interface], invalidate: [interface]}
         revise_architecture_bom: {target: architecture_bom, reviewVerdicts: [fail], requiresVisited: [architecture_bom], invalidate: [architecture-bom]}
         revise_parts: {target: parts, reviewVerdicts: [fail], invalidate: [parts]}

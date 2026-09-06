@@ -29,6 +29,7 @@ export function WorkflowRail() {
   if (unavailable) return <div className="workflow-rail unavailable" data-testid="workflow-rail"><span>Workflow unavailable</span></div>;
   if (!current?.runId || phases.length === 0) return <div className="workflow-rail idle" data-testid="workflow-rail"><span>No active workflow</span></div>;
   return <div className="workflow-rail" data-testid="workflow-rail">
+    <div className="workflow-level" title={`Pinned workflow ${current.workflowId}@${current.workflowVersion || "current"}`}><strong>{current.workflowId?.includes("modify") ? "Controlled change" : current.workflowId?.includes("one-shot") ? "Full engineering" : current.workflowId?.includes("quick") ? "Quick task" : "Engineering task"}</strong><small>{current.workflowId} · pinned {current.workflowHash?.slice(0, 10)}</small></div>
     {phases.map((phase, index) => <div className={`rail-step ${phase.status}`} key={phase.id} aria-current={phase.status === "active" ? "step" : undefined} title={[phase.purpose, ...phase.transitions.map((item) => `${item.event} → ${item.target}`)].filter(Boolean).join("\n")}>
       <span className="rail-node">{phase.status === "complete" ? <Check size={11} /> : <Circle size={8} fill={phase.status === "active" ? "currentColor" : "none"} />}</span>
       <span>{phase.title}</span>

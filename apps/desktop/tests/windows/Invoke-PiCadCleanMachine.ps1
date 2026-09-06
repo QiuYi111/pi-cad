@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if (-not $Installer) { $Installer = Join-Path $PSScriptRoot 'Pi-CAD-Setup-x64.exe' }
+if (-not $Installer) { $Installer = Join-Path $PSScriptRoot 'Reify-Setup-x64.exe' }
 if (-not $ResultPath) { $ResultPath = Join-Path $PSScriptRoot 'clean-machine-result.json' }
 $result = [ordered]@{ timestamp = (Get-Date).ToUniversalTime().ToString('o'); checks = [ordered]@{}; manual = [ordered]@{}; next = $null }
 $installerPath = [IO.Path]::GetFullPath($Installer)
@@ -18,7 +18,7 @@ $result.checks.wslBefore = @(wsl.exe -l -q 2>$null).Count -gt 0
 
 $install = Start-Process -FilePath $installerPath -ArgumentList '/S' -Wait -PassThru
 $result.checks.installExitCode = $install.ExitCode
-$app = Join-Path $env:LOCALAPPDATA 'Programs\pi-cad-desktop\Pi-CAD.exe'
+$app = Join-Path $env:LOCALAPPDATA 'Programs\pi-cad-desktop\Reify.exe'
 $result.checks.appPresent = Test-Path -LiteralPath $app
 
 if ($InstallWsl -and -not $result.checks.wslBefore) {

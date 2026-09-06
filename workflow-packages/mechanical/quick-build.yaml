@@ -1,0 +1,59 @@
+schema: 1
+id: mechanical.quick-build
+description: Build a clear, small single part without concept or assembly ceremony; optionally request machine review.
+tags: [cad, mechanical, quick, single-part]
+version: 1.0.0
+workflow:
+  schema: 1
+  id: mechanical.quick-build
+  version: 1.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: build
+  versionControl:
+    init: true
+    allowRemote: false
+    phases:
+      build: {onExit: [commit]}
+  phases:
+    build:
+      rebuildContextOnExit: true
+      purpose: Turn one clear single-part request into deterministic source and an inspected STEP candidate.
+      guidance: >-
+        Use only when the request is already specific enough to build without concept exploration. Record the compact requirement and source with cad.save_and_check("quick-build", source, output, variables={...}). That call uses the normal authorized commit and managed build; inspect its seven views and probe every stated dimension or feature that generic B-Rep checks cannot establish. Rebuild on failure. Advance delivered for an ordinary result. If the user requests machine review, create one review-candidate commit from the latest source and ArtifactRef, then advance review_requested and submit that Commit exactly once.
+      actions: [cad_build_step, cad_commit, transition]
+      grants: [file_read, file_edit_source, model_build, observe, observe_programmable, shell, transition]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: [{ref: quick-build, type: workspace_commit, closeWith: cad_commit}]
+      evidenceObligations:
+        - {ref: candidate-visual, type: visual, closeWith: cad_build_step, dependsOn: [quick-build]}
+        - {ref: candidate-geometry, type: geometry, closeWith: cad_build_step, dependsOn: [quick-build]}
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions:
+        delivered: {target: done, requiresPhaseObligations: true}
+        review_requested: {target: final_review, requiresPhaseObligations: true}
+    final_review:
+      purpose: Obtain an optional independent verdict on the immutable quick-build candidate.
+      guidance: Submit exactly once using the review-candidate Commit. Wait for the host completion event; the reviewer owns the verdict and transition.
+      actions: [cad_submit_for_review]
+      grants: [file_read, observe, observe_programmable]
+      writeScopes: [run:observation]
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: []
+      reviewProfile: mechanical.final-review
+      transitions:
+        accepted: {target: done, reviewVerdicts: [pass]}
+        revise: {target: build, reviewVerdicts: [fail], invalidate: [quick-build]}
+    done:
+      purpose: Preserve the inspected single-part result.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

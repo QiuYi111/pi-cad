@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Optional Blender runtime installer for Pi-CAD.
+ * Optional Blender runtime installer for Reify.
  *
  * Release presentation is an optional capability: a failed download must
  * never break `npm install`. PI_CAD_SKIP_BLENDER=1 opts out entirely;
@@ -24,7 +24,7 @@ function sha256File(path) {
 }
 
 function platformKey() {
-  if (process.platform !== "linux") throw new Error("Pi-CAD Blender installation must run inside Linux or WSL");
+  if (process.platform !== "linux") throw new Error("Reify Blender installation must run inside Linux or WSL");
   return process.arch === "arm64" ? "linux-arm64" : "linux-x64";
 }
 
@@ -141,7 +141,7 @@ if (process.argv[1] && process.argv[1].endsWith("install-blender.mjs")) {
   const { fileURLToPath } = await import("node:url");
   const root = fileURLToPath(new URL("..", import.meta.url));
   if (process.platform !== "linux") {
-    console.error("Run Pi-CAD and its installers inside Linux or a WSL distribution.");
+    console.error("Run Reify and its installers inside Linux or a WSL distribution.");
     process.exit(2);
   }
   execFileSync(process.env.PI_CAD_UV ?? "uv", ["sync", "--project", join(root, "python"), "--extra", "simulation"], { cwd: root, stdio: "inherit" });

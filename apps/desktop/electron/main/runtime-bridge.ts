@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
-import type { AppSettings, RuntimeStatus } from "../../src/shared/contracts.js";
+import type { AppSettings, RuntimeStatus, SimulationComponentStatus } from "../../src/shared/contracts.js";
 
 export interface RuntimePaths {
   piCadRepo: string;
@@ -53,5 +53,7 @@ export interface RuntimeBridge {
   check(settings: AppSettings): Promise<RuntimeStatus>;
   install(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus>;
   installWsl(onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus>;
+  checkSimulationComponent(settings: AppSettings): Promise<SimulationComponentStatus>;
+  installSimulationComponent(settings: AppSettings): Promise<SimulationComponentStatus>;
   revealPath(path: string): Promise<string>;
 }

@@ -18,6 +18,7 @@ cad.workflow.list() -> list[dict]
 cad.workflow.start(workflow_id: str, *, interaction_mode: str = "interactive") -> dict
 cad.workflow.current() -> dict | None
 cad.workflow.advance(event: str) -> dict
+cad.save_and_check(record: str, source: str | Path, output: str | Path | None = None, *, variables=None, artifacts=None, force=False, parameters=None) -> SaveAndCheckResult
 cad.commit(
     name: str,
     *,

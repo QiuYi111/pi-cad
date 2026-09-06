@@ -19,11 +19,18 @@ function artifactSources(
   }));
 }
 
+function blenderSources(artifacts: ViewerCatalog["projectHead"]["artifacts"], scope: "current" | "head" | "commit", commitId?: string): ViewerSource[] {
+  return artifacts.filter((artifact) => /\.blend$/i.test(artifact.path)).map((artifact) => ({ kind: "blender", id: `blender:${scope}:${commitId ?? "latest"}:${artifact.id}:${artifact.sha256}`, label: artifact.role.replaceAll("-", " "), path: artifact.path, role: artifact.role, sha256: artifact.sha256, scope }));
+}
+
 export function sourcesFromCatalog(catalog: ViewerCatalog, fallbackPath?: string): ViewerSource[] {
   const sources: ViewerSource[] = [
     ...artifactSources(catalog.currentRun?.artifacts ?? [], "current"),
+    ...blenderSources(catalog.currentRun?.artifacts ?? [], "current"),
     ...artifactSources(catalog.projectHead.artifacts, "head"),
+    ...blenderSources(catalog.projectHead.artifacts, "head"),
     ...catalog.commits.flatMap((commit) => artifactSources(commit.artifacts, "commit", commit.id).map((source) => ({ ...source, label: `${commit.name} · ${source.label}` }))),
+    ...catalog.commits.flatMap((commit) => blenderSources(commit.artifacts, "commit", commit.id).map((source) => ({ ...source, label: `${commit.name} · ${source.label}` }))),
     ...catalog.simulationRuns.flatMap((run) => run.outputs.flatMap((output): ViewerSource[] => output.path && output.type !== "scalar" ? [{
       kind: "simulation",
       id: `simulation:${run.id}:${output.name}:${output.sha256 ?? output.path}`,
@@ -31,6 +38,7 @@ export function sourcesFromCatalog(catalog: ViewerCatalog, fallbackPath?: string
       path: output.path,
       outputType: output.type,
       runId: run.id,
+      createdAt: run.completedAt ?? run.createdAt,
       ...(output.unit ? { unit: output.unit } : {}),
       ...(output.sha256 ? { sha256: output.sha256 } : {}),
     }] : [])),

@@ -49,6 +49,15 @@ describe("WSL path conversion", () => {
 });
 
 describe("WSL runtime environment", () => {
+  it("installs the optional torch-fem component as WSL root and verifies it", async () => {
+    const bridge = new WslBridge("Ubuntu");
+    vi.spyOn(bridge, "resolveRuntimePaths").mockResolvedValue({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "", projectPath: "/workspace" });
+    const exec = vi.spyOn(bridge, "exec").mockResolvedValue({ stdout: "", stderr: "" });
+    const status = await bridge.installSimulationComponent({} as AppSettings);
+    expect(status.state).toBe("ready");
+    expect(exec).toHaveBeenCalledWith(["bash", "/runtime/pi-cad/scripts/bootstrap-torch-fem-runtimes.sh"], { user: "root", timeout: 1_800_000 });
+  });
+
   it("forwards state and distillation roots without forwarding unrelated host secrets", () => {
     const env = forwardWslRuntimeEnvironment({
       WSLENV: "PATH/p",
@@ -128,7 +137,7 @@ describe("WSL first-install status", () => {
       state: "error", message: "Install runtime", checks: [
         { id: "wsl", label: "WSL", status: "ready", detail: "Ubuntu", installable: true },
         { id: "prime", label: "Prime", status: "missing", detail: "missing", installable: true },
-        { id: "picad", label: "Pi-CAD", status: "missing", detail: "missing", installable: true },
+        { id: "picad", label: "Reify", status: "missing", detail: "missing", installable: true },
       ],
     } as const;
     const ready = { state: "idle", checks: missing.checks.map((item) => ({ ...item, status: "ready" as const })) } as const;

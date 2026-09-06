@@ -200,6 +200,26 @@ test("completion gate requires terminal state, release commit, and a PASS bound 
   }
 });
 
+test("completion gate accepts a terminal workflow that declares no release record", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-completion-no-release-"));
+  try {
+    const workflow = compileWorkflowDefinition({
+      schema: 1, id: "test/quick", version: "1.0.0", parametersSchema: {}, initialPhase: "done",
+      phases: {
+        done: { purpose: "Quick result", actions: [], grants: ["file_read"], writeScopes: [], recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [], transitions: {}, terminal: true },
+      },
+    }, mechanicalRegistries);
+    const started = await new HarnessProjectStoreV7(cwd).startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
+    await new HarnessRunStoreV7(cwd, started.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
+      state: { ...state, status: "done" }, event: { type: "TestCompleted" },
+    }));
+    const gate = await completionGate(cwd);
+    assert.equal(gate.complete, true);
+    assert.equal(gate.outcome, "complete");
+    assert.match(gate.reason, /no release record/);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
 test("completion gate permits a workflow with only pre-build review when release contains the current candidate and source", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-review-free-gate-"));
   try {

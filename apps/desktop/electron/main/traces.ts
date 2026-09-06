@@ -1,5 +1,6 @@
 import type { AppSettings, DistillationStatus, RatingStatus, TraceSummary } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
+import { userInfo } from "node:os";
 
 export function desktopDistillationEnvironment(
   settings: Pick<AppSettings, "provider" | "model" | "thinking">,
@@ -108,5 +109,14 @@ export class TraceStore {
         : reject(new Error(stderr.trim() || `Distillation exited with code ${code}`)));
     });
     return last;
+  }
+
+  async candidateAction(settings: AppSettings, jobPath: string, mode: "validate" | "adopt"): Promise<unknown> {
+    const home = await this.bridge.homeDirectory(); const root = process.env.PI_CAD_EXPERIENCE_ROOT || `${home}/.cad/transcripts`; const prefix = `${root}/distill-jobs/`;
+    if (!jobPath.startsWith(prefix) || !jobPath.endsWith(".job.json") || jobPath.includes("/../")) throw new Error("Candidate job path escapes the experience library.");
+    const { piCadRepo, primeAgentRepo } = await this.bridge.resolveRuntimePaths(settings); const node = await this.bridge.commandPath("node");
+    const primeCommand = JSON.stringify([`${primeAgentRepo}/prime-agent.sh`]);
+    const { stdout } = await this.bridge.exec(["env", desktopDistillationPath(node), ...desktopDistillationEnvironment(settings), node, `${piCadRepo}/scripts/adopt-experience-candidate.mjs`, mode, jobPath, piCadRepo, userInfo().username, primeCommand], { timeout: 30 * 60_000 });
+    return JSON.parse(stdout.trim().split("\n").at(-1) || "{}");
   }
 }

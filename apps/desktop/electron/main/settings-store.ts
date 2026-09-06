@@ -13,6 +13,8 @@ const defaults = (): AppSettings => ({
   thinking: "minimal",
   permission: "workspace",
   reviewer: { mode: "inherit" },
+  remotePublish: { enabled: false, allowedRemotes: ["origin"] },
+  onboardingComplete: false,
 });
 
 export class SettingsStore {
@@ -26,7 +28,7 @@ export class SettingsStore {
   async get(): Promise<AppSettings> {
     try {
       const parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<AppSettings>;
-      return { ...defaults(), ...parsed, reviewer: { ...defaults().reviewer, ...parsed.reviewer } };
+      return { ...defaults(), ...parsed, reviewer: { ...defaults().reviewer, ...parsed.reviewer }, remotePublish: { ...defaults().remotePublish, ...parsed.remotePublish } };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       return defaults();
@@ -40,6 +42,7 @@ export class SettingsStore {
         ...current,
         ...patch,
         reviewer: patch.reviewer ? { ...current.reviewer, ...patch.reviewer } : current.reviewer,
+        remotePublish: patch.remotePublish ? { ...current.remotePublish, ...patch.remotePublish } : current.remotePublish,
       };
       await mkdir(dirname(this.path), { recursive: true });
       const temporary = `${this.path}.${process.pid}.${Date.now()}.tmp`;

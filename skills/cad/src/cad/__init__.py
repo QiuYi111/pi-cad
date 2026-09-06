@@ -8,7 +8,7 @@ from typing import Any
 from . import artifacts, model, review, simulation, snapshot, templates, workflow
 from .client import CadApiError, project_path, request
 from .probe import probe
-from .refs import ArtifactRef, Commit
+from .refs import ArtifactRef, Commit, SaveAndCheckResult
 
 
 def _commit_from_payload(manifest: dict[str, Any], variables: dict[str, Any]) -> Commit:
@@ -51,6 +51,23 @@ async def history() -> list[Commit]:
     return [_commit_from_payload(manifest, {}) for manifest in manifests]
 
 
+async def save_and_check(
+    record: str,
+    source: str | Path,
+    output: str | Path | None = None,
+    *,
+    parent: str | Commit | None = None,
+    variables: dict[str, Any] | None = None,
+    artifacts: list[str | Path | ArtifactRef] | None = None,
+    force: bool = False,
+    parameters: dict[str, dict[str, Any]] | None = None,
+) -> SaveAndCheckResult:
+    """Close the current workspace record, then run the managed build and checks."""
+    saved = await commit(record, parent=parent, variables=variables, artifacts=artifacts)
+    candidate = await model.build(source, output, force=force, parameters=parameters)
+    return SaveAndCheckResult(saved, candidate)
+
+
 __all__ = [
-    "ArtifactRef", "CadApiError", "Commit", "artifacts", "commit", "history", "load", "model", "probe", "review", "simulation", "snapshot", "templates", "workflow",
+    "ArtifactRef", "CadApiError", "Commit", "SaveAndCheckResult", "artifacts", "commit", "history", "load", "model", "probe", "review", "save_and_check", "simulation", "snapshot", "templates", "workflow",
 ]

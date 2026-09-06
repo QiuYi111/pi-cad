@@ -67,16 +67,18 @@ test("installed desktop completes real WSL onboarding and applies a live model p
   try {
     const page = await application.firstWindow();
     await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
-    await expect(page.getByText("READY THE WORKBENCH")).toBeVisible();
+    await expect(page.getByText("MAKE IDEAS REAL")).toBeVisible();
     const install = page.getByRole("button", { name: "Install bundled runtime" });
     await expect(install).toBeVisible({ timeout: 120_000 });
     await install.click();
-    await expect(page.getByRole("button", { name: "Open Pi-CAD" })).toBeEnabled({ timeout: 20 * 60_000 });
-    await page.getByRole("button", { name: "Open Pi-CAD" }).click();
+    await expect(page.getByRole("button", { name: "进入 Reify" })).toBeEnabled({ timeout: 20 * 60_000 });
+    await page.getByRole("button", { name: "进入 Reify" }).click();
 
     const catalog = await page.evaluate(() => window.piCad.viewer.catalog());
     const settings = await page.evaluate(() => window.piCad.settings.get());
     expect(catalog.currentRun, JSON.stringify({ canonical, project, settings, catalog }, null, 2)).not.toBeNull();
+    if (!((await page.locator(".workbench-page").getAttribute("class")) || "").includes("mode-canvas")) await page.keyboard.press("Control+Backslash");
+    await expect(page.locator(".workbench-page")).toHaveClass(/mode-canvas/);
     await expect(page.getByTestId("parameter-panel")).toBeVisible({ timeout: 120_000 });
     const width = page.getByRole("spinbutton", { name: "Width" });
     await width.fill("67");

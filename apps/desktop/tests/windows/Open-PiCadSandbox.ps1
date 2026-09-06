@@ -6,9 +6,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 if (-not $ReleaseDirectory) { $ReleaseDirectory = Join-Path $PSScriptRoot '..\..\release' }
-if (-not $ResultDirectory) { $ResultDirectory = Join-Path $env:LOCALAPPDATA 'Pi-CAD\sandbox-results' }
+if (-not $ResultDirectory) { $ResultDirectory = Join-Path $env:LOCALAPPDATA 'Reify\sandbox-results' }
 $releasePath = [IO.Path]::GetFullPath($ReleaseDirectory)
-$installer = Join-Path $releasePath 'Pi-CAD-Setup-x64.exe'
+$installer = Join-Path $releasePath 'Reify-Setup-x64.exe'
 if (-not (Test-Path -LiteralPath $installer)) { throw "Build the installer first: $installer" }
 if (-not (Get-Command WindowsSandbox.exe -ErrorAction SilentlyContinue)) {
   throw 'Windows Sandbox is not enabled. Enable Containers-DisposableClientVM, restart Windows, then retry.'
@@ -37,7 +37,7 @@ $configuration = @"
 $sandboxDirectory = Join-Path $releasePath 'sandbox'
 New-Item -ItemType Directory -Path $sandboxDirectory -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Sandbox-Bootstrap.ps1') -Destination $sandboxDirectory -Force
-$wsb = Join-Path $releasePath 'Pi-CAD-Test.wsb'
+$wsb = Join-Path $releasePath 'Reify-Test.wsb'
 $configuration | Set-Content -LiteralPath $wsb -Encoding utf8
 Start-Process -FilePath $wsb
 Write-Host "Sandbox started. Results: $resultPath"

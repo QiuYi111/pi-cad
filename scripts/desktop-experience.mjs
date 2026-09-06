@@ -45,17 +45,22 @@ for (;;) {
   await new Promise((resolve) => setTimeout(resolve, 1000));
   let job;
   try { job = JSON.parse(await readFile(jobPath, "utf8")); } catch { continue; }
-  const terminal = job.status === "complete" || job.status === "failed";
+  const terminal = job.status === "candidate" || job.status === "complete" || job.status === "failed";
   emit({
     state: terminal ? job.status : "running",
     processed: terminal ? sessionPaths.length : Math.max(0, sessionPaths.length - 1),
     total: sessionPaths.length,
     message: terminal
-      ? (job.status === "complete"
-          ? (job.changed ? "Reusable experience updated." : "Validation complete. No reusable change was published.")
+      ? (job.status === "candidate" || job.status === "complete"
+          ? (job.status === "candidate" ? "Improvement candidate created. Production rules are unchanged and validation is pending." : "No reusable change was proposed.")
           : job.validation_error || job.error || "Distillation failed.")
       : "Prime is extracting reusable engineering experience…",
     outputPath: job.log_path || dirname(jobPath),
+    candidateRoot: job.candidate_root,
+    changedFiles: job.changed_files,
+    sourceFailureSeqs: job.source_failure_seqs,
+    validationStatus: job.validation_status,
+    jobPath,
   });
-  if (terminal) process.exit(job.status === "complete" ? 0 : 1);
+  if (terminal) process.exit(job.status === "failed" ? 1 : 0);
 }

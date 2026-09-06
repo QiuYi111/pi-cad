@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -321,6 +322,22 @@ test("built-in distillation uses the packaged Prime dist entrypoint", async () =
   }
 });
 
+test("distillation writes a traceable pending candidate and never replaces production skills", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-cad-distill-candidate-only-")); const request = join(root, "distill-1-1.json");
+  const productionSkill = join(process.cwd(), "skills", "cad", "SKILL.md"); const productionBefore = await readFile(productionSkill, "utf8");
+  try {
+    const archive = join(root, "archive"); await mkdir(archive, { recursive: true }); await writeFile(join(archive, "experience.md"), "tool failed at build\n");
+    await writeFile(join(root, "index.jsonl"), `${JSON.stringify({ seq: 1, run_id: "failed-run", archive_path: archive, evaluation_status: "evaluated", quality: 2, feedback: "tool failed", transcript_tokens: 20 })}\n`);
+    await writeFile(join(root, "distill_state.json"), JSON.stringify({ schema_version: 1, last_distilled_seq: 0, pending_transcript_tokens: 20, threshold_tokens: 10, last_distilled_at: null, active_cutoff_seq: 1, active_started_at: new Date().toISOString() })); await writeFile(join(root, "distill.lock"), "");
+    await writeFile(request, JSON.stringify({ schema_version: 1, from_seq: 1, cutoff_seq: 1, selected_seqs: [1], transcript_tokens: 20 }));
+    const helper = join(root, "candidate.mjs"); await writeFile(helper, `import{appendFile,writeFile}from'node:fs/promises';import{basename,dirname,join}from'node:path';const q=process.argv[2],r=dirname(q),s=basename(q,'.json');await appendFile(join(process.cwd(),'skills/cad/SKILL.md'),'\\nCandidate repair.\\n');await writeFile(join(r,'distill-jobs',s+'.replay.json'),JSON.stringify({cases:[{kind:'repair',seq:1,task:'failed task',checkpoint:'before build',evidence:'tool failed',failureSignature:'tool failed',expectedRepair:'retry safely',regressionGuard:'preserve success'}]}));await writeFile(join(r,'distill-jobs',s+'.audit.md'),'Failure 1; candidate only.');`);
+    await execFileAsync(process.execPath, [join(process.cwd(), "scripts", "distill-experience.mjs"), request, root, JSON.stringify([process.execPath, helper])]);
+    const status = JSON.parse(await readFile(join(root, "distill-jobs", "distill-1-1.job.json"), "utf8"));
+    assert.equal(status.status, "candidate"); assert.equal(status.validation_status, "pending"); assert.deepEqual(status.source_failure_seqs, [1]); assert.ok(status.changed_files.includes("skills/cad/SKILL.md"));
+    assert.equal(await readFile(productionSkill, "utf8"), productionBefore); assert.match(await readFile(join(status.candidate_root, "skills", "cad", "SKILL.md"), "utf8"), /Candidate repair/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("real-task checkpoint replay runs only one bounded next action and an independent judgement", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-cad-checkpoint-replay-"));
   try {
@@ -343,4 +360,19 @@ test("real-task checkpoint replay runs only one bounded next action and an indep
     assert.equal(result.passed, true);
     assert.equal(result.results[0].kind, "repair");
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("validated experience adoption requires engineering replay, records metrics, and rolls back", async () => {
+  const root=await mkdtemp(join(tmpdir(),"pi-cad-adopt-candidate-")), pkg=join(root,"package"), candidate=join(root,"candidate"), jobs=join(root,"distill-jobs");
+  const digest=async(directory:string)=>{const h=createHash("sha256");const walk=async(d:string,r="")=>{for(const e of (await readdir(d,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))){const p=join(d,e.name),q=join(r,e.name);if(e.isDirectory())await walk(p,q);else h.update(q).update(await readFile(p));}};await walk(directory);return h.digest("hex");};
+  try {
+    for(const base of [pkg,candidate]){await mkdir(join(base,"skills","cad"),{recursive:true});await mkdir(join(base,"workflow-packages"),{recursive:true});} await mkdir(join(pkg,"scripts"),{recursive:true});await mkdir(jobs);
+    await writeFile(join(pkg,"skills","cad","SKILL.md"),"original\n");await writeFile(join(candidate,"skills","cad","SKILL.md"),"original\nCandidate repair.\n");await cp(join(process.cwd(),"scripts","evaluate-distillation-checkpoints.mjs"),join(pkg,"scripts","evaluate-distillation-checkpoints.mjs"));await symlink(join(process.cwd(),"node_modules"),join(pkg,"node_modules"));await symlink(join(process.cwd(),"src"),join(pkg,"src"));
+    const archive=join(root,"archive");await mkdir(archive);await writeFile(join(archive,"experience.md"),"tool failed\n");await writeFile(join(root,"index.jsonl"),JSON.stringify({seq:1,evaluation_status:"evaluated",archive_path:archive,quality:2})+'\n');
+    const engineer=join(root,"engineering.mjs");await writeFile(engineer,"import{readFileSync}from'node:fs';process.exit(readFileSync('skills/cad/SKILL.md','utf8').includes('Candidate repair')?0:1)");const prime=join(root,"prime.mjs");await writeFile(prime,"process.stdout.write('PASS\\nnext action is bounded\\n')");
+    await writeFile(join(jobs,"distill-1-1.replay.json"),JSON.stringify({cases:[{kind:"repair",seq:1,task:"repair build",checkpoint:"before failure",evidence:"tool failed",failureSignature:"tool failed",expectedRepair:"repair",regressionGuard:"preserve",engineeringCheck:[process.execPath,engineer]}]}));
+    const jobPath=join(jobs,"distill-1-1.job.json");await writeFile(jobPath,JSON.stringify({status:"candidate",changed:true,candidate_root:candidate,source_failure_seqs:[1],changed_files:["skills/cad/SKILL.md"],original_skill_digest:await digest(join(pkg,"skills")),original_workflow_digest:await digest(join(pkg,"workflow-packages"))}));
+    const script=join(process.cwd(),"scripts","adopt-experience-candidate.mjs"), primeCommand=JSON.stringify([process.execPath,prime]);const validated=JSON.parse((await execFileAsync(process.execPath,[script,"validate",jobPath,pkg,"admin",primeCommand])).stdout);assert.deepEqual(validated.metrics,{baselinePasses:1,baselineEngineeringPasses:0,candidatePasses:1,candidateEngineeringPasses:1,falsePasses:0,durationMs:validated.metrics.durationMs,costUsd:null});assert.equal(await readFile(join(pkg,"skills","cad","SKILL.md"),"utf8"),"original\n");
+    const adopted=JSON.parse((await execFileAsync(process.execPath,[script,"adopt",jobPath,pkg,"admin",primeCommand])).stdout);assert.match(await readFile(join(pkg,"skills","cad","SKILL.md"),"utf8"),/Candidate repair/);await execFileAsync(process.execPath,[script,"rollback",adopted.version,pkg,"admin"]);assert.equal(await readFile(join(pkg,"skills","cad","SKILL.md"),"utf8"),"original\n");
+  } finally {await rm(root,{recursive:true,force:true});}
 });

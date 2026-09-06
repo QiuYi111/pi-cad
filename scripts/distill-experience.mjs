@@ -35,6 +35,15 @@ async function treeDigest(directory) {
   return hash.digest("hex");
 }
 
+async function treeFiles(directory, relative = "", output = new Map()) {
+  for (const entry of (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+    const rel = join(relative, entry.name); const path = join(directory, entry.name);
+    if (entry.isDirectory()) await treeFiles(path, rel, output);
+    else if (entry.isFile()) output.set(rel.replaceAll("\\", "/"), createHash("sha256").update(await readFile(path)).digest("hex"));
+  }
+  return output;
+}
+
 async function prepareCandidate() {
   await rm(candidateRoot, { recursive: true, force: true });
   await mkdir(candidateRoot, { recursive: true });
@@ -218,33 +227,20 @@ async function run() {
         if (checked.exitCode !== 0) { validationError = `${name}: ${checked.stderr || checked.stdout}`; break; }
       }
     }
-    if (!validationError) {
-      const replayed = await runProcess({
-        command: process.execPath,
-        args: [join(packageRoot, "scripts", "evaluate-distillation-checkpoints.mjs"), join(jobsDir, `${jobStem}.replay.json`), root, candidateRoot, replayReportPath, replayCommand],
-        cwd: packageRoot,
-        env,
-        timeoutMs: Number(process.env.PI_CAD_REPLAY_SUITE_TIMEOUT_MS || 1_800_000),
-        maxStdoutBytes: 2 * 1024 * 1024,
-        maxStderrBytes: 512 * 1024,
-      });
-      if (replayed.exitCode !== 0) validationError = replayed.stderr || replayed.stdout || "checkpoint replay failed";
-    }
-    if (!validationError) {
-      await rm(join(packageRoot, "skills"), { recursive: true, force: true });
-      await rm(join(packageRoot, "workflow-packages"), { recursive: true, force: true });
-      await cp(join(candidateRoot, "skills"), join(packageRoot, "skills"), { recursive: true });
-      await cp(join(candidateRoot, "workflow-packages"), join(packageRoot, "workflow-packages"), { recursive: true });
-    }
   }
   if (validationError) await writeFile(logPath, `${processResult.stdout}${processResult.stderr}\nVALIDATION FAILED: ${validationError}\n`, "utf8");
   const success = exitCode === 0 && !validationError;
   const state = await finishDistillation(success);
   const completedAt = new Date().toISOString();
   const logDigest = createHash("sha256").update(await readFile(logPath)).digest("hex");
+  const originalFiles = new Map([...(await treeFiles(join(packageRoot, "skills"))).entries()].map(([path, sha]) => [`skills/${path}`, sha]));
+  for (const [path, sha] of await treeFiles(join(packageRoot, "workflow-packages"))) originalFiles.set(`workflow-packages/${path}`, sha);
+  const candidateFiles = new Map([...(await treeFiles(join(candidateRoot, "skills"))).entries()].map(([path, sha]) => [`skills/${path}`, sha]));
+  for (const [path, sha] of await treeFiles(join(candidateRoot, "workflow-packages"))) candidateFiles.set(`workflow-packages/${path}`, sha);
+  const changedFiles = [...new Set([...originalFiles.keys(), ...candidateFiles.keys()])].filter((path) => originalFiles.get(path) !== candidateFiles.get(path)).sort();
   await atomicWrite(statusPath, {
     schema_version: 1,
-    status: success ? "complete" : "failed",
+    status: success ? (changed ? "candidate" : "complete") : "failed",
     mode,
     model: mode === "builtin-prime" ? `${process.env.PI_CAD_DISTILL_PROVIDER || "zai"}/${process.env.PI_CAD_DISTILL_MODEL || "glm-5.3-flash"}` : null,
     thinking: mode === "builtin-prime" ? process.env.PI_CAD_DISTILL_THINKING || "low" : null,
@@ -258,9 +254,14 @@ async function run() {
     last_distilled_seq: state.last_distilled_seq,
     pending_transcript_tokens: state.pending_transcript_tokens,
     changed,
+    original_skill_digest: originalSkillDigest,
+    original_workflow_digest: originalWorkflowDigest,
     validation_error: validationError || null,
     candidate_root: candidateRoot,
-    replay_report: changed ? replayReportPath : null,
+    changed_files: changedFiles,
+    source_failure_seqs: request.selected_seqs || [],
+    validation_status: changed ? "pending" : "not-needed",
+    replay_report: null,
   });
 }
 

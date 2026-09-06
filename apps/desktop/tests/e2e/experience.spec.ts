@@ -18,6 +18,8 @@ test("desktop rating distills a real trajectory and publishes only after replay"
   const sessionRoot = join(project, ".prime-sessions");
   const session = join(sessionRoot, "failed-bracket.jsonl");
   const distiller = join(repository, "apps", "desktop", "tests", "fixtures", "distillation-agent.mjs");
+  const primeAgentRepo = join(root, "prime-e2e");
+  const cookbook = join(candidateRepo, "skills", "parametric-cad-modeling", "references", "cookbook.md");
 
   await mkdir(appRoot, { recursive: true });
   await cp(join(process.cwd(), "out"), join(appRoot, "out"), { recursive: true });
@@ -31,6 +33,9 @@ test("desktop rating distills a real trajectory and publishes only after replay"
   }
   await cp(join(repository, "package.json"), join(candidateRepo, "package.json"));
   await symlink(join(repository, "node_modules"), join(candidateRepo, "node_modules"), "dir");
+  await mkdir(primeAgentRepo, { recursive: true });
+  await writeFile(join(primeAgentRepo, "prime-agent.sh"), `#!/bin/sh\nexec ${process.execPath} ${distiller} "$@"\n`);
+  await chmod(join(primeAgentRepo, "prime-agent.sh"), 0o755);
   await mkdir(sessionRoot, { recursive: true });
   await writeFile(session, [
     JSON.stringify({ type: "session", name: "E2E failed bracket" }),
@@ -62,16 +67,17 @@ test("desktop rating distills a real trajectory and publishes only after replay"
   try {
     const page = await application.firstWindow();
     await page.waitForLoadState("domcontentloaded", { timeout: 30_000 });
-    await page.getByRole("button", { name: "Open Pi-CAD" }).click();
-    await page.evaluate(async ({ project, candidateRepo }) => {
-      await window.piCad.settings.update({ projectPath: project, piCadRepo: candidateRepo, primeAgentRepo: "/tmp/prime-e2e" });
-    }, { project, candidateRepo });
+    await page.getByRole("button", { name: "进入 Reify" }).click();
+    await page.evaluate(async ({ project, candidateRepo, primeAgentRepo }) => {
+      await window.piCad.settings.update({ projectPath: project, piCadRepo: candidateRepo, primeAgentRepo });
+    }, { project, candidateRepo, primeAgentRepo });
     await page.getByRole("button", { name: "Trajectories" }).click();
     await expect(page.getByText("E2E failed bracket")).toBeVisible();
     await page.getByText("E2E failed bracket").click();
     await expect(page.getByText("The bracket is complete.")).toBeVisible();
     await expect(page.locator(".trace-check")).toHaveClass(/selected/);
     const footer = page.locator(".trace-list footer");
+    await footer.getByRole("button", { name: "1 selected" }).click();
     await footer.getByLabel("Quality").selectOption("2");
     await footer.getByLabel("Difficulty").selectOption("4");
     await footer.getByPlaceholder("What worked or failed?").fill("The bracket was built before its load path was checked.");
@@ -80,16 +86,20 @@ test("desktop rating distills a real trajectory and publishes only after replay"
     await expect(page.locator(".trace-row").filter({ hasText: "E2E failed bracket" })).toContainText("2/5");
     await footer.getByRole("button", { name: "Distill now" }).click();
     await expect(page.getByText("Distilling experience")).toBeVisible();
-    await expect(page.getByText("Reusable experience updated.")).toBeVisible({ timeout: 180_000 });
+    await expect(page.getByText("Improvement candidate ready")).toBeVisible({ timeout: 180_000 });
     await page.screenshot({ path: join(process.cwd(), "test-results", "experience-distilled.png") });
 
     const index = (await readFile(join(experience, "index.jsonl"), "utf8")).trim().split(/\r?\n/).map((line) => JSON.parse(line));
     expect(index).toHaveLength(1);
     expect(index[0]).toMatchObject({ quality: 2, difficulty: 4, feedback: "The bracket was built before its load path was checked." });
-    await expect(readFile(join(candidateRepo, "skills", "parametric-cad-modeling", "references", "cookbook.md"), "utf8"))
-      .resolves.toContain("Before rebuilding a failed bracket, inspect its load path");
+    await expect(readFile(cookbook, "utf8")).resolves.not.toContain("Before rebuilding a failed bracket, inspect its load path");
+    await page.getByRole("button", { name: "Validate replay" }).click();
+    await expect(page.getByText("Engineering replay passed. Review metrics before adoption.")).toBeVisible({ timeout: 180_000 });
+    await page.getByRole("button", { name: "Approve and adopt" }).click();
+    await expect(page.getByText(/Adopted fixed rule version/)).toBeVisible({ timeout: 180_000 });
+    await expect(readFile(cookbook, "utf8")).resolves.toContain("Before rebuilding a failed bracket, inspect its load path");
     const replay = JSON.parse(await readFile(join(experience, "distill-jobs", "distill-1-1.replay-result.json"), "utf8"));
-    expect(replay).toMatchObject({ passed: true, results: [{ kind: "repair", seq: 1, pass: true }] });
+    expect(replay).toMatchObject({ passed: true, results: [{ kind: "repair", seq: 1, pass: true, engineeringEvidence: { verified: true } }] });
   } finally {
     await application.close();
     await rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });

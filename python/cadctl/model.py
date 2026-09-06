@@ -13,6 +13,33 @@ import build123d as bd
 _writes: list[Path] = []
 
 
+def _track_project_reads(roots: tuple[Path, ...]) -> tuple[set[Path], dict[str, bool]]:
+    """Collect files opened by user model code inside its project roots.
+
+    Python audit hooks cannot be removed, so the small mutable switch disables
+    this collector after one build. Warm builds execute in fresh forked
+    children; direct library callers remain safe as well.
+    """
+    files: set[Path] = set()
+    state = {"active": True}
+
+    def audit(event: str, args: tuple[Any, ...]) -> None:
+        if not state["active"] or event != "open" or not args:
+            return
+        raw = args[0]
+        if not isinstance(raw, (str, bytes, os.PathLike)):
+            return
+        try:
+            path = Path(raw).resolve()
+        except (OSError, TypeError, ValueError):
+            return
+        if path.is_file() and any(_is_within(path, root) for root in roots):
+            files.add(path)
+
+    sys.addaudithook(audit)
+    return files, state
+
+
 def _is_within(path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -75,6 +102,7 @@ def run_source(
     stderr = io.StringIO()
     before_modules = set(sys.modules)
     source_roots = tuple(dict.fromkeys((cwd, source.parent)))
+    accessed_files, audit_state = _track_project_reads(source_roots)
     inserted_paths: list[str] = []
     try:
         if cwd != old_cwd:
@@ -136,7 +164,7 @@ def run_source(
             "exitCode": 0,
             "stdout": stdout.getvalue(),
             "stderr": stderr.getvalue(),
-            "sourceFiles": _source_files(source, source_roots, before_modules),
+            "sourceFiles": sorted(set(_source_files(source, source_roots, before_modules)) | {str(path) for path in accessed_files if path != output_path and ".pi-cad" not in path.parts}),
         }
     except Exception as exc:  # pragma: no cover - formatted below
         return {
@@ -144,9 +172,10 @@ def run_source(
             "stdout": stdout.getvalue(),
             "stderr": stderr.getvalue() + "\n" + traceback.format_exc(),
             "error": str(exc),
-            "sourceFiles": _source_files(source, source_roots, before_modules),
+            "sourceFiles": sorted(set(_source_files(source, source_roots, before_modules)) | {str(path) for path in accessed_files if path != output_path and ".pi-cad" not in path.parts}),
         }
     finally:
+        audit_state["active"] = False
         if cwd != old_cwd:
             os.chdir(old_cwd)
         for entry in inserted_paths:

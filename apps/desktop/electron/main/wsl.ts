@@ -53,7 +53,7 @@ export function classifyWslInstallResult(result: { exitCode: number; distroPrese
   if (result.exitCode !== 0) return { state: "error", checks: [], action: "retry", message: `Windows installer exited with code ${result.exitCode}.` };
   if (!result.distroPresent) return {
     state: "action-required", checks: [], action: "restart-windows", progress: 0.25,
-    message: "Windows accepted the installation. Restart Windows, then reopen Pi-CAD.",
+    message: "Windows accepted the installation. Restart Windows, then reopen Reify.",
   };
   if (!result.distroReady) return {
     state: "action-required", checks: [], action: "initialize-ubuntu", progress: 0.28,
@@ -129,6 +129,19 @@ export class WslBridge implements RuntimeBridge {
   }
 
   async toRuntimePath(value: string): Promise<string> { return this.toLinuxPath(value); }
+
+  async checkSimulationComponent(settings: AppSettings) {
+    const ready = await this.exec(["test", "-x", "/opt/pi-cad-runtime/torch-fem-0.9-cu126/project/python/runtimes/torch-fem-cuda/.venv/bin/python"]).then(() => true, () => false);
+    return { state: ready ? "ready" : "missing", component: "torch-fem-0.9", detail: ready ? "CUDA and CPU managed runtimes installed" : "Required for managed linear-elastic analysis", estimatedSize: "about 6 GB" } as const;
+  }
+
+  async installSimulationComponent(settings: AppSettings) {
+    const { piCadRepo } = await this.resolveRuntimePaths(settings);
+    await this.exec(["bash", `${piCadRepo}/scripts/bootstrap-torch-fem-runtimes.sh`], { user: "root", timeout: 30 * 60_000 });
+    const checked = await this.checkSimulationComponent(settings);
+    if (checked.state !== "ready") throw new Error("torch-fem installation finished without a qualified runtime.");
+    return checked;
+  }
 
   async revealPath(path: string): Promise<string> {
     return path.startsWith("/") ? `\\\\wsl.localhost\\${this.distro}${path.replaceAll("/", "\\")}` : path;
@@ -218,7 +231,7 @@ export class WslBridge implements RuntimeBridge {
     const bundleReady = values.bundle === "ready";
     add("prime", "Prime Agent", values.prime === "ready" && bundleReady, bundleReady ? paths.primeAgentRepo : "Bundled runtime update available");
     const knowledgeReady = values.knowledge === String(knowledge.count);
-    add("picad", "Pi-CAD runtime", values.picad === "ready" && knowledgeReady && bundleReady,
+    add("picad", "Reify runtime", values.picad === "ready" && knowledgeReady && bundleReady,
       !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
     const ready = checks.every((check) => check.status === "ready");
     return { state: ready ? "idle" : "error", checks, message: ready ? undefined : "Install the missing runtime dependencies." };
@@ -310,11 +323,11 @@ export class WslBridge implements RuntimeBridge {
         this.exec(["test", "-f", `${paths.piCadRepo}/package.json`]),
       ]);
     } catch {
-      throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Pi-CAD or select development checkouts in Settings.`);
+      throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Reify or select development checkouts in Settings.`);
     }
-    report("Preparing Pi-CAD Python packages…", 0.78);
+    report("Preparing Reify Python packages…", 0.78);
     await this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; cd ${JSON.stringify(paths.piCadRepo)} && if ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi && npm run setup:python`], { timeout: 15 * 60_000 });
-    report("Connecting Prime Agent to Pi-CAD…", 0.92);
+    report("Connecting Prime Agent to Reify…", 0.92);
     await this.exec(["bash", "-lc", [
       "set -e",
       `mkdir -p ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works`,

@@ -45,6 +45,15 @@ class Commit:
 
 
 @dataclass(frozen=True, repr=False)
+class SaveAndCheckResult:
+    commit: Commit
+    artifact: ArtifactRef
+
+    def __repr__(self) -> str:
+        return f"SaveAndCheckResult(commit={self.commit.id!r}, artifact={str(self.artifact.path)!r})"
+
+
+@dataclass(frozen=True, repr=False)
 class ProbeResult:
     value: Any
     artifact_hash: str | None = None

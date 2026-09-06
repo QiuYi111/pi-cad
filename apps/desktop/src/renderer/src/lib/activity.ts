@@ -7,7 +7,7 @@ function textOf(content: unknown): string {
 }
 
 function classify(code: string): { kind: CadActivity["kind"]; title: string } | null {
-  if (/cad\.model\.build/.test(code)) return { kind: "build", title: "Building model" };
+  if (/cad\.(?:model\.build|save_and_check)/.test(code)) return { kind: "build", title: "Building model" };
   if (/cad\.probe\.run|@cad\.probe/.test(code)) return { kind: "probe", title: "Inspecting geometry" };
   if (/cad\.simulation\.run/.test(code)) return { kind: "simulation", title: "Running simulation" };
   if (/cad\.workflow\.advance/.test(code)) return { kind: "workflow", title: "Advancing workflow" };
@@ -167,7 +167,7 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
           progress: 1,
           finishedAt: Date.now(),
           media,
-          artifactPath: activity.kind === "build" ? stepArtifact(event.result) : activity.kind === "simulation" ? outputs.find((output) => output.path)?.path : undefined,
+          artifactPath: activity.kind === "build" ? stepArtifact(event.result) : activity.kind === "simulation" ? (outputs.find((output) => output.type === "field" && output.path) ?? outputs.find((output) => output.type === "artifact" && output.path))?.path : undefined,
           metrics: activity.kind === "simulation" ? outputs.filter((output) => output.type === "scalar" && typeof output.value === "number").slice(0, 4).map((output) => ({ label: output.name, value: `${output.value}${output.unit ? ` ${output.unit}` : ""}` })) : activity.metrics,
           details: activity.kind === "simulation" && outputs.length ? { outputs } : undefined,
         },
@@ -206,6 +206,12 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
       };
       return [...messages, { id: `review-${activity.id}`, role: "system", text: "", createdAt: Date.now(), activity }];
     }
+  }
+  if (event.type === "agent_abort") {
+    const now = Date.now();
+    return finishOpenAssistant(messages.map((message) => message.activity && (message.activity.state === "running" || message.activity.state === "queued")
+      ? { ...message, activity: { ...message.activity, state: "denied", title: `${message.activity.kind === "simulation" ? "Simulation" : "Task"} stopped`, summary: "Stopped by user", finishedAt: now } }
+      : message), "aborted");
   }
   if (event.type === "agent_end") return finishOpenAssistant(messages, "complete");
   if (event.type === "agent_abort" || event.type === "abort") return finishOpenAssistant(messages, "aborted");

@@ -115,6 +115,8 @@ test("Plan C discovers and pins a workflow package before mutation", async () =>
       "mechanical.modify",
       "mechanical.one-shot",
       "mechanical.parameter-edit",
+      "mechanical.quick-build",
+      "mechanical.quick-check",
     ]);
     assert.deepEqual(Object.keys(packages[0]).sort(), ["description", "id", "tags", "version"]);
     const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" }) as any;
@@ -400,6 +402,11 @@ test("Python-facing probe bridge stays inside the existing fenced programmable b
     });
     assert.equal((direct as any).value.solids, 1);
     assert.equal((direct as any).artifactHash, detachedHash);
+
+    const explicitPath = await handleAgentApi(cwd, {
+      schema: 1, op: "probe", preset: "geometry", args: { artifact: detached },
+    });
+    assert.equal((explicitPath as any).value.solidCount, 1);
 
     await assert.rejects(
       handleAgentApi(cwd, {

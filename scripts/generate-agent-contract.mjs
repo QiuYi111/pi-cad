@@ -68,11 +68,11 @@ for (const tool of contract.tools) {
 
 function renderArchitecture(value) {
   const lines = [
-    "# Generated Pi-CAD architecture contract",
+    "# Generated Reify architecture contract",
     "",
     "> Generated from executable registries. Do not edit; run `npm run generate:agent-contract`.",
     "",
-    "Normal Pi-CAD use relies on this contract, the current action card, and cookbooks. Reading `src/**` is not an operating step.",
+    "Normal Reify use relies on this contract, the current action card, and cookbooks. Reading `src/**` is not an operating step.",
     "",
     "## Layers",
     "",

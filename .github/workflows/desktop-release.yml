@@ -17,19 +17,19 @@ jobs:
           - os: windows-latest
             command: package:win
             artifact: windows
-            files: apps/desktop/release/Pi-CAD-Setup-*.exe
+            files: apps/desktop/release/Reify-Setup-*.exe
           - os: ubuntu-latest
             command: package:linux
             artifact: linux
             files: |
-              apps/desktop/release/Pi-CAD-Linux-*.AppImage
-              apps/desktop/release/Pi-CAD-Linux-*.deb
+              apps/desktop/release/Reify-Linux-*.AppImage
+              apps/desktop/release/Reify-Linux-*.deb
           - os: macos-14
             command: package:mac
             artifact: macos-arm64
             files: |
-              apps/desktop/release/Pi-CAD-macOS-*.dmg
-              apps/desktop/release/Pi-CAD-macOS-*.zip
+              apps/desktop/release/Reify-macOS-*.dmg
+              apps/desktop/release/Reify-macOS-*.zip
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     steps:
@@ -64,9 +64,12 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - if: runner.os == 'Linux'
+        run: npm run test:linux:packages
+        working-directory: apps/desktop
       - uses: actions/upload-artifact@v4
         with:
-          name: pi-cad-${{ matrix.artifact }}
+          name: reify-${{ matrix.artifact }}
           path: ${{ matrix.files }}
 
   publish:

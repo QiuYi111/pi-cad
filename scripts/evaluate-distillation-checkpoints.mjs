@@ -69,7 +69,12 @@ for (const item of replay.cases) {
     `Regression guard:\n${item.regressionGuard}`,
     `Candidate next action:\n${continuation}`,
   ].join("\n\n"));
-  results.push({ kind: item.kind, seq: item.seq, pass: /^PASS\b/i.test(judgement), continuation, judgement });
+  let engineeringEvidence = null;
+  if (Array.isArray(item.engineeringCheck) && item.engineeringCheck.length && item.engineeringCheck.every((value) => typeof value === "string" && value)) {
+    const checked = await runProcess({ command: item.engineeringCheck[0], args: item.engineeringCheck.slice(1), cwd: candidateRoot, env: process.env, timeoutMs: 120_000, maxStdoutBytes: 256 * 1024, maxStderrBytes: 128 * 1024 });
+    engineeringEvidence = { verified: checked.exitCode === 0, exitCode: checked.exitCode, stdoutSha256: (await import("node:crypto")).createHash("sha256").update(checked.stdout).digest("hex") };
+  }
+  results.push({ kind: item.kind, seq: item.seq, pass: /^PASS\b/i.test(judgement), continuation, judgement, engineeringEvidence });
 }
 const report = { schema_version: 1, kind: "real-task-checkpoint-replay", passed: results.every((item) => item.pass), results };
 await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");

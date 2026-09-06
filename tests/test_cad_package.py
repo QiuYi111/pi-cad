@@ -116,6 +116,31 @@ class CadPackageTests(unittest.TestCase):
         self.assertLess(len(repr(artifact)), 160)
         self.assertNotIn("a" * 64, repr(artifact))
 
+    def test_save_and_check_is_the_authorized_commit_then_build_composition(self) -> None:
+        saved = cad.Commit("commit-1", "parts", None, "workflow", "parts", {}, (), "now")
+        artifact = cad.ArtifactRef(Path("build/bracket.step"), "b" * 64, "candidate")
+        with (
+            patch.object(cad, "commit", AsyncMock(return_value=saved)) as commit,
+            patch.object(cad.model, "build", AsyncMock(return_value=artifact)) as build,
+        ):
+            result = asyncio.run(cad.save_and_check(
+                "parts", "bracket.py", "build/bracket.step",
+                variables={"width": 40}, force=True,
+            ))
+        self.assertIs(result.commit, saved)
+        self.assertIs(result.artifact, artifact)
+        commit.assert_awaited_once_with("parts", parent=None, variables={"width": 40}, artifacts=None)
+        build.assert_awaited_once_with("bracket.py", "build/bracket.step", force=True, parameters=None)
+
+    def test_save_and_check_does_not_build_when_authorized_commit_fails(self) -> None:
+        with (
+            patch.object(cad, "commit", AsyncMock(side_effect=cad.CadApiError("denied"))),
+            patch.object(cad.model, "build", AsyncMock()) as build,
+        ):
+            with self.assertRaisesRegex(cad.CadApiError, "denied"):
+                asyncio.run(cad.save_and_check("parts", "bracket.py"))
+        build.assert_not_awaited()
+
     def test_probe_decorator_captures_plain_source_without_decorator(self) -> None:
         self.assertIn("def _module_probe", _module_probe.source)
         self.assertNotIn("@cad.probe", _module_probe.source)

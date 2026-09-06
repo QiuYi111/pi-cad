@@ -1,12 +1,9 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
-import { promisify } from "node:util";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
 import { engineeringKnowledgeProbe, type RuntimeBridge, type RuntimePaths } from "./runtime-bridge.js";
-
-const execFileAsync = promisify(execFile);
 
 export class NativeBridge implements RuntimeBridge {
   readonly kind = "native" as const;
@@ -16,11 +13,43 @@ export class NativeBridge implements RuntimeBridge {
     if (options.user) throw new Error("Native runtime cannot change users.");
     const [command, ...rest] = args;
     if (!command) throw new Error("Runtime command is empty.");
-    const result = await execFileAsync(command, rest, {
-      encoding: "utf8", timeout: options.timeout ?? 30_000, maxBuffer: 16 * 1024 * 1024,
-      input: options.input, env: this.environment(command),
-    } as Parameters<typeof execFileAsync>[2]);
-    return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") };
+    return await new Promise<{ stdout: string; stderr: string }>((resolveResult, reject) => {
+      const child = spawn(command, rest, { stdio: ["pipe", "pipe", "pipe"], env: this.environment(command) });
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let bytes = 0;
+      let settled = false;
+      const finish = (error?: Error, result?: { stdout: string; stderr: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        error ? reject(error) : resolveResult(result!);
+      };
+      const collect = (target: Buffer[]) => (chunk: Buffer) => {
+        bytes += chunk.length;
+        if (bytes > 16 * 1024 * 1024) {
+          child.kill("SIGKILL");
+          finish(new Error(`${command} output exceeded 16 MiB`));
+          return;
+        }
+        target.push(chunk);
+      };
+      child.stdout.on("data", collect(stdout));
+      child.stderr.on("data", collect(stderr));
+      child.on("error", (error) => finish(error));
+      child.on("close", (code, signal) => {
+        const result = { stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") };
+        if (code === 0) finish(undefined, result);
+        else finish(Object.assign(new Error(`${command} exited with ${code ?? signal ?? "unknown status"}${result.stderr ? `: ${result.stderr}` : ""}`), result));
+      });
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        finish(new Error(`${command} timed out after ${options.timeout ?? 30_000}ms`));
+      }, options.timeout ?? 30_000);
+      timer.unref();
+      if (options.input !== undefined) child.stdin.end(options.input);
+      else child.stdin.end();
+    });
   }
 
   spawn(args: string[]): ChildProcessWithoutNullStreams {
@@ -33,6 +62,18 @@ export class NativeBridge implements RuntimeBridge {
   async toRuntimePath(value: string) { return isAbsolute(value) ? resolve(value) : resolve(value); }
   async homeDirectory() { return homedir(); }
   async revealPath(path: string) { return path; }
+
+  async checkSimulationComponent(_settings: AppSettings) {
+    const ready = await this.exec(["test", "-x", "/opt/pi-cad-runtime/torch-fem-0.9-cu126/project/python/runtimes/torch-fem-cuda/.venv/bin/python"]).then(() => true, () => false);
+    return { state: ready ? "ready" : "missing", component: "torch-fem-0.9", detail: ready ? "CUDA and CPU managed runtimes installed" : "Required for managed linear-elastic analysis", estimatedSize: "about 6 GB" } as const;
+  }
+
+  async installSimulationComponent(settings: AppSettings) {
+    if (typeof process.getuid !== "function" || process.getuid() !== 0) throw new Error("Run the torch-fem component installer with administrator privileges, then retry.");
+    const { piCadRepo } = await this.resolveRuntimePaths(settings);
+    await this.exec(["bash", `${piCadRepo}/scripts/bootstrap-torch-fem-runtimes.sh`], { timeout: 30 * 60_000 });
+    return this.checkSimulationComponent(settings);
+  }
 
   private environment(command: string): NodeJS.ProcessEnv {
     return command === this.electronExecutable ? { ...process.env, ELECTRON_RUN_AS_NODE: "1" } : process.env;
@@ -97,7 +138,7 @@ export class NativeBridge implements RuntimeBridge {
     const bundleReady = values.bundle === "ready";
     add("prime", "Prime Agent", values.prime === "ready" && bundleReady, bundleReady ? paths.primeAgentRepo : "Bundled runtime update available");
     const knowledgeReady = values.knowledge === String(knowledge.count);
-    add("picad", "Pi-CAD runtime", values.picad === "ready" && knowledgeReady && bundleReady,
+    add("picad", "Reify runtime", values.picad === "ready" && knowledgeReady && bundleReady,
       !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
     const ready = checks.every((check) => check.status === "ready");
     return { state: ready ? "idle" : "error", checks, message: ready ? undefined : "Install the missing runtime dependencies." };

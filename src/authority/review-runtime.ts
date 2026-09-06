@@ -7,6 +7,7 @@ import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { transitionRun } from "../harness/reducer.ts";
 import type { WorkflowSnapshotV1 } from "../harness/workflow/types.ts";
 import type { HarnessRunStateV7 } from "../harness/state.ts";
+import { executeWorkflowGitActions, phaseGitActions } from "./workflow-git.ts";
 
 export type AuthoritativeReviewVerdictV1 = "pass" | "fail" | "clarification_required";
 export interface ReviewHandleV1 { reviewId: string; subjectCommit: string; status: "running" | AuthoritativeReviewVerdictV1 | "unresolved"; }
@@ -265,7 +266,17 @@ export class ReviewRuntime {
     const status = result.verdict;
     const updated: StoredReview = { ...existing, status, result, updatedAt: new Date().toISOString() };
     const path = `reviews/${reviewId}.json`;
-    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(mechanicalRegistries, (loaded) => {
+    const previewReviewedState = {
+      ...active.state,
+      domainMetadata: { ...(active.state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(active.state), [reviewId]: updated }) },
+      latestReview: { id: reviewId, verdict: status, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(active)), workflowHash: active.workflow.hash, registryContractHash: active.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },
+      updatedAt: updated.updatedAt,
+    } satisfies HarnessRunStateV7;
+    transitionRun(previewReviewedState, active.workflow, choice.event);
+    const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
+    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit"), `complete ${active.state.phase}`);
+    if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
+    const transitioned = await store.mutate(mechanicalRegistries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         domainMetadata: { ...(loaded.state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(loaded.state), [reviewId]: updated }) },
@@ -279,6 +290,8 @@ export class ReviewRuntime {
         payloads: { [path]: jsonValue({ schema: 1, ...updated }) },
       };
     });
+    const enterGit = await executeWorkflowGitActions(this.cwd, transitioned.workflow, phaseGitActions(transitioned.workflow, transitioned.state.phase, "onEnter"), `enter ${transitioned.state.phase}`);
+    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${state.phase}`, results: enterGit }) } }));
     const handle: ReviewStatusV1 = { reviewId, subjectCommit: existing.subjectCommit, status, result };
     this.reviewerControllers.get(reviewId)?.abort();
     this.events.emit("completed", handle);
@@ -293,7 +306,16 @@ export class ReviewRuntime {
       .find((item) => item.verdict === existing.result!.verdict && item.target === existing.result!.target);
     if (!choice) throw new Error(`cached review target ${existing.result.target} is no longer legal for verdict ${existing.result.verdict}`);
     const path = `reviews/${existing.reviewId}.json`;
-    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(mechanicalRegistries, (loaded) => {
+    const previewReviewedState = {
+      ...active.state,
+      latestReview: { id: existing.reviewId, verdict: existing.result.verdict, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(active)), workflowHash: active.workflow.hash, registryContractHash: active.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },
+      updatedAt: new Date().toISOString(),
+    } satisfies HarnessRunStateV7;
+    transitionRun(previewReviewedState, active.workflow, choice.event);
+    const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
+    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit"), `complete ${active.state.phase}`);
+    if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
+    const transitioned = await store.mutate(mechanicalRegistries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         latestReview: { id: existing.reviewId, verdict: existing.result!.verdict, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(loaded)), workflowHash: loaded.workflow.hash, registryContractHash: loaded.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },
@@ -304,6 +326,8 @@ export class ReviewRuntime {
         event: { type: "ReviewDispositionReused", data: { reviewId: existing.reviewId, verdict: existing.result!.verdict, artifactHash: existing.artifactHash, event: choice.event, from: loaded.state.phase, to: choice.target } },
       };
     });
+    const enterGit = await executeWorkflowGitActions(this.cwd, transitioned.workflow, phaseGitActions(transitioned.workflow, transitioned.state.phase, "onEnter"), `enter ${transitioned.state.phase}`);
+    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${state.phase}`, results: enterGit }) } }));
   }
 
   private async failRuntime(reviewId: string, summary: string, findingId: string): Promise<ReviewStatusV1> {

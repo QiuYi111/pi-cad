@@ -51,6 +51,16 @@ export class AuthController extends EventEmitter {
     this.child.stdin.write(`${JSON.stringify({ value })}\n`);
   }
 
+  async cancel(): Promise<AuthStatus> {
+    if (this.child && !this.child.killed) this.child.kill(); this.child = undefined; this.buffer = "";
+    const status = { provider: "openai-codex", state: "signed-out", message: "Sign-in cancelled. You can retry when ready." } satisfies AuthStatus; this.update(status); return status;
+  }
+
+  async signOut(settings: AppSettings): Promise<AuthStatus> {
+    await this.cancel(); const home = await this.bridge.homeDirectory(); await this.bridge.exec(["rm", "-f", `${home}/.prime/agent/auth.json`]);
+    const status = { provider: "openai-codex", state: "signed-out", message: "Signed out. Project files were kept." } satisfies AuthStatus; this.update(status); return status;
+  }
+
   private consume(chunk: string) {
     this.buffer += chunk;
     while (true) {

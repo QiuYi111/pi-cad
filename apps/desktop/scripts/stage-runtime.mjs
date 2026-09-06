@@ -73,7 +73,7 @@ const manifest = {
   stagedAt: new Date().toISOString(),
   piCadVersion: JSON.parse(await readFile(join(repository, "package.json"), "utf8")).version,
   primeVersion: JSON.parse(await readFile(join(prime, "packages/coding-agent/package.json"), "utf8")).version,
-  licenses: ["Pi-CAD: MIT", "Prime Agent: MIT", "zeromq: MIT AND MPL-2.0", "photon-node: Apache-2.0"],
+  licenses: ["Reify (pi-cad runtime): MIT", "Prime Agent: MIT", "zeromq: MIT AND MPL-2.0", "photon-node: Apache-2.0"],
 };
 await writeFile(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 await rm(piCadDestination, { recursive: true, force: true });

@@ -42,6 +42,35 @@ const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-
 const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture", "image-generated"]);
 const READ_ONLY_OPERATIONS = new Set<Operation>(["workspace.commit", "model.build", "simulation.run", "image.generate", "review.submit", "workflow.transition"]);
 
+function assertValidPng(bytes: Buffer): void {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (bytes.length < 45 || !bytes.subarray(0, 8).equals(signature)) throw new Error("concept image evidence has an invalid PNG signature");
+  let offset = 8;
+  let sawHeader = false;
+  let sawImageData = false;
+  let sawEnd = false;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const end = offset + 12 + length;
+    if (end > bytes.length) throw new Error("concept image evidence has a truncated PNG chunk");
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    if (!sawHeader && (type !== "IHDR" || length !== 13)) throw new Error("concept image evidence lacks a valid PNG header");
+    if (type === "IHDR") {
+      if (sawHeader || bytes.readUInt32BE(offset + 8) < 64 || bytes.readUInt32BE(offset + 12) < 64) throw new Error("concept image evidence has invalid or undersized dimensions");
+      sawHeader = true;
+    } else if (type === "IDAT") {
+      if (!sawHeader || length === 0) throw new Error("concept image evidence has invalid image data");
+      sawImageData = true;
+    } else if (type === "IEND") {
+      if (length !== 0 || !sawImageData || end !== bytes.length) throw new Error("concept image evidence has an invalid PNG ending");
+      sawEnd = true;
+      break;
+    }
+    offset = end;
+  }
+  if (!sawHeader || !sawImageData || !sawEnd) throw new Error("concept image evidence is not a complete PNG");
+}
+
 function errorResponse(error: unknown): AgentApiResponse {
   return {
     schema: 1,
@@ -182,7 +211,7 @@ async function recordGeneratedImage(cwd: string, requestedPath: string): Promise
   if (image !== root && !image.startsWith(`${root}${sep}`)) throw new Error("generated image must remain inside the project");
   if (extname(image).toLowerCase() !== ".png") throw new Error("concept image evidence must be a PNG");
   const bytes = await readFile(image);
-  if (bytes.length < 8 || !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new Error("concept image evidence has an invalid PNG signature");
+  assertValidPng(bytes);
   const active = await new HarnessProjectStoreV7(root).currentRun(mechanicalRegistries);
   if (!active) throw new Error("generated image evidence requires an active workflow");
   const obligation = active.workflow.phases[active.state.phase]?.evidenceObligations.find((item) => item.closeWith === "codex_generate_image");
@@ -373,6 +402,17 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
       };
     }
     return { complete: false, reason: "admitted requirements are missing current independent PASS authority", runId: loaded.state.runId, workflowId: loaded.workflow.id };
+  }
+  const declaresRelease = Boolean(loaded.workflow.phases.release) || Object.values(loaded.workflow.phases).some((candidate) =>
+    candidate.recordObligations.some((obligation) => obligation.ref === "release"));
+  if (!declaresRelease) {
+    return {
+      complete: true,
+      outcome: "complete",
+      reason: "terminal workflow is complete and declares no release record",
+      runId: loaded.state.runId,
+      workflowId: loaded.workflow.id,
+    };
   }
   const release = loaded.state.records.release;
   if (!release || release.type !== "workspace_commit" || release.workflowHash !== loaded.workflow.hash) {

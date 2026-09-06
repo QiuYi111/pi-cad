@@ -53,11 +53,11 @@ jobs:
         working-directory: apps/desktop
         env:
           PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent
-      - run: PI_CAD_PACKAGED_EXE="$PWD/release/linux-unpacked/pi-cad-desktop" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
+      - run: PI_CAD_PACKAGED_EXE="$PWD/release/linux-unpacked/reify" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
         working-directory: apps/desktop
       - uses: actions/upload-artifact@v4
         with:
-          name: pi-cad-linux-smoke
+          name: reify-linux-smoke
           path: |
             apps/desktop/release/*.AppImage
             apps/desktop/release/*.deb
@@ -87,11 +87,11 @@ jobs:
         env:
           PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      - run: PI_CAD_PACKAGED_EXE="$PWD/release/mac-arm64/Pi-CAD.app/Contents/MacOS/Pi-CAD" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
+      - run: PI_CAD_PACKAGED_EXE="$PWD/release/mac-arm64/Reify.app/Contents/MacOS/Reify" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
         working-directory: apps/desktop
       - uses: actions/upload-artifact@v4
         with:
-          name: pi-cad-macos-smoke
+          name: reify-macos-smoke
           path: |
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip

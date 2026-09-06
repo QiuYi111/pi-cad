@@ -40,6 +40,7 @@ await writeFile(join(jobs, `${stem}.replay.json`), `${JSON.stringify({
     failureSignature: "Geometry was changed without checking its load path.",
     expectedRepair: "Inspect the load path and interface before rebuilding.",
     regressionGuard: "Do not proceed directly to another geometry edit.",
+    engineeringCheck: [process.execPath, "-e", "const fs=require('fs');const p='skills/parametric-cad-modeling/references/cookbook.md';process.exit(fs.readFileSync(p,'utf8').includes('Before rebuilding a failed bracket, inspect its load path')?0:1)"],
   }],
 }, null, 2)}\n`, "utf8");
 await writeFile(join(jobs, `${stem}.audit.md`), "# E2E distillation audit\n\nOne rated failure produced one bounded repair and replay case.\n", "utf8");

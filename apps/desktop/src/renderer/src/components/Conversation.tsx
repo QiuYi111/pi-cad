@@ -3,16 +3,19 @@ import { Box } from "./icons";
 import type { ChatMessage } from "@shared/contracts";
 import { ActivityCard } from "./ActivityCard";
 
-export function Conversation({ messages }: { messages: ChatMessage[] }) {
+export function Conversation({ messages, onReadingChange, onReference }: { messages: ChatMessage[]; onReadingChange?: (reading: boolean) => void; onReference?: (text: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   useEffect(() => { if (follow.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [messages]);
   return <div ref={ref} className="conversation" data-testid="conversation" onScroll={() => {
     const node = ref.current;
-    if (node) follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+    if (node) {
+      follow.current = node.scrollHeight - node.scrollTop - node.clientHeight < 100;
+      onReadingChange?.(!follow.current);
+    }
   }}>
     {messages.map((message) => message.activity
-      ? <ActivityCard key={message.id} activity={message.activity} />
+      ? <ActivityCard key={message.id} activity={message.activity} onReference={onReference} />
       : message.role === "user"
         ? <div key={message.id} className="user-message">{message.text}</div>
         : <AssistantMessage key={message.id} message={message} />)}

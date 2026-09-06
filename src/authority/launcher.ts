@@ -553,7 +553,9 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     const result = process.platform === "darwin"
       ? await (async () => {
           const socket = join(paths.authorSocketDirectory, "authority.sock");
-          const writable = [runtimeDirectory, ephemeralAgentDir, process.env.PI_CAD_CANONICAL_PROJECT_DIR!, ...(process.env.PI_CAD_DESKTOP_PERMISSION === "read-only" ? [] : [project])];
+          // Canonical workflow state belongs to the sidecar. The author may
+          // read its projection but must never write the authority store.
+          const writable = [runtimeDirectory, ephemeralAgentDir, ...(process.env.PI_CAD_DESKTOP_PERMISSION === "read-only" ? [] : [project])];
           const readable = [paths.repository, paths.project, paths.primeRoot, paths.primeKernelVenv, paths.nodeRoot, paths.primeAgentDir, runtimeDirectory, process.env.PI_CAD_CANONICAL_PROJECT_DIR!];
           const launch = await macSandboxCommand(paths, join(paths.primeRoot, "prime-agent.sh"), nativePrimeArgs(paths, primeArgs), readable, writable);
           return childExit(launch.command, launch.args, nativeEnvironment(paths, ephemeralAgentDir, socket));

@@ -1,5 +1,5 @@
 import type { JsonValue } from "../harness/canonical.ts";
-import type { EncodedVariable } from "../harness/commit.ts";
+import type { AcceptanceSummaryInput, EncodedVariable } from "../harness/commit.ts";
 import type { ModelParameterDefinitionInput } from "../shared/model-parameters.ts";
 
 export interface AgentArtifactSubject {
@@ -14,10 +14,11 @@ export type AgentApiRequest =
   | { schema: 1; op: "workflow-current" }
   | { schema: 1; op: "workflow-start"; id: string; interactionMode?: "interactive" | "headless" }
   | { schema: 1; op: "workflow-advance"; event: string }
-  | { schema: 1; op: "commit"; name: string; parent?: string | null; variables?: Record<string, EncodedVariable>; artifacts?: Array<string | { path: string; role?: string }>; session?: string }
+  | { schema: 1; op: "commit"; name: string; parent?: string | null; variables?: Record<string, EncodedVariable>; artifacts?: Array<string | { path: string; role?: string }>; session?: string; acceptance?: AcceptanceSummaryInput }
   | { schema: 1; op: "load"; id: string }
   | { schema: 1; op: "history" }
   | { schema: 1; op: "viewer-catalog" }
+  | { schema: 1; op: "evidence-read"; path: string }
   | { schema: 1; op: "probe"; preset?: string; subject?: "current" | "baseline" | AgentArtifactSubject; purpose?: string; code?: string; args?: Record<string, JsonValue> }
   | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean; parameters?: Record<string, ModelParameterDefinitionInput> }
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }

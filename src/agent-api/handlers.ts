@@ -17,6 +17,7 @@ import type { Operation, OperationAuthority } from "../harness/permissions.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
 import { workflowCurrentView } from "../harness/card.ts";
 import { sha256File } from "../shared/store.ts";
+import { currentGitRevision, executeWorkflowGitActions, phaseGitActions, prepareWorkflowGit, type WorkflowGitResult } from "../authority/workflow-git.ts";
 import {
   normalizeModelParameterDefinitions,
   type ModelParameterManifestV1,
@@ -41,6 +42,14 @@ async function current(cwd: string) {
   const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
   if (!loaded) return null;
   return workflowCurrentView(loaded, mechanicalRegistries);
+}
+
+async function recordGitResults(store: HarnessRunStoreV7, results: WorkflowGitResult[], moment: string): Promise<void> {
+  if (!results.length) return;
+  await store.mutate(mechanicalRegistries, ({ state }) => ({
+    state,
+    event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment, results }) },
+  }));
 }
 
 async function viewerCatalog(cwd: string) {
@@ -77,6 +86,7 @@ async function viewerCatalog(cwd: string) {
   const parameterArtifacts = [
     ...Object.values(active?.state.artifacts ?? {}),
     ...Object.values(projectState.head.artifacts),
+    ...commits.flatMap((commit) => commit.artifacts),
   ];
   const seenParameterArtifacts = new Set<string>();
   for (const artifact of parameterArtifacts) {
@@ -97,6 +107,17 @@ async function viewerCatalog(cwd: string) {
       parameterManifests.push({ path, sha256: artifact.sha256, manifest });
     } catch {
       // A loose, stale, or user-edited sidecar has no workflow authority.
+    }
+  }
+  if (active) {
+    const runStore = new HarnessRunStoreV7(cwd, active.state.runId);
+    for (const commit of commits) for (const artifact of commit.artifacts.filter((item) => item.role === "model-parameter-manifest" || /\.parameters\.json$/i.test(item.path))) {
+      const snapshot = commit.artifactSnapshots?.[artifact.sha256];
+      if (!snapshot) continue;
+      try {
+        const manifest = await runStore.transactions.readJson<ModelParameterManifestV1>(snapshot.path);
+        if (manifest?.schema === 1 && Array.isArray(manifest.parameters)) parameterManifests.push({ path: `@commit/${commit.id}/${artifact.path}`, sha256: artifact.sha256, manifest });
+      } catch { /* Corrupt historical metadata is omitted instead of gaining authority. */ }
     }
   }
   return jsonValue({
@@ -273,10 +294,15 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
     case "workflow-current": return jsonValue(await current(cwd));
     case "workflow-start": {
       const selected = await resolveWorkflowPackage(cwd, request.id, mechanicalRegistries);
-      await cadStartSnapshot({
+      const startResults = await prepareWorkflowGit(cwd, selected.workflow);
+      const enterResults = await executeWorkflowGitActions(cwd, selected.workflow, phaseGitActions(selected.workflow, selected.workflow.initialPhase, "onEnter"), `enter ${selected.workflow.initialPhase}`);
+      const started = await cadStartSnapshot({
         cwd, registries: mechanicalRegistries, workflow: selected.workflow,
         interactionMode: request.interactionMode ?? "interactive",
       });
+      const store = new HarnessRunStoreV7(cwd, started.state.runId);
+      await recordGitResults(store, startResults, "workflow-start");
+      await recordGitResults(store, enterResults, `enter:${started.state.phase}`);
       return jsonValue(await current(cwd));
     }
     case "workflow-advance": {
@@ -284,20 +310,43 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
       const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
       if (!active) throw new Error("no active Pi-CAD v7 run");
       const store = new HarnessRunStoreV7(cwd, active.state.runId);
+      // Validate the state transition before producing any external Git side effect.
+      transitionRun(active.state, active.workflow, request.event);
+      const exitResults = await executeWorkflowGitActions(cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit"), `complete ${active.state.phase}`);
+      await recordGitResults(store, exitResults, `exit:${active.state.phase}`);
       const next = await store.mutate(mechanicalRegistries, (loaded) => ({ state: transitionRun(loaded.state, loaded.workflow, request.event), event: { type: "WorkflowAdvancedByAgentApi", data: { event: request.event } } }));
+      const enterResults = await executeWorkflowGitActions(cwd, next.workflow, phaseGitActions(next.workflow, next.state.phase, "onEnter"), `enter ${next.state.phase}`);
+      await recordGitResults(store, enterResults, `enter:${next.state.phase}`);
       return jsonValue({ phase: next.state.phase, status: next.state.status });
     }
     case "commit": {
-      return jsonValue(await commitWorkspace({ cwd, registries: mechanicalRegistries, name: request.name, ...(request.parent === undefined ? {} : { parent: request.parent }), variables: request.variables, artifacts: request.artifacts, session: request.session }));
+      const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+      const gitResults = active
+        ? await executeWorkflowGitActions(cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit").filter((action) => action === "commit"), `record ${request.name}`)
+        : [];
+      const sourceRevision = active?.workflow.versionControl ? await currentGitRevision(cwd) : undefined;
+      const manifest = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: request.name, ...(request.parent === undefined ? {} : { parent: request.parent }), variables: request.variables, artifacts: request.artifacts, session: request.session, acceptance: request.acceptance, ...(sourceRevision ? { sourceRevision } : {}) });
+      if (active) await recordGitResults(new HarnessRunStoreV7(cwd, active.state.runId), gitResults, `record:${request.name}`);
+      return jsonValue(manifest);
     }
     case "load": return jsonValue(await loadWorkspaceCommit(cwd, mechanicalRegistries, request.id));
     case "history": return jsonValue(await workspaceHistory(cwd, mechanicalRegistries));
     case "viewer-catalog": return viewerCatalog(cwd);
+    case "evidence-read": {
+      if (!/^evidence\/[a-zA-Z0-9._/-]+\.json$/.test(request.path) || request.path.includes("..")) throw new Error("invalid evidence path");
+      const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+      if (!active) throw new Error("no active Pi-CAD v7 run");
+      const value = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<JsonValue>(request.path);
+      if (value === null) throw new Error(`evidence not found: ${request.path}`);
+      return value;
+    }
     case "probe": {
       const preset = request.preset?.trim() || "python";
       const rendered = await executeCadProbe(cwd, {
         preset,
-        subject: request.subject ?? "current",
+        // An explicit artifact is already the exact subject. Do not also
+        // synthesize `current`, because the probe contract rejects two targets.
+        subject: request.subject ?? (request.args?.artifact ? undefined : "current"),
         purpose: request.purpose,
         code: request.code,
         args: request.args,

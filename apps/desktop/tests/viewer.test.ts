@@ -11,11 +11,17 @@ describe("desktop viewer bridge", () => {
   it("projects canonical artifacts and simulation observations without inventing identities", () => {
     const sources = sourcesFromCatalog({
       projectId: "phone", projectHead: { updatedAt: "now", artifacts: [{ id: "head", path: "release.step", sha256: "h", role: "authoritative-design" }] },
-      currentRun: { id: "r", phase: "build", status: "active", updatedAt: "now", artifacts: [{ id: "candidate:authoritative", path: "candidate.step", sha256: "c", role: "authoritative-candidate-design" }] },
+      currentRun: { id: "r", phase: "build", status: "active", updatedAt: "now", artifacts: [{ id: "candidate:authoritative", path: "candidate.step", sha256: "c", role: "authoritative-candidate-design" }, { id: "scene", path: "presentation.blend", sha256: "b", role: "presentation-scene" }] },
       commits: [], simulationRuns: [{ id: "s", recipeId: "static", status: "completed", outputs: [{ name: "stress", type: "field", path: "stress.vtp", sha256: "f", unit: "MPa" }] }], parameterManifests: [],
     });
-    expect(sources.map((source) => source.path)).toEqual(["candidate.step", "release.step", "stress.vtp"]);
+    expect(sources.map((source) => source.path)).toEqual(["candidate.step", "presentation.blend", "release.step", "stress.vtp"]);
     expect(preferredSource(sources)?.path).toBe("candidate.step");
+    expect(sources).toMatchObject([
+      { kind: "cad", scope: "current", role: "authoritative-candidate-design", sha256: "c" },
+      { kind: "blender", scope: "current", role: "presentation-scene", sha256: "b" },
+      { kind: "cad", scope: "head", role: "authoritative-design", sha256: "h" },
+      { kind: "simulation", outputType: "field", runId: "s", sha256: "f", unit: "MPa" },
+    ]);
   });
 
   it("selects the artifact returned by the latest build", () => {
@@ -26,6 +32,16 @@ describe("desktop viewer bridge", () => {
   it("matches build paths across slash styles", () => {
     const sources = sourcesFromCatalog(emptyCatalog, "C:\\project\\candidate.step");
     expect(sourceForArtifact(sources, "C:/project/candidate.step")?.path).toBe("C:\\project\\candidate.step");
+  });
+  it("keeps two preserved hashes at the same path as distinct versions", () => {
+    const sources = sourcesFromCatalog({ ...emptyCatalog, commits: [
+      { id: "v1", name: "Hole 8 mm", parent: null, phase: "review", createdAt: "one", artifacts: [{ id: "part", path: "build/plate.step", sha256: "sha-8", role: "authoritative-design" }] },
+      { id: "v2", name: "Hole 10 mm", parent: "v1", phase: "review", createdAt: "two", artifacts: [{ id: "part", path: "build/plate.step", sha256: "sha-10", role: "authoritative-design" }] },
+    ] });
+    expect(sources.filter((source) => source.kind === "cad")).toMatchObject([
+      { scope: "commit", commitId: "v1", path: "build/plate.step", sha256: "sha-8" },
+      { scope: "commit", commitId: "v2", path: "build/plate.step", sha256: "sha-10" },
+    ]);
   });
   it("adapts STEP tessellation to the open-source Z-up CAD scene protocol", () => {
     const scene = toThreeCadShapes({
@@ -71,5 +87,26 @@ describe("desktop viewer bridge", () => {
       toRuntimePath: async () => "/etc/passwd.step",
     };
     await expect(new ViewerBackend(bridge as never).loadStep({} as never, "/etc/passwd.step")).rejects.toThrow(/active project/);
+  });
+
+  it("exports the open STEP to the user-selected destination", async () => {
+    let command: string[] = [];
+    const bridge = {
+      resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
+      toRuntimePath: async (path: string) => path === "C:\\Users\\Jordan\\Downloads\\bracket.step"
+        ? "/mnt/c/Users/Jordan/Downloads/bracket.step"
+        : path,
+      exec: async (args: string[]) => { command = args; return { stdout: "", stderr: "" }; },
+    };
+
+    await new ViewerBackend(bridge as never).exportStep(
+      {} as never,
+      "/workspace/build/bracket.step",
+      "C:\\Users\\Jordan\\Downloads\\bracket.step",
+    );
+
+    expect(command).toEqual([
+      "cp", "--", "/projects/bracket/build/bracket.step", "/mnt/c/Users/Jordan/Downloads/bracket.step",
+    ]);
   });
 });

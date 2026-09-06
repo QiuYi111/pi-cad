@@ -66,6 +66,13 @@ describe("Prime activity projection", () => {
     expect(messages[0]?.activity?.details).toBeUndefined();
   });
 
+  it("treats save_and_check as the same managed build activity", () => {
+    let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "macro", toolName: "ipython", args: { code: "result = await cad.save_and_check('quick-build', source, output)" } });
+    expect(messages[0]?.activity).toMatchObject({ kind: "build", state: "running" });
+    messages = reducePrimeEvent(messages, { type: "tool_execution_end", toolCallId: "macro", result: { content: [{ type: "text", text: "SaveAndCheckResult(commit='c1', artifact='build/bracket.step')" }] } });
+    expect(messages[0]?.activity).toMatchObject({ kind: "build", state: "success", artifactPath: "build/bracket.step" });
+  });
+
   it("deduplicates a build image exposed through content and attachment details", () => {
     let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "b2", toolName: "ipython", args: { code: "await cad.model.build(source, output)" } });
     const image = { type: "image", mimeType: "image/png", data: "aGVsbG8=", name: "iso" };
@@ -92,10 +99,17 @@ describe("Prime activity projection", () => {
   it("keeps structured simulation results available to the viewer", () => {
     let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "s1", toolName: "ipython", args: { code: "await cad.simulation.run(recipe='static')" } });
     messages = reducePrimeEvent(messages, { type: "tool_execution_end", toolCallId: "s1", result: { details: { observation: { exports: [
+      { name: "view", type: "image", path: "simulation/stress.png" },
       { name: "stress", type: "field", path: "simulation/stress.vtp", unit: "MPa" },
       { name: "peak", type: "scalar", value: 82, unit: "MPa" },
     ] } } } });
     expect(messages[0]?.activity).toMatchObject({ kind: "simulation", artifactPath: "simulation/stress.vtp", metrics: [{ label: "peak", value: "82 MPa" }] });
+  });
+
+  it("closes running tool activities when the user stops the Agent", () => {
+    let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "s-stop", toolName: "ipython", args: { code: "await cad.simulation.run(recipe='static')" } });
+    messages = reducePrimeEvent(messages, { type: "agent_abort" });
+    expect(messages[0]?.activity).toMatchObject({ state: "denied", title: "Simulation stopped", summary: "Stopped by user" });
   });
 
   it("does not leak workflow result objects into the chat", () => {

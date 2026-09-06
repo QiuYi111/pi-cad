@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, screen, shell } from "electron";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
@@ -17,9 +17,17 @@ import { TraceStore } from "./traces.js";
 import { DemoRuntime } from "./demo-runtime.js";
 import { AuthController } from "./auth.js";
 import { ParaViewBackend } from "./paraview.js";
+import { BlenderBackend } from "./blender.js";
+import { HumanApprovalStore } from "./approvals.js";
+
+// Keep existing settings and sign-in state across the public rename, while honoring
+// Electron's explicit profile override for managed deployments and isolated tests.
+const hasExplicitUserData = process.argv.some((argument) => argument === "--user-data-dir" || argument.startsWith("--user-data-dir="));
+if (app.isPackaged && !hasExplicitUserData) app.setPath("userData", join(app.getPath("appData"), "Pi-CAD"));
 
 let mainWindow: BrowserWindow | null = null;
 const settingsStore = new SettingsStore();
+const approvalStore = new HumanApprovalStore(join(app.getPath("userData"), "human-approvals"));
 let runtime: PrimeRpc | DemoRuntime | null = null;
 let authController: AuthController | null = null;
 let runtimeBridge: RuntimeBridge | null = null;
@@ -28,12 +36,20 @@ let paraView: ParaViewBackend | null = null;
 let paraViewBridge: RuntimeBridge | null = null;
 let viewer: ViewerBackend | null = null;
 let viewerBridge: RuntimeBridge | null = null;
+let blender: BlenderBackend | null = null;
+let blenderBridge: RuntimeBridge | null = null;
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
+const desktopE2EOpenStep = process.env.PI_CAD_DESKTOP_E2E_OPEN_STEP
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-open-step="))?.slice("--pi-cad-e2e-open-step=".length);
+const testOpenSteps = process.argv
+  .filter((argument) => argument.startsWith("--pi-cad-test-open-step="))
+  .map((argument) => argument.slice("--pi-cad-test-open-step=".length));
+const testExportStep = process.argv.find((argument) => argument.startsWith("--pi-cad-test-export-step="))?.slice("--pi-cad-test-export-step=".length);
 const realTraceE2E = desktopE2E && process.env.PI_CAD_DESKTOP_E2E_REAL_TRACES === "1";
 const authE2E = desktopE2E || process.env.PI_CAD_DESKTOP_E2E_AUTH === "1" || process.argv.includes("--pi-cad-e2e-auth");
 const demoRuntimeStatus: RuntimeStatus = { state: "idle", checks: [
   ["wsl", "Windows Subsystem for Linux"], ["node", "Node.js 22+"], ["python", "Python"],
-  ["uv", "uv"], ["bwrap", "Bubblewrap"], ["paraview", "ParaView"], ["prime", "Prime Agent"], ["picad", "Pi-CAD runtime"],
+  ["uv", "uv"], ["bwrap", "Bubblewrap"], ["paraview", "ParaView"], ["prime", "Prime Agent"], ["picad", "Reify runtime"],
 ].map(([id, label]) => ({ id: id as RuntimeStatus["checks"][number]["id"], label, status: "ready", detail: "Bundled", installable: false })) };
 
 function send(channel: string, value: unknown) {
@@ -123,24 +139,42 @@ async function ensureViewer() {
   return viewer;
 }
 
+async function ensureBlender() {
+  const current = await bridge();
+  if (!blender || blenderBridge !== current) {
+    blender?.stop();
+    blender = new BlenderBackend(current);
+    blenderBridge = current;
+  }
+  return blender;
+}
+
 function demoMesh(path: string, values: Record<string, ModelParameterValue> = {}) {
   const width = Number(values.width ?? 40);
   const depth = Number(values.depth ?? 24);
   const height = Number(values.height ?? 12);
   const x = width / 2; const y = depth / 2; const z = height;
+  const positions = (dx: number, dy: number, scale = 1) => [-x*scale+dx,-y*scale+dy,0, x*scale+dx,-y*scale+dy,0, x*scale+dx,y*scale+dy,0, -x*scale+dx,y*scale+dy,0, -x*scale+dx,-y*scale+dy,z*scale, x*scale+dx,-y*scale+dy,z*scale, x*scale+dx,y*scale+dy,z*scale, -x*scale+dx,y*scale+dy,z*scale];
+  const indices = [0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7];
   return {
     source: path,
-    parts: [{
-      name: "Adjustable body",
-      positions: [-x,-y,0, x,-y,0, x,y,0, -x,y,0, -x,-y,z, x,-y,z, x,y,z, -x,y,z],
-      indices: [0,2,1,0,3,2,4,5,6,4,6,7,0,1,5,0,5,4,1,2,6,1,6,5,2,3,7,2,7,6,3,0,4,3,4,7],
-      color: "#cbd2da",
-    }],
+    sha256: "demo-step",
+    parts: [
+      { id: "frame:solid-1", partId: "frame", solidId: "frame:solid-1", name: "Bracket", positions: positions(-x * .55, 0, .42), indices, color: "#cbd2da" },
+      { id: "frame:solid-2", partId: "frame", solidId: "frame:solid-2", name: "Bracket", positions: positions(x * .55, 0, .42), indices, color: "#b7c0b6" },
+      { id: "pin:solid-1", partId: "pin", solidId: "pin:solid-1", name: "Bracket", positions: positions(0, 0, .22), indices, color: "#8f978e" },
+    ],
     bounds: { min: [-x,-y,0] as [number, number, number], max: [x,y,z] as [number, number, number] },
   };
 }
 
 function registerIpc() {
+  ipcMain.handle(IPC.systemInstallationInfo, async () => {
+    const settings = await settingsStore.get(); const platform = process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macos" : "linux";
+    const channel = !app.isPackaged ? "development" : process.env.APPIMAGE ? "appimage" : platform === "windows" ? "nsis" : platform === "macos" ? "dmg" : "deb";
+    const updateInstructions = channel === "deb" ? "Install the newer .deb with your package manager; keep the same project folder." : channel === "appimage" ? "Download the newer AppImage and replace the application file; project and user data remain separate." : channel === "dmg" ? "Quit active tasks, verify the signed DMG, then replace Reify in Applications." : channel === "nsis" ? "Finish or stop active tasks, then run the newer signed installer. Projects and user data are retained." : "Use the matching installation channel for updates.";
+    return { version: app.getVersion(), platform, arch: process.arch, channel, packaged: app.isPackaged, userDataPath: app.getPath("userData"), projectPath: settings.projectPath, updateMode: "manual", updateInstructions, signature: app.isPackaged ? "release-signature-required" : "runtime-verified" };
+  });
   const demo = desktopE2E;
   const demoParameterValues: Record<string, ModelParameterValue> = { width: 40, depth: 24, height: 12 };
   let demoEvaluation: { quality: number; difficulty: number; feedback?: string } | undefined;
@@ -174,7 +208,16 @@ function registerIpc() {
     const current = await settingsStore.get();
     return (await bridge()).install(current, (status) => send(IPC.runtimeStatus, status));
   });
+  ipcMain.handle(IPC.runtimeCheckSimulation, async () => desktopE2E
+    ? { state: "ready", component: "torch-fem-0.9", detail: "CUDA managed runtime qualified", estimatedSize: "about 6 GB" }
+    : (await bridge()).checkSimulationComponent(await settingsStore.get()));
+  ipcMain.handle(IPC.runtimeInstallSimulation, async () => desktopE2E
+    ? { state: "ready", component: "torch-fem-0.9", detail: "CUDA managed runtime qualified", estimatedSize: "about 6 GB" }
+    : (await bridge()).installSimulationComponent(await settingsStore.get()));
   ipcMain.handle(IPC.runtimeStart, async () => (await ensureRuntime()).start(await settingsStore.get()));
+  ipcMain.handle(IPC.runtimeRestore, async () => runtime
+    ? { status: runtime.status, messages: await runtime.getMessages() }
+    : { status: { state: "idle", checks: [] }, messages: [] });
   ipcMain.handle(IPC.runtimeStop, async () => { await runtime?.stop(); runtime = null; });
   ipcMain.handle(IPC.runtimePrompt, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).prompt(message, images));
   ipcMain.handle(IPC.runtimeSteer, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).steer(message, images));
@@ -190,6 +233,10 @@ function registerIpc() {
     return Promise.all(result.filePaths.map(async (path) => {
       const data = await readFile(path);
       if (data.byteLength > 20 * 1024 * 1024) throw new Error(`Image is larger than 20 MB: ${path}`);
+      const decoded = nativeImage.createFromBuffer(data);
+      const size = decoded.getSize();
+      if (decoded.isEmpty() || size.width < 1 || size.height < 1) throw new Error(`Image cannot be decoded: ${path}`);
+      if (size.width > 16_384 || size.height > 16_384) throw new Error(`Image dimensions exceed 16384 px: ${path}`);
       const extension = extname(path).toLowerCase();
       const mimeType = extension === ".png" ? "image/png" : extension === ".webp" ? "image/webp" : extension === ".gif" ? "image/gif" : "image/jpeg";
       return { name: path.split(/[\\/]/).at(-1) || "image", data: data.toString("base64"), mimeType };
@@ -199,18 +246,40 @@ function registerIpc() {
   ipcMain.handle(IPC.authStatusGet, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).status(await settingsStore.get()));
   ipcMain.handle(IPC.authLogin, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).login(await settingsStore.get()));
   ipcMain.handle(IPC.authManualCode, async (_event, value: string) => (await ensureAuth()).submitManualCode(value));
+  ipcMain.handle(IPC.authCancel, async () => (await ensureAuth()).cancel());
+  ipcMain.handle(IPC.authSignOut, async () => (await ensureAuth()).signOut(await settingsStore.get()));
   ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.workflowCurrent, async () => demo ? {
     workflowId: demoWorkflow.id, workflowVersion: demoWorkflow.version, workflowHash: "demo", runId: "e2e", phase: "concept", status: "active",
     phaseHistory: ["grilling", "spec", "concept"], phases: demoWorkflow.phases, authoritative: false,
   } : new WorkflowStore(await bridge()).current(await settingsStore.get()));
   ipcMain.handle(IPC.workflowSave, async (_event, document: WorkflowDocument) => demo ? document : new WorkflowStore(await bridge()).save(await settingsStore.get(), document));
+  ipcMain.handle(IPC.workflowAdoptionPolicy, async () => new WorkflowStore(await bridge()).adoptionPolicy(await settingsStore.get()));
+  ipcMain.handle(IPC.workflowAdopt, async (_event, id: string, version: string) => new WorkflowStore(await bridge()).adopt(await settingsStore.get(), id, version));
   ipcMain.handle(IPC.viewerChooseStep, async () => {
+    if (testOpenSteps.length) return testOpenSteps.shift()!;
+    if (desktopE2E && desktopE2EOpenStep) return desktopE2EOpenStep;
     const settings = await settingsStore.get();
     const result = await dialog.showOpenDialog(mainWindow!, { title: "Open STEP model", defaultPath: settings.projectPath || undefined, properties: ["openFile"], filters: [{ name: "STEP model", extensions: ["step", "stp"] }] });
     return result.canceled ? null : result.filePaths[0] || null;
   });
   ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? demoMesh(path) : (await ensureViewer()).loadStep(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerExportStep, async (_event, source: string) => {
+    const settings = await settingsStore.get();
+    const basename = source.split(/[\\/]/).at(-1) || "model.step";
+    if (testExportStep) {
+      if (!demo) await (await ensureViewer()).exportStep(settings, source, testExportStep);
+      return testExportStep;
+    }
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: "Export STEP model",
+      defaultPath: basename,
+      filters: [{ name: "STEP model", extensions: ["step", "stp"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    if (!demo) await (await ensureViewer()).exportStep(settings, source, result.filePath);
+    return result.filePath;
+  });
   ipcMain.handle(IPC.viewerCatalog, async () => demo ? {
     projectId: "desktop-e2e",
     projectHead: { updatedAt: new Date().toISOString(), artifacts: [] },
@@ -227,20 +296,56 @@ function registerIpc() {
           { id: "width", type: "number", default: 40, value: demoParameterValues.width, min: 24, max: 80, step: 1, unit: "mm", label: "Width", group: "Envelope" },
           { id: "depth", type: "number", default: 24, value: demoParameterValues.depth, min: 12, max: 48, step: 1, unit: "mm", label: "Depth", group: "Envelope" },
           { id: "height", type: "number", default: 12, value: demoParameterValues.height, min: 4, max: 30, step: 1, unit: "mm", label: "Height", group: "Envelope" },
+          { id: "fillet_radius", type: "number", default: 1, value: demoParameterValues.fillet_radius ?? 1, min: 0, max: 20, step: 0.5, unit: "mm", label: "Fillet radius", group: "Features" },
         ],
       },
     }],
   } : (await ensureViewer()).catalog(await settingsStore.get()));
-  ipcMain.handle(IPC.viewerPreviewParameters, async (_event, path: string, values: Record<string, ModelParameterValue>) => demo
-    ? demoMesh(`preview:${path}`, { ...demoParameterValues, ...values })
-    : (await ensureViewer()).previewParameters(await settingsStore.get(), path, values));
+  ipcMain.handle(IPC.viewerPreviewParameters, async (_event, path: string, values: Record<string, ModelParameterValue>) => {
+    if (!demo) return (await ensureViewer()).previewParameters(await settingsStore.get(), path, values);
+    if (Number(values.fillet_radius ?? 1) > 6) throw new Error("Fillet radius is too large for the selected body near the outer edge.");
+    return demoMesh(`preview:${path}`, { ...demoParameterValues, ...values });
+  });
   ipcMain.handle(IPC.viewerApplyParameters, async (_event, path: string, values: Record<string, ModelParameterValue>) => {
     if (demo) { Object.assign(demoParameterValues, values); return; }
     await (await ensureViewer()).applyParameters(await settingsStore.get(), path, values);
   });
+  ipcMain.handle(IPC.viewerInspectGeometry, async (_event, path: string) => demo
+    ? { source: path, sha256: "demo-step", units: "mm", bbox: { x: 40, y: 24, z: 12 }, solidCount: 3 }
+    : (await ensureViewer()).inspectGeometry(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerInspectSection, async (_event, path: string, axis: "x" | "y" | "z") => demo
+    ? { source: path, sha256: "demo-step", axis, position: axis === "x" ? 20 : axis === "y" ? 12 : 6, totalArea: axis === "z" ? 960 : axis === "y" ? 480 : 288, faceCount: 1, units: "mm" }
+    : (await ensureViewer()).inspectSection(await settingsStore.get(), path, axis));
   ipcMain.handle(IPC.viewerOpenParaView, async (_event, path: string) => demo ? { state: "ready", sourcePath: path, url: "pi-cad://demo-paraview" } : (await ensureParaView()).open(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerInspectSimulation, async (_event, path: string) => demo
+    ? { format: "VTK XML UnstructuredGrid (.vtu, ASCII)", source: path, pointCount: 842, cellCount: 1260, bounds: { x: [-20, 20], y: [-12, 12], z: [0, 12] }, fields: [{ name: "von Mises stress", association: "point", components: 1, min: 2.4, max: 82, unit: "MPa" }, { name: "displacement", association: "point", components: 3, min: 0, max: 0.34, unit: "mm" }], modelSource: "build/part.step#demo-step" }
+    : (await ensureParaView()).inspect(await settingsStore.get(), path));
   ipcMain.handle(IPC.viewerStopParaView, async () => paraView?.stop());
   ipcMain.handle(IPC.viewerOpenParaViewDesktop, async (_event, path: string) => (await ensureParaView()).openDesktop(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerInspectBlender, async (_event, path: string) => demo
+    ? { source: path, scene: "product.blend", cameras: ["Hero", "Detail"], activeCamera: "Hero", objectCount: 8, frame: 1, frameStart: 1, frameEnd: 120 }
+    : (await ensureBlender()).inspect(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerInstallBlender, async () => demo ? undefined : (await ensureBlender()).install(await settingsStore.get()));
+  ipcMain.handle(IPC.viewerRenderBlender, async (_event, path: string, camera?: string) => demo
+    ? { path: ".pi-cad/renders/product.png", camera: camera || "Hero", dataUrl: "" }
+    : (await ensureBlender()).render(await settingsStore.get(), path, camera));
+  ipcMain.handle(IPC.viewerOpenBlenderDesktop, async (_event, path: string) => demo ? undefined : (await ensureBlender()).openDesktop(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerStopBlender, async () => blender?.stop());
+  ipcMain.handle(IPC.viewerRebuildCommit, async (_event, commitId: string, manifestPath: string) => (await ensureViewer()).rebuildCommit(await settingsStore.get(), commitId, manifestPath));
+  ipcMain.handle(IPC.viewerReadEvidence, async (_event, path: string) => (await ensureViewer()).readEvidence(await settingsStore.get(), path));
+  ipcMain.handle(IPC.approvalsList, async () => approvalStore.list(await (await ensureViewer()).catalog(await settingsStore.get())));
+  ipcMain.handle(IPC.approvalsApprove, async (_event, commitId: string, scope: string, rationale: string) => approvalStore.approve(await (await ensureViewer()).catalog(await settingsStore.get()), commitId, scope, rationale));
+  ipcMain.handle(IPC.approvalsRevoke, async (_event, id: string, reason: string) => approvalStore.revoke(await (await ensureViewer()).catalog(await settingsStore.get()), id, reason));
+  ipcMain.handle(IPC.approvalsRelease, async (_event, commitId: string, approvalId: string) => {
+    const backend = await ensureViewer(); const settings = await settingsStore.get(); const catalog = await backend.catalog(settings);
+    const approval = (await approvalStore.list(catalog)).find((item) => item.id === approvalId && item.valid);
+    if (!approval) throw new Error("A current valid human approval is required for formal release.");
+    const chosen = await dialog.showOpenDialog(mainWindow!, { title: "Choose formal release destination", properties: ["openDirectory", "createDirectory"] });
+    if (chosen.canceled || !chosen.filePaths[0]) return null;
+    const validate = async () => Boolean((await approvalStore.list(await backend.catalog(settings))).find((item) => item.id === approvalId && item.valid));
+    return backend.releaseCommit(settings, commitId, approval, chosen.filePaths[0], validate);
+  });
+  ipcMain.handle(IPC.approvalsPublishRemote, async (_event, release, remote: string, tag: string) => (await ensureViewer()).publishRemoteRelease(await settingsStore.get(), release, remote, tag));
   ipcMain.handle(IPC.tracesList, async () => demo && !realTraceE2E ? [{ id: "demo-trace", path: "/workspace/.prime-sessions/demo.jsonl", title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420, ...(demoEvaluation ? { evaluation: demoEvaluation } : {}) }] : new TraceStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo && !realTraceE2E ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(await settingsStore.get(), path));
   ipcMain.handle(IPC.tracesRate, async (_event, paths: string[], evaluation: { quality: number; difficulty: number; feedback?: string }) => demo && !realTraceE2E
@@ -254,6 +359,8 @@ function registerIpc() {
     }
     return new TraceStore(await bridge()).distill(await settingsStore.get(), paths, evaluation, (status) => send(IPC.tracesDistillStatus, status));
   });
+  ipcMain.handle(IPC.tracesValidateCandidate, async (_event, jobPath: string) => new TraceStore(await bridge()).candidateAction(await settingsStore.get(), jobPath, "validate"));
+  ipcMain.handle(IPC.tracesAdoptCandidate, async (_event, jobPath: string) => new TraceStore(await bridge()).candidateAction(await settingsStore.get(), jobPath, "adopt"));
   ipcMain.handle(IPC.shellReveal, async (_event, path: string) => {
     const target = await (await bridge()).revealPath(path);
     if (existsSync(target)) shell.showItemInFolder(target);

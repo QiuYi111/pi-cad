@@ -15,7 +15,7 @@ const entries = [];
 for (const sessionPath of sessionPaths) {
   const archived = await store.finalizeExperience({
     runId: basename(sessionPath, ".jsonl"), workflow: "desktop.conversation",
-    projectPath, sessionPath, outcome: "complete", outcomeReason: "Rated in Pi-CAD Desktop",
+    projectPath, sessionPath, outcome: "complete", outcomeReason: "Rated in Reify Desktop",
   });
   entries.push(await store.recordEvaluation({ sha: archived.sha }, quality, difficulty, feedback));
 }

@@ -23,12 +23,14 @@ export function ParameterPanel({
   onPreviewReady,
   onApply,
   onApplied,
+  onAgentFix,
 }: {
   stored: StoredModelParameterManifest;
   onPreview: (values: Record<string, ModelParameterValue>) => Promise<MeshDocument>;
   onPreviewReady: (mesh: MeshDocument | null) => void;
   onApply: (values: Record<string, ModelParameterValue>) => Promise<void>;
   onApplied: () => Promise<void> | void;
+  onAgentFix?: (request: string) => void;
 }) {
   const original = useMemo(() => initialValues(stored.manifest.parameters), [stored.sha256]);
   const [values, setValues] = useState(original);
@@ -36,6 +38,7 @@ export function ParameterPanel({
   const [state, setState] = useState<PanelState>("idle");
   const [message, setMessage] = useState("");
   const [dirty, setDirty] = useState(false);
+  const [failures, setFailures] = useState<Array<{ values: Record<string, ModelParameterValue>; message: string; at: number }>>([]);
   const generation = useRef(0);
 
   useEffect(() => {
@@ -62,8 +65,11 @@ export function ParameterPanel({
         setState("idle");
       }).catch((error) => {
         if (generation.current !== current) return;
+        const detail = error instanceof Error ? error.message : String(error);
+        onPreviewReady(null);
         setState("error");
-        setMessage(error instanceof Error ? error.message : String(error));
+        setMessage(detail);
+        setFailures((history) => [{ values, message: detail, at: Date.now() }, ...history].slice(0, 5));
       });
     }, 220);
     return () => window.clearTimeout(timer);
@@ -74,8 +80,12 @@ export function ParameterPanel({
     setDirty(true);
   };
   const reset = () => {
-    setValues(Object.fromEntries(stored.manifest.parameters.map((parameter) => [parameter.id, parameter.default])));
-    setDirty(true);
+    generation.current += 1;
+    setValues(applied);
+    setDirty(false);
+    setState("idle");
+    setMessage("");
+    onPreviewReady(null);
   };
   const apply = async () => {
     generation.current += 1;
@@ -89,8 +99,11 @@ export function ParameterPanel({
       setState("applied");
       await onApplied();
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      onPreviewReady(null);
       setState("error");
-      setMessage(error instanceof Error ? error.message : String(error));
+      setMessage(detail);
+      setFailures((history) => [{ values, message: detail, at: Date.now() }, ...history].slice(0, 5));
     }
   };
 
@@ -103,8 +116,8 @@ export function ParameterPanel({
 
   return <aside className="parameter-panel" data-testid="parameter-panel">
     <header>
-      <div><span>Live model</span><strong>Parameters</strong></div>
-      <button type="button" onClick={reset}>Reset</button>
+      <div><span>Live model</span><strong>Parameters</strong><small title={stored.manifest.source.path}>Source · {stored.manifest.source.path.split(/[\\/]/).at(-1)} · {stored.manifest.source.sha256.slice(0, 10)}</small></div>
+      <button type="button" disabled={!changed} onClick={reset}>Reset preview</button>
     </header>
     <div className="parameter-scroll">
       {[...groups].map(([group, parameters]) => <section key={group}>
@@ -113,10 +126,13 @@ export function ParameterPanel({
           key={parameter.id}
           parameter={parameter}
           value={values[parameter.id]!}
+          appliedValue={applied[parameter.id]!}
           onChange={(value) => setValue(parameter.id, value)}
         />)}
       </section>)}
     </div>
+    {failures.length > 0 && <details className="parameter-failures" open={state === "error"}><summary>Failed candidate · {new Date(failures[0]!.at).toLocaleTimeString()}</summary><strong>Known</strong><p>The applied model is still displayed. Candidate values: {JSON.stringify(failures[0]!.values)}</p><strong>Diagnostic / possible cause</strong><p>{failures[0]!.message}</p><div><button type="button" onClick={reset}>Restore applied values</button><button type="button" onClick={() => onAgentFix?.(`Fix the failed parameter candidate for ${stored.manifest.output.path}. Candidate values: ${JSON.stringify(failures[0]!.values)}. Diagnostic: ${failures[0]!.message}. Preserve unrelated working changes and the current applied model.`)}>Ask Agent to fix</button></div></details>}
+    <p className="parameter-material-note">Appearance belongs to the Viewer. Engineering material properties belong to the analysis workflow and its evidence.</p>
     <footer>
       <span className={`parameter-status ${state}`} title={message}>
         <i />{state === "queued" ? "Queued" : state === "previewing" ? "Previewing" : state === "applying" ? "Applying" : state === "applied" ? "Applied" : state === "error" ? message : changed ? "Preview ready" : "Up to date"}
@@ -126,17 +142,18 @@ export function ParameterPanel({
   </aside>;
 }
 
-function ParameterControl({ parameter, value, onChange }: {
+function ParameterControl({ parameter, value, appliedValue, onChange }: {
   parameter: ModelParameterDefinition;
   value: ModelParameterValue;
+  appliedValue: ModelParameterValue;
   onChange: (value: ModelParameterValue) => void;
 }) {
   if (parameter.type === "boolean") return <label className="parameter-control parameter-toggle">
-    <span><strong>{parameter.label || parameter.id}</strong>{parameter.description && <small>{parameter.description}</small>}</span>
+    <span><strong>{parameter.label || parameter.id}</strong>{parameter.description && <small>{parameter.description}</small>}<small>Applied · {String(appliedValue)}{parameter.unit ? ` ${parameter.unit}` : ""}{value !== appliedValue ? ` · Preview ${String(value)}${parameter.unit ? ` ${parameter.unit}` : ""}` : ""}</small></span>
     <input type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} />
   </label>;
   if (parameter.type === "enum") return <label className="parameter-control">
-    <span><strong>{parameter.label || parameter.id}</strong>{parameter.description && <small>{parameter.description}</small>}</span>
+    <span><strong>{parameter.label || parameter.id}</strong>{parameter.description && <small>{parameter.description}</small>}<small>Applied · {String(appliedValue)}{value !== appliedValue ? ` · Preview ${String(value)}` : ""}</small></span>
     <select value={String(value)} onChange={(event) => onChange(event.target.value)}>
       {parameter.options?.map((option) => <option key={option.value} value={option.value}>{option.label || option.value}</option>)}
     </select>
@@ -148,7 +165,7 @@ function ParameterControl({ parameter, value, onChange }: {
     ? ((Number(parameter.default) - parameter.min!) / (parameter.max! - parameter.min!)) * 100
     : 0;
   return <label className="parameter-control parameter-number">
-    <span><strong>{parameter.label || parameter.id}</strong>{parameter.description && <small>{parameter.description}</small>}</span>
+    <span><strong>{parameter.label || parameter.id}</strong>{parameter.description && <small>{parameter.description}</small>}<small>Applied · {String(appliedValue)}{parameter.unit ? ` ${parameter.unit}` : ""}{value !== appliedValue ? ` · Preview ${String(value)}${parameter.unit ? ` ${parameter.unit}` : ""}` : ""}{hasRange ? ` · Range ${parameter.min}–${parameter.max} ${parameter.unit || ""}` : ""}</small></span>
     <span className="parameter-value"><input
       type="number"
       value={number}

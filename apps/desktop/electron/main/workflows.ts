@@ -1,20 +1,41 @@
 import YAML from "yaml";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { AppSettings, WorkflowCurrent, WorkflowDocument, WorkflowPhase } from "../../src/shared/contracts.js";
+import { userInfo } from "node:os";
+import type { AppSettings, WorkflowAdoptionPolicy, WorkflowCurrent, WorkflowDocument, WorkflowPhase } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
 
 function quote(value: string): string { return `'${value.replaceAll("'", `'\\''`)}'`; }
 
 export class WorkflowStore {
-  constructor(private readonly bridge: RuntimeBridge) {}
+  constructor(private readonly bridge: RuntimeBridge, private readonly identity = userInfo().username) {}
+
+  async adoptionPolicy(settings: AppSettings): Promise<WorkflowAdoptionPolicy> {
+    const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
+    if (!projectPath) return { schema: 1, globalSafetyPolicyVersion: "builtin-current", adopted: {}, history: [] };
+    try { return JSON.parse((await this.bridge.exec(["cat", "--", `${projectPath}/.pi-cad/admin/workflow-adoptions.json`])).stdout) as WorkflowAdoptionPolicy; }
+    catch { return { schema: 1, globalSafetyPolicyVersion: "builtin-current", adopted: {}, history: [] }; }
+  }
 
   async list(settings: AppSettings): Promise<WorkflowDocument[]> {
     const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
     const roots = [`${piCadRepo}/workflow-packages`, ...(projectPath ? [`${projectPath}/workflows`] : [])];
     const { stdout } = await this.bridge.exec(["bash", "-lc", `find ${roots.map(quote).join(" ")} -type f -name '*.yaml' -print0 2>/dev/null | sort -z | xargs -0 -r -n1 printf '%s\\n'`]);
     const paths = stdout.split("\n").map((item) => item.trim()).filter(Boolean);
-    return Promise.all(paths.map(async (path) => this.read(path)));
+    const [documents, policy] = await Promise.all([Promise.all(paths.map(async (path) => this.read(path))), this.adoptionPolicy(settings)]);
+    const counts = new Map<string, number>(); for (const item of documents) counts.set(item.id, (counts.get(item.id) ?? 0) + 1);
+    return documents.map((item) => ({ ...item, adopted: policy.adopted[item.id]?.version === item.version || (!policy.adopted[item.id] && counts.get(item.id) === 1) }));
+  }
+
+  async adopt(settings: AppSettings, id: string, version: string): Promise<WorkflowAdoptionPolicy> {
+    const installed = await this.list(settings);
+    if (!installed.some((item) => item.id === id && item.version === version)) throw new Error(`Workflow package is not installed: ${id}@${version}`);
+    const { projectPath } = await this.bridge.resolveRuntimePaths(settings); if (!projectPath) throw new Error("Choose a project before adopting a workflow version.");
+    const current = await this.adoptionPolicy(settings); const adoptedAt = new Date().toISOString(); const from = current.adopted[id]?.version;
+    const next: WorkflowAdoptionPolicy = { ...current, adopted: { ...current.adopted, [id]: { version, adoptedBy: this.identity, adoptedAt } }, history: [...current.history, { id, ...(from ? { from } : {}), to: version, adoptedBy: this.identity, adoptedAt }] };
+    const directory = `${projectPath}/.pi-cad/admin`; const target = `${directory}/workflow-adoptions.json`; const temporary = `${target}.${process.pid}.tmp`;
+    await this.bridge.exec(["mkdir", "-p", directory]); await this.bridge.exec(["tee", temporary], { input: `${JSON.stringify(next, null, 2)}\n` }); await this.bridge.exec(["chmod", "600", temporary]); await this.bridge.exec(["mv", "--", temporary, target]);
+    return next;
   }
 
   async current(settings: AppSettings): Promise<WorkflowCurrent> {
