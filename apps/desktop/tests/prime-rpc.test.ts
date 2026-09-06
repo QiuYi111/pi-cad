@@ -59,7 +59,7 @@ describe("Prime runtime setup", () => {
 
     await expect(new PrimeRpc(bridge as any).start(settings))
       .rejects.toThrow("Project folder no longer exists");
-    expect(bridge.exec).toHaveBeenCalledWith(["test", "-d", "--", "/tmp/deleted-project"]);
+    expect(bridge.exec).toHaveBeenCalledWith(["test", "-d", "/tmp/deleted-project"]);
     expect(spawn).not.toHaveBeenCalled();
   });
 });

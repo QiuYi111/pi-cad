@@ -24,7 +24,7 @@ export class PrimeRpc extends EventEmitter {
     const paths = await this.bridge.resolveRuntimePaths(settings);
     if (!paths.projectPath) throw new Error("Choose a project folder before starting Prime.");
     try {
-      await this.bridge.exec(["test", "-d", "--", paths.projectPath]);
+      await this.bridge.exec(["test", "-d", paths.projectPath]);
     } catch {
       const error = new Error("Project folder no longer exists. Choose another project.");
       this.setStatus({ state: "error", checks: [], message: error.message });
