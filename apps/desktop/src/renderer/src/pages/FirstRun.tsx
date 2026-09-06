@@ -3,6 +3,18 @@ import { Check, ChevronRight, FolderOpen, Wrench } from "../components/icons";
 import type { AppSettings, AuthStatus, RuntimeStatus } from "@shared/contracts";
 import { Wordmark } from "../components/Brand";
 
+export function setupErrorMessage(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  if (/404|not found/i.test(text) && /node|nodejs/i.test(text)) return "Node.js 安装包下载失败。请检查网络后重试。";
+  if (/unsupported.*(?:cpu|architecture)/i.test(text)) return "当前 WSL 处理器架构不受支持。";
+  const clean = text
+    .replace(/^Error:\s*/i, "")
+    .replace(/^Error invoking remote method '[^']+':\s*/i, "")
+    .split(/\r?\n/)
+    .find((line) => line.trim() && !/^(command failed:|picad_|case |curl |tar |ln |mkdir |export )/i.test(line.trim()));
+  return (clean || "安装失败，请重试。").trim().slice(0, 220);
+}
+
 export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSettings; onSettings: (value: AppSettings) => void; onComplete: () => void }) {
   const [runtime, setRuntime] = useState<RuntimeStatus>({ state: "checking", checks: [] });
   const [auth, setAuth] = useState<AuthStatus>({ provider: "openai-codex", state: "checking" });
@@ -19,7 +31,7 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   const check = async () => {
     setRuntime({ state: "checking", checks: [], message: "正在检查 Windows 和 WSL…" });
     try { setRuntime(await window.piCad.runtime.check()); }
-    catch (error) { setRuntime({ state: "error", checks: [], message: String(error) }); }
+    catch (error) { setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) }); }
   };
   useEffect(() => {
     void check();
@@ -36,13 +48,13 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
       setRuntime(result);
       if (result.state === "checking") await check();
     }
-    catch (error) { setRuntime({ state: "error", checks: [], message: String(error) }); }
+    catch (error) { setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) }); }
     finally { setWorking(""); }
   };
   const installRuntime = async () => {
     setWorking("runtime");
     try { setRuntime(await window.piCad.runtime.install()); }
-    catch (error) { setRuntime({ state: "error", checks: runtime.checks, message: String(error) }); }
+    catch (error) { setRuntime({ state: "error", checks: runtime.checks, message: setupErrorMessage(error) }); }
     finally { setWorking(""); }
   };
   const login = async () => {
@@ -63,13 +75,15 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   return <main className="first-run">
     <header className="first-run-titlebar"><Wordmark /><span>首次设置</span></header>
     <section className="setup-stage">
-      <div className={`setup-progress ${runtime.state === "installing" ? "indeterminate" : ""}`} aria-label={`Setup ${progress} of 3`}><i style={{ width: `${Math.min(100, ((progress + (runtimeReady ? 0 : runtime.progress || 0)) / 3) * 100)}%` }} /></div>
+      <div className={`setup-progress ${runtime.state === "installing" && runtime.progress === undefined ? "indeterminate" : ""}`} aria-label={`Setup ${progress} of 3`}><i style={{ width: `${Math.min(100, ((progress + (runtimeReady ? 0 : runtime.progress || 0)) / 3) * 100)}%` }} /></div>
       <div className="setup-hero"><span>MAKE IDEAS REAL</span><h1>把想法变成<br />可检查的工程成果。</h1><p>依次准备工程环境、连接 ChatGPT，并选择项目位置。中断后会从当前步骤继续。</p></div>
       <div className="setup-grid">
         <SetupCard index="01" title="工程环境" ready={runtimeReady} active={!runtimeReady} icon={<Wrench size={17} />}>
           <p>{runtime.message || (runtimeReady ? "WSL 和内置 CAD 环境已就绪。" : "正在检查 WSL 和内置组件。")}</p>
           <label>WSL 发行版<input value={settings.distro} onChange={(event) => onSettings({ ...settings, distro: event.target.value })} onBlur={() => void window.piCad.settings.update({ distro: settings.distro })} /></label>
-          {(runtime.state === "checking" || runtime.state === "installing") && <SetupMotion label={runtime.state === "installing" ? `Installing · ${runtime.elapsedSeconds || 0}s` : "Inspecting system"} />}
+          {runtime.state === "installing" && runtime.progress !== undefined
+            ? <RuntimeProgress progress={runtime.progress} elapsedSeconds={runtime.elapsedSeconds || 0} />
+            : runtime.state === "checking" || runtime.state === "installing" ? <SetupMotion label="正在检查系统" /> : null}
           {runtime.state === "action-required"
             ? <button className="setup-secondary" disabled={Boolean(working)} onClick={() => void check()}>{runtime.action === "restart-windows" ? "Check after restart" : "I initialized Ubuntu — check again"}</button>
             : wslMissing ? <button className="primary" disabled={Boolean(working)} onClick={() => void installWsl()}>{working === "wsl" ? "Waiting for Windows…" : "Install WSL and Ubuntu"}<ChevronRight size={14} /></button>
@@ -96,4 +110,12 @@ function SetupCard({ index, title, ready, active, icon, children }: { index: str
 
 function SetupMotion({ label }: { label: string }) {
   return <div className="setup-motion"><span>{label}</span><div>{Array.from({ length: 9 }, (_, index) => <i key={index} />)}</div></div>;
+}
+
+function RuntimeProgress({ progress, elapsedSeconds }: { progress: number; elapsedSeconds: number }) {
+  const percent = Math.round(Math.max(0, Math.min(1, progress)) * 100);
+  return <div className="runtime-install-progress" aria-label={`安装进度 ${percent}%`}>
+    <div><strong>{percent}%</strong><span>已用 {elapsedSeconds} 秒</span></div>
+    <progress max={1} value={progress} />
+  </div>;
 }

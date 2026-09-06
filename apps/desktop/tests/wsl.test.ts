@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
+import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, nodeInstallScript, runtimeChecksReady, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
 import { engineeringKnowledgeProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
 
@@ -99,6 +99,28 @@ describe("bundled engineering knowledge", () => {
 });
 
 describe("WSL first-install status", () => {
+  it("downloads the Node archive format published for both supported WSL architectures", () => {
+    const script = nodeInstallScript();
+    expect(script).toContain("x86_64|amd64) picad_node_arch=x64");
+    expect(script).toContain("aarch64|arm64) picad_node_arch=arm64");
+    expect(script).toContain("linux-$picad_node_arch.tar.xz");
+    expect(script).toContain("tar -xJf");
+    expect(script).not.toContain("linux-$picad_node_arch.tar.gz");
+  });
+
+  it("does not block the base runtime on optional ParaView", () => {
+    expect(runtimeChecksReady([
+      { id: "wsl", label: "WSL", status: "ready", detail: "Ubuntu", installable: true },
+      { id: "node", label: "Node", status: "ready", detail: "22", installable: true },
+      { id: "python", label: "Python", status: "ready", detail: "3", installable: true },
+      { id: "uv", label: "uv", status: "ready", detail: "uv", installable: true },
+      { id: "bwrap", label: "Bubblewrap", status: "ready", detail: "bwrap", installable: true },
+      { id: "prime", label: "Prime", status: "ready", detail: "ready", installable: true },
+      { id: "picad", label: "Reify", status: "ready", detail: "ready", installable: true },
+      { id: "paraview", label: "ParaView", status: "missing", detail: "optional", installable: true },
+    ])).toBe(true);
+  });
+
   it("does not let the hidden installer wait for Ubuntu's interactive user setup", () => {
     const command = wslInstallPowerShellCommand("Ubuntu");
     expect(command).toContain("'--no-launch'");

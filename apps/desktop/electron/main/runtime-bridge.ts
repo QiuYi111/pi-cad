@@ -2,6 +2,13 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { AppSettings, RuntimeStatus, SimulationComponentStatus } from "../../src/shared/contracts.js";
 
+const OPTIONAL_RUNTIME_CHECKS = new Set(["paraview"]);
+
+export function runtimeChecksReady(checks: RuntimeStatus["checks"]): boolean {
+  const required = checks.filter((check) => !OPTIONAL_RUNTIME_CHECKS.has(check.id));
+  return required.length > 0 && required.every((check) => check.status === "ready");
+}
+
 export interface RuntimePaths {
   piCadRepo: string;
   primeAgentRepo: string;

@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
-import type { RuntimeBridge } from "./runtime-bridge.js";
+import { runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
 
 interface PendingRequest {
   accept: (value: any) => void;
@@ -184,9 +184,9 @@ export async function ensureRuntimeReady(
   onStatus?: (status: RuntimeStatus) => void,
 ): Promise<RuntimeStatus> {
   const current = await bridge.check(settings);
-  if (current.checks.every((check) => check.status === "ready")) return current;
+  if (runtimeChecksReady(current.checks)) return current;
   const installed = await bridge.install(settings, onStatus);
-  const missing = installed.checks.filter((check) => check.status !== "ready");
+  const missing = installed.checks.filter((check) => check.id !== "paraview" && check.status !== "ready");
   if (missing.length) throw new Error(`Runtime setup incomplete: ${missing.map((check) => check.label).join(", ")}`);
   return installed;
 }

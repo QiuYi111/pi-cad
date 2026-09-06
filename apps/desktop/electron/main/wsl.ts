@@ -2,7 +2,9 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
-import { engineeringKnowledgeProbe, type RuntimeBridge } from "./runtime-bridge.js";
+import { engineeringKnowledgeProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
+
+export { runtimeChecksReady } from "./runtime-bridge.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -65,6 +67,24 @@ export function classifyWslInstallResult(result: { exitCode: number; distroPrese
 export function wslInstallPowerShellCommand(distro: string): string {
   const escaped = distro.replaceAll("'", "''");
   return `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -PassThru -ArgumentList @('--install','--distribution','${escaped}','--no-launch'); $process.WaitForExit(); exit $process.ExitCode`;
+}
+
+export function nodeInstallScript(version = "v22.23.2"): string {
+  return [
+    "set -e",
+    `picad_node_version=${version}`,
+    "picad_node_machine=$(uname -m)",
+    "case \"$picad_node_machine\" in x86_64|amd64) picad_node_arch=x64 ;; aarch64|arm64) picad_node_arch=arm64 ;; *) echo \"Unsupported WSL CPU architecture: $picad_node_machine\" >&2; exit 1 ;; esac",
+    "picad_node_root=$HOME/.local/lib/nodejs",
+    "picad_node_dir=$picad_node_root/node-$picad_node_version-linux-$picad_node_arch",
+    "picad_node_archive=/tmp/pi-cad-node.tar.xz",
+    "mkdir -p $picad_node_root $HOME/.local/bin",
+    "curl --fail --location --retry 3 --retry-all-errors --connect-timeout 15 --progress-bar -o $picad_node_archive https://nodejs.org/download/release/$picad_node_version/node-$picad_node_version-linux-$picad_node_arch.tar.xz",
+    "tar -xJf $picad_node_archive -C $picad_node_root",
+    "ln -sfn $picad_node_dir/bin/node $HOME/.local/bin/node",
+    "ln -sfn $picad_node_dir/bin/npm $HOME/.local/bin/npm",
+    "ln -sfn $picad_node_dir/bin/npx $HOME/.local/bin/npx",
+  ].join("; ");
 }
 
 function uncWslPath(value: string): { distro: string; path: string } | null {
@@ -233,7 +253,7 @@ export class WslBridge implements RuntimeBridge {
     const knowledgeReady = values.knowledge === String(knowledge.count);
     add("picad", "Reify runtime", values.picad === "ready" && knowledgeReady && bundleReady,
       !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
-    const ready = checks.every((check) => check.status === "ready");
+    const ready = runtimeChecksReady(checks);
     return { state: ready ? "idle" : "error", checks, message: ready ? undefined : "Install the missing runtime dependencies." };
   }
 
@@ -267,40 +287,38 @@ export class WslBridge implements RuntimeBridge {
 
   async install(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
     let status = await this.check(settings);
-    const report = (message: string, progress: number) => onStatus?.({ ...status, state: "installing", message, progress });
+    const startedAt = Date.now();
+    const report = (message: string, progress: number) => onStatus?.({
+      ...status,
+      state: "installing",
+      message,
+      progress,
+      elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+    });
+    const runStep = async <T>(message: string, progress: number, task: () => Promise<T>): Promise<T> => {
+      report(message, progress);
+      const heartbeat = setInterval(() => report(message, progress), 1_000);
+      try { return await task(); }
+      finally { clearInterval(heartbeat); }
+    };
     report("Checking runtime components…", 0.05);
     if (status.checks.some((item) => item.id === "wsl" && item.status !== "ready")) return status;
     const missing = new Set(status.checks.filter((item) => item.status !== "ready").map((item) => item.id));
-    if (missing.has("python") || missing.has("bwrap") || missing.has("paraview")) {
-      report("Installing Python, sandbox, and 3D viewing packages…", 0.15);
-      await execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates paraview python3-paraview"], {
+    if (missing.has("python") || missing.has("bwrap")) {
+      await runStep("Installing Python and the secure sandbox…", 0.15, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates xz-utils"], {
         encoding: "utf8", timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
-      });
+      }).then(() => undefined));
     }
     if (missing.has("uv")) {
-      report("Installing the Python package runner…", 0.4);
-      await this.exec(["bash", "-lc", "curl -LsSf https://astral.sh/uv/install.sh | sh"], { timeout: 5 * 60_000 });
+      await runStep("Installing the Python package runner…", 0.36,
+        () => this.exec(["bash", "-lc", "curl -LsSf https://astral.sh/uv/install.sh | sh"], { timeout: 5 * 60_000 }));
     }
     if (missing.has("node")) {
-      report("Installing Node.js…", 0.5);
-      const script = [
-        "set -e",
-        "picad_node_version=v22.23.2",
-        "case $(uname -m) in x86_64) picad_node_arch=x64 ;; aarch64|arm64) picad_node_arch=arm64 ;; *) echo 'Unsupported CPU architecture' >&2; exit 1 ;; esac",
-        "picad_node_root=$HOME/.local/lib/nodejs",
-        "picad_node_dir=$picad_node_root/node-$picad_node_version-linux-$picad_node_arch",
-        "mkdir -p $picad_node_root $HOME/.local/bin",
-        "curl -fsSLo /tmp/pi-cad-node.tar.gz https://nodejs.org/dist/$picad_node_version/node-$picad_node_version-linux-$picad_node_arch.tar.gz",
-        "tar -xzf /tmp/pi-cad-node.tar.gz -C $picad_node_root",
-        "ln -sfn $picad_node_dir/bin/node $HOME/.local/bin/node",
-        "ln -sfn $picad_node_dir/bin/npm $HOME/.local/bin/npm",
-        "ln -sfn $picad_node_dir/bin/npx $HOME/.local/bin/npx",
-      ].join("; ");
-      await this.exec(["bash", "-lc", script], { timeout: 10 * 60_000 });
+      await runStep("Downloading and installing Node.js…", 0.48,
+        () => this.exec(["bash", "-lc", nodeInstallScript()], { timeout: 10 * 60_000 }));
     }
     let paths = await this.resolveRuntimePaths(settings);
     if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath) {
-      report("Copying the bundled engineering runtime…", 0.62);
       const source = await this.toLinuxPath(this.bundledRuntimePath);
       const home = await this.homeDirectory();
       const destination = process.env.PI_CAD_DESKTOP_RUNTIME_ROOT
@@ -314,7 +332,8 @@ export class WslBridge implements RuntimeBridge {
         `cp ${JSON.stringify(source)}/manifest.json ${JSON.stringify(destination)}/manifest.json`,
         `chmod +x ${JSON.stringify(destination)}/prime-agent/prime-agent.sh`,
       ].join("; ");
-      await this.exec(["bash", "-lc", installBundled], { timeout: 15 * 60_000 });
+      await runStep("Unpacking the bundled engineering runtime…", 0.62,
+        () => this.exec(["bash", "-lc", installBundled], { timeout: 15 * 60_000 }));
       paths = await this.resolveRuntimePaths(settings);
     }
     try {
@@ -325,15 +344,14 @@ export class WslBridge implements RuntimeBridge {
     } catch {
       throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Reify or select development checkouts in Settings.`);
     }
-    report("Preparing Reify Python packages…", 0.78);
-    await this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; cd ${JSON.stringify(paths.piCadRepo)} && if ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi && npm run setup:python`], { timeout: 15 * 60_000 });
-    report("Connecting Prime Agent to Reify…", 0.92);
-    await this.exec(["bash", "-lc", [
+    await runStep("Installing the core CAD packages…", 0.78,
+      () => this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; export PI_CAD_BASE_RUNTIME=1; cd ${JSON.stringify(paths.piCadRepo)} && if ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi && npm run setup:python`], { timeout: 15 * 60_000 }));
+    await runStep("Connecting Prime Agent to Reify…", 0.92, () => this.exec(["bash", "-lc", [
       "set -e",
       `mkdir -p ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/coding-agent ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-coding-agent`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/ai ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-ai`,
-    ].join("; ")]);
+    ].join("; ")]).then(() => undefined));
     report("Verifying the installation…", 0.97);
     status = await this.check(settings);
     onStatus?.(status);

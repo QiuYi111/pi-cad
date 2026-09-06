@@ -16,13 +16,15 @@ if (process.platform !== "linux" && process.platform !== "darwin") {
   throw new Error("Reify installation requires Linux, macOS, or Linux through WSL");
 }
 
-// macOS ships the CAD core. Linux additionally qualifies the managed
-// simulation stack whose solver runtimes and Bubblewrap boundary are Linux-only.
-const pythonArgs = ["--project", pythonProject, ...(process.platform === "linux" ? ["--extra", "simulation"] : [])];
+// Desktop first-run installs the small CAD core. Simulation and Blender are
+// installed only when a workflow needs them.
+const baseRuntimeOnly = process.env.PI_CAD_BASE_RUNTIME === "1";
+const pythonArgs = ["--project", pythonProject, ...(process.platform === "linux" && !baseRuntimeOnly ? ["--extra", "simulation"] : [])];
 uv(["sync", ...pythonArgs], { stdio: "inherit" });
 
 const python = join(pythonProject, ".venv", "bin", "python");
-if (process.platform === "linux") await installBlender({ root, python, env: process.env });
+if (process.platform === "linux" && !baseRuntimeOnly) await installBlender({ root, python, env: process.env });
+else if (process.platform === "linux") console.log("[pi-cad] simulation and Blender will be installed when first used");
 else console.log("[pi-cad] managed Blender is not bundled on macOS; use a PATH Blender installation when needed");
 
 const doctorText = uv(
