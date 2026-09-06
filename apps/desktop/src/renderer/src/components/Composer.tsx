@@ -8,7 +8,7 @@ const efforts: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "
 type PendingRequest = { id: string; text: string };
 type RunningIntent = "queue" | "replace" | "note";
 
-export function Composer({ settings, status, queueKey, onSettingsChange, onSend, onNote, onAbort, onDraftChange, onImagesAdded }: { settings: AppSettings; status: RuntimeStatus; queueKey: string; onSettingsChange: (patch: Partial<AppSettings>) => Promise<void>; onSend: (text: string, images?: Array<{ data: string; mimeType: string }>) => Promise<void>; onNote: (text: string) => void; onAbort: () => Promise<void>; onDraftChange?: (hasDraft: boolean) => void; onImagesAdded?: (images: Array<{ name: string; data: string; mimeType: string }>) => void }) {
+export function Composer({ settings, status, queueKey, draftRequest, onSettingsChange, onSend, onNote, onAbort, onDraftChange, onImagesAdded }: { settings: AppSettings; status: RuntimeStatus; queueKey: string; draftRequest?: { id: string; text: string }; onSettingsChange: (patch: Partial<AppSettings>) => Promise<void>; onSend: (text: string, images?: Array<{ data: string; mimeType: string }>) => Promise<void>; onNote: (text: string) => void; onAbort: () => Promise<void>; onDraftChange?: (hasDraft: boolean) => void; onImagesAdded?: (images: Array<{ name: string; data: string; mimeType: string }>) => void }) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<Array<{ name: string; data: string; mimeType: string }>>([]);
   const [availableModels, setAvailableModels] = useState(models);
@@ -21,6 +21,7 @@ export function Composer({ settings, status, queueKey, onSettingsChange, onSend,
   const imagesRef = useRef(images);
   const draining = useRef(false);
   const loadingQueue = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = status.state === "streaming";
   const starting = status.state === "starting";
   useEffect(() => {
@@ -45,6 +46,13 @@ export function Composer({ settings, status, queueKey, onSettingsChange, onSend,
     onDraftChange?.(Boolean(saved));
   }, [draftKey]);
   useEffect(() => {
+    if (!draftRequest) return;
+    setText(draftRequest.text);
+    localStorage.setItem(draftKey, draftRequest.text);
+    onDraftChange?.(true);
+    window.requestAnimationFrame(() => { textareaRef.current?.focus(); textareaRef.current?.setSelectionRange(draftRequest.text.length, draftRequest.text.length); });
+  }, [draftRequest, draftKey, onDraftChange]);
+  useEffect(() => {
     loadingQueue.current = true;
     try { setPending(JSON.parse(localStorage.getItem(storageKey) || "[]")); }
     catch { setPending([]); }
@@ -57,7 +65,7 @@ export function Composer({ settings, status, queueKey, onSettingsChange, onSend,
     if (status.state !== "ready" || !pending.length || draining.current) return;
     const request = pending[0]!;
     draining.current = true;
-    void onSend(`[Queued request ${request.id}] ${request.text}`).finally(() => {
+    void onSend(request.text).finally(() => {
       setPending((current) => current.filter((item) => item.id !== request.id));
       draining.current = false;
     });
@@ -118,7 +126,7 @@ export function Composer({ settings, status, queueKey, onSettingsChange, onSend,
     {attachmentError && <div className="composer-error" role="alert">{attachmentError}</div>}
     {images.length > 0 && <div className="composer-attachments">{images.map((image, index) => <button key={`${image.name}-${index}`} onClick={() => setImages((current) => current.filter((_, item) => item !== index))} title="Remove image"><img src={`data:${image.mimeType};base64,${image.data}`} alt={image.name} /><span>{image.name}</span></button>)}</div>}
     {pending.length > 0 && <div className="pending-requests" role="region" aria-label="Pending requests"><strong>After current task</strong>{pending.map((request) => <div key={request.id}><input aria-label={`Queued request ${request.id}`} value={request.text} onChange={(event) => setPending((current) => current.map((item) => item.id === request.id ? { ...item, text: event.target.value } : item))} /><button aria-label={`Cancel queued request ${request.id}`} onClick={() => setPending((current) => current.filter((item) => item.id !== request.id))}>Cancel</button></div>)}</div>}
-    <textarea value={text} onChange={(event) => { setText(event.target.value); localStorage.setItem(draftKey, event.target.value); onDraftChange?.(Boolean(event.target.value)); }} onKeyDown={(event) => {
+    <textarea ref={textareaRef} value={text} onChange={(event) => { setText(event.target.value); localStorage.setItem(draftKey, event.target.value); onDraftChange?.(Boolean(event.target.value)); }} onKeyDown={(event) => {
       if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); }
     }} placeholder="Ask anything about the design" aria-label="Message" />
     <div className="composer-controls">

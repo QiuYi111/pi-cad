@@ -81,8 +81,19 @@ describe("Prime activity projection", () => {
     expect(messages[0]?.activity?.media?.[0]?.label).toBe("iso");
   });
 
-  it("does not expose arbitrary Python as a product activity", () => {
-    expect(reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "x", toolName: "ipython", args: { code: "print('hello')" } })).toEqual([]);
+  it("shows ordinary tools as a compact activity", () => {
+    let messages = reducePrimeEvent([], { type: "agent_start" });
+    messages = reducePrimeEvent(messages, { type: "tool_execution_start", toolCallId: "x", toolName: "ipython", args: { code: "print('hello')" } });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.activity).toMatchObject({ kind: "tool", state: "running", title: "Python" });
+    messages = reducePrimeEvent(messages, { type: "tool_execution_end", toolCallId: "x", result: { content: [{ type: "text", text: "hello" }] } });
+    expect(messages[0]?.activity).toMatchObject({ kind: "tool", state: "success", summary: "hello" });
+  });
+
+  it("deduplicates repeated tool starts", () => {
+    const start = { type: "tool_execution_start", toolCallId: "same", toolName: "read", args: { path: "part.py" } };
+    const once = reducePrimeEvent([], start);
+    expect(reducePrimeEvent(once, start)).toHaveLength(1);
   });
 
   it("shows the authoritative review result", () => {

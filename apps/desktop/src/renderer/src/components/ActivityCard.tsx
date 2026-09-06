@@ -7,6 +7,7 @@ const icons = { build: Box, probe: ScanLine, workflow: GitCommit, simulation: Wa
 export const ActivityCard = memo(function ActivityCard({ activity, onReference }: { activity: CadActivity; onReference?: (text: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
+  if (activity.kind === "tool") return <ToolActivity activity={activity} />;
   const Icon = icons[activity.kind];
   if (activity.kind === "workflow") return <WorkflowActivity activity={activity} />;
   const running = activity.state === "running" || activity.state === "queued";
@@ -41,6 +42,16 @@ function ActivityMotion({ kind, progress = .4 }: { kind: CadActivity["kind"]; pr
   if (kind === "review") return <div className="review-motion"><i /><b /></div>;
   if (kind === "image") return <div className="pixel-motion">{Array.from({ length: 24 }, (_, index) => <i key={index} style={{ animationDelay: `${index * .04}s` }} />)}</div>;
   return null;
+}
+
+function ToolActivity({ activity }: { activity: CadActivity }) {
+  const running = activity.state === "running" || activity.state === "queued";
+  const failed = activity.state === "failed" || activity.state === "denied";
+  return <div className={`tool-activity ${activity.state}`} data-testid="activity-tool">
+    <span>{running ? <i /> : failed ? <TriangleAlert size={13} /> : <Check size={13} />}</span>
+    <strong>{activity.title}</strong>
+    <small>{activity.summary || (running ? "正在执行" : failed ? "执行失败" : "已完成")}</small>
+  </div>;
 }
 
 function WorkflowActivity({ activity }: { activity: CadActivity }) {

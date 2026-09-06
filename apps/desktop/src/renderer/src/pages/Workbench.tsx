@@ -54,6 +54,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   useEffect(() => { composerPositionRef.current = composerPosition; }, [composerPosition]);
   useEffect(() => () => { if (composerClickTimer.current) clearTimeout(composerClickTimer.current); }, []);
   const [hasDraft, setHasDraft] = useState(false);
+  const [editDraft, setEditDraft] = useState<{ id: string; text: string }>();
   const [readingHistory, setReadingHistory] = useState(false);
   const [canvasNotice, setCanvasNotice] = useState(false);
   const [canvasNoticeTarget, setCanvasNoticeTarget] = useState<"artifact" | "concept" | null>(null);
@@ -436,7 +437,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
       {!sidebarOpen && <button className="sidebar-reopen" aria-label="展开侧栏" onClick={() => { setSidebarOpen(true); localStorage.setItem("reify.sidebar-open.v1", "1"); }}>›</button>}
       <header className="chat-header"><div><small>Design agent</small><strong>{project}</strong></div><span /><button className="open-step" aria-label="Open STEP" disabled={openStepState === "loading"} onClick={() => void openStep()}><FolderOpen size={15} />{openStepState === "loading" ? "Opening…" : "Open STEP"}</button><button className="rate-current" onClick={() => setRatingOpen((open) => !open)}>Rate</button>{ratingOpen && <div className="conversation-rating"><strong>Rate this conversation</strong><div className="rating-row"><label>Quality<select value={ratingQuality} onChange={(event) => setRatingQuality(Number(event.target.value))}>{[1,2,3,4,5].map((value) => <option key={value}>{value}</option>)}</select></label><label>Difficulty<select value={ratingDifficulty} onChange={(event) => setRatingDifficulty(Number(event.target.value))}>{[1,2,3,4,5].map((value) => <option key={value}>{value}</option>)}</select></label></div><textarea value={ratingFeedback} onChange={(event) => setRatingFeedback(event.target.value)} placeholder="What worked or failed?" /><button className="primary" disabled={ratingBusy} onClick={() => void rateCurrent()}>{ratingBusy ? "Saving…" : "Save rating"}</button>{ratingMessage && <small>{ratingMessage}</small>}</div>}</header>
       {openStepError && <div className="conversation-error" role="alert"><strong>Could not open that STEP.</strong><span>{currentArtifact ? "The current model is preserved." : "Choose another project STEP file."}</span><small>{openStepError}</small></div>}
-      <Conversation messages={prime.messages} onReadingChange={setReadingHistory} onReference={(text) => void send(text)} />
+      <Conversation messages={prime.messages} onReadingChange={setReadingHistory} onReference={(text) => void send(text)} onEdit={(text) => { setMode("conversation"); setEditDraft({ id: crypto.randomUUID(), text }); }} />
     </section>
     <section className="design-pane">
       <header className="design-header">
@@ -468,7 +469,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     </section>
     <div className="floating-composer" ref={composerRef}>
       <button className="composer-handle" aria-label={mode === "conversation" ? "切换到画布；拖动可移动输入框" : "展开对话；拖动可移动输入框"} aria-keyshortcuts="Control+Backslash Meta+Backslash" title="点击切换 · 拖动调整位置 · 双击复位" onPointerDown={beginComposerDrag} onPointerMove={moveComposer} onPointerUp={endComposerDrag} onPointerCancel={() => { dragRef.current = null; }} onLostPointerCapture={() => { dragRef.current = null; }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); if (composerClickTimer.current) clearTimeout(composerClickTimer.current); composerClickTimer.current = null; resetComposerPosition(); }}><span /></button>
-      <Composer settings={settings} status={prime.status} queueKey={`${settings.projectPath}:${conversationStorageKey}`} onSettingsChange={updateSettings} onSend={send} onNote={prime.note} onAbort={prime.abort} onDraftChange={setHasDraft} onImagesAdded={addUploadedConcepts} />
+      <Composer settings={settings} status={prime.status} queueKey={`${settings.projectPath}:${conversationStorageKey}`} draftRequest={editDraft} onSettingsChange={updateSettings} onSend={send} onNote={prime.note} onAbort={prime.abort} onDraftChange={setHasDraft} onImagesAdded={addUploadedConcepts} />
       <button className="composer-reset" onClick={resetComposerPosition}>复位输入框</button>
     </div>
     <StatusBar settings={settings} status={prime.status} />

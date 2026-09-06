@@ -6,7 +6,7 @@ function textOf(content: unknown): string {
   return content.filter((item: any) => item?.type === "text").map((item: any) => item.text || "").join("\n");
 }
 
-function classify(code: string): { kind: CadActivity["kind"]; title: string } | null {
+function classify(toolName: string, code: string): { kind: CadActivity["kind"]; title: string } {
   if (/cad\.(?:model\.build|save_and_check)/.test(code)) return { kind: "build", title: "Building model" };
   if (/cad\.probe\.run|@cad\.probe/.test(code)) return { kind: "probe", title: "Inspecting geometry" };
   if (/cad\.simulation\.run/.test(code)) return { kind: "simulation", title: "Running simulation" };
@@ -15,7 +15,19 @@ function classify(code: string): { kind: CadActivity["kind"]; title: string } | 
   if (/cad\.review\.submit/.test(code)) return { kind: "review", title: "Independent review" };
   if (/cad\.commit/.test(code)) return { kind: "commit", title: "Freezing design state" };
   if (/codex_generate_image/.test(code)) return { kind: "image", title: "Generating concept image" };
-  return null;
+  const normalized = toolName.toLowerCase();
+  const title = /ipython|python/.test(normalized) ? "Python"
+    : /bash|shell|exec|command/.test(normalized) ? "命令"
+      : /read|open/.test(normalized) ? "读取文件"
+        : /write|edit|patch/.test(normalized) ? "修改文件"
+          : /search|find|grep/.test(normalized) ? "搜索项目"
+            : toolName.replace(/^.*[.:/]/, "").replaceAll("_", " ") || "工具";
+  return { kind: "tool", title };
+}
+
+function toolInputSummary(input: any): string | undefined {
+  const value = input?.code || input?.command || input?.cmd || input?.path || input?.file || input?.query;
+  return typeof value === "string" ? concise(value.split(/\r?\n/).find((line) => line.trim()) || value) : undefined;
 }
 
 function attachments(result: any, id: string): MediaAttachment[] {
@@ -131,17 +143,21 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
   }
   if (event.type === "tool_execution_start") {
     const code = event.args?.code || event.input?.code || JSON.stringify(event.args || event.input || {});
-    const classified = classify(`${event.toolName || ""}\n${code}`);
-    if (!classified) return messages;
+    const classified = classify(event.toolName || "", `${event.toolName || ""}\n${code}`);
+    if (messages.some((message) => {
+      const activity = message.activity;
+      return Boolean(activity && activity.id === event.toolCallId && (activity.state === "running" || activity.state === "queued"));
+    })) return messages;
     const activity: CadActivity = {
       id: event.toolCallId,
       ...classified,
       state: "running",
-      summary: classified.kind === "build" ? "Source · STEP · Geometry · Views" : undefined,
+      summary: classified.kind === "build" ? "Source · STEP · Geometry · Views" : classified.kind === "tool" ? toolInputSummary(event.args || event.input) : undefined,
       startedAt: Date.now(),
       progress: 0.35,
     };
-    return [...messages, { id: `activity-${activity.id}`, role: "system", text: "", createdAt: Date.now(), activity }];
+    const occurrence = messages.filter((message) => message.activity?.id === activity.id).length;
+    return [...finishOpenAssistant(messages, "complete"), { id: `activity-${activity.id}${occurrence ? `-${occurrence + 1}` : ""}`, role: "system", text: "", createdAt: Date.now(), activity }];
   }
   if (event.type === "tool_execution_update") {
     return messages.map((message): ChatMessage => {
@@ -151,9 +167,14 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
     });
   }
   if (event.type === "tool_execution_end") {
-    return messages.map((message): ChatMessage => {
+    const target = findLast(messages, (message) => {
       const activity = message.activity;
-      if (!activity || activity.id !== event.toolCallId) return message;
+      return Boolean(activity && activity.id === event.toolCallId && (activity.state === "running" || activity.state === "queued"));
+    });
+    if (target < 0) return messages;
+    return messages.map((message, current): ChatMessage => {
+      const activity = message.activity;
+      if (!activity || current !== target) return message;
       const media = attachments(event.result, event.toolCallId);
       const content = textOf(event.result?.content || event.result);
       const outputs = activity.kind === "simulation" ? simulationOutputs(event.result) : [];
@@ -162,7 +183,7 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
         activity: {
           ...activity,
           state: event.isError || event.result?.isError ? "failed" : "success",
-          title: completedTitle(activity.kind, event.isError || event.result?.isError),
+          title: completedTitle(activity.kind, event.isError || event.result?.isError, activity.title),
           summary: activity.kind === "workflow" ? workflowSummary(event.result) : concise(content) || activity.summary,
           progress: 1,
           finishedAt: Date.now(),
@@ -231,10 +252,12 @@ function findLast(messages: ChatMessage[], predicate: (message: ChatMessage) => 
 function finishOpenAssistant(messages: ChatMessage[], state: "complete" | "aborted" | "error"): ChatMessage[] {
   const index = findOpenAssistant(messages);
   if (index < 0) return messages;
+  if (state === "complete" && !messages[index]!.text.trim()) return messages.filter((_, current) => current !== index);
   return messages.map((message, current) => current === index ? { ...message, stream: { ...message.stream!, state, finishedAt: Date.now() } } : message);
 }
 
-function completedTitle(kind: CadActivity["kind"], failed: boolean): string {
+function completedTitle(kind: CadActivity["kind"], failed: boolean, currentTitle: string): string {
+  if (kind === "tool") return failed ? `${currentTitle}失败` : currentTitle;
   if (failed) return `${kind[0]!.toUpperCase()}${kind.slice(1)} failed`;
   return ({ build: "Model built", probe: "Geometry inspected", simulation: "Simulation complete", workflow: "Workflow advanced", review: "Review requested", commit: "Design state frozen", image: "Concept image generated" })[kind];
 }

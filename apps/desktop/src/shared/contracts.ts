@@ -82,7 +82,7 @@ export interface WorkflowDocument {
 }
 export interface WorkflowAdoptionPolicy { schema: 1; globalSafetyPolicyVersion: string; adopted: Record<string, { version: string; adoptedBy: string; adoptedAt: string }>; history: Array<{ id: string; from?: string; to: string; adoptedBy: string; adoptedAt: string }> }
 
-export type ActivityKind = "workflow" | "commit" | "build" | "probe" | "simulation" | "review" | "image";
+export type ActivityKind = "workflow" | "commit" | "build" | "probe" | "simulation" | "review" | "image" | "tool";
 export type ActivityState = "queued" | "running" | "success" | "failed" | "denied";
 
 export interface MediaAttachment {

@@ -74,6 +74,19 @@ export class DemoRuntime extends EventEmitter {
       this.emit("status", this.status);
       return;
     }
+    if (/format response/i.test(message)) {
+      this.emit("event", { type: "tool_execution_start", toolCallId: "demo-read", toolName: "read", args: { path: "requirements.md" } });
+      await wait(80);
+      if (generation !== this.generation) return;
+      this.emit("event", { type: "tool_execution_end", toolCallId: "demo-read", result: { content: [{ type: "text", text: "读取完成" }] } });
+      const content = "## 设计约束\n\n**重点尺寸**\n\n- 宽度 80 mm\n- 厚度 3 mm\n\n---\n\n| 项目 | 数值 |\n| --- | --- |\n| 倾角 | 65° |";
+      this.emit("event", { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: content }], id: "demo-assistant" } });
+      this.emit("event", { type: "agent_end" });
+      this.messages.push({ id: `demo-assistant-${generation}`, role: "assistant", content });
+      this.status = { ...this.status, state: "ready" };
+      this.emit("status", this.status);
+      return;
+    }
     if (/simulation\/torch-fem-linear-elastic/i.test(message)) {
       this.emit("event", { type: "tool_execution_start", toolCallId: "demo-simulation-run", toolName: "ipython", args: { code: "await cad.simulation.run(recipe='simulation/torch-fem-linear-elastic')" } });
       await wait(800);
