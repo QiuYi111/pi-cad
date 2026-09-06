@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { posix } from "node:path";
 import type { AppSettings, BlenderRender, BlenderScene } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
 
@@ -16,8 +17,12 @@ export class BlenderBackend {
 
   private async paths(settings: AppSettings, source: string) {
     const runtime = await this.bridge.resolveRuntimePaths(settings);
-    const scene = source.startsWith("/") ? source : `${runtime.projectPath}/${source}`;
-    if (!scene.startsWith(`${runtime.projectPath}/`)) throw new Error("Blender scene must remain inside the active project.");
+    if (!/\.blend$/i.test(source)) throw new Error("Choose a Blender .blend scene.");
+    const requestedScene = source.startsWith("/") ? source : `${runtime.projectPath}/${source}`;
+    const project = (await this.bridge.exec(["realpath", "-e", "--", runtime.projectPath])).stdout.trim();
+    const scene = (await this.bridge.exec(["realpath", "-e", "--", requestedScene])).stdout.trim();
+    const relative = posix.relative(project, scene);
+    if (!relative || relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) throw new Error("Blender scene must remain inside the active project.");
     const probe = await this.bridge.exec(["bash", "-lc", `command -v blender || find ${JSON.stringify(`${runtime.piCadRepo}/.runtime/blender`)} -type f -name blender -perm -111 | head -1`]);
     const blender = probe.stdout.trim();
     if (!blender) throw new Error("Blender is not installed. Install the optional presentation component first.");

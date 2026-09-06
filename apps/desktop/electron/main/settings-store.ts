@@ -1,5 +1,5 @@
 import { app } from "electron";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { AppSettings } from "../../src/shared/contracts.js";
 
@@ -47,7 +47,12 @@ export class SettingsStore {
       await mkdir(dirname(this.path), { recursive: true });
       const temporary = `${this.path}.${process.pid}.${Date.now()}.tmp`;
       await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-      await rename(temporary, this.path);
+      try { await rename(temporary, this.path); }
+      catch (error) {
+        if (!["EEXIST", "EPERM"].includes((error as NodeJS.ErrnoException).code || "")) throw error;
+        await copyFile(temporary, this.path);
+        await unlink(temporary);
+      }
       return next;
     });
     this.mutation = pending.then(() => undefined, () => undefined);

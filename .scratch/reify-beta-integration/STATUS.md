@@ -28,9 +28,9 @@
 
 ## 自动证据
 
-- 桌面单元与集成测试：69/69。
+- 桌面单元与集成测试：72/72。
 - 根目录 TypeScript：300/300。
-- Python：128 项通过，7 项按环境跳过。
+- Python：129 项通过，7 项按环境跳过。
 - Electron 主流程和悬浮输入框专项：通过。
 - 最终包真实 STEP：解析、失败保留、导出一致、刷新通过。
 - Windows 安装器：安装、启动、快捷方式、卸载项通过。
@@ -38,7 +38,7 @@
 
 ## 候选包
 
-- 目录：`C:\Users\Admin\Downloads\Reify-Beta-2026-09-06`
-- 安装包 SHA-256：`CDF75D370C1091F5C32D99A6902A78C9735953FE426F3F293A12AB0174DE4C27`
-- 便携版 SHA-256：`8BEB7AC93F26BB8F6CC5E86B87FA7CA775633E592633EEB90AA1A9C9334675E4`
+- 目录：`C:\Users\Admin\Downloads\Reify-Beta-2026-09-06-r3`
+- 安装包 SHA-256：`A34BB923FBEB54BE2E95D6508C0884734D8A21A72D9CBA7B1746CB3225DDA8CC`
+- 便携版 SHA-256：`FE833D585C48EF541779C5D1D75C7B67B90F2406AFBDF497CD54D42EB6A60BB8`
 - 代码签名：无，仅供允许未签名程序的内测环境。

@@ -13,8 +13,13 @@ export class WorkflowStore {
   async adoptionPolicy(settings: AppSettings): Promise<WorkflowAdoptionPolicy> {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) return { schema: 1, globalSafetyPolicyVersion: "builtin-current", adopted: {}, history: [] };
-    try { return JSON.parse((await this.bridge.exec(["cat", "--", `${projectPath}/.pi-cad/admin/workflow-adoptions.json`])).stdout) as WorkflowAdoptionPolicy; }
-    catch { return { schema: 1, globalSafetyPolicyVersion: "builtin-current", adopted: {}, history: [] }; }
+    const path = `${projectPath}/.pi-cad/admin/workflow-adoptions.json`;
+    try { return JSON.parse((await this.bridge.exec(["cat", "--", path])).stdout) as WorkflowAdoptionPolicy; }
+    catch (error) {
+      try { await this.bridge.exec(["test", "!", "-e", path]); }
+      catch { throw error; }
+      return { schema: 1, globalSafetyPolicyVersion: "builtin-current", adopted: {}, history: [] };
+    }
   }
 
   async list(settings: AppSettings): Promise<WorkflowDocument[]> {

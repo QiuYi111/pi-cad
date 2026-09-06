@@ -16,6 +16,9 @@ export function Composer({ settings, status, queueKey, onSettingsChange, onSend,
   const [stopping, setStopping] = useState(false);
   const [runningIntent, setRunningIntent] = useState<RunningIntent>("queue");
   const [pending, setPending] = useState<PendingRequest[]>([]);
+  const imagesByConversation = useRef<Record<string, Array<{ name: string; data: string; mimeType: string }>>>({});
+  const activeImageKey = useRef(queueKey);
+  const imagesRef = useRef(images);
   const draining = useRef(false);
   const loadingQueue = useRef(false);
   const streaming = status.state === "streaming";
@@ -29,6 +32,13 @@ export function Composer({ settings, status, queueKey, onSettingsChange, onSend,
   }, [status.state, settings.provider]);
   const storageKey = `reify.pending.${queueKey || "unconfigured"}`;
   const draftKey = `reify.draft.${queueKey || "unconfigured"}`;
+  useEffect(() => { imagesRef.current = images; }, [images]);
+  useEffect(() => {
+    imagesByConversation.current[activeImageKey.current] = imagesRef.current;
+    activeImageKey.current = queueKey;
+    setImages(imagesByConversation.current[queueKey] || []);
+    setAttachmentError("");
+  }, [queueKey]);
   useEffect(() => {
     const saved = localStorage.getItem(draftKey) || "";
     setText(saved);

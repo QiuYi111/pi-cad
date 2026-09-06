@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { extname } from "node:path";
-import type { AppSettings, ModelParameterValue, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
+import { pathToFileURL } from "node:url";
+import type { AppSettings, ModelParameterValue, ReleaseResult, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
@@ -38,6 +39,7 @@ let viewer: ViewerBackend | null = null;
 let viewerBridge: RuntimeBridge | null = null;
 let blender: BlenderBackend | null = null;
 let blenderBridge: RuntimeBridge | null = null;
+const trustedReleases = new Map<string, ReleaseResult>();
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
 const desktopE2EOpenStep = process.env.PI_CAD_DESKTOP_E2E_OPEN_STEP
   || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-open-step="))?.slice("--pi-cad-e2e-open-step=".length);
@@ -80,6 +82,15 @@ function createWindow() {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url);
     return { action: "deny" };
+  });
+  const rendererUrl = is.dev && process.env.ELECTRON_RENDERER_URL
+    ? process.env.ELECTRON_RENDERER_URL
+    : pathToFileURL(join(__dirname, "../renderer/index.html")).href;
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const allowed = is.dev
+      ? new URL(url).origin === new URL(rendererUrl).origin
+      : url === rendererUrl || url.startsWith(`${rendererUrl}#`);
+    if (!allowed) event.preventDefault();
   });
   if (is.dev && process.env.ELECTRON_RENDERER_URL) void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
@@ -343,9 +354,16 @@ function registerIpc() {
     const chosen = await dialog.showOpenDialog(mainWindow!, { title: "Choose formal release destination", properties: ["openDirectory", "createDirectory"] });
     if (chosen.canceled || !chosen.filePaths[0]) return null;
     const validate = async () => Boolean((await approvalStore.list(await backend.catalog(settings))).find((item) => item.id === approvalId && item.valid));
-    return backend.releaseCommit(settings, commitId, approval, chosen.filePaths[0], validate);
+    const release = await backend.releaseCommit(settings, commitId, approval, chosen.filePaths[0], validate);
+    trustedReleases.set(release.releaseId, release);
+    return release;
   });
-  ipcMain.handle(IPC.approvalsPublishRemote, async (_event, release, remote: string, tag: string) => (await ensureViewer()).publishRemoteRelease(await settingsStore.get(), release, remote, tag));
+  ipcMain.handle(IPC.approvalsPublishRemote, async (event, releaseId: string, remote: string, tag: string) => {
+    if (!mainWindow || event.sender.id !== mainWindow.webContents.id) throw new Error("Remote publication is only available from the main Reify window.");
+    const release = trustedReleases.get(releaseId);
+    if (!release) throw new Error("Create or verify the local formal package before publishing its tag.");
+    return (await ensureViewer()).publishRemoteRelease(await settingsStore.get(), release, remote, tag);
+  });
   ipcMain.handle(IPC.tracesList, async () => demo && !realTraceE2E ? [{ id: "demo-trace", path: "/workspace/.prime-sessions/demo.jsonl", title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420, ...(demoEvaluation ? { evaluation: demoEvaluation } : {}) }] : new TraceStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo && !realTraceE2E ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(await settingsStore.get(), path));
   ipcMain.handle(IPC.tracesRate, async (_event, paths: string[], evaluation: { quality: number; difficulty: number; feedback?: string }) => demo && !realTraceE2E

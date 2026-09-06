@@ -274,9 +274,14 @@ export class ReviewRuntime {
     } satisfies HarnessRunStateV7;
     transitionRun(previewReviewedState, active.workflow, choice.event);
     const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
-    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit"), `complete ${active.state.phase}`);
+    const exitActions = phaseGitActions(active.workflow, active.state.phase, "onExit");
+    const enterActions = phaseGitActions(active.workflow, choice.target, "onEnter");
+    if (exitActions.length || enterActions.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
+    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, exitActions, `complete ${active.state.phase}`);
     if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
-    const transitioned = await store.mutate(mechanicalRegistries, (loaded) => {
+    const enterGit = await executeWorkflowGitActions(this.cwd, active.workflow, enterActions, `enter ${choice.target}`);
+    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
+    await store.mutate(mechanicalRegistries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         domainMetadata: { ...(loaded.state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(loaded.state), [reviewId]: updated }) },
@@ -290,8 +295,6 @@ export class ReviewRuntime {
         payloads: { [path]: jsonValue({ schema: 1, ...updated }) },
       };
     });
-    const enterGit = await executeWorkflowGitActions(this.cwd, transitioned.workflow, phaseGitActions(transitioned.workflow, transitioned.state.phase, "onEnter"), `enter ${transitioned.state.phase}`);
-    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${state.phase}`, results: enterGit }) } }));
     const handle: ReviewStatusV1 = { reviewId, subjectCommit: existing.subjectCommit, status, result };
     this.reviewerControllers.get(reviewId)?.abort();
     this.events.emit("completed", handle);
@@ -313,9 +316,14 @@ export class ReviewRuntime {
     } satisfies HarnessRunStateV7;
     transitionRun(previewReviewedState, active.workflow, choice.event);
     const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
-    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit"), `complete ${active.state.phase}`);
+    const exitActions = phaseGitActions(active.workflow, active.state.phase, "onExit");
+    const enterActions = phaseGitActions(active.workflow, choice.target, "onEnter");
+    if (exitActions.length || enterActions.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
+    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, exitActions, `complete ${active.state.phase}`);
     if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
-    const transitioned = await store.mutate(mechanicalRegistries, (loaded) => {
+    const enterGit = await executeWorkflowGitActions(this.cwd, active.workflow, enterActions, `enter ${choice.target}`);
+    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
+    await store.mutate(mechanicalRegistries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         latestReview: { id: existing.reviewId, verdict: existing.result!.verdict, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(loaded)), workflowHash: loaded.workflow.hash, registryContractHash: loaded.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },
@@ -326,8 +334,6 @@ export class ReviewRuntime {
         event: { type: "ReviewDispositionReused", data: { reviewId: existing.reviewId, verdict: existing.result!.verdict, artifactHash: existing.artifactHash, event: choice.event, from: loaded.state.phase, to: choice.target } },
       };
     });
-    const enterGit = await executeWorkflowGitActions(this.cwd, transitioned.workflow, phaseGitActions(transitioned.workflow, transitioned.state.phase, "onEnter"), `enter ${transitioned.state.phase}`);
-    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${state.phase}`, results: enterGit }) } }));
   }
 
   private async failRuntime(reviewId: string, summary: string, findingId: string): Promise<ReviewStatusV1> {

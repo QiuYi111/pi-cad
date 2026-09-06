@@ -8,6 +8,7 @@ export function Settings({ value, onChange }: { value: AppSettings; onChange: (v
   const [draft, setDraft] = useState(value);
   const [runtime, setRuntime] = useState<RuntimeStatus>({ state: "checking", checks: [] });
   const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
   const [auth, setAuth] = useState<AuthStatus>({ provider: "openai-codex", state: "checking" });
   const [authInput, setAuthInput] = useState("");
   const [installation, setInstallation] = useState<InstallationInfo | null>(null);
@@ -18,11 +19,18 @@ export function Settings({ value, onChange }: { value: AppSettings; onChange: (v
     void window.piCad.system.installationInfo().then(setInstallation);
     return window.piCad.auth.onStatus(setAuth);
   }, []);
+  useEffect(() => { setDraft(value); }, [value]);
   const patch = <K extends keyof AppSettings>(key: K, next: AppSettings[K]) => setDraft((current) => ({ ...current, [key]: next }));
-  const save = async () => { setSaving(true); try { const next = await window.piCad.settings.update(draft); await onChange(next); setDraft(next); } finally { setSaving(false); } };
+  const dirty = JSON.stringify(draft) !== JSON.stringify(value);
+  const save = async () => {
+    setSaving(true); setSaveMessage("");
+    try { const next = await window.piCad.settings.update(draft); await onChange(next); setDraft(next); setSaveMessage("Changes saved."); }
+    catch (error) { setSaveMessage(`Save failed: ${error instanceof Error ? error.message : String(error)}`); }
+    finally { setSaving(false); }
+  };
   const chooseProject = async () => { const path = await window.piCad.settings.chooseProject(); if (path) patch("projectPath", path); };
   return <div className="settings-page page-scroll" data-testid="settings-page">
-    <header className="page-heading"><div><span>Preferences</span><h1>Providers and runtime</h1><p>Choose where engineering runs and which models make decisions.</p></div><button className="primary" onClick={() => void save()}>{saving ? "Saving…" : "Save changes"}</button></header>
+    <header className="page-heading"><div><span>Preferences</span><h1>Providers and runtime</h1><p>Choose where engineering runs and which models make decisions.</p></div><div className="settings-save"><button className="primary" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "Saving…" : dirty ? "Save changes" : "Saved"}</button>{saveMessage && <small role={saveMessage.startsWith("Save failed") ? "alert" : "status"}>{saveMessage}</small>}</div></header>
     <nav className="settings-index" aria-label="Settings sections"><button onClick={() => document.getElementById("settings-project")?.scrollIntoView({ behavior: "smooth" })}>Project</button><button onClick={() => document.getElementById("settings-model")?.scrollIntoView({ behavior: "smooth" })}>Account & model</button><button onClick={() => document.getElementById("settings-runtime")?.scrollIntoView({ behavior: "smooth" })}>Runtime</button><button onClick={() => document.getElementById("settings-advanced")?.scrollIntoView({ behavior: "smooth" })}>Advanced</button></nav>
     <div className="settings-grid">
       <section id="settings-project" className="settings-card wide"><header><div><span className="setting-icon"><FolderOpen size={18} /></span><div><h2>Project</h2><p>Prime and Reify only receive this workspace.</p></div></div></header><div className="path-picker"><code>{draft.projectPath || "No project selected"}</code><button onClick={() => void chooseProject()}>Choose folder</button></div></section>
@@ -30,7 +38,7 @@ export function Settings({ value, onChange }: { value: AppSettings; onChange: (v
         <label>Provider<select value={draft.provider} onChange={(event) => patch("provider", event.target.value)}><option value="openai-codex">OpenAI Codex</option><option value="prime">Prime Inference</option><option value="zai">Z.AI</option><option value="openrouter">OpenRouter</option></select></label>
         <label>Default model<input value={draft.model} onChange={(event) => patch("model", event.target.value)} /></label>
         <label>Reasoning<select value={draft.thinking} onChange={(event) => patch("thinking", event.target.value as ThinkingLevel)}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label>
-        <div className="auth-row"><div><i className={auth.state === "signed-in" ? "online" : ""} /><span>{auth.message || auth.state}</span></div>{auth.state === "signed-in" ? <button onClick={() => void window.piCad.auth.signOut().then(setAuth)}>退出登录</button> : <button disabled={auth.state === "waiting"} onClick={() => void window.piCad.auth.login().then(setAuth)}>{auth.state === "waiting" ? "Waiting…" : "Sign in with ChatGPT"}</button>}</div>
+        <div className="auth-row"><div><i className={auth.state === "signed-in" ? "online" : ""} /><span>{auth.message || auth.state}</span></div>{auth.state === "signed-in" ? <button onClick={() => void window.piCad.auth.signOut().then(setAuth)}>退出登录</button> : auth.state === "waiting" ? <button onClick={() => void window.piCad.auth.cancel().then(setAuth)}>Cancel</button> : <button onClick={() => void window.piCad.auth.login().then(setAuth)}>Sign in with ChatGPT</button>}</div>
         {auth.input && <div className="auth-input">{auth.input.kind === "select" ? <select value={authInput} onChange={(event) => setAuthInput(event.target.value)}><option value="">Choose an account</option>{auth.input.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input value={authInput} placeholder={auth.input.placeholder || "Paste the redirect URL"} onChange={(event) => setAuthInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && authInput.trim()) { void window.piCad.auth.submitManualCode(authInput.trim()); setAuthInput(""); } }} />}<button className="primary" disabled={!authInput.trim()} onClick={() => { void window.piCad.auth.submitManualCode(authInput.trim()); setAuthInput(""); }}>Continue</button></div>}
       </section>
       <section className="settings-card"><header><div><span className="setting-icon"><Check size={18} /></span><div><h2>Independent reviewer</h2><p>Defaults to the active author model.</p></div></div></header>

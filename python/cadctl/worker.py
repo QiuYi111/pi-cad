@@ -130,6 +130,7 @@ def _forked_response(request: dict[str, Any]) -> dict[str, Any]:
     child_pid = os.fork()
     if child_pid == 0:
         try:
+            os.setsid()
             devnull = os.open(os.devnull, os.O_RDWR)
             try:
                 os.dup2(devnull, 0)
@@ -175,9 +176,11 @@ def _forked_response(request: dict[str, Any]) -> dict[str, Any]:
         if time.monotonic() >= deadline:
             timed_out = True
             try:
-                os.kill(child_pid, signal.SIGKILL)
+                os.killpg(child_pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            except PermissionError:
+                os.kill(child_pid, signal.SIGKILL)
             os.waitpid(child_pid, 0)
             break
         time.sleep(0.01)

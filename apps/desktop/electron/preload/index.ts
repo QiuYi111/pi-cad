@@ -89,7 +89,7 @@ const api: DesktopApi = {
     approve: (commitId, scope, rationale) => ipcRenderer.invoke(IPC.approvalsApprove, commitId, scope, rationale),
     revoke: (id, reason) => ipcRenderer.invoke(IPC.approvalsRevoke, id, reason),
     release: (commitId, approvalId) => ipcRenderer.invoke(IPC.approvalsRelease, commitId, approvalId),
-    publishRemote: (release, remote, tag) => ipcRenderer.invoke(IPC.approvalsPublishRemote, release, remote, tag),
+    publishRemote: (release, remote, tag) => ipcRenderer.invoke(IPC.approvalsPublishRemote, release.releaseId, remote, tag),
   },
   shell: { reveal: (path) => ipcRenderer.invoke(IPC.shellReveal, path) },
 };

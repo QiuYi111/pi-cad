@@ -33,7 +33,6 @@ export interface WorkspaceCommitManifestV1 {
     assumptions: string[];
   };
   sourceRevision?: string;
-  acceptance?: AcceptanceSummaryInput;
   producer: { transport: "json-cli"; session?: string };
   createdAt: string;
 }
@@ -92,6 +91,7 @@ export async function commitWorkspace(input: {
   artifacts?: Array<string | { path: string; role?: string }>;
   session?: string;
   sourceRevision?: string;
+  acceptance?: AcceptanceSummaryInput;
 }): Promise<WorkspaceCommitManifestV1> {
   const name = safeName(input.name);
   const project = new HarnessProjectStoreV7(input.cwd);

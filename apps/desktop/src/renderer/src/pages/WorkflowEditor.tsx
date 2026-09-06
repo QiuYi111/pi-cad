@@ -24,7 +24,7 @@ export function WorkflowEditor() {
     if (!document) return;
     try {
       const saved = await window.piCad.workflow.save({ ...document, raw: source });
-      setDocuments((items) => [...items.filter((item) => item.id !== selectedId && item.id !== saved.id), saved]); setSelectedId(saved.id); setSelectedPhase(saved.phases[0]?.id || ""); setSource(saved.raw || ""); setMessage("Saved and validated");
+      setDocuments((items) => [...items.filter((item) => item.id !== saved.id), saved]); setSelectedId(`${saved.id}@${saved.version}`); setSelectedPhase(saved.phases[0]?.id || ""); setSource(saved.raw || ""); setMessage("Saved and validated");
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   };
   return <div className="workflow-editor" data-testid="workflow-editor">

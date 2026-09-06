@@ -68,6 +68,17 @@ class MeshDocumentTests(unittest.TestCase):
             self.assertEqual(before_by_id["frame:solid-2"]["positions"], after_by_id["frame:solid-2"]["positions"])
             self.assertNotEqual(before_by_id["pin:solid-1"]["positions"], after_by_id["pin:solid-1"]["positions"])
 
+    def test_unbound_identical_solids_receive_unique_geometry_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "duplicates.step"
+            bd.export_step(bd.Compound([bd.Box(10, 8, 2), bd.Box(10, 8, 2)]), source)
+
+            ids = [part["solidId"] for part in mesh_document(source)["parts"]]
+
+            self.assertEqual(len(ids), 2)
+            self.assertEqual(len(set(ids)), 2)
+            self.assertTrue(all(value.startswith("geometry:") for value in ids))
+
 
 if __name__ == "__main__":
     unittest.main()

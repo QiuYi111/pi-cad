@@ -90,21 +90,30 @@ def mesh_document(path: str | Path) -> dict:
     BRepMesh_IncrementalMesh(shape, tolerance, False, 0.22, True).Perform()
     palette = ["#d7d9dc", "#bfc5cc", "#929aa4", "#e6e7e9", "#aab3be", "#cfd4da"]
     parts = []
+    geometry_occurrences: dict[str, int] = {}
     for index, solid in enumerate(solids):
         vertices, triangles = _tessellate(solid)
+        positions = [coordinate for vertex in vertices for coordinate in _vec(vertex)]
+        indices = [coordinate for triangle in triangles for coordinate in triangle]
         if index in identities:
             part_id, name, solid_id = identities[index]
         else:
-            box_key = ",".join(str(value) for value in _shape_bounds(solid))
-            solid_id = "geometry:" + hashlib.sha256(box_key.encode("utf-8")).hexdigest()[:16]
+            geometry = json.dumps(
+                {"bounds": _shape_bounds(solid), "positions": positions, "indices": indices},
+                separators=(",", ":"),
+            )
+            digest = hashlib.sha256(geometry.encode("utf-8")).hexdigest()[:16]
+            occurrence = geometry_occurrences.get(digest, 0) + 1
+            geometry_occurrences[digest] = occurrence
+            solid_id = f"geometry:{digest}:{occurrence}"
             part_id, name = solid_id, f"Unbound solid {index + 1}"
         parts.append({
             "id": solid_id,
             "partId": part_id,
             "solidId": solid_id,
             "name": name,
-            "positions": [coordinate for vertex in vertices for coordinate in _vec(vertex)],
-            "indices": [coordinate for triangle in triangles for coordinate in triangle],
+            "positions": positions,
+            "indices": indices,
             "color": palette[index % len(palette)],
         })
     return {
