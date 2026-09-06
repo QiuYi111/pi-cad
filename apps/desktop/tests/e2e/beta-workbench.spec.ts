@@ -92,10 +92,18 @@ test("beta workbench keeps one movable composer above canvas and conversation", 
     await page.screenshot({ path: join(process.cwd(), "test-results", "beta-trajectories-1366x768.png") });
     await page.getByRole("button", { name: "Workbench" }).click();
     await expect(page.locator(".workbench-page")).toHaveClass(/mode-conversation/);
+    await expect(page.locator(".design-pane")).toBeHidden();
     await page.keyboard.press("Control+Backslash");
     await handle.dblclick();
     await page.waitForTimeout(280);
     await expect(page.locator(".workbench-page")).toHaveClass(/mode-canvas/);
+    await page.locator(".cad-viewer-open-source").evaluate((host) => {
+      const navigation = document.createElement("div");
+      navigation.className = "tcv_cad_navigation";
+      navigation.dataset.testid = "upstream-viewer-navigation";
+      host.append(navigation);
+    });
+    await expect(page.getByTestId("upstream-viewer-navigation")).toBeHidden();
     const reset = await page.locator(".floating-composer").boundingBox();
     expect(Math.abs((reset!.x + reset!.width / 2) / 1366 - .5)).toBeLessThan(.02);
 

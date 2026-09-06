@@ -136,6 +136,12 @@ button { cursor: pointer; }
 .cad-viewer { position: relative; width:100%;height:100%;overflow: hidden; background: #090a0b; }
 .viewer-canvas, .viewer-canvas canvas { width: 100%; height: 100%; display: block; }
 .cad-viewer-open-source { position: absolute; inset: 0; overflow: hidden; }
+.cad-viewer-open-source>.tcv_cad_viewer{position:absolute;inset:0;width:100%!important;height:100%!important;margin:0!important;overflow:hidden;contain:layout paint style}
+.cad-viewer-open-source .tcv_cad_body{width:100%!important;height:100%!important;min-width:0;overflow:hidden}
+.cad-viewer-open-source .tcv_cad_view{flex:1;min-width:0;max-width:100%;margin:0!important;overflow:hidden}
+/* Reify owns the assembly, inspection and file controls. The upstream tree and
+   toolbar duplicate them and are not safe when the persistent viewer is hidden. */
+.cad-viewer-open-source .tcv_cad_navigation,.cad-viewer-open-source .tcv_cad_toolbar{display:none!important}
 .cad-viewer-open-source .tcv_cad_view { background: #090a0b !important; }
 .cad-viewer-open-source .tcv_cad_body { max-width: 100%; max-height: 100%; }
 .cad-viewer-open-source .tcv_cad_toolbar,
@@ -609,6 +615,6 @@ body { background: radial-gradient(circle at 84% -20%, #344039 0, #171a17 20%, v
 /* The WebGL viewer renders its own positioned controls. Hide the complete
    canvas tree after the conversation reveal so those controls cannot escape
    the canvas stacking context and overlap the navigation rail. */
-.workbench-page.mode-conversation .design-pane{visibility:hidden;pointer-events:none}
+.workbench-page.mode-conversation .design-pane{display:none;visibility:hidden;pointer-events:none}
 .workbench-page.mode-canvas .design-pane,.workbench-page.mode-recent .design-pane{visibility:visible}
 .trace-list-state{margin:18px 12px;color:#777e77;font-size:10px;line-height:1.5}.trace-entry.tool>button{justify-self:start;margin-top:6px;padding:4px 7px;border:1px solid #cbc8c0;border-radius:6px;background:#f0ede7;color:#465048;font-size:9px}

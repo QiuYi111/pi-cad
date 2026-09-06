@@ -151,6 +151,9 @@ test("complete desktop product path", async () => {
   await expect(page.locator(".workbench-page")).toHaveClass(/mode-canvas/);
   await expect(page.getByText("Model built", { exact: true })).not.toHaveCount(0);
   await showWorkspaceMode(page, "conversation");
+  await expect(page.locator(".design-pane")).toBeHidden();
+  await expect(page.locator(".cad-viewer-open-source .tcv_cad_navigation")).toBeHidden();
+  await expect(page.locator(".cad-viewer-open-source .tcv_cad_toolbar")).toBeHidden();
   await expect(page.getByText("Build a compact bracket", { exact: true })).toBeVisible();
   await expect(page.getByText("Model built", { exact: true }).last()).toBeVisible();
   await expect(page.getByText("The first model is built and ready for inspection.").last()).toBeVisible();
