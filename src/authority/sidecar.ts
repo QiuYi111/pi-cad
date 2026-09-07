@@ -9,7 +9,7 @@ import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
 import { handleAgentApi } from "../agent-api/handlers.ts";
 import type { AgentApiRequest, AgentApiResponse } from "../agent-api/protocol.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
-import { compilePhaseCard, workflowCurrentView } from "../harness/card.ts";
+import { compilePhaseCard, compilePhaseContract, workflowCurrentView } from "../harness/card.ts";
 import { renderAuthorizationDenied, type Operation } from "../harness/permissions.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } from "../harness/run-store.ts";
 import { writeStatusProjection } from "./storage.ts";
@@ -27,6 +27,7 @@ type AuthorModelSelection = { provider: string; model: string; thinking: "off" |
 
 export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "phase-card" }
+  | { schema: 1; op: "phase-contract" }
   | { schema: 1; op: "completion-gate" }
   | { schema: 1; op: "mission-capture"; mission: string }
   | { schema: 1; op: "author-model"; provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
@@ -39,7 +40,7 @@ export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "experience-read"; identifier: { seq?: number; sha?: string }; startLine?: number; endLine?: number };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "phase-contract", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
 const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture", "image-generated"]);
@@ -173,6 +174,10 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
       if (role !== "author") throw new Error("phase-card is author-scoped");
       bootstrapAgentApiContracts();
       result = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
+    } else if (value.op === "phase-contract") {
+      if (role !== "author") throw new Error("phase-contract is author-scoped");
+      bootstrapAgentApiContracts();
+      result = await compilePhaseContract(cwd, { registries: mechanicalRegistries });
     } else if (value.op === "completion-gate") {
       if (role !== "author") throw new Error("completion-gate is author-scoped");
       result = await completionGate(cwd);
@@ -461,3 +466,4 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
 function canonicalArtifactContentHash(artifacts: Array<{ path: string; sha256: string }>): string {
   return canonicalDigest(artifacts.map(({ path, sha256 }) => ({ path, sha256 })));
 }
+

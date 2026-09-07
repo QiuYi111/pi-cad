@@ -65,7 +65,7 @@ test("Prime review completion uses ExtensionAPI messaging rather than event cont
   assert.doesNotMatch(extension, /else if \(current\) await notifyReview/);
   assert.match(extension, /persistedReviewNotificationIds\(event\.messages\)/);
   assert.match(extension, /op: "review-current"/);
-  assert.match(extension, /resumedReviewMessage = reviewCompletionMessage\(current\)/);
+  assert.match(extension, /pi\.sendMessage\(reviewCompletionMessage\(current\), \{ deliverAs: "steer" \}\)/);
 });
 
 test("Prime review notification identity survives resume and imported legacy messages", () => {
