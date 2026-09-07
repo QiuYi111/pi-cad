@@ -38,6 +38,46 @@ For 444 faces, the first result reports totals, type distribution, area range, a
 - Never reuse selectors after the resolved artifact hash changes.
 - For Python, assign a JSON-serializable `result`; keep scalars/small objects inline and allow arrays/tables to become collections.
 
+## Motion analysis
+
+Keep motion analysis inside the programmable Probe. Do not look for a hinge,
+four-bar, slider, cam, or other mechanism-specific tool. Write the kinematic
+equations needed by the task, make transformed copies of the selected bodies,
+and use build123d intersection and distance operations to measure each pose.
+Probe is read-only: transformed copies exist only during the calculation.
+
+Check the complete required range. Start and endpoint checks alone are invalid.
+Begin with a coarse sweep, then refine near contact, minimum clearance, a change
+in collision state, an endpoint, a solver failure, or a singularity. Prefer a
+bounded adaptive sweep over a costly union of every swept solid. The author
+chooses the sampling or solver tolerance from the mechanism scale and acceptance
+limits, and reports that coverage so a reviewer can judge it.
+
+Return a small structured summary with these fields when they apply:
+
+```python
+result = {
+    "kind": "motion",
+    "analysisLevel": "fast | standard | full",
+    "movingBodies": ["..."],
+    "parameter": {"name": "angle", "unit": "deg", "requiredRange": [0, 90]},
+    "sampleCount": 0,
+    "maxParameterStep": 0.0,
+    "solverTolerance": None,
+    "endpointsReached": True,
+    "minimumClearance": {"value": 0.0, "unit": "mm", "at": 0.0, "pair": ["...", "..."]},
+    "firstFailure": None,
+    "unreachable": [],
+    "singular": [],
+    "passed": False,
+}
+```
+
+`fast` is an exploratory coarse sweep. `standard` refines all suspicious
+intervals. `full` must cover the full required range at a declared maximum step
+or solver tolerance and is the release-level check. These names describe the
+proof returned by the program; they are not fixed mechanism solvers.
+
 ## Expected Observation
 
 Images precede text. Text contains a bounded semantic projection, exact resolved subject, immutable observation ID, and collection catalog/counts. Raw envelopes remain in immutable tool details, not default context.

@@ -52,7 +52,9 @@ reason to call `inspect.signature()` before using them.
 
 - Read `await cad.workflow.current()` before acting. If it is `None`, inspect
   `await cad.workflow.list()` and start exactly one installed package, normally
-  `await cad.workflow.start("mechanical.one-shot")` for greenfield design,
+  `await cad.workflow.start("mechanical.default")` for ordinary greenfield design,
+  `mechanical.one-shot` only when a task explicitly needs separate specification,
+  interface, BOM, parts, and assembly gates,
   `mechanical.modify` for an existing design change, `mechanical.analysis`
   for a bounded investigation, or a benchmark package only when the task or
   benchmark harness explicitly selects it. `mechanical.benchmark` uses one
@@ -124,6 +126,16 @@ reason to call `inspect.signature()` before using them.
   function defined in a real source file, where Python can capture its source.
   The legacy `"current"` and `"baseline"` subjects remain available for
   state-bound v7 runs; unrestricted imports do not cross the effect fence.
+- For movable designs, treat the concept as a kinematic hypothesis and the
+  programmable Probe as its geometric proof. Write task-specific equations in
+  `cad.probe.run`; transform copies of the moving bodies and measure collision
+  and clearance across the complete required range. Do not infer feasibility
+  from appearance or test only the start and endpoint. Refine sampling around
+  contact, low clearance, solver failure, and singularity. Return the range,
+  sample coverage or tolerance, minimum-clearance pose, first failure,
+  unreachable or singular states, endpoint reachability, and pass/fail result.
+  Use `analysisLevel="fast"`, `"standard"`, or `"full"` in that result to state
+  the strength of the proof; this is an evidence label, not a separate solver.
 - Use `await cad.probe.run(subject=artifact_ref, preset="visual",
   args={"views": ["right", "top"]})` when another direction would resolve a
   visual question. Choose only the views needed from `iso`, `front`, `back`,

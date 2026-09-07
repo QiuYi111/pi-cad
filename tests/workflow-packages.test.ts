@@ -17,7 +17,7 @@ test("installed Mechanical packages expose metadata only and compile branchable 
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
   try {
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.modify", "mechanical.one-shot", "mechanical.parameter-edit", "mechanical.quick-build", "mechanical.quick-check"]);
+    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.default", "mechanical.modify", "mechanical.one-shot", "mechanical.parameter-edit", "mechanical.quick-build", "mechanical.quick-check"]);
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
 
     const benchmark = await resolveWorkflowPackage(cwd, "mechanical.benchmark", mechanicalRegistries);
@@ -55,6 +55,14 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.equal(parameterEdit.workflow.phases.adjust!.actions.includes("cad_build_step"), true);
     assert.deepEqual(parameterEdit.workflow.phases.adjust!.evidenceObligations.map((item) => item.ref), ["parameter-geometry", "parameter-visual"]);
     assert.deepEqual(Object.keys(parameterEdit.workflow.phases.adjust!.transitions), ["applied"]);
+
+    const defaultWorkflow = await resolveWorkflowPackage(cwd, "mechanical.default", mechanicalRegistries);
+    assert.deepEqual(Object.keys(defaultWorkflow.workflow.phases), ["concept", "done", "final_review", "grilling", "modify"]);
+    assert.equal(defaultWorkflow.workflow.initialPhase, "grilling");
+    assert.deepEqual(defaultWorkflow.workflow.phases.modify!.recordObligations, []);
+    assert.deepEqual(defaultWorkflow.workflow.phases.modify!.evidenceObligations.map((item) => item.ref), ["candidate-geometry", "candidate-visual"]);
+    assert.equal(defaultWorkflow.workflow.phases.final_review!.transitions.accepted!.target, "done");
+    assert.equal(defaultWorkflow.workflow.phases.done!.terminal, true);
 
     const quickBuild = await resolveWorkflowPackage(cwd, "mechanical.quick-build", mechanicalRegistries);
     assert.equal(quickBuild.workflow.initialPhase, "build");
@@ -94,11 +102,15 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.equal(loaded.workflow.phases.concept!.actions.includes("cad_build_step"), false);
     assert.equal(loaded.workflow.phases.parts!.actions.includes("cad_build_step"), true);
     assert.deepEqual(loaded.workflow.phases.final_review!.reviewProfile, "mechanical.final-review");
-    assert.equal(loaded.workflow.version, "1.0.8");
+    assert.equal(loaded.workflow.version, "1.0.9");
     const concept = loaded.workflow.phases.concept;
     assert.match(concept.guidance, /realistic multi-view drawings/);
     assert.match(concept.guidance, /section views for critical axes/);
     assert.match(concept.guidance, /not geometry authority/);
+    assert.match(concept.guidance, /kinematic hypothesis/);
+    assert.match(loaded.workflow.phases.assembly!.guidance, /complete required motion/);
+    assert.match(loaded.workflow.phases.assembly!.guidance, /Do not check only the start and endpoint/);
+    assert.match(loaded.workflow.phases.assembly!.guidance, /minimum clearance and pose/);
     assert.equal(loaded.workflow.phases.parts!.rebuildContextOnExit, true);
     assert.equal(loaded.workflow.phases.assembly!.rebuildContextOnExit, true);
     assert.deepEqual(Object.keys(loaded.workflow.phases.final_review!.transitions), ["accepted", "revise_architecture_bom", "revise_assembly", "revise_concept", "revise_interface", "revise_parts", "revise_spec"]);

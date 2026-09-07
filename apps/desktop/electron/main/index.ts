@@ -189,7 +189,7 @@ function registerIpc() {
   const demo = desktopE2E;
   const demoParameterValues: Record<string, ModelParameterValue> = { width: 40, depth: 24, height: 12 };
   let demoEvaluation: { quality: number; difficulty: number; feedback?: string } | undefined;
-  const demoWorkflow: WorkflowDocument = { id: "mechanical.one-shot", version: "1.0.0", description: "Design a verified mechanical assembly", phases: ["grilling", "spec", "concept", "parts", "assembly", "final_review", "release"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 2 ? "complete" : index === 2 ? "active" : "pending", transitions: [], capabilities: index === 2 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.one-shot\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/one-shot.yaml" };
+  const demoWorkflow: WorkflowDocument = { id: "mechanical.default", version: "1.0.0", description: "Design a reviewed mechanical product", phases: ["grilling", "concept", "modify", "final_review", "done"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: index === 1 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.default\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/default.yaml" };
   ipcMain.handle(IPC.settingsGet, () => settingsStore.get());
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
   ipcMain.handle(IPC.settingsChooseProject, async () => {

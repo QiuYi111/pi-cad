@@ -112,6 +112,7 @@ test("Plan C discovers and pins a workflow package before mutation", async () =>
       "mechanical.benchmark-author-only",
       "mechanical.benchmark-build",
       "mechanical.benchmark-triage",
+      "mechanical.default",
       "mechanical.modify",
       "mechanical.one-shot",
       "mechanical.parameter-edit",
