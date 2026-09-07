@@ -151,7 +151,10 @@ test("CodexImagesClient calls only the standalone Codex Images endpoint", async 
 		background: "auto",
 		quality: "high",
 		size: "1536x1024",
+		stream: true,
+		partial_images: 0,
 	});
+	assert.equal(transport.requests[0]!.headers.Accept, "text/event-stream");
 	assert.equal(
 		transport.requests[0]!.url,
 		"https://chatgpt.com/backend-api/codex/images/generations",
@@ -212,8 +215,35 @@ test("CodexImagesClient sends reference images to the standalone edits endpoint"
 		background: "auto",
 		quality: "high",
 		size: "1024x1024",
+		stream: true,
+		partial_images: 0,
 	});
 	assert.equal(result.base64, "ZWRpdGVk");
+});
+
+test("CodexImagesClient accepts keepalives and parses the completed image stream", async () => {
+	const transport = new FakeTransport({
+		status: 200,
+		headers: { "content-type": "text/event-stream" },
+		body: [
+			'data: {"type":"keepalive"}',
+			"",
+			'data: {"type":"image_generation.completed","b64_json":"cG5n","created_at":1778832975,"quality":"high","size":"1536x1024"}',
+			"",
+			"data: [DONE]",
+			"",
+		].join("\n"),
+	});
+	const result = await new CodexImagesClient(transport).generate(
+		{ prompt: "streamed fox", quality: "high", size: "1536x1024" },
+		auth,
+	);
+	assert.deepEqual(result, {
+		base64: "cG5n",
+		created: 1778832975,
+		quality: "high",
+		size: "1536x1024",
+	});
 });
 
 test("CodexImagesClient reports terminal provider limits without retrying", async () => {

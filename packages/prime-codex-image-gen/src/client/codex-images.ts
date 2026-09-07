@@ -176,6 +176,8 @@ export class CodexImagesClient {
 				background: "auto",
 				quality: request.quality,
 				size: request.size,
+				stream: true,
+				partial_images: 0,
 			},
 			auth,
 			signal,
@@ -196,6 +198,8 @@ export class CodexImagesClient {
 				background: "auto",
 				quality: request.quality,
 				size: request.size,
+				stream: true,
+				partial_images: 0,
 			},
 			auth,
 			signal,
@@ -211,7 +215,7 @@ export class CodexImagesClient {
 		const httpRequest: HttpRequest = {
 			method: "POST",
 			url: endpoint,
-			headers: { ...auth.headers },
+			headers: { ...auth.headers, Accept: "text/event-stream" },
 			body: JSON.stringify(body),
 		};
 
@@ -313,6 +317,7 @@ export class CodexImagesClient {
 }
 
 function parseSuccessfulResponse(body: string): GeneratedImageData {
+	if (/^\s*(?:event:|data:)/m.test(body)) return parseStreamingResponse(body);
 	let payload: unknown;
 	try {
 		payload = JSON.parse(body);
@@ -335,6 +340,36 @@ function parseSuccessfulResponse(body: string): GeneratedImageData {
 	if (typeof record.created === "number") result.created = record.created;
 	if (typeof record.quality === "string") result.quality = record.quality;
 	if (typeof record.size === "string") result.size = record.size;
+	return result;
+}
+
+function parseStreamingResponse(body: string): GeneratedImageData {
+	let completed: Record<string, unknown> | undefined;
+	let backendError: Record<string, unknown> | undefined;
+	for (const line of body.split(/\r?\n/)) {
+		if (!line.startsWith("data:")) continue;
+		const raw = line.slice(5).trim();
+		if (!raw || raw === "[DONE]") continue;
+		try {
+			const event = JSON.parse(raw) as Record<string, unknown>;
+			if (event.type === "image_generation.completed") completed = event;
+			if (event.type === "error") backendError = event;
+		} catch {
+			// Ignore malformed progress frames; the final image frame is authoritative.
+		}
+	}
+	if (!completed) {
+		const message = typeof backendError?.message === "string"
+			? backendError.message.replace(/[\r\n\t]+/g, " ").slice(0, 320)
+			: "The Codex image stream ended before a completed image was returned.";
+		throw new ExtensionError("BACKEND_UNAVAILABLE", message);
+	}
+	const base64 = completed.b64_json;
+	if (typeof base64 !== "string" || base64.length === 0) throw noImageError();
+	const result: GeneratedImageData = { base64 };
+	if (typeof completed.created_at === "number") result.created = completed.created_at;
+	if (typeof completed.quality === "string") result.quality = completed.quality;
+	if (typeof completed.size === "string") result.size = completed.size;
 	return result;
 }
 
