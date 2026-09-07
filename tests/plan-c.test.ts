@@ -500,6 +500,70 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   await rm(cwd, { recursive: true, force: true });
 });
 
+test("Prime preserves the first user mission when workflow starts in the same turn", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-pending-mission-"));
+  const runtime = await mkdtemp(join(tmpdir(), "pi-cad-pending-mission-sidecar-"));
+  const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
+  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
+  const handlers = new Map<string, Function>();
+  const sentMessages: Array<{ message: any; options: any }> = [];
+  const pi = {
+    on(name: string, handler: Function) { handlers.set(name, handler); },
+    registerTool() {}, getThinkingLevel() { return "low"; },
+    sendMessage(message: any, options: any) { sentMessages.push({ message, options }); },
+  } as any;
+  primeExtension(pi);
+  const fullMission = "设计完整发动机支架，承受 5 kN 载荷";
+  try {
+    assert.equal(await handlers.get("before_agent_start")!({ prompt: fullMission }, { cwd }), undefined);
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
+    await handlers.get("message_end")!({ message: { role: "toolResult", toolName: "ipython", toolCallId: "start", isError: false } }, { cwd });
+    assert.equal(sentMessages.length, 1, "workflow start must append its first Phase Contract");
+    const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+    assert.ok(active);
+    const frame = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<any>("context/frame.json");
+    assert.equal(frame?.mission, fullMission);
+    await handlers.get("before_agent_start")!({ prompt: "按推荐值" }, { cwd });
+    const unchanged = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<any>("context/frame.json");
+    assert.equal(unchanged?.mission, fullMission);
+  } finally {
+    await sidecar.close();
+    if (previousSocket === undefined) delete process.env.PI_CAD_AUTHOR_SOCKET;
+    else process.env.PI_CAD_AUTHOR_SOCKET = previousSocket;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(runtime, { recursive: true, force: true });
+  }
+});
+
+test("Prime restores the Phase Contract key before before_agent_start on resume", async () => {
+  const { cwd } = await projectFixture();
+  const runtime = await mkdtemp(join(tmpdir(), "pi-cad-resume-contract-"));
+  const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
+  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
+  const firstHandlers = new Map<string, Function>();
+  const pi = { on(name: string, handler: Function) { firstHandlers.set(name, handler); }, registerTool() {}, getThinkingLevel() { return "low"; }, sendMessage() {} } as any;
+  primeExtension(pi);
+  try {
+    const prepared = await firstHandlers.get("before_agent_start")!({ prompt: "original mission" }, { cwd, sessionManager: { getBranch: () => [] } });
+    const persisted = { type: "message", message: { role: "custom", ...prepared.message, timestamp: 1 } };
+    const resumedHandlers = new Map<string, Function>();
+    primeExtension({ ...pi, on(name: string, handler: Function) { resumedHandlers.set(name, handler); } } as any);
+    assert.equal(
+      await resumedHandlers.get("before_agent_start")!({ prompt: "continue" }, { cwd, sessionManager: { getBranch: () => [persisted] } }),
+      undefined,
+      "resume must not append the current phase contract twice",
+    );
+  } finally {
+    await sidecar.close();
+    if (previousSocket === undefined) delete process.env.PI_CAD_AUTHOR_SOCKET;
+    else process.env.PI_CAD_AUTHOR_SOCKET = previousSocket;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(runtime, { recursive: true, force: true });
+  }
+});
+
 test("provider Phase Contract stays stable while live state changes inside one phase", async () => {
   const { cwd } = await projectFixture();
   try {

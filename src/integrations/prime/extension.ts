@@ -54,6 +54,26 @@ export function persistedReviewNotificationIds(messages: any[]): string[] {
   return [...ids];
 }
 
+function transcriptMessages(ctx: any): any[] {
+  try {
+    return (ctx.sessionManager?.getBranch?.() ?? []).map((entry: any) => entry?.message ?? entry);
+  } catch {
+    return [];
+  }
+}
+
+function originalUserRequest(messages: any[]): string | null {
+  const message = messages.find((item) => item?.role === "user");
+  if (!message) return null;
+  if (typeof message.content === "string") return message.content.trim() || null;
+  if (!Array.isArray(message.content)) return null;
+  return message.content
+    .filter((item: any) => item?.type === "text" && typeof item.text === "string")
+    .map((item: any) => item.text)
+    .join("\n")
+    .trim() || null;
+}
+
 /** Append immutable phase contracts to the durable transcript; never rewrite provider history. */
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
   registerExperienceTools(pi);
@@ -67,6 +87,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   let recoveryTurns = 0;
   let phaseCardFailureCount = 0;
   let activeContractKey: string | null = null;
+  let pendingMission: string | null = null;
   const MAX_RECOVERY_TURNS = 3;
   const reviewCompletionMessage = (review: ReviewHandle) => {
     const result = review.result;
@@ -96,6 +117,17 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   };
   const contractKey = (card: Pick<SidecarPhaseCard, "digest" | "workflowHash" | "phase">) =>
     `${card.workflowHash}:${card.phase}:${card.digest}`;
+  const restoreContractKey = (messages: any[]) => {
+    const latest = messages.filter((message) =>
+      message?.role === "custom" && message.customType === PHASE_CARD_CUSTOM_TYPE && message.details?.digest
+    ).at(-1);
+    if (latest) activeContractKey = contractKey(latest.details);
+  };
+  const capturePendingMission = async () => {
+    if (!pendingMission) return;
+    await requestAuthority({ op: "mission-capture", mission: pendingMission });
+    pendingMission = null;
+  };
   const fallbackContractMessage = (warning: string) => ({
     customType: PHASE_CARD_CUSTOM_TYPE,
     display: false,
@@ -116,6 +148,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     { retries: 3, retryDelayMs: 25 },
   );
   const appendChangedContract = async (deliverAs: "steer" | "followUp" = "steer") => {
+    await capturePendingMission().catch(() => undefined);
     const card = await loadContract();
     if (!card) return;
     const key = contractKey(card);
@@ -180,14 +213,16 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   });
   pi.on("before_agent_start", async (event, ctx) => {
     try {
+      const transcript = transcriptMessages(ctx);
+      restoreContractKey(transcript);
+      pendingMission ??= originalUserRequest(transcript) ?? (event.prompt.trim() || null);
       const model = ctx.model;
       if (model) {
         await requestAuthority({
           op: "author-model", provider: model.provider, model: model.id, thinking: pi.getThinkingLevel(),
         }, { retries: 1, retryDelayMs: 20 }).catch(() => undefined);
       }
-      const mission = event.prompt.trim();
-      if (mission) await requestAuthority({ op: "mission-capture", mission }).catch(() => undefined);
+      await capturePendingMission().catch(() => undefined);
       const card = await loadContract();
       phaseCardFailureCount = 0;
       if (!card) return undefined;
@@ -222,8 +257,8 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     // user prompt with a duplicate triggerTurn follow-up and can leave Prime's
     // session-action scheduler permanently "streaming" before provider I/O.
     for (const reviewId of persistedReviewNotificationIds(event.messages)) notifiedReviews.add(reviewId);
-    const latestContract = event.messages.filter((message) => message.role === "custom" && message.customType === PHASE_CARD_CUSTOM_TYPE && message.details?.digest).at(-1);
-    if (latestContract) activeContractKey = `${latestContract.details.workflowHash}:${latestContract.details.phase}:${latestContract.details.digest}`;
+    restoreContractKey(event.messages);
+    pendingMission ??= originalUserRequest(event.messages);
     try {
       const card = await loadContract();
       phaseCardFailureCount = 0;
