@@ -1,7 +1,7 @@
 """Release presentation interpreter (0.8 M4b, whitepaper section 11).
 
-Blender is a pinned optional runtime, exactly like SU2: PATH first, then
-the manifest-installed runtime under .runtime/blender/<version>/, and a
+Blender is a pinned optional runtime, exactly like SU2: the manifest-installed
+runtime under .runtime/blender/<version>/ first, then PATH fallback, and a
 fail-soft "unavailable" status when neither exists. The interpreter is a
 compiler target — it consumes a canonical PresentationSpec and the
 Assembly Definition (from the assembly_design record) and produces:
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -248,6 +249,17 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
     return paths
 
 
+def _blender_manifest_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "scripts" / "blender-manifest.json"
+
+
+def _blender_platform_key() -> str | None:
+    machine = platform.machine().lower()
+    arch = "arm64" if machine in {"arm64", "aarch64"} else "x64" if machine in {"x86_64", "amd64"} else None
+    os_name = "linux" if sys.platform.startswith("linux") else "darwin" if sys.platform == "darwin" else "win32" if sys.platform == "win32" else None
+    return f"{os_name}-{arch}" if os_name and arch else None
+
+
 def blender_binary() -> tuple[str | None, str]:
     """Resolve Blender: env override, pinned runtime, then PATH fallback."""
     override = os.environ.get("PI_CAD_BLENDER_BIN")
@@ -258,17 +270,17 @@ def blender_binary() -> tuple[str | None, str]:
         "PI_CAD_BLENDER_RUNTIME",
         str(Path(__file__).resolve().parents[2] / ".runtime" / "blender"),
     ))
-    if not runtime_root.exists():
-        candidates = []
-    else:
-        candidates = [
-            candidate_dir / "blender"
-            for version_dir in sorted(runtime_root.glob("*/"), reverse=True)
-            for candidate_dir in sorted(version_dir.glob("*/"), reverse=True)
-        ]
-    for candidate in candidates:
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return str(candidate.resolve()), f"{candidate.parent.parent.name}/{candidate.parent.name}"
+    try:
+        manifest = json.loads(_blender_manifest_path().read_text(encoding="utf-8"))
+        version = str(manifest["version"])
+        platform_key = _blender_platform_key()
+        entry = manifest.get("platforms", {}).get(platform_key) if platform_key else None
+        if entry and entry.get("binary"):
+            candidate = runtime_root / version / platform_key / ("blender.exe" if platform_key.startswith("win32-") else "blender")
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve()), f"{version}/{platform_key}"
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
 
     on_path = shutil.which("blender")
     if on_path:

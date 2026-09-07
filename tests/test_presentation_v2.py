@@ -55,6 +55,31 @@ class PresentationSchema(unittest.TestCase):
             ):
                 self.assertEqual(blender_binary(), (str(managed.resolve()), "4.5.3/linux-x64"))
 
+    def test_managed_blender_uses_exact_manifest_version_and_platform(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pinned = root / "runtime" / "4.5.3" / "linux-x64" / "blender"
+            newer = root / "runtime" / "4.6.0" / "linux-x64" / "blender"
+            foreign = root / "runtime" / "9.0.0" / "win32-x64" / "blender"
+            for binary in (pinned, newer, foreign):
+                binary.parent.mkdir(parents=True)
+                binary.write_text("binary")
+                binary.chmod(0o755)
+            manifest = root / "blender-manifest.json"
+            manifest.write_text(json.dumps({
+                "version": "4.5.3",
+                "platforms": {"linux-x64": {"binary": "distribution/blender", "sha256": "pinned"}},
+            }))
+            with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": str(root / "runtime")}, clear=False), patch(
+                "cadctl.presentation._blender_manifest_path", return_value=manifest
+            ), patch("cadctl.presentation._blender_platform_key", return_value="linux-x64"), patch(
+                "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
+            ):
+                self.assertEqual(blender_binary(), (str(pinned.resolve()), "4.5.3/linux-x64"))
+
     def test_cycles_prefers_available_gpu_and_falls_back_to_cpu(self):
         class Device:
             def __init__(self, name, kind):
