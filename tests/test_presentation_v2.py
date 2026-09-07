@@ -14,6 +14,7 @@ import unittest
 from pathlib import Path
 
 from cadctl.presentation import blender_binary, run_presentation, validate_spec
+from cadctl.presentation_driver import configure_cycles_device
 
 ROOT = Path(__file__).resolve().parent.parent
 HAS_BLENDER = shutil.which("blender") is not None
@@ -40,6 +41,53 @@ def _reference_image(path: Path) -> Path:
 
 
 class PresentationSchema(unittest.TestCase):
+    def test_managed_blender_wins_over_path_blender(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            managed = Path(tmp) / "4.5.3" / "linux-x64" / "blender"
+            managed.parent.mkdir(parents=True)
+            managed.write_text("binary")
+            managed.chmod(0o755)
+            with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": tmp}, clear=False), patch(
+                "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
+            ):
+                self.assertEqual(blender_binary(), (str(managed.resolve()), "4.5.3/linux-x64"))
+
+    def test_cycles_prefers_available_gpu_and_falls_back_to_cpu(self):
+        class Device:
+            def __init__(self, name, kind):
+                self.name, self.type, self.use = name, kind, False
+
+        class Preferences:
+            def __init__(self, devices):
+                self.devices = devices
+                self.compute_device_type = "NONE"
+
+            def get_devices(self):
+                return None
+
+        class Cycles:
+            device = "CPU"
+
+        class Scene:
+            cycles = Cycles()
+
+        gpu = Device("NVIDIA TITAN Xp", "CUDA")
+        cpu = Device("CPU", "CPU")
+        scene = Scene()
+        selected = configure_cycles_device(scene, Preferences([gpu, cpu]))
+        self.assertEqual(scene.cycles.device, "GPU")
+        self.assertTrue(gpu.use)
+        self.assertFalse(cpu.use)
+        self.assertEqual(selected["device"], "NVIDIA TITAN Xp")
+
+        scene = Scene()
+        selected = configure_cycles_device(scene, Preferences([cpu]))
+        self.assertEqual(scene.cycles.device, "CPU")
+        self.assertEqual(selected["backend"], "CPU")
+
     def spec(self, **overrides):
         spec = {
             "artifact": "model.step",

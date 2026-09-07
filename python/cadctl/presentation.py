@@ -249,39 +249,38 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
 
 
 def blender_binary() -> tuple[str | None, str]:
-    """Resolve the pinned Blender runtime: env override, PATH, then the
-    manifest-installed runtime directory. Returns (path, version-label)."""
+    """Resolve Blender: env override, pinned runtime, then PATH fallback."""
     override = os.environ.get("PI_CAD_BLENDER_BIN")
     if override:
         return (override, "pinned-override") if Path(override).exists() else (None, "override-missing")
+    # Resolve against the Pi-CAD installation, not the caller's workspace.
+    runtime_root = Path(os.environ.get(
+        "PI_CAD_BLENDER_RUNTIME",
+        str(Path(__file__).resolve().parents[2] / ".runtime" / "blender"),
+    ))
+    if not runtime_root.exists():
+        candidates = []
+    else:
+        candidates = [
+            candidate_dir / "blender"
+            for version_dir in sorted(runtime_root.glob("*/"), reverse=True)
+            for candidate_dir in sorted(version_dir.glob("*/"), reverse=True)
+        ]
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate.resolve()), f"{candidate.parent.parent.name}/{candidate.parent.name}"
+
     on_path = shutil.which("blender")
     if on_path:
-        # A PATH blender must actually run: distro stubs and broken
-        # entries fall through to the managed runtime instead of failing.
         try:
-            lib_dir = Path(on_path).parent / "lib"
-            env = {**os.environ, "OMP_NUM_THREADS": "1"}
-            if lib_dir.exists():
-                env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
             probe = subprocess.run(
                 [on_path, "--version"], capture_output=True, text=True, timeout=90,
-                env=env,
+                env={**os.environ, "OMP_NUM_THREADS": "1"},
             )
             if probe.returncode == 0 and re.search(r"Blender \d", probe.stdout or ""):
-                return on_path, "path"
+                return on_path, "path-fallback"
         except Exception:
             pass
-    # The runtime tree mirrors the SU2 layout: <root>/<version>/<platform>/.
-    # Search platform dirs first (they may contain non-binary entries at
-    # other levels), newest version first.
-    runtime_root = Path(os.environ.get("PI_CAD_BLENDER_RUNTIME", ".runtime/blender"))
-    if not runtime_root.exists():
-        return None, "missing"
-    for version_dir in sorted(runtime_root.glob("*/"), reverse=True):
-        for candidate_dir in sorted(version_dir.glob("*/"), reverse=True):
-            candidate = candidate_dir / "blender"
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return str(candidate.resolve()), f"{version_dir.name}/{candidate_dir.name}"
     return None, "missing"
 
 
@@ -369,7 +368,7 @@ def run_presentation(
             "spec": str(spec_path),
             "artifact": str(artifact_path),
             "subjectArtifactHash": subject_hash,
-            "renderer": "blender+cycles-cpu" if binary else "unavailable",
+            "renderer": "blender+cycles-auto" if binary else "unavailable",
             "blender": {"binary": binary, "source": source},
             "semantic": {
                 "directions": spec.get("directions", []),
@@ -544,7 +543,8 @@ def run_presentation(
         "blenderVersion": _blender_version(binary),
         "renderer": "CYCLES",
         "rendererSettings": {
-            "device": "CPU",
+            "device": report.get("renderer", {}).get("device", "CPU"),
+            "backend": report.get("renderer", {}).get("backend", "CPU"),
             "seed": 0,
             "samples": preset["samples"],
             "resolution": resolution,
