@@ -102,6 +102,7 @@ export function createCodexImageExtension(
 			promptSnippet: "Generate or edit one PNG through the Codex Images flow",
 			promptGuidelines: [
 				"Use codex_generate_image when a generated or edited raster image materially helps the task; it sends a real request through the user's Codex login, so avoid redundant calls.",
+				"BACKEND_UNAVAILABLE is retryable. The tool already makes three transport attempts; after a failure, report the exact error and retry later when the image is required rather than claiming success.",
 				"Pass referencedImagePaths to codex_generate_image only for local images the user explicitly wants uploaded to Codex as edit/reference inputs.",
 				"Pass outputPath to codex_generate_image only when the user requests a destination.",
 			],

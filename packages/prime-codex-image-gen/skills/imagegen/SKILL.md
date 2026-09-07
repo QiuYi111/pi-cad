@@ -30,3 +30,6 @@ Codex service and may change.
   avoid redundant generations that do not materially improve the result.
 - The current version creates one PNG. It does not support masks, batch
   generation, native transparency controls, or JPEG/WebP output.
+- `BACKEND_UNAVAILABLE` is retryable. One call already makes up to three
+  transport attempts. Show the exact final error; retry later when the image is
+  required, and never claim that a failed request produced an image.

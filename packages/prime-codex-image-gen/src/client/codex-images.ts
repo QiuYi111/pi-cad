@@ -193,9 +193,24 @@ export class CodexImagesClient {
 				response = await this.transport.send(httpRequest, signal);
 			} catch (error) {
 				if (signal?.aborted || isAbortError(error)) throw cancelledError();
+				if (attempt < MAX_ATTEMPTS) {
+					try {
+						await this.sleep(retryDelayMs({}, attempt), signal);
+					} catch (sleepError) {
+						if (
+							signal?.aborted ||
+							isAbortError(sleepError) ||
+							isCancelled(sleepError)
+						)
+							throw cancelledError();
+						throw sleepError;
+					}
+					continue;
+				}
 				throw new ExtensionError(
 					"BACKEND_UNAVAILABLE",
-					"The Codex image service could not be reached. The request was not retried to avoid a duplicate image request.",
+					`The Codex image service could not be reached after ${MAX_ATTEMPTS} attempts. ${describeTransportError(error)}`,
+					{ cause: error },
 				);
 			}
 
@@ -326,3 +341,24 @@ function isCancelled(error: unknown): boolean {
 	return error instanceof ExtensionError && error.code === "CANCELLED";
 }
 
+function describeTransportError(error: unknown): string {
+	const details: string[] = [];
+	if (error instanceof Error) {
+		details.push(error.name, error.message);
+		const cause = error.cause;
+		if (cause && typeof cause === "object") {
+			const record = cause as Record<string, unknown>;
+			if (typeof record.code === "string") details.push(record.code);
+			if (typeof record.message === "string") details.push(record.message);
+		}
+	} else {
+		details.push(String(error));
+	}
+	const summary = [...new Set(details)]
+		.join(": ")
+		.replace(/[\r\n\t]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.slice(0, 320);
+	return summary ? `Transport error: ${summary}` : "Transport error: unknown failure.";
+}

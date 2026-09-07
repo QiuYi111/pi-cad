@@ -418,16 +418,26 @@ test("CodexImagesClient stops after one repeated Cloudflare 520 retry", async ()
 	assert.equal(sleeps.length, 1);
 });
 
-test("CodexImagesClient does not retry ambiguous transport or malformed success failures", async (t) => {
+test("CodexImagesClient retries transport failures and reports the final cause", async (t) => {
 	await t.test("transport failure", async () => {
-		const transport = new FakeTransport(new Error("socket closed after write"));
-		const client = new CodexImagesClient(transport);
+		const transport = new FakeTransport(
+			new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }) }),
+			new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }) }),
+			new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }) }),
+		);
+		const sleeps: number[] = [];
+		const client = new CodexImagesClient(transport, { sleep: async (milliseconds) => { sleeps.push(milliseconds); } });
 		await assert.rejects(
 			client.generate({ prompt: "fox", quality: "auto", size: "auto" }, auth),
 			(error: unknown) =>
-				error instanceof ExtensionError && error.code === "BACKEND_UNAVAILABLE",
+				error instanceof ExtensionError &&
+				error.code === "BACKEND_UNAVAILABLE" &&
+				error.message.includes("after 3 attempts") &&
+				error.message.includes("ECONNRESET") &&
+				error.message.includes("socket closed"),
 		);
-		assert.equal(transport.requests.length, 1);
+		assert.equal(transport.requests.length, 3);
+		assert.equal(sleeps.length, 2);
 	});
 
 	await t.test("malformed success", async () => {
@@ -518,4 +528,3 @@ test("CodexImagesClient maps moderation blocks and empty image data", async (t) 
 		);
 	});
 });
-
