@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { test } from "node:test";
 
-import { compilePhaseCard } from "../src/harness/card.ts";
+import { compilePhaseCard, compilePhaseContract } from "../src/harness/card.ts";
 import { canonicalJson } from "../src/harness/canonical.ts";
 import { commitWorkspace, loadWorkspaceCommit, workspaceHistory } from "../src/harness/commit.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
@@ -412,7 +412,7 @@ test("Python cad.commit crosses the real bridge with float snapshots and project
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
-test("thin Prime extension injects exactly one ephemeral current card and is silent without a run", async () => {
+test("thin Prime extension durably appends Phase Contracts and is silent without a run", async () => {
   const { cwd } = await projectFixture();
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-test-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
@@ -421,40 +421,60 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const handlers = new Map<string, Function>();
   const registeredTools = new Map<string, unknown>();
+  const sentMessages: Array<{ message: any; options: any }> = [];
   const pi = {
     on(name: string, handler: Function) { handlers.set(name, handler); },
     registerTool(tool: { name: string }) { registeredTools.set(tool.name, tool); },
     getThinkingLevel() { return "low"; },
+    sendMessage(message: any, options: any) { sentMessages.push({ message, options }); },
   } as any;
   primeExtension(pi);
   assert.deepEqual([...registeredTools.keys()].sort(), [
     "cad_experience_find", "cad_experience_get", "cad_experience_read", "cad_experience_search",
   ]);
+  const beforeAgentStart = handlers.get("before_agent_start")!;
   const context = handlers.get("context")!;
+  const messageEnd = handlers.get("message_end")!;
   const toolCall = handlers.get("tool_call")!;
   const original = [{ role: "user", content: "hello", timestamp: 1 }];
-  const first = await context({ messages: original }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  const prepared = await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  const first = { messages: [...original, { role: "custom", ...prepared.message, timestamp: 2 }] };
+  await context({ messages: first.messages }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
   assert.deepEqual(reportedModel, { provider: "dashscope", model: "qwen3.8-max", thinking: "low" });
   assert.equal(first.messages.length, 2);
   assert.equal(first.messages[1].customType, PHASE_CARD_CUSTOM_TYPE);
   assert.equal(first.messages[1].display, false);
+  const continued = [...original, { role: "assistant", content: "working", timestamp: 2 }, { role: "toolResult", content: "ok", timestamp: 3 }];
+  assert.equal(await context({ messages: continued }, { cwd }), undefined);
+  await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "same", isError: false } }, { cwd });
+  assert.deepEqual(sentMessages, [], "same phase must not append a duplicate contract");
+  assert.equal(
+    await beforeAgentStart({ prompt: "continue", images: undefined, systemPrompt: "system" }, { cwd }),
+    undefined,
+    "a new user turn in the same phase must not append a duplicate contract",
+  );
   const activeAfterContext = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
   assert.ok(activeAfterContext);
   const frame = await new HarnessRunStoreV7(cwd, activeAfterContext.state.runId).transactions.readJson<any>("context/frame.json");
   assert.equal(frame?.mission, "hello");
   await handleAgentApi(cwd, { schema: 1, op: "commit", name: "system-design" });
   await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "integrated" });
-  const second = await context({ messages: [...original, first.messages[1]] }, { cwd });
-  assert.equal(second.messages.filter((item: any) => item.customType === PHASE_CARD_CUSTOM_TYPE).length, 1);
-  assert.match(second.messages.at(-1).content[0].text, /phase review/);
-  assert.doesNotMatch(second.messages.at(-1).content[0].text, /phase design/);
+  await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "transition", isError: false } }, { cwd });
+  assert.equal(sentMessages.length, 1);
+  assert.equal(sentMessages[0].options.deliverAs, "steer");
+  const reviewContract = sentMessages[0].message;
+  assert.match(reviewContract.content[0].text, /phase review/);
+  assert.doesNotMatch(reviewContract.content[0].text, /phase design/);
+  const priorProviderInput = [...first.messages, { role: "assistant", content: "working", timestamp: 3 }, { role: "toolResult", content: "advanced", timestamp: 4 }];
+  const nextProviderInput = [...priorProviderInput, { role: "custom", ...reviewContract, timestamp: 5 }];
+  assert.deepEqual(nextProviderInput.slice(0, priorProviderInput.length), priorProviderInput, "phase transition must be append-only");
   const deniedImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });
   assert.equal(deniedImage.block, true);
   assert.match(deniedImage.reason, /image\.generate is not granted in workflow phase review/);
 
   await sidecar.close();
-  const unavailableContext = await context({ messages: original }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
-  const fallbackCard = unavailableContext.messages.at(-1).content;
+  const unavailableContext = await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  const fallbackCard = unavailableContext.message.content;
   assert.match(fallbackCard, /await cad\.workflow\.current\(\)/);
   assert.match(fallbackCard, /read only/);
   assert.doesNotMatch(fallbackCard, /CAN\n- none/);
@@ -478,4 +498,19 @@ test("thin Prime extension injects exactly one ephemeral current card and is sil
     await rm(runtime, { recursive: true, force: true });
   }
   await rm(cwd, { recursive: true, force: true });
+});
+
+test("provider Phase Contract stays stable while live state changes inside one phase", async () => {
+  const { cwd } = await projectFixture();
+  try {
+    const before = await compilePhaseContract(cwd, { registries: mechanicalRegistries });
+    assert.ok(before);
+    await handleAgentApi(cwd, { schema: 1, op: "commit", name: "system-design" });
+    const after = await compilePhaseContract(cwd, { registries: mechanicalRegistries });
+    assert.ok(after);
+    assert.equal(after.digest, before.digest);
+    assert.equal(after.text, before.text);
+    assert.deepEqual(after.images, []);
+    assert.deepEqual((await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any).unmet, []);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
 });
