@@ -50,14 +50,19 @@ The three engineering calls are therefore canonical exactly as
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.
 
-- Read `await cad.workflow.current()` before acting. If it is `None`, inspect
-  `await cad.workflow.list()` and start exactly one installed package, normally
-  `await cad.workflow.start("mechanical.default")` for ordinary greenfield design,
-  `mechanical.one-shot` only when a task explicitly needs separate specification,
-  interface, BOM, parts, and assembly gates,
-  `mechanical.modify` for an existing design change, `mechanical.analysis`
-  for a bounded investigation, or a benchmark package only when the task or
-  benchmark harness explicitly selects it. `mechanical.benchmark` uses one
+- Read `await cad.workflow.current()` before acting. If it is `None`, always call
+  `await cad.workflow.list()` and route the request to exactly one workflow from
+  that live list. Workflows are user-maintained project data as well as built-in
+  packages; never assume a fixed default or a fixed catalog. Compare the request
+  with each workflow's description and tags. Prefer the narrowest workflow that
+  covers the required result and checks. `mechanical.design` fits ordinary
+  concept-led greenfield work; `mechanical.one-shot` fits work that explicitly
+  needs separate specification, interface, BOM, parts, and assembly gates;
+  `mechanical.modify` fits an existing design change; `mechanical.analysis` fits
+  a bounded investigation. A closer project workflow takes precedence over
+  these examples. Use a benchmark package only when the task or benchmark
+  harness explicitly selects it. An adopted version selects the version after
+  an ID has been routed; it does not select the workflow ID. `mechanical.benchmark` uses one
   pre-build requirements reviewer. `mechanical.benchmark-author-only` is an
   explicit reviewer-free experiment: the author must choose `interpreted` only
   for a unique observable contract, or commit the competing readings and take

@@ -79,6 +79,7 @@ export interface WorkflowDocument {
   phases: WorkflowPhase[];
   raw?: string;
   adopted?: boolean;
+  editable?: boolean;
 }
 export interface WorkflowAdoptionPolicy { schema: 1; globalSafetyPolicyVersion: string; adopted: Record<string, { version: string; adoptedBy: string; adoptedAt: string }>; history: Array<{ id: string; from?: string; to: string; adoptedBy: string; adoptedAt: string }> }
 
@@ -356,6 +357,7 @@ export interface DesktopApi {
     list(): Promise<WorkflowDocument[]>;
     current(): Promise<WorkflowCurrent>;
     save(document: WorkflowDocument): Promise<WorkflowDocument>;
+    delete(document: WorkflowDocument): Promise<void>;
     adoptionPolicy(): Promise<WorkflowAdoptionPolicy>;
     adopt(id: string, version: string): Promise<WorkflowAdoptionPolicy>;
   };
@@ -429,6 +431,7 @@ export const IPC = {
   workflowList: "workflow:list",
   workflowCurrent: "workflow:current",
   workflowSave: "workflow:save",
+  workflowDelete: "workflow:delete",
   workflowAdoptionPolicy: "workflow:adoption-policy",
   workflowAdopt: "workflow:adopt",
   viewerLoadStep: "viewer:load-step",

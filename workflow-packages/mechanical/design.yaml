@@ -1,11 +1,11 @@
 schema: 1
-id: mechanical.default
-description: Default mechanical design loop with one brief, one concept, one build loop, and independent final review.
-tags: [cad, default, design, mechanical]
+id: mechanical.design
+description: Concept-led mechanical design with one brief, one build loop, and independent final review.
+tags: [cad, concept, design, mechanical]
 version: 1.0.0
 workflow:
   schema: 1
-  id: mechanical.default
+  id: mechanical.design
   version: 1.0.0
   parametersSchema: {type: object, additionalProperties: false}
   initialPhase: grilling

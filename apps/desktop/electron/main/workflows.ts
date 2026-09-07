@@ -27,7 +27,8 @@ export class WorkflowStore {
     const roots = [`${piCadRepo}/workflow-packages`, ...(projectPath ? [`${projectPath}/workflows`] : [])];
     const { stdout } = await this.bridge.exec(["bash", "-lc", `find ${roots.map(quote).join(" ")} -type f -name '*.yaml' -print0 2>/dev/null | sort -z | xargs -0 -r -n1 printf '%s\\n'`]);
     const paths = stdout.split("\n").map((item) => item.trim()).filter(Boolean);
-    const [documents, policy] = await Promise.all([Promise.all(paths.map(async (path) => this.read(path))), this.adoptionPolicy(settings)]);
+    const projectWorkflowRoot = projectPath ? `${projectPath.replace(/\/$/, "")}/workflows/` : "";
+    const [documents, policy] = await Promise.all([Promise.all(paths.map(async (path) => this.read(path, Boolean(projectWorkflowRoot && path.startsWith(projectWorkflowRoot))))), this.adoptionPolicy(settings)]);
     const counts = new Map<string, number>(); for (const item of documents) counts.set(item.id, (counts.get(item.id) ?? 0) + 1);
     return documents.map((item) => ({ ...item, adopted: policy.adopted[item.id]?.version === item.version || (!policy.adopted[item.id] && counts.get(item.id) === 1) }));
   }
@@ -59,7 +60,7 @@ export class WorkflowStore {
     } catch { return { authoritative: false, phaseHistory: [], phases: [] }; }
   }
 
-  private async read(path: string): Promise<WorkflowDocument> {
+  private async read(path: string, editable = false): Promise<WorkflowDocument> {
     const { stdout } = await this.bridge.exec(["cat", path]);
     const value = YAML.parse(stdout) as any;
     const sourcePhases = value.workflow?.phases || {};
@@ -83,6 +84,7 @@ export class WorkflowStore {
       sourcePath: path,
       phases,
       raw: stdout,
+      editable,
     };
   }
 
@@ -114,6 +116,27 @@ export class WorkflowStore {
     }
     const atomicWrite = "const fs=require('fs'),p=process.argv[1],t=p+'.'+process.pid+'.tmp';let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>{fs.writeFileSync(t,s,{mode:0o644});fs.renameSync(t,p)})";
     await this.bridge.pipe([node, "-e", atomicWrite, path], document.raw);
-    return this.read(path);
+    return this.read(path, Boolean(projectPath && path.startsWith(`${projectPath.replace(/\/$/, "")}/workflows/`)));
+  }
+
+  async delete(settings: AppSettings, document: WorkflowDocument): Promise<void> {
+    if (!document.sourcePath) throw new Error("Save the workflow before deleting it.");
+    const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
+    if (!projectPath) throw new Error("Choose a project before deleting a workflow.");
+    const root = (await this.bridge.exec(["realpath", "-e", `${projectPath}/workflows`])).stdout.trim();
+    const path = (await this.bridge.exec(["realpath", "-e", "--", document.sourcePath])).stdout.trim();
+    if (!root || !path.startsWith(`${root}/`)) throw new Error("Only project workflows can be deleted.");
+    const installed = await this.read(path, true);
+    if (installed.id !== document.id || installed.version !== document.version) throw new Error("Workflow identity changed before deletion.");
+    await this.bridge.exec(["rm", "--", path]);
+
+    const policy = await this.adoptionPolicy(settings);
+    if (policy.adopted[document.id]?.version === document.version) {
+      const adopted = { ...policy.adopted };
+      delete adopted[document.id];
+      const next = { ...policy, adopted };
+      const directory = `${projectPath}/.pi-cad/admin`; const target = `${directory}/workflow-adoptions.json`; const temporary = `${target}.${process.pid}.tmp`;
+      await this.bridge.exec(["mkdir", "-p", directory]); await this.bridge.exec(["tee", temporary], { input: `${JSON.stringify(next, null, 2)}\n` }); await this.bridge.exec(["chmod", "600", temporary]); await this.bridge.exec(["mv", "--", temporary, target]);
+    }
   }
 }

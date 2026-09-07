@@ -17,7 +17,7 @@ test("installed Mechanical packages expose metadata only and compile branchable 
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
   try {
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.default", "mechanical.modify", "mechanical.one-shot", "mechanical.parameter-edit", "mechanical.quick-build", "mechanical.quick-check"]);
+    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.design", "mechanical.modify", "mechanical.one-shot", "mechanical.parameter-edit", "mechanical.quick-build", "mechanical.quick-check"]);
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
 
     const benchmark = await resolveWorkflowPackage(cwd, "mechanical.benchmark", mechanicalRegistries);
@@ -56,13 +56,13 @@ test("installed Mechanical packages expose metadata only and compile branchable 
     assert.deepEqual(parameterEdit.workflow.phases.adjust!.evidenceObligations.map((item) => item.ref), ["parameter-geometry", "parameter-visual"]);
     assert.deepEqual(Object.keys(parameterEdit.workflow.phases.adjust!.transitions), ["applied"]);
 
-    const defaultWorkflow = await resolveWorkflowPackage(cwd, "mechanical.default", mechanicalRegistries);
-    assert.deepEqual(Object.keys(defaultWorkflow.workflow.phases), ["concept", "done", "final_review", "grilling", "modify"]);
-    assert.equal(defaultWorkflow.workflow.initialPhase, "grilling");
-    assert.deepEqual(defaultWorkflow.workflow.phases.modify!.recordObligations, []);
-    assert.deepEqual(defaultWorkflow.workflow.phases.modify!.evidenceObligations.map((item) => item.ref), ["candidate-geometry", "candidate-visual"]);
-    assert.equal(defaultWorkflow.workflow.phases.final_review!.transitions.accepted!.target, "done");
-    assert.equal(defaultWorkflow.workflow.phases.done!.terminal, true);
+    const designWorkflow = await resolveWorkflowPackage(cwd, "mechanical.design", mechanicalRegistries);
+    assert.deepEqual(Object.keys(designWorkflow.workflow.phases), ["concept", "done", "final_review", "grilling", "modify"]);
+    assert.equal(designWorkflow.workflow.initialPhase, "grilling");
+    assert.deepEqual(designWorkflow.workflow.phases.modify!.recordObligations, []);
+    assert.deepEqual(designWorkflow.workflow.phases.modify!.evidenceObligations.map((item) => item.ref), ["candidate-geometry", "candidate-visual"]);
+    assert.equal(designWorkflow.workflow.phases.final_review!.transitions.accepted!.target, "done");
+    assert.equal(designWorkflow.workflow.phases.done!.terminal, true);
 
     const quickBuild = await resolveWorkflowPackage(cwd, "mechanical.quick-build", mechanicalRegistries);
     assert.equal(quickBuild.workflow.initialPhase, "build");

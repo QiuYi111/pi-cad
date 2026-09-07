@@ -51,6 +51,7 @@ const api: DesktopApi = {
     list: () => ipcRenderer.invoke(IPC.workflowList),
     current: () => ipcRenderer.invoke(IPC.workflowCurrent),
     save: (document) => ipcRenderer.invoke(IPC.workflowSave, document),
+    delete: (document) => ipcRenderer.invoke(IPC.workflowDelete, document),
     adoptionPolicy: () => ipcRenderer.invoke(IPC.workflowAdoptionPolicy),
     adopt: (id, version) => ipcRenderer.invoke(IPC.workflowAdopt, id, version),
   },

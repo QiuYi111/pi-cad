@@ -35,4 +35,26 @@ describe("desktop workflow projection", () => {
     expect(shouldRefreshWorkflow({ type: "tool_execution_end" })).toBe(true);
     expect(shouldRefreshWorkflow({ type: "agent_end" })).toBe(true);
   });
+
+  it("deletes project workflows but refuses built-in packages", async () => {
+    const removed: string[] = [];
+    const source = "/project/workflows/custom-design.yaml";
+    const yaml = "schema: 1\nid: custom.design\ndescription: Test\ntags: [custom]\nversion: 1.0.0\nworkflow:\n  schema: 1\n  id: custom.design\n  version: 1.0.0\n  initialPhase: done\n  phases:\n    done:\n      purpose: Done\n      actions: []\n      grants: [file_read]\n      writeScopes: []\n      recordObligations: []\n      evidenceObligations: []\n      contextProviders: [kernel.current-action]\n      hooks: []\n      transitions: {}\n      terminal: true\n";
+    const bridge = {
+      resolveRuntimePaths: async () => ({ projectPath: "/project", piCadRepo: "/runtime" }),
+      exec: async (args: string[]) => {
+        if (args[0] === "realpath" && args.at(-1) === "/project/workflows") return { stdout: "/project/workflows\n" };
+        if (args[0] === "realpath") return { stdout: `${args.at(-1)}\n` };
+        if (args[0] === "cat" && args[1] === source) return { stdout: yaml };
+        if (args[0] === "cat") throw new Error("missing policy");
+        if (args[0] === "rm") { removed.push(args[2]!); return { stdout: "" }; }
+        if (args[0] === "test") return { stdout: "" };
+        throw new Error(`unexpected command: ${args.join(" ")}`);
+      },
+    };
+    const store = new WorkflowStore(bridge as never);
+    await store.delete({ projectPath: "/project" } as never, { id: "custom.design", version: "1.0.0", description: "Test", sourcePath: source, phases: [] });
+    expect(removed).toEqual([source]);
+    await expect(store.delete({ projectPath: "/project" } as never, { id: "mechanical.design", version: "1.0.0", description: "Built in", sourcePath: "/runtime/workflow-packages/mechanical/design.yaml", phases: [] })).rejects.toThrow("Only project workflows");
+  });
 });

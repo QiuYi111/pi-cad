@@ -189,7 +189,7 @@ function registerIpc() {
   const demo = desktopE2E;
   const demoParameterValues: Record<string, ModelParameterValue> = { width: 40, depth: 24, height: 12 };
   let demoEvaluation: { quality: number; difficulty: number; feedback?: string } | undefined;
-  const demoWorkflow: WorkflowDocument = { id: "mechanical.default", version: "1.0.0", description: "Design a reviewed mechanical product", phases: ["grilling", "concept", "modify", "final_review", "done"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: index === 1 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.default\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/default.yaml" };
+  const demoWorkflow: WorkflowDocument = { id: "mechanical.design", version: "1.0.0", description: "Design a reviewed mechanical product", phases: ["grilling", "concept", "modify", "final_review", "done"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: index === 1 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.design\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/design.yaml" };
   ipcMain.handle(IPC.settingsGet, () => settingsStore.get());
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
   ipcMain.handle(IPC.settingsChooseProject, async () => {
@@ -265,6 +265,7 @@ function registerIpc() {
     phaseHistory: ["grilling", "spec", "concept"], phases: demoWorkflow.phases, authoritative: false,
   } : new WorkflowStore(await bridge()).current(await settingsStore.get()));
   ipcMain.handle(IPC.workflowSave, async (_event, document: WorkflowDocument) => demo ? document : new WorkflowStore(await bridge()).save(await settingsStore.get(), document));
+  ipcMain.handle(IPC.workflowDelete, async (_event, document: WorkflowDocument) => demo ? undefined : new WorkflowStore(await bridge()).delete(await settingsStore.get(), document));
   ipcMain.handle(IPC.workflowAdoptionPolicy, async () => new WorkflowStore(await bridge()).adoptionPolicy(await settingsStore.get()));
   ipcMain.handle(IPC.workflowAdopt, async (_event, id: string, version: string) => new WorkflowStore(await bridge()).adopt(await settingsStore.get(), id, version));
   ipcMain.handle(IPC.viewerChooseStep, async () => {
