@@ -1,4 +1,5 @@
 import type { CodexAuth } from "../auth/codex-auth.ts";
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { ExtensionError, cancelledError } from "../errors.ts";
 import { abortableSleep, retryDelayMs, type Sleep } from "../runtime/retry.ts";
 import type {
@@ -21,6 +22,7 @@ const TERMINAL_LIMIT_CODES =
 	/usage[_ ]limit[_ ]reached|usage[_ ]not[_ ]included|insufficient[_ ]quota|monthly[_ ]limit|billing[_ ]hard[_ ]limit/i;
 const MODERATION_CODES = /moderation|content_policy|safety/i;
 const RETRYABLE_SERVER_STATUSES = new Set([502, 503, 504, 520, 522, 523, 524]);
+const ENV_PROXY_DISPATCHER = new EnvHttpProxyAgent();
 
 export interface CodexGenerateRequest {
 	prompt: string;
@@ -43,6 +45,20 @@ interface ErrorPayload {
 }
 
 export class FetchHttpTransport implements HttpTransport {
+	private readonly fetchEndpoint: (
+		url: string,
+		init: RequestInit,
+	) => Promise<Response>;
+
+	constructor(
+		fetchEndpoint: (
+			url: string,
+			init: RequestInit,
+		) => Promise<Response> = fetchCodexEndpoint,
+	) {
+		this.fetchEndpoint = fetchEndpoint;
+	}
+
 	async send(
 		request: HttpRequest,
 		signal?: AbortSignal,
@@ -54,7 +70,7 @@ export class FetchHttpTransport implements HttpTransport {
 			redirect: "error",
 		};
 		if (signal !== undefined) init.signal = signal;
-		const response = await fetchCodexEndpoint(request.url, init);
+		const response = await this.fetchEndpoint(request.url, init);
 		const contentLength = response.headers.get("content-length");
 		if (
 			contentLength !== null &&
@@ -111,11 +127,25 @@ async function fetchCodexEndpoint(
 	url: string,
 	init: RequestInit,
 ): Promise<Response> {
+	const proxyInit = {
+		method: init.method,
+		headers: init.headers as Record<string, string>,
+		body: typeof init.body === "string" ? init.body : undefined,
+		redirect: init.redirect,
+		signal: init.signal,
+		dispatcher: ENV_PROXY_DISPATCHER,
+	} as Parameters<typeof undiciFetch>[1];
 	switch (url) {
 		case CODEX_GENERATIONS_ENDPOINT:
-			return fetch(CODEX_GENERATIONS_ENDPOINT, init);
+			return (await undiciFetch(
+				CODEX_GENERATIONS_ENDPOINT,
+				proxyInit,
+			)) as unknown as Response;
 		case CODEX_EDITS_ENDPOINT:
-			return fetch(CODEX_EDITS_ENDPOINT, init);
+			return (await undiciFetch(
+				CODEX_EDITS_ENDPOINT,
+				proxyInit,
+			)) as unknown as Response;
 		default:
 			throw new Error("Unexpected Codex image service endpoint.");
 	}

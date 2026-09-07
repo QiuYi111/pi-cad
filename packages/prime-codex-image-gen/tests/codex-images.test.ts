@@ -56,9 +56,8 @@ function parseJson(value: string): unknown {
 }
 
 test("FetchHttpTransport cancels a response with an excessive declared size", async () => {
-	const originalFetch = globalThis.fetch;
 	let bodyCancelled = false;
-	globalThis.fetch = async () =>
+	const fetchEndpoint = async () =>
 		new Response(
 			new ReadableStream({
 				cancel() {
@@ -70,19 +69,15 @@ test("FetchHttpTransport cancels a response with an excessive declared size", as
 				headers: { "content-length": String(100 * 1024 * 1024) },
 			},
 		);
-	try {
-		await assert.rejects(
-			new FetchHttpTransport().send({
+	await assert.rejects(
+		new FetchHttpTransport(fetchEndpoint).send({
 				method: "POST",
 				url: "https://chatgpt.com/backend-api/codex/images/generations",
 				headers: {},
 				body: "{}",
 			}),
-		);
-		assert.equal(bodyCancelled, true);
-	} finally {
-		globalThis.fetch = originalFetch;
-	}
+	);
+	assert.equal(bodyCancelled, true);
 });
 
 test("FetchHttpTransport rejects non-Codex endpoints before fetch", async () => {
@@ -109,10 +104,9 @@ test("FetchHttpTransport rejects non-Codex endpoints before fetch", async () => 
 });
 
 test("FetchHttpTransport stops reading an excessive streamed response", async () => {
-	const originalFetch = globalThis.fetch;
 	const chunk = new Uint8Array(1024 * 1024);
 	let pulls = 0;
-	globalThis.fetch = async () =>
+	const fetchEndpoint = async () =>
 		new Response(
 			new ReadableStream<Uint8Array>({
 				pull(controller) {
@@ -123,19 +117,15 @@ test("FetchHttpTransport stops reading an excessive streamed response", async ()
 			}),
 			{ status: 200 },
 		);
-	try {
-		await assert.rejects(
-			new FetchHttpTransport().send({
+	await assert.rejects(
+		new FetchHttpTransport(fetchEndpoint).send({
 				method: "POST",
 				url: "https://chatgpt.com/backend-api/codex/images/generations",
 				headers: {},
 				body: "{}",
 			}),
-		);
-		assert.ok(pulls < 40);
-	} finally {
-		globalThis.fetch = originalFetch;
-	}
+	);
+	assert.ok(pulls < 40);
 });
 
 test("CodexImagesClient calls only the standalone Codex Images endpoint", async () => {

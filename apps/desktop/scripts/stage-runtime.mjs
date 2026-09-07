@@ -35,7 +35,7 @@ for (const name of ["package.json", "package-lock.json", "README.md", "README.zh
   await cp(join(repository, name), join(piCadDestination, name));
 }
 await mkdir(join(piCadDestination, "node_modules"), { recursive: true });
-for (const name of ["jiti", "typebox", "yaml"]) {
+for (const name of ["jiti", "typebox", "undici", "yaml"]) {
   await cp(join(repository, "node_modules", name), join(piCadDestination, "node_modules", name), { recursive: true });
 }
 
