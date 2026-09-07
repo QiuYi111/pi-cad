@@ -8,6 +8,12 @@ description: Use Pi-CAD's Python API in Prime's persistent IPython workspace for
 Use ordinary Python variables as working state and `import cad` as the small
 engineering capability surface.
 
+When acceptance needs structural, flow, or thermal evidence, load the `pi-cad`
+skill and the matching `structural-analysis` or `thermal-fluid-analysis` skill
+before checking Python. Managed choices already include OpenFOAM 14, SU2 8.5.0,
+and torch-fem 0.9 CPU/CUDA; discover readiness through
+`await cad.workflow.current()` and run them through Pi-CAD Recipes. Python packages are not the solver catalog.
+
 The complete public signatures needed by the author workflow are below. Call
 them directly; importing `inspect`, reading docstrings, source files, or package
 internals to rediscover these signatures is a workflow violation and is never a
