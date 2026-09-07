@@ -22,7 +22,6 @@ const TERMINAL_LIMIT_CODES =
 	/usage[_ ]limit[_ ]reached|usage[_ ]not[_ ]included|insufficient[_ ]quota|monthly[_ ]limit|billing[_ ]hard[_ ]limit/i;
 const MODERATION_CODES = /moderation|content_policy|safety/i;
 const RETRYABLE_SERVER_STATUSES = new Set([502, 503, 504, 520, 522, 523, 524]);
-const ENV_PROXY_DISPATCHER = new EnvHttpProxyAgent();
 
 export interface CodexGenerateRequest {
 	prompt: string;
@@ -45,24 +44,13 @@ interface ErrorPayload {
 }
 
 export class FetchHttpTransport implements HttpTransport {
-	private readonly fetchEndpoint: (
-		url: string,
-		init: RequestInit,
-	) => Promise<Response>;
+	private readonly fetchEndpoint: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
 
-	constructor(
-		fetchEndpoint: (
-			url: string,
-			init: RequestInit,
-		) => Promise<Response> = fetchCodexEndpoint,
-	) {
+	constructor(fetchEndpoint?: (url: string, init: RequestInit) => Promise<Response>) {
 		this.fetchEndpoint = fetchEndpoint;
 	}
 
-	async send(
-		request: HttpRequest,
-		signal?: AbortSignal,
-	): Promise<HttpResponse> {
+	async send(request: HttpRequest, signal?: AbortSignal): Promise<HttpResponse> {
 		const init: RequestInit = {
 			method: request.method,
 			headers: request.headers,
@@ -70,32 +58,24 @@ export class FetchHttpTransport implements HttpTransport {
 			redirect: "error",
 		};
 		if (signal !== undefined) init.signal = signal;
-		const response = await this.fetchEndpoint(request.url, init);
-		const contentLength = response.headers.get("content-length");
-		if (
-			contentLength !== null &&
-			/^\d+$/.test(contentLength) &&
-			Number(contentLength) > MAX_RESPONSE_BODY_BYTES
-		) {
-			if (response.body !== null) {
-				await response.body.cancel().catch(() => undefined);
+		const dispatcher = this.fetchEndpoint ? undefined : new EnvHttpProxyAgent();
+		try {
+			const response = this.fetchEndpoint
+				? await this.fetchEndpoint(request.url, init)
+				: await fetchCodexEndpoint(request.url, init, dispatcher!);
+			const contentLength = response.headers.get("content-length");
+			if (contentLength !== null && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_RESPONSE_BODY_BYTES) {
+				if (response.body !== null) await response.body.cancel().catch(() => undefined);
+				throw new Error("The Codex image service response exceeded the safe size limit.");
 			}
-			throw new Error(
-				"The Codex image service response exceeded the safe size limit.",
-			);
+			const headers: Record<string, string> = {};
+			response.headers.forEach((value, key) => { headers[key] = value; });
+			return { status: response.status, headers, body: await readBoundedResponseBody(response) };
+		} finally {
+			await dispatcher?.close().catch(() => undefined);
 		}
-		const headers: Record<string, string> = {};
-		response.headers.forEach((value, key) => {
-			headers[key] = value;
-		});
-		return {
-			status: response.status,
-			headers,
-			body: await readBoundedResponseBody(response),
-		};
 	}
 }
-
 async function readBoundedResponseBody(response: Response): Promise<string> {
 	if (response.body === null) return "";
 
@@ -126,6 +106,7 @@ async function readBoundedResponseBody(response: Response): Promise<string> {
 async function fetchCodexEndpoint(
 	url: string,
 	init: RequestInit,
+	dispatcher: EnvHttpProxyAgent,
 ): Promise<Response> {
 	const proxyInit = {
 		method: init.method,
@@ -133,7 +114,7 @@ async function fetchCodexEndpoint(
 		body: typeof init.body === "string" ? init.body : undefined,
 		redirect: init.redirect,
 		signal: init.signal,
-		dispatcher: ENV_PROXY_DISPATCHER,
+		dispatcher,
 	} as Parameters<typeof undiciFetch>[1];
 	switch (url) {
 		case CODEX_GENERATIONS_ENDPOINT:
