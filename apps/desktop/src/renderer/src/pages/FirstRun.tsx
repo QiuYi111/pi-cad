@@ -6,7 +6,8 @@ import { Wordmark } from "../components/Brand";
 export function setupErrorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   if (/404|not found/i.test(text) && /node|nodejs/i.test(text)) return "Node.js 安装包下载失败。请检查网络后重试。";
-  if (/unsupported.*(?:cpu|architecture)/i.test(text)) return "当前 WSL 处理器架构不受支持。";
+  const architecture = text.match(/Unsupported WSL CPU architecture:\s*([^\r\n]+)/i);
+  if (architecture) return `当前 WSL 处理器架构无法识别：${architecture[1]!.trim()}`;
   const clean = text
     .replace(/^Error:\s*/i, "")
     .replace(/^Error invoking remote method '[^']+':\s*/i, "")

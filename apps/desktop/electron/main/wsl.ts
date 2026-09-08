@@ -73,8 +73,9 @@ export function nodeInstallScript(version = "v22.23.2"): string {
   return [
     "set -e",
     `picad_node_version=${version}`,
-    "picad_node_machine=$(uname -m)",
-    "case \"$picad_node_machine\" in x86_64|amd64) picad_node_arch=x64 ;; aarch64|arm64) picad_node_arch=arm64 ;; *) echo \"Unsupported WSL CPU architecture: $picad_node_machine\" >&2; exit 1 ;; esac",
+    "picad_node_machine=$(uname -m | tr -d '\\r\\n' | tr '[:upper:]' '[:lower:]')",
+    "picad_dpkg_arch=$(dpkg --print-architecture 2>/dev/null | tr -d '\\r\\n' | tr '[:upper:]' '[:lower:]' || true)",
+    "case \"$picad_node_machine:$picad_dpkg_arch\" in x86_64:*|amd64:*|*:amd64) picad_node_arch=x64 ;; aarch64:*|arm64:*|*:arm64) picad_node_arch=arm64 ;; *) echo \"Unsupported WSL CPU architecture: uname=$picad_node_machine dpkg=$picad_dpkg_arch\" >&2; exit 1 ;; esac",
     "picad_node_root=$HOME/.local/lib/nodejs",
     "picad_node_dir=$picad_node_root/node-$picad_node_version-linux-$picad_node_arch",
     "picad_node_archive=/tmp/pi-cad-node.tar.xz",

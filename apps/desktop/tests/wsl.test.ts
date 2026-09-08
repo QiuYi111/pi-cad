@@ -101,8 +101,9 @@ describe("bundled engineering knowledge", () => {
 describe("WSL first-install status", () => {
   it("downloads the Node archive format published for both supported WSL architectures", () => {
     const script = nodeInstallScript();
-    expect(script).toContain("x86_64|amd64) picad_node_arch=x64");
-    expect(script).toContain("aarch64|arm64) picad_node_arch=arm64");
+    expect(script).toContain("x86_64:*|amd64:*|*:amd64) picad_node_arch=x64");
+    expect(script).toContain("aarch64:*|arm64:*|*:arm64) picad_node_arch=arm64");
+    expect(script).toContain("dpkg --print-architecture");
     expect(script).toContain("linux-$picad_node_arch.tar.xz");
     expect(script).toContain("tar -xJf");
     expect(script).not.toContain("linux-$picad_node_arch.tar.gz");
