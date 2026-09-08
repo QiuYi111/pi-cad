@@ -53,3 +53,12 @@ test("CAD skill routes simulation to managed backends before Python discovery", 
     assert.match(text, /Python (?:packages|imports).*(?:not|never).*solver (?:catalog|availability)/i);
   }
 });
+
+test("Blender product rendering uses the managed runtime and requires visual preview review", () => {
+  const skill = readFileSync(join(skills, "blender-product-rendering", "SKILL.md"), "utf-8");
+  assert.match(skill, /cadctl blender/);
+  assert.match(skill, /managed runtime/i);
+  assert.match(skill, /low-resolution preview/i);
+  assert.match(skill, /Animation requires user intent/i);
+  assert.doesNotMatch(skill, /subprocess\.(?:run|Popen)\(\[?["']blender["']/);
+});

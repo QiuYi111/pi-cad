@@ -41,6 +41,30 @@ def _reference_image(path: Path) -> Path:
 
 
 class PresentationSchema(unittest.TestCase):
+    def test_agent_blender_command_uses_managed_binary(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from cadctl.cli import main
+
+        completed = SimpleNamespace(returncode=7)
+        with patch("cadctl.presentation.blender_binary", return_value=("/managed/blender", "4.5.3/linux-x64")), patch(
+            "cadctl.cli.subprocess.run", return_value=completed
+        ) as run:
+            self.assertEqual(main(["blender", "--", "--background", "--python", "scene.py"]), 7)
+        self.assertEqual(run.call_args.args[0], ["/managed/blender", "--background", "--python", "scene.py"])
+
+    def test_agent_blender_command_rejects_path_fallback(self):
+        from unittest.mock import patch
+
+        from cadctl.cli import main
+
+        with patch("cadctl.presentation.blender_binary", return_value=("/usr/bin/blender", "path-fallback")), patch(
+            "cadctl.cli.subprocess.run"
+        ) as run:
+            self.assertEqual(main(["blender", "--", "--version"]), 2)
+        run.assert_not_called()
+
     def test_managed_blender_wins_over_path_blender(self):
         import os
         from unittest.mock import patch

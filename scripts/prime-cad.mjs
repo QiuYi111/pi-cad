@@ -34,6 +34,7 @@ const args = [
   "--extension", resolve(repository, "packages/prime-codex-image-gen/index.ts"),
   "--skill", resolve(repository, "skills/cad/SKILL.md"),
   "--skill", resolve(repository, "skills/grill-me/SKILL.md"),
+  "--skill", resolve(repository, "skills/blender-product-rendering/SKILL.md"),
   "--skill", resolve(repository, "packages/prime-codex-image-gen/skills/imagegen/SKILL.md"),
   ...process.argv.slice(2),
 ];

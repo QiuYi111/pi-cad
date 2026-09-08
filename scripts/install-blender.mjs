@@ -16,6 +16,29 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as PathResolve } from "node:path";
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
+
+async function downloadArchive(url, archivePath, env, fetchImpl) {
+  if (!fetchImpl) {
+    try {
+      execFileSync("curl", ["--fail", "--location", "--retry", "3", "--continue-at", "-", "--progress-bar", "--output", archivePath, url], {
+        env,
+        stdio: ["ignore", "inherit", "inherit"],
+      });
+      return;
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  const dispatcher = fetchImpl ? undefined : new EnvHttpProxyAgent({ env });
+  try {
+    const res = await (fetchImpl ?? undiciFetch)(url, dispatcher ? { dispatcher } : undefined);
+    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
+    writeFileSync(archivePath, Buffer.from(await res.arrayBuffer()));
+  } finally {
+    await dispatcher?.close();
+  }
+}
 
 function sha256File(path) {
   const hash = createHash("sha256");
@@ -44,12 +67,12 @@ function pythonExtract(python, env, root, archivePath, distribution, destDir) {
   execFileSync(python, ["-c", script, archivePath, distribution, destDir], { cwd: root, env, stdio: "pipe" });
 }
 
-export async function installBlender({ root, python, env = process.env }) {
-  if (process.env.PI_CAD_SKIP_BLENDER) {
-    console.log("[pi-cad] PI_CAD_SKIP_BLENDER set; skipping Blender install (release presentation limited to PATH blender)");
+export async function installBlender({ root, python, env = process.env, fetchImpl }) {
+  if (env.PI_CAD_SKIP_BLENDER) {
+    console.log("[pi-cad] PI_CAD_SKIP_BLENDER set; skipping managed Blender install");
     return { status: "skipped" };
   }
-  if (process.env.PI_CAD_BLENDER_BIN) {
+  if (env.PI_CAD_BLENDER_BIN) {
     console.log("[pi-cad] PI_CAD_BLENDER_BIN set; using external Blender binary");
     return { status: "external" };
   }
@@ -57,22 +80,22 @@ export async function installBlender({ root, python, env = process.env }) {
   try {
     manifest = JSON.parse(readFileSync(join(root, "scripts", "blender-manifest.json"), "utf-8"));
   } catch {
-    console.warn("[pi-cad] Blender manifest unreadable; release presentation relies on PATH blender");
+    console.warn("[pi-cad] Blender manifest unreadable; managed presentation is unavailable");
     return { status: "unavailable" };
   }
   const key = platformKey();
   const entry = key && manifest.platforms?.[key];
   if (!entry || !entry.binary) {
-    console.warn(`[pi-cad] no Blender archive for platform ${key ?? process.platform}; release presentation relies on PATH blender`);
+    console.warn(`[pi-cad] no Blender archive for platform ${key ?? process.platform}; managed presentation is unavailable`);
     return { status: "unavailable" };
   }
   if (!entry.sha256 || entry.sha256 === "pending-download-verification") {
-    console.warn("[pi-cad] Blender archive hash not pinned yet; refusing unpinned download (release presentation relies on PATH blender)");
+    console.warn("[pi-cad] Blender archive hash not pinned yet; refusing unpinned download");
     return { status: "unpinned" };
   }
   const version = manifest.version ?? "unknown";
-  const runtimeRoot = process.env.PI_CAD_BLENDER_RUNTIME
-    ? PathResolve(process.env.PI_CAD_BLENDER_RUNTIME)
+  const runtimeRoot = env.PI_CAD_BLENDER_RUNTIME
+    ? PathResolve(env.PI_CAD_BLENDER_RUNTIME)
     : join(root, ".runtime", "blender");
   const targetDir = join(runtimeRoot, version, key);
   const target = join(targetDir, "blender");
@@ -88,9 +111,7 @@ export async function installBlender({ root, python, env = process.env }) {
   const distribution = entry.binary.split("/")[0];
   try {
     console.log(`[pi-cad] downloading Blender ${version} for ${key}...`);
-    const res = await fetch(entry.url);
-    if (!res.ok) throw new Error(`download failed: HTTP ${res.status}`);
-    writeFileSync(archivePath, Buffer.from(await res.arrayBuffer()));
+    await downloadArchive(entry.url, archivePath, env, fetchImpl);
     const digest = sha256File(archivePath);
     if (digest !== entry.sha256) {
       throw new Error(`sha256 mismatch: expected ${entry.sha256}, got ${digest}`);
@@ -127,7 +148,7 @@ export async function installBlender({ root, python, env = process.env }) {
       if (existsSync(target)) rmSync(target);
       rmSync(tmpDir, { recursive: true, force: true });
     } catch {}
-    console.warn(`[pi-cad] Blender install unavailable; release presentation relies on PATH blender (${String(error?.message ?? error)})`);
+    console.warn(`[pi-cad] Blender install unavailable; managed presentation is unavailable (${String(error?.message ?? error)})`);
     return { status: "unavailable" };
   } finally {
     try {
@@ -147,5 +168,5 @@ if (process.argv[1] && process.argv[1].endsWith("install-blender.mjs")) {
   execFileSync(process.env.PI_CAD_UV ?? "uv", ["sync", "--project", join(root, "python"), "--extra", "simulation"], { cwd: root, stdio: "inherit" });
   const python = join(root, "python", ".venv", "bin", "python");
   const result = await installBlender({ root, python });
-  process.exit(result.status === "ready" || result.status === "skipped" || result.status === "external" ? 0 : 0);
+  process.exit(result.status === "ready" || result.status === "skipped" || result.status === "external" ? 0 : 1);
 }

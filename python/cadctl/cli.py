@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -656,6 +658,40 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_blender(args: argparse.Namespace) -> int:
+    """Run agent-authored Blender work through the managed runtime."""
+    from .presentation import blender_binary
+
+    binary, source = blender_binary()
+    if not binary or source in {"missing", "path-fallback", "override-missing"}:
+        print(
+            json.dumps({
+                "ok": False,
+                "tool": "cadctl_blender",
+                "payload": {
+                    "error": "managed Blender runtime is unavailable",
+                    "source": source,
+                },
+            }),
+            file=sys.stderr,
+        )
+        return 2
+    if args.print_path:
+        print(binary)
+        return 0
+    command = list(args.blender_args)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        print("cadctl blender requires Blender arguments or --print-path", file=sys.stderr)
+        return 2
+    lib_dir = Path(binary).parent / "lib"
+    env = {**os.environ, "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "1")}
+    if lib_dir.exists():
+        env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
+    return subprocess.run([binary, *command], env=env, check=False).returncode
+
+
 def _cmd_optimize(args: argparse.Namespace) -> int:
     from .simulation.topology import run_topology
 
@@ -782,6 +818,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="Report the actual Pi-CAD execution environment")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=_cmd_doctor)
+
+    p = sub.add_parser("blender", help="Run the pinned managed Blender binary")
+    p.add_argument("--print-path", action="store_true", help="Print the managed Blender path and exit")
+    p.add_argument("blender_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=_cmd_blender)
 
     p = sub.add_parser("optimize", help="Run deterministic differentiable topology optimization")
     p.add_argument("--spec", required=True)

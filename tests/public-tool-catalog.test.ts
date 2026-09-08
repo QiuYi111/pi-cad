@@ -42,6 +42,7 @@ test("the skill surface includes the Prime Python capability and grilling skills
   const names = readdirSync(skillsDir).sort();
   assert.deepEqual(names, [
     "assembly-design",
+    "blender-product-rendering",
     "cad",
     "design-for-manufacturing",
     "grill-me",

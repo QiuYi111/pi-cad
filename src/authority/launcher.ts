@@ -218,6 +218,9 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad",
   ];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  const blenderRuntime = join(paths.repository, ".runtime", "blender");
+  if (existsSync(blenderRuntime)) args.push("--ro-bind", blenderRuntime, "/opt/pi-cad/blender-runtime");
+  else args.push("--dir", "/opt/pi-cad/blender-runtime");
   args.push(
     permission === "read-only" ? "--ro-bind" : "--bind", paths.project, "/workspace",
     "--dir", "/opt/node-bin", "--symlink", `/opt/node/${paths.nodeExecutableRelative ?? "bin/node"}`, "/opt/node-bin/node",
@@ -226,6 +229,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--ro-bind", join(paths.repository, "src", "integrations", "prime"), "/opt/pi-cad/prime-extension",
     "--ro-bind", join(paths.repository, "skills", "cad"), "/opt/pi-cad/cad",
     "--ro-bind", join(paths.repository, "skills", "grill-me"), "/opt/pi-cad/grill-me",
+    "--ro-bind", join(paths.repository, "skills", "blender-product-rendering"), "/opt/pi-cad/blender-product-rendering",
     "--ro-bind", join(paths.repository, "packages", "prime-codex-image-gen"), "/opt/pi-cad/imagegen",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
     "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
@@ -240,6 +244,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PI_CAD_AUTHOR_SOCKET", "/run/pi-cad/author/authority.sock",
     "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad",
+    "--setenv", "PI_CAD_BLENDER_RUNTIME", "/opt/pi-cad/blender-runtime",
     "--setenv", "PYTHONPATH", `/opt/prime-kernel-venv/${paths.kernelSitePackages}:/opt/pi-cad/cad/src`,
     "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime",
@@ -260,6 +265,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--extension", "/opt/pi-cad/imagegen/index.ts",
     "--skill", "/opt/pi-cad/cad/SKILL.md",
     "--skill", "/opt/pi-cad/grill-me/SKILL.md",
+    "--skill", "/opt/pi-cad/blender-product-rendering/SKILL.md",
     "--skill", "/opt/pi-cad/imagegen/skills/imagegen/SKILL.md",
     ...primeArgs,
   );
@@ -432,6 +438,7 @@ function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string,
     PATH: `${process.env.PI_CAD_NODE_WRAPPER ? dirname(process.env.PI_CAD_NODE_WRAPPER) : join(paths.nodeRoot, "bin")}:${paths.primeRoot}:${join(paths.primeRoot, "node_modules", ".bin")}:/usr/local/bin:/usr/bin:/bin`,
     PI_CAD_PROJECT_CWD: reviewer ? join(paths.runtimeDirectory, "reviewer-workspace") : paths.project,
     PI_CAD_REPO: paths.repository,
+    PI_CAD_BLENDER_RUNTIME: join(paths.repository, ".runtime", "blender"),
     PYTHONPATH: `${join(paths.primeKernelVenv, paths.kernelSitePackages)}:${join(paths.repository, "skills", "cad", "src")}`,
     PYTHONDONTWRITEBYTECODE: "1", PRIME_AGENT_REPO: paths.primeRoot,
     PRIME_AGENT_CODING_AGENT_DIR: agentDir,
@@ -465,6 +472,7 @@ function nativePrimeArgs(paths: LaunchPaths, primeArgs: string[]): string[] {
     "--extension", join(paths.repository, "packages", "prime-codex-image-gen", "index.ts"),
     "--skill", join(paths.repository, "skills", "cad", "SKILL.md"),
     "--skill", join(paths.repository, "skills", "grill-me", "SKILL.md"),
+    "--skill", join(paths.repository, "skills", "blender-product-rendering", "SKILL.md"),
     "--skill", join(paths.repository, "packages", "prime-codex-image-gen", "skills", "imagegen", "SKILL.md"), ...primeArgs];
 }
 

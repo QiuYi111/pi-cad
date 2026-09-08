@@ -127,6 +127,10 @@ reason to call `inspect.signature()` before using them.
   call the documented `cad` API directly in that kernel. Never launch a nested
   `python`/`python3`, `pip`, or `uv` subprocess to inspect the environment or
   perform CAD work, and never use a subprocess as an API-adaptation fallback.
+  Blender presentation is the sole exception: follow the
+  `blender-product-rendering` skill and invoke Blender through
+  `sys.executable -m cadctl blender`; never call `blender` from `PATH` or
+  `/usr/bin/blender`.
 - In live IPython, use `await cad.probe.run(subject=artifact_ref, purpose=...,
   code="result = {'solids': len(shape.solids())}")` for Agent-authored,
   read-only B-Rep calculations on any project-local `ArtifactRef`. The fenced
