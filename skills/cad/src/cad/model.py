@@ -15,7 +15,7 @@ def _project_path(value: str | Path) -> tuple[Path, Path]:
     return project_path(value, error_type="ModelBuildError")
 
 
-async def _attach_images(images: list[dict[str, str]]) -> None:
+async def _attach_images(images: list[dict[str, str]], artifact: ArtifactRef | None = None) -> None:
     if not images:
         raise CadApiError("Pi-CAD model build produced no mandatory visual observations", error_type="ModelBuildError")
     try:
@@ -23,11 +23,16 @@ async def _attach_images(images: list[dict[str, str]]) -> None:
     except Exception as error:
         raise CadApiError("Prime image attachment capability is unavailable", error_type="ModelBuildError") from error
     try:
-        for image in images:
+        for index, image in enumerate(images):
             if image.get("mimeType") != "image/png" or not image.get("data"):
                 raise ValueError("mandatory build image is not an inline PNG")
             view = image.get("name") or image.get("view")
-            label = f"Pi-CAD mandatory build observation · {str(view).upper()}" if view else "Pi-CAD mandatory build observation"
+            view_label = f"[{str(view).upper()}]" if view else "[VIEW]"
+            label = (
+                f"Built {artifact!r}. Inspect the attached views carefully as the primary observation of the geometry before continuing. "
+                f"Probe the artifact for any facts you need to verify.\n\n{view_label}"
+                if index == 0 and artifact is not None else view_label
+            )
             display_inline_image(image, label=label)
     except Exception as error:
         raise CadApiError(f"Pi-CAD could not inject mandatory build images into Prime: {error}", error_type="ModelBuildError") from error
@@ -69,6 +74,7 @@ async def build(
             RuntimeWarning,
             stacklevel=2,
         )
-    await _attach_images(response.get("images") or [])
     digest = artifact.get("sha256") if artifact else None
-    return ArtifactRef(output_relative, digest, "candidate")
+    ref = ArtifactRef(output_relative, digest, "candidate")
+    await _attach_images(response.get("images") or [], ref)
+    return ref

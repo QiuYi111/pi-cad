@@ -227,7 +227,7 @@ class CadPackageTests(unittest.TestCase):
                 artifact = asyncio.run(cad.model.build("part.py", "build/part.step"))
             self.assertEqual(artifact.sha256, "b" * 64)
             self.assertEqual(artifact.path, Path("build/part.step"))
-            attach.assert_awaited_once_with(response["images"])
+            attach.assert_awaited_once_with(response["images"], artifact)
 
     def test_model_build_forwards_parameter_definitions(self) -> None:
         model_module = importlib.import_module("cad.model")
@@ -270,14 +270,19 @@ class CadPackageTests(unittest.TestCase):
             {"data": base64.b64encode(b"second").decode(), "mimeType": "image/png"},
         ]
         with patch("IPython.display.display", attach):
-            asyncio.run(model_module._attach_images(images))
+            artifact = cad.ArtifactRef(Path("build/part.step"), "a" * 64, "candidate")
+            asyncio.run(model_module._attach_images(images, artifact))
         self.assertEqual(attach.call_count, 2)
         for call, expected in zip(attach.call_args_list, images, strict=True):
             self.assertTrue(call.kwargs["raw"])
             self.assertEqual(call.args[0]["application/vnd.prime-agent.attachment+json"], {
                 "mime_type": "image/png", "data": expected["data"],
             })
-            self.assertEqual(call.args[0]["text/plain"], "Pi-CAD mandatory build observation")
+        first_label = attach.call_args_list[0].args[0]["text/plain"]
+        self.assertIn("Built ArtifactRef", first_label)
+        self.assertIn("primary observation", first_label)
+        self.assertNotIn("bbox", first_label)
+        self.assertEqual(attach.call_args_list[1].args[0]["text/plain"], "[VIEW]")
 
     def test_review_inspect_attaches_canonical_images_without_returning_base64(self) -> None:
         review_module = importlib.import_module("cad.review")

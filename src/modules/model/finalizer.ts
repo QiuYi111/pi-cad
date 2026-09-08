@@ -287,18 +287,8 @@ export async function finalizeCandidate(
   const images = visualEnvelope.ok
     ? await readImageContents((visualPayload(visualEnvelope).views ?? []).map((view) => view.path))
     : [];
-  const summary = [
-    `Candidate ${label} committed. Harness executed build, visual, geometry${assemblyRecorded ? ", assembly tree" : ""}${interferenceRecorded ? ", interference" : ""}${compareRecorded ? ", compare" : ""}.`,
-    `- ${buildEnvelope.ok ? "build: ok" : "build: failed"}`,
-    `- ${visualEnvelope.ok ? "visual: ok" : "visual: failed"}`,
-    `- ${geometryEnvelope.ok ? "geometry: ok" : "geometry: failed"}`,
-    ...(geometryEnvelope.ok ? [`- facts: ${geometryDigest(geometryEnvelope)}`] : []),
-    `artifactHash=${artifactHash.slice(0, 12)}`,
-    `sourceHash=${sourceHash.slice(0, 12)}`,
-    ...(warnings.length ? [`warnings: ${warnings.join("; ")}`] : []),
-    "",
-    `Phase is ${next.phase.toUpperCase()}. Inspect the attached current-version images yourself.`,
-  ].join("\n");
+  const artifactRef = `ArtifactRef(id='${artifactHash}', role='candidate', path='${stepPath}')`;
+  const summary = `Built ${artifactRef}. Inspect the attached views carefully as the primary observation of the geometry before continuing. Probe the artifact for any facts you need to verify.`;
   return { ok: true, text: summary, images, details: { state: next, envelope: buildEnvelope } };
 }
 
@@ -421,21 +411,4 @@ function wantsCompareEvidence(state: CadRunState): boolean {
   if (route.objective === "convert") return true;
   if (route.objective !== "design") return false;
   return route.lineage === "legacy" || route.maturity === "release";
-}
-
-function geometryDigest(envelope: Parameters<typeof geometryPayload>[0]): string {
-  const p = geometryPayload(envelope);
-  const bbox = p.bbox ? `${p.bbox.x}×${p.bbox.y}×${p.bbox.z} ${p.units ?? ""}`.trim() : "?";
-  const radii = (p.cylinders ?? [])
-    .map((c) => (typeof c.radius === "number" ? `r=${c.radius}` : null))
-    .filter((s): s is string => s !== null)
-    .slice(0, 8);
-  const parts = [
-    `bbox=${bbox}`,
-    `volume=${p.volume ?? "?"}`,
-    `surfaceArea=${p.surfaceArea ?? "?"}`,
-    `solids=${p.solidCount ?? "?"}`,
-    `cylinders=${p.cylinders?.length ?? 0}${radii.length ? ` [${radii.join(", ")}]` : ""}`,
-  ];
-  return parts.join("; ");
 }

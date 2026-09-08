@@ -125,7 +125,8 @@ test("V0 walking skeleton: plate task runs route -> requirements -> candidate ->
       undefined,
       ctx,
     );
-    assert.match(committedCandidate.content[0].text!, /REVIEW/);
+    assert.match(committedCandidate.content[0].text!, /^Built ArtifactRef/);
+    assert.doesNotMatch(committedCandidate.content[0].text!, /visual: ok|geometry: ok|facts:/);
     assert.equal(committedCandidate.content.filter((part) => part.type === "image").length, 7);
 
     const statePath = join(cwd, ".pi-cad", "runs", "v0-run", "state.json");

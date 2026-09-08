@@ -777,7 +777,8 @@ test("release design-review accepted enters audit without closure deliverables o
       ].join("\n"),
     );
     const committed = await candidateTool.execute("c7", { sources: ["models/assembly.py"], label: "r1" }, undefined, undefined, ctx);
-    assert.match(committed.content[0].text as string, /INTEGRATION_REVIEW/);
+    assert.match(committed.content[0].text as string, /^Built ArtifactRef/);
+    assert.doesNotMatch(committed.content[0].text as string, /visual: ok|geometry: ok|facts:/);
 
     // The design review accepted: only the design-core evidence is present
     // (visual, geometry, assembly, interference) — no drawing, no
