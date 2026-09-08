@@ -346,7 +346,9 @@ export class WslBridge implements RuntimeBridge {
     }
     await runStep("Installing the core CAD packages…", 0.78,
       () => this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; export PI_CAD_BASE_RUNTIME=1; cd ${JSON.stringify(paths.piCadRepo)} && if ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi && npm run setup:python`], { timeout: 15 * 60_000 }));
-    await runStep("Connecting Prime Agent to Reify…", 0.92, () => this.exec(["bash", "-lc", [
+    await runStep("Preparing the managed Blender runtime…", 0.88,
+      () => this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; cd ${JSON.stringify(paths.piCadRepo)} && node scripts/install-blender.mjs`], { timeout: 30 * 60_000 }));
+    await runStep("Connecting Prime Agent to Reify…", 0.94, () => this.exec(["bash", "-lc", [
       "set -e",
       `mkdir -p ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/coding-agent ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-coding-agent`,
