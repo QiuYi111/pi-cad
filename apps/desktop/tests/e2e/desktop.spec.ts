@@ -250,7 +250,7 @@ test("complete desktop product path", async () => {
   await page.screenshot({ path: join(process.cwd(), "test-results", "workbench-compare.png") });
 
   await page.getByRole("button", { name: "Workflows" }).click();
-  await expect(page.getByRole("heading", { name: "mechanical.design" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "mechanical.default" })).toBeVisible();
   await page.getByRole("button", { name: /concept/i }).click();
   await expect(page.getByText("image.generate")).toBeVisible();
   await page.getByRole("button", { name: "New workflow" }).click();

@@ -57,10 +57,11 @@ export function usePrimeRuntime() {
     const loaded = await window.piCad.runtime.switchSession(path);
     dispatch({ type: "desktop_session_loaded", messages: loaded });
   };
+  const setSessionName = (name: string) => window.piCad.runtime.setSessionName(name);
   const clearConversation = () => dispatch({ type: "desktop_session_loaded", messages: [] });
   const note = (text: string) => dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text: `Note · ${text}` });
 
-  return { messages, status, prompt, note, newSession, switchSession, clearConversation, start: () => window.piCad.runtime.start(), stop: () => window.piCad.runtime.stop(), abort: () => window.piCad.runtime.abort() };
+  return { messages, status, prompt, note, newSession, switchSession, setSessionName, clearConversation, start: () => window.piCad.runtime.start(), stop: () => window.piCad.runtime.stop(), abort: () => window.piCad.runtime.abort() };
 }
 
 export type PrimeRuntimeController = ReturnType<typeof usePrimeRuntime>;

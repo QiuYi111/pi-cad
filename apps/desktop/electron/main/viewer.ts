@@ -141,7 +141,7 @@ export class ViewerBackend {
     if (replaceable) {
       current = await request<WorkflowView>({
         op: "workflow-start",
-        id: "mechanical.parameter-edit",
+        id: "mechanical.naked",
         interactionMode: "headless",
       });
     }
@@ -156,7 +156,6 @@ export class ViewerBackend {
       force: true,
       parameters: definitions,
     }, 180_000);
-    if (replaceable) await request({ op: "workflow-advance", event: "applied" });
   }
 
   async inspectGeometry(settings: AppSettings, path: string): Promise<QuickGeometryCheck> {

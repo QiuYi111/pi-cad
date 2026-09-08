@@ -106,34 +106,22 @@ test("Plan C discovers and pins a workflow package before mutation", async () =>
       /cad\.workflow\.start/,
     );
     const packages = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(packages.map((item) => item.id), [
-      "mechanical.analysis",
-      "mechanical.benchmark",
-      "mechanical.benchmark-author-only",
-      "mechanical.benchmark-build",
-      "mechanical.benchmark-triage",
-      "mechanical.design",
-      "mechanical.modify",
-      "mechanical.one-shot",
-      "mechanical.parameter-edit",
-      "mechanical.quick-build",
-      "mechanical.quick-check",
-    ]);
+    assert.deepEqual(packages.map((item) => item.id), ["mechanical.default", "mechanical.naked"]);
     assert.deepEqual(Object.keys(packages[0]).sort(), ["description", "id", "tags", "version"]);
-    const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" }) as any;
-    assert.equal(started.workflowId, "mechanical.one-shot");
-    assert.equal(started.phase, "grilling");
-    assert.deepEqual(started.unmet, ["grill"]);
+    const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" }) as any;
+    assert.equal(started.workflowId, "mechanical.default");
+    assert.equal(started.phase, "plan");
+    assert.deepEqual(started.unmet, ["plan"]);
     await assert.rejects(
       handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }),
-      /model\.build is not granted in workflow phase grilling/,
+      /model\.build is not granted in workflow phase plan/,
     );
-    const grillCommit = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "grill" }) as any;
-    assert.equal(grillCommit.name, "grill");
+    const grillCommit = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "plan" }) as any;
+    assert.equal(grillCommit.name, "plan");
     assert.deepEqual((await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any).unmet, []);
-    const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "clarified" }) as any;
-    assert.equal(advanced.phase, "spec");
-    assert.match((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.text ?? "", /phase spec/);
+    const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "plan_ready" }) as any;
+    assert.equal(advanced.phase, "cook");
+    assert.match((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.text ?? "", /phase cook/);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
@@ -622,7 +610,7 @@ test("Prime preserves the first user mission when workflow starts in the same tu
   const fullMission = "设计完整发动机支架，承受 5 kN 载荷";
   try {
     assert.equal(await handlers.get("before_agent_start")!({ prompt: fullMission }, { cwd }), undefined);
-    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
     await handlers.get("message_end")!({ message: { role: "toolResult", toolName: "ipython", toolCallId: "start", isError: false } }, { cwd });
     assert.equal(sentMessages.length, 1, "workflow start must append its first Phase Contract");
     const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
@@ -632,6 +620,41 @@ test("Prime preserves the first user mission when workflow starts in the same tu
     await handlers.get("before_agent_start")!({ prompt: "按推荐值" }, { cwd });
     const unchanged = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<any>("context/frame.json");
     assert.equal(unchanged?.mission, fullMission);
+  } finally {
+    await sidecar.close();
+    if (previousSocket === undefined) delete process.env.PI_CAD_AUTHOR_SOCKET;
+    else process.env.PI_CAD_AUTHOR_SOCKET = previousSocket;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(runtime, { recursive: true, force: true });
+  }
+});
+
+test("Prime appends a generated concept PNG directly to model context", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-concept-grounding-"));
+  const runtime = await mkdtemp(join(tmpdir(), "pi-cad-concept-grounding-sidecar-"));
+  const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
+  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
+  const handlers = new Map<string, Function>();
+  const sentMessages: Array<{ message: any; options: any }> = [];
+  const pi = {
+    on(name: string, handler: Function) { handlers.set(name, handler); },
+    registerTool() {}, getThinkingLevel() { return "low"; },
+    sendMessage(message: any, options: any) { sentMessages.push({ message, options }); },
+  } as any;
+  primeExtension(pi);
+  try {
+    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
+    const image = join(cwd, "concept.png");
+    await writeFile(image, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAXklEQVR4nO3PMQ0AMAzAsPInvYLYYVWKESTzjhsd8KsBrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BbQHKU9LC7/CP1AAAAABJRU5ErkJggg==", "base64"));
+    await handlers.get("message_end")!({ message: { role: "toolResult", toolName: "codex_generate_image", toolCallId: "concept", isError: false, content: `Generated PNG and saved it to ${image}` } }, { cwd });
+    const grounded = sentMessages.find((entry) => entry.message.customType === "pi-cad.concept-grounded");
+    assert.ok(grounded);
+    assert.equal(grounded.options.deliverAs, "steer");
+    assert.equal(grounded.message.display, false);
+    assert.equal(grounded.message.content[1].type, "image");
+    assert.equal(grounded.message.content[1].mimeType, "image/png");
+    assert.ok(grounded.message.content[1].data.length > 50);
   } finally {
     await sidecar.close();
     if (previousSocket === undefined) delete process.env.PI_CAD_AUTHOR_SOCKET;

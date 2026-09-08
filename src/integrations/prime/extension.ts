@@ -1,4 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import { makePhaseContractMessage, PHASE_CARD_CUSTOM_TYPE } from "./phase-card-message.ts";
 import { requestAuthority } from "./sidecar-client.ts";
@@ -14,6 +16,7 @@ interface SidecarPhaseCard {
 }
 
 const REVIEW_COMPLETED_CUSTOM_TYPE = "pi-cad.review-completed";
+const CONCEPT_GROUNDED_CUSTOM_TYPE = "pi-cad.concept-grounded";
 
 interface ReviewResult {
   verdict: string;
@@ -111,6 +114,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   // bounded, explicit recovery turn so a failed CAD action cannot silently
   // become the end of the user's engineering task.
   const recoveredToolCalls = new Set<string>();
+  const groundedConceptPaths = new Set<string>();
   let recoveryTurns = 0;
   let phaseCardFailureCount = 0;
   let activeContractKey: string | null = null;
@@ -221,9 +225,32 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
         ? event.message.content.filter((item: any) => item?.type === "text").map((item: any) => item.text || "").join("\n")
         : String(event.message.content || "");
       const path = text.match(/saved it to\s+(.+?\.png)(?:\.|\s|$)/i)?.[1];
-      if (path) await requestAuthority({ op: "image-generated", path }).catch((error) => {
-        process.stderr.write(`[pi-cad] generated image evidence was not recorded: ${error instanceof Error ? error.message : String(error)}\n`);
-      });
+      if (path) {
+        try {
+          const recorded = await requestAuthority<{ recorded: boolean; path: string }>({ op: "image-generated", path });
+          if (recorded.recorded && !groundedConceptPaths.has(recorded.path)) {
+            const project = process.env.PI_CAD_PROJECT_CWD ?? ctx.cwd;
+            const bytes = await readFile(resolve(project, recorded.path));
+            groundedConceptPaths.add(recorded.path);
+            pi.sendMessage({
+              role: "custom",
+              customType: CONCEPT_GROUNDED_CUSTOM_TYPE,
+              display: false,
+              content: [
+                { type: "text", text: [
+                  "The generated concept image is now attached as direct visual context. Inspect the image itself before CAD.",
+                  "Translate it into a geometry plan covering canonical-view silhouettes, dominant forms, continuous and separate regions, support topology, transitions and curvature, part relationships, interfaces, and visual features that must survive CAD.",
+                  "The image is form and layout intent, but not dimensional authority. Do not replace its intended form with placeholder primitives.",
+                ].join("\n") },
+                { type: "image", data: bytes.toString("base64"), mimeType: "image/png" },
+              ],
+              details: { path: recorded.path },
+            }, { deliverAs: "steer" });
+          }
+        } catch (error) {
+          process.stderr.write(`[pi-cad] generated image evidence was not grounded: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
     }
     if (
       event.message.role === "toolResult" &&

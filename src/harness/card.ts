@@ -81,6 +81,7 @@ export interface WorkflowCurrentView {
 }
 
 const DEFAULT_TEXT_CAP = 3200;
+const WORKFLOW_BOUNDARY_RULE = "The workflow is a coordination boundary, not the objective. There is no reward for advancing it; advance only when the engineering meaning of the current phase is complete.";
 const DEFAULT_IMAGE_CAP = 2;
 const IMAGE_MIME = new Map([
   [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"],
@@ -204,7 +205,7 @@ export function workflowCurrentView(loaded: LoadedHarnessRunV7, registries: Regi
     `snapshot ${loaded.workflow.hash}`,
     `phase ${loaded.state.phase}; status ${loaded.state.status}; interaction ${loaded.state.interactionMode}`,
   ];
-  const goal = [phase.purpose];
+  const goal = [WORKFLOW_BOUNDARY_RULE, phase.purpose];
   const sop = [
     phase.guidance ?? "No phase-specific SOP is declared by the pinned workflow package.",
     ...(phase.recommendedSkills ?? []).map((skill) => `Use the ${skill} skill in this phase.`),
@@ -346,6 +347,7 @@ export async function compilePhaseContract(
   if (!project.state.currentRunId) return null;
   const loaded = await new HarnessRunStoreV7(cwd, project.state.currentRunId).load(options.registries);
   if (!loaded || ["done", "aborted"].includes(loaded.state.status)) return null;
+  if (loaded.workflow.id === "mechanical.naked") return null;
   const phase = loaded.workflow.phases[loaded.state.phase];
   if (!phase) throw new Error(`phase contract cannot resolve phase: ${loaded.state.phase}`);
 
@@ -381,7 +383,7 @@ export async function compilePhaseContract(
       `snapshot ${loaded.workflow.hash}`,
       `phase ${loaded.state.phase}`,
     ],
-    goal: [phase.purpose],
+    goal: [WORKFLOW_BOUNDARY_RULE, phase.purpose],
     sop: [
       phase.guidance ?? "No phase-specific SOP is declared by the pinned workflow package.",
       ...(phase.recommendedSkills ?? []).map((skill) => `Use the ${skill} skill in this phase.`),

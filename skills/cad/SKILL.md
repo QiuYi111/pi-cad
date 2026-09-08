@@ -60,24 +60,16 @@ reason to call `inspect.signature()` before using them.
   `await cad.workflow.list()` and route the request to exactly one workflow from
   that live list. Workflows are user-maintained project data as well as built-in
   packages; never assume a fixed default or a fixed catalog. Compare the request
-  with each workflow's description and tags. Prefer the narrowest workflow that
-  covers the required result and checks. `mechanical.design` fits ordinary
-  concept-led greenfield work; `mechanical.one-shot` fits work that explicitly
-  needs separate specification, interface, BOM, parts, and assembly gates;
-  `mechanical.modify` fits an existing design change; `mechanical.analysis` fits
-  a bounded investigation. A closer project workflow takes precedence over
-  these examples. Use a benchmark package only when the task or benchmark
-  harness explicitly selects it. An adopted version selects the version after
-  an ID has been routed; it does not select the workflow ID. `mechanical.benchmark` uses one
-  pre-build requirements reviewer. `mechanical.benchmark-author-only` is an
-  explicit reviewer-free experiment: the author must choose `interpreted` only
-  for a unique observable contract, or commit the competing readings and take
-  `clarification_required` without building. Either package enters
-  `wait_for_user` for a material ambiguity; in a headless benchmark, that is an
-  accepted unscored exit for the current sample. Otherwise
-  build the candidate, inspect it, commit `release` with the latest ArtifactRef
-  and source, then take `delivered`. `start()` pins the current compiled package;
-  never invent phase names or use a separate route protocol.
+  with each workflow's description and tags. A matching project workflow takes
+  precedence. Use `mechanical.default` for normal production work: plan the real
+  task, execute freely, then submit one immutable candidate to independent final
+  review. Use `mechanical.naked` only when the user requests a tools-only run or
+  an explicit baseline experiment; it provides no Phase Contract, milestones,
+  obligations, or prescribed process. The author model makes this routing choice
+  after reading the live catalog. An adopted version selects the version after
+  an ID has been routed; it does not select the workflow ID. `start()` pins the
+  current compiled package; never invent phase names or use a separate route
+  protocol.
 - When an experience library is available, you can look at prior trajectories
   to learn how others approached similar work; comparing high- and low-scoring
   examples may be useful.

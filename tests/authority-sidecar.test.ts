@@ -86,27 +86,27 @@ test("authority sidecar owns canonical state and rewrites a non-authoritative wo
     assert.notEqual(sidecar.authorSocket, sidecar.reviewerSocket);
     assert.equal((await stat(sidecar.authorSocket)).mode & 0o777, 0o600);
     assert.equal((await stat(sidecar.reviewerSocket)).mode & 0o777, 0o600);
-    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
+    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
     assert.equal(started.ok, true);
     assert.ok((await readdir(canonical)).includes("v7-project"));
     assert.deepEqual(await readdir(join(cwd, ".pi-cad")), ["status.json"]);
     const statusPath = join(cwd, ".pi-cad", "status.json");
     const projection = JSON.parse(await readFile(statusPath, "utf-8"));
     assert.equal(projection.authoritative, false);
-    assert.equal(projection.run.phase, "grilling");
-    assert.equal(projection.run.workflowId, "mechanical.one-shot");
+    assert.equal(projection.run.phase, "plan");
+    assert.equal(projection.run.workflowId, "mechanical.default");
     assert.ok(projection.run.workflowHash);
-    assert.deepEqual(projection.run.phaseHistory, ["grilling"]);
-    assert.equal(projection.run.phases.find((phase: any) => phase.id === "grilling").status, "active");
-    assert.deepEqual(projection.run.phases.find((phase: any) => phase.id === "grilling").transitions, []);
-    assert.ok(projection.run.phases.some((phase: any) => phase.id !== "grilling" && phase.transitions.length > 0));
-    assert.ok(projection.run.phases.find((phase: any) => phase.id === "grilling").capabilities.length > 0);
+    assert.deepEqual(projection.run.phaseHistory, ["plan"]);
+    assert.equal(projection.run.phases.find((phase: any) => phase.id === "plan").status, "active");
+    assert.deepEqual(projection.run.phases.find((phase: any) => phase.id === "plan").transitions, []);
+    assert.ok(projection.run.phases.some((phase: any) => phase.id !== "plan" && phase.transitions.length > 0));
+    assert.ok(projection.run.phases.find((phase: any) => phase.id === "plan").capabilities.length > 0);
 
     await chmod(statusPath, 0o644);
     await writeFile(statusPath, '{"authoritative":true,"run":{"phase":"release"}}\n');
     const current = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-current" });
     assert.equal(current.ok, true);
-    assert.equal((current.result as any).phase, "grilling");
+    assert.equal((current.result as any).phase, "plan");
     assert.equal(JSON.parse(await readFile(statusPath, "utf-8")).authoritative, false);
 
     const gate = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "completion-gate" });
@@ -115,7 +115,7 @@ test("authority sidecar owns canonical state and rewrites a non-authoritative wo
     const reviewerGate = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "completion-gate" });
     assert.equal(reviewerGate.ok, false);
 
-    const denied = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
+    const denied = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
     assert.equal(denied.ok, false);
     assert.match(denied.error?.message ?? "", /reviewer endpoint does not expose/);
     const malformed = await dispatchSidecarRequest("author", cwd, { schema: 2, op: "workflow-current" });
@@ -140,7 +140,7 @@ test("workspace projection symlinks cannot redirect sidecar writes", async () =>
   await symlink(outside, join(cwd, ".pi-cad"));
   const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
   try {
-    const response = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
+    const response = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
     assert.equal(response.ok, true);
     assert.deepEqual(await readdir(outside), []);
     assert.ok((await readdir(canonical)).includes("v7-project"));
@@ -341,7 +341,7 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
 test("desktop read-only authority denies workflow and artifact mutation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-read-only-"));
   try {
-    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" }, undefined, undefined, { authorReadOnly: true });
+    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" }, undefined, undefined, { authorReadOnly: true });
     assert.equal(started.ok, false);
     if (!started.ok) assert.match(started.error.message, /read-only mode denies/);
     const authorization = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "authorize", operation: "model.build" }, undefined, undefined, { authorReadOnly: true });

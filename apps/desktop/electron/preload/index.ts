@@ -29,6 +29,7 @@ const api: DesktopApi = {
     steer: (message, images) => ipcRenderer.invoke(IPC.runtimeSteer, message, images),
     newSession: () => ipcRenderer.invoke(IPC.runtimeNewSession),
     switchSession: (path) => ipcRenderer.invoke(IPC.runtimeSwitchSession, path),
+    setSessionName: (name) => ipcRenderer.invoke(IPC.runtimeSetSessionName, name),
     abort: () => ipcRenderer.invoke(IPC.runtimeAbort),
     getModels: () => ipcRenderer.invoke(IPC.runtimeModels),
     setModel: (provider, model) => ipcRenderer.invoke(IPC.runtimeSetModel, provider, model),

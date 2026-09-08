@@ -8,7 +8,7 @@ import { WorkflowRail } from "../components/WorkflowRail";
 import { EngineeringViewer } from "../components/EngineeringViewer";
 import { StatusBar } from "../components/StatusBar";
 import { ConceptBoard, type ConceptImage, type ConceptSelection } from "../components/ConceptBoard";
-import { automaticConversationTitle, needsAutomaticConversationTitle } from "../lib/conversation-title";
+import { automaticConversationTitle } from "../lib/conversation-title";
 
 export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }: { settings: AppSettings; prime: PrimeRuntimeController; onSettingsChange: (settings: AppSettings) => void; onOpenSettings: () => void }) {
   const [projectMenu, setProjectMenu] = useState(false);
@@ -18,6 +18,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   const [projectError, setProjectError] = useState("");
   const [sessions, setSessions] = useState<TraceSummary[]>([]);
   const [sessionsState, setSessionsState] = useState<"loading" | "ready" | "error">("loading");
+  const [restoringSession, setRestoringSession] = useState("");
   const sessionRequest = useRef(0);
   const sessionsProject = useRef("");
   const [sessionQuery, setSessionQuery] = useState("");
@@ -27,10 +28,6 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
       return Array.isArray(saved) ? saved.filter((path): path is string => typeof path === "string").slice(0, 6) : [];
     } catch { return []; }
   });
-  const [sessionAliases, setSessionAliases] = useState<Record<string, string>>({});
-  const [renamingSession, setRenamingSession] = useState("");
-  const [sessionTitleDraft, setSessionTitleDraft] = useState("");
-  const pendingAutomaticTitle = useRef("");
   const [conversationStorageKey, setConversationStorageKey] = useState(() => localStorage.getItem(`reify.active-conversation-key.${settings.projectPath || "unconfigured"}`) || crypto.randomUUID());
   const [ratingOpen, setRatingOpen] = useState(false);
   const [ratingQuality, setRatingQuality] = useState(4);
@@ -76,7 +73,6 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   const project = settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || "Untitled project";
   const workspaceStateKey = `reify.workspace.${settings.projectPath || "unconfigured"}`;
   const artifactStateKey = `reify.artifact.${settings.projectPath || "unconfigured"}`;
-  const sessionAliasKey = `reify.session-aliases.${settings.projectPath || "unconfigured"}`;
   const conversationKeyStateKey = `reify.active-conversation-key.${settings.projectPath || "unconfigured"}`;
   useEffect(() => {
     setConversationStorageKey(localStorage.getItem(conversationKeyStateKey) || crypto.randomUUID());
@@ -88,8 +84,8 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   }, [conversationStorageKey, prime.status.sessionId]);
   const visibleSessions = useMemo(() => {
     const needle = sessionQuery.trim().toLowerCase();
-    return needle ? sessions.filter((session) => `${sessionAliases[session.path] || session.title} ${session.model}`.toLowerCase().includes(needle)) : sessions;
-  }, [sessions, sessionAliases, sessionQuery]);
+    return needle ? sessions.filter((session) => `${session.title} ${session.model}`.toLowerCase().includes(needle)) : sessions;
+  }, [sessions, sessionQuery]);
   const otherProjects = useMemo(() => recentProjects.filter((path) => path !== settings.projectPath), [recentProjects, settings.projectPath]);
   const builtArtifact = [...prime.messages].reverse().find((message) => message.activity?.kind === "build" && message.activity.state === "success" && message.activity.artifactPath)?.activity?.artifactPath;
   const currentArtifact = openedMesh?.source || builtArtifact;
@@ -114,9 +110,15 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     await prime.start();
   };
   const send = async (text: string, images?: Array<{ data: string; mimeType: string }>) => {
-    if (!prime.messages.some((message) => message.role === "user")) pendingAutomaticTitle.current = automaticConversationTitle(text);
+    const automaticTitle = !prime.messages.some((message) => message.role === "user") ? automaticConversationTitle(text) : "";
     const needsStart = prime.status.state !== "ready" && prime.status.state !== "streaming";
-    await prime.prompt(text, images, needsStart ? start : undefined);
+    await prime.prompt(text, images, async () => {
+      if (needsStart) await start();
+      if (automaticTitle) {
+        await prime.setSessionName(automaticTitle).catch(() => undefined);
+        await refreshSessions(false);
+      }
+    });
   };
   useEffect(() => { canvasContentRef.current = canvasContent; }, [canvasContent]);
   useEffect(() => { openedMeshRef.current = openedMesh; }, [openedMesh]);
@@ -241,37 +243,6 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     void refreshSessions();
     return () => { sessionRequest.current += 1; };
   }, [settings.projectPath, prime.status.sessionId]);
-  useEffect(() => {
-    if (!pendingAutomaticTitle.current || !prime.status.sessionId) return;
-    void refreshSessions(false);
-  }, [prime.messages.length, prime.status.sessionId, prime.status.state]);
-  useEffect(() => {
-    try { setSessionAliases(JSON.parse(localStorage.getItem(sessionAliasKey) || "{}")); }
-    catch { setSessionAliases({}); }
-  }, [sessionAliasKey]);
-  useEffect(() => {
-    const title = pendingAutomaticTitle.current;
-    if (!title || !prime.status.sessionId) return;
-    const session = sessions.find((item) => item.id === prime.status.sessionId);
-    if (!session || sessionAliases[session.path] || !needsAutomaticConversationTitle(session.title, session.id)) return;
-    setSessionAliases((current) => {
-      if (current[session.path]) return current;
-      const next = { ...current, [session.path]: title };
-      localStorage.setItem(sessionAliasKey, JSON.stringify(next));
-      return next;
-    });
-    pendingAutomaticTitle.current = "";
-  }, [prime.status.sessionId, sessionAliasKey, sessionAliases, sessions]);
-  const saveSessionTitle = (path: string) => {
-    const title = sessionTitleDraft.trim();
-    if (!title) return;
-    setSessionAliases((current) => {
-      const next = { ...current, [path]: title };
-      localStorage.setItem(sessionAliasKey, JSON.stringify(next));
-      return next;
-    });
-    setRenamingSession("");
-  };
   const newSession = async () => {
     if (prime.status.state === "streaming" || prime.status.state === "starting") throw new Error("Stop the current response before starting another conversation.");
     setConversationStorageKey(crypto.randomUUID());
@@ -284,12 +255,19 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   };
   const switchSession = async (path: string) => {
     if (prime.status.state === "streaming" || prime.status.state === "starting") throw new Error("Stop the current response before switching sessions.");
+    const selected = sessions.find((session) => session.path === path);
+    if (selected?.id === prime.status.sessionId) return;
+    setRestoringSession(path);
     setConversationStorageKey(path);
     setOpenedMesh(null);
     setUploadedConcepts([]);
     setOpenStepError("");
-    if (prime.status.state !== "ready") await start();
-    await prime.switchSession(path);
+    try {
+      if (prime.status.state !== "ready") await start();
+      await prime.switchSession(path);
+    } finally {
+      setRestoringSession("");
+    }
   };
   const rateCurrent = async () => {
     setRatingBusy(true);
@@ -431,7 +409,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
           {projectMenu && <div className="sidebar-project-menu">{projectError && <small role="alert">{projectError}</small>}{!newProject ? <><button onClick={() => void switchProject()}>打开项目</button><button onClick={() => setNewProject(true)}>新建项目</button><button onClick={onOpenSettings}>项目设置</button></> : <form onSubmit={(event) => { event.preventDefault(); void createProject(); }}><label>项目名称<input autoFocus value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="新设计" /></label><div><button type="button" onClick={() => setNewProject(false)}>返回</button><button className="primary" disabled={!projectName.trim()} type="submit">选择位置</button></div></form>}</div>}
           {!!otherProjects.length && <div className="recent-projects">{otherProjects.map((path) => <div key={path}><button title={path} onClick={() => void activateProject(path)}>{path.split(/[\\/]/).filter(Boolean).at(-1)}</button><button aria-label={`Remove ${path} from recent projects`} onClick={() => setRecentProjects((current) => { const next = current.filter((item) => item !== path); localStorage.setItem("reify.recent-projects.v1", JSON.stringify(next)); return next; })}>×</button></div>)}</div>}
         </div>
-        <div className="sidebar-group chat-history"><span>对话</span><label className="sidebar-search"><Search size={13} /><input aria-label="搜索当前项目的对话" value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} placeholder="搜索对话" />{sessionQuery && <button aria-label="清除搜索" onClick={() => setSessionQuery("")}>×</button>}</label><div className="sidebar-session-list">{sessionsState === "loading" ? <p>正在读取对话…</p> : sessionsState === "error" ? <p role="alert">无法读取对话。请重试或检查项目。</p> : visibleSessions.length ? visibleSessions.map((session) => <div className={`sidebar-session ${session.id === prime.status.sessionId ? "active" : ""}`} key={session.path}>{renamingSession === session.path ? <input aria-label={`Conversation title for ${session.title}`} autoFocus value={sessionTitleDraft} onChange={(event) => setSessionTitleDraft(event.target.value)} onBlur={() => saveSessionTitle(session.path)} onKeyDown={(event) => { if (event.key === "Enter") saveSessionTitle(session.path); if (event.key === "Escape") setRenamingSession(""); }} /> : <button title={`${sessionAliases[session.path] || session.title}；双击可改名`} onClick={() => void switchSession(session.path)} onDoubleClick={() => { setRenamingSession(session.path); setSessionTitleDraft(sessionAliases[session.path] || session.title); }}><strong>{sessionAliases[session.path] || session.title}</strong><small>{new Date(session.updatedAt).toLocaleDateString()}</small></button>}<button className="rename-session" title="重命名对话" aria-label={`Rename ${sessionAliases[session.path] || session.title}`} onClick={() => { setRenamingSession(session.path); setSessionTitleDraft(sessionAliases[session.path] || session.title); }}>改名</button></div>) : <p>{sessionQuery ? "没有匹配的对话。" : "完成第一条需求后，对话会出现在这里。"}</p>}</div></div>
+        <div className="sidebar-group chat-history"><span>对话</span><label className="sidebar-search"><Search size={13} /><input aria-label="搜索当前项目的对话" value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} placeholder="搜索对话" />{sessionQuery && <button aria-label="清除搜索" onClick={() => setSessionQuery("")}>×</button>}</label><div className="sidebar-session-list">{sessionsState === "loading" ? <p>正在读取对话…</p> : sessionsState === "error" ? <p role="alert">无法读取对话。请重试或检查项目。</p> : visibleSessions.length ? visibleSessions.map((session) => <div className={`sidebar-session ${session.id === prime.status.sessionId ? "active" : ""} ${restoringSession === session.path ? "loading" : ""}`} key={session.path}><button title={`恢复对话：${session.title}`} disabled={Boolean(restoringSession)} onClick={() => void switchSession(session.path)}><strong>{session.title}</strong><small>{restoringSession === session.path ? "恢复中…" : new Date(session.updatedAt).toLocaleDateString()}</small></button></div>) : <p>{sessionQuery ? "没有匹配的对话。" : "完成第一条需求后，对话会出现在这里。"}</p>}</div></div>
         <button className="sidebar-settings" onClick={onOpenSettings}>设置</button>
       </aside>
       {!sidebarOpen && <button className="sidebar-reopen" aria-label="展开侧栏" onClick={() => { setSidebarOpen(true); localStorage.setItem("reify.sidebar-open.v1", "1"); }}>›</button>}

@@ -132,9 +132,15 @@ export class PrimeRpc extends EventEmitter {
   async switchSession(path: string): Promise<unknown[]> {
     const result = await this.request("switch_session", { sessionPath: sandboxSessionPath(path) });
     if (result?.cancelled) throw new Error("Session switch was cancelled.");
-    const state = await this.request("get_state");
+    const [state, messages] = await Promise.all([this.request("get_state"), this.request("get_messages")]);
     this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
-    return (await this.request("get_messages"))?.messages || [];
+    return messages?.messages || [];
+  }
+
+  async setSessionName(name: string): Promise<void> {
+    const title = name.replace(/\s+/g, " ").trim().slice(0, 80);
+    if (!title) return;
+    await this.request("set_session_name", { name: title });
   }
 
   async getModels(): Promise<ModelChoice[]> {

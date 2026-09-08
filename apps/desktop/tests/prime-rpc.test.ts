@@ -26,6 +26,15 @@ describe("Prime runtime setup", () => {
     await expect(runtime.prompt("continue")).resolves.toBeUndefined();
     expect(request.mock.calls.map(([type]) => type)).toEqual(["prompt", "steer"]);
   });
+  it("sets a bounded normalized automatic session name", async () => {
+    const runtime = new PrimeRpc({} as never);
+    const request = vi.spyOn(runtime, "request").mockResolvedValue(undefined);
+    await runtime.setSessionName(`  折叠   手机支架 ${"长".repeat(100)}  `);
+    const [, payload] = request.mock.calls[0]!;
+    expect(request.mock.calls[0]![0]).toBe("set_session_name");
+    expect(payload.name).toHaveLength(80);
+    expect(payload.name.startsWith("折叠 手机支架 ")).toBe(true);
+  });
   it("uses an existing runtime without reinstalling", async () => {
     const bridge = { check: vi.fn().mockResolvedValue(ready), install: vi.fn() };
     await expect(ensureRuntimeReady(bridge as any, settings)).resolves.toEqual(ready);

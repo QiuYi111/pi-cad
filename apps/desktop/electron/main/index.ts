@@ -189,7 +189,7 @@ function registerIpc() {
   const demo = desktopE2E;
   const demoParameterValues: Record<string, ModelParameterValue> = { width: 40, depth: 24, height: 12 };
   let demoEvaluation: { quality: number; difficulty: number; feedback?: string } | undefined;
-  const demoWorkflow: WorkflowDocument = { id: "mechanical.design", version: "1.0.0", description: "Design a reviewed mechanical product", phases: ["grilling", "concept", "modify", "final_review", "done"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: index === 1 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.design\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/design.yaml" };
+  const demoWorkflow: WorkflowDocument = { id: "mechanical.default", version: "2.0.0", description: "Plan, build, and review an engineering result", phases: ["plan", "cook", "final", "done"].map((id, index) => ({ id, title: id, purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: index === 1 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.default\nversion: 2.0.0\nworkflow:\n  phases:\n    plan: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/default.yaml" };
   ipcMain.handle(IPC.settingsGet, () => settingsStore.get());
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
   ipcMain.handle(IPC.settingsChooseProject, async () => {
@@ -234,6 +234,7 @@ function registerIpc() {
   ipcMain.handle(IPC.runtimeSteer, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).steer(message, images));
   ipcMain.handle(IPC.runtimeNewSession, async () => (await ensureRuntime()).newSession());
   ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => (await ensureRuntime()).switchSession(path));
+  ipcMain.handle(IPC.runtimeSetSessionName, async (_event, name: string) => (await ensureRuntime()).setSessionName(name));
   ipcMain.handle(IPC.runtimeAbort, async () => (await ensureRuntime()).abort());
   ipcMain.handle(IPC.runtimeModels, async () => (await ensureRuntime()).getModels());
   ipcMain.handle(IPC.runtimeSetModel, async (_event, provider: string, model: string) => (await ensureRuntime()).setModel(provider, model));

@@ -1,0 +1,140 @@
+schema: 1
+id: mechanical.default
+description: Plan the engineering task, execute it freely, and independently review the finished candidate.
+tags: [cad, mechanical, default]
+version: 2.0.0
+workflow:
+  schema: 1
+  id: mechanical.default
+  version: 2.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: plan
+  versionControl:
+    init: true
+    allowRemote: false
+    phases:
+      plan: {onExit: [commit]}
+  phases:
+    plan:
+      purpose: Understand the real engineering task and make a complete execution plan before CAD work.
+      guidance: >-
+        Plan the engineering task itself, not the workflow. Resolve the required
+        deliverable, measurable requirements, source and reference authority,
+        dimensions, loads, interfaces, manufacturing assumptions, motion,
+        acceptance criteria, and failure risks only to the depth justified by the
+        task. Grilling is optional: ask only when an unresolved user-owned decision
+        materially changes the solution.
+
+        A visual concept is optional. Generate one when spatial, architectural,
+        ergonomic, packaging, form, or kinematic reasoning benefits from it. After
+        generation, inspect the actual image and translate it into a geometry plan:
+        describe the main-view silhouettes, dominant forms, continuous and separate
+        regions, support topology, transitions and curvature, part relationships,
+        interfaces, and visual features that must survive CAD. Reference the PNG
+        and this geometry plan from the plan commit.
+
+        A concept image is not dimensional authority, but it is form and layout
+        intent. Preserve its major silhouette, topology, proportions, part
+        relationships, interfaces, and visual language unless an engineering
+        constraint justifies and records a deviation.
+
+        Define how important geometry will actually be constructed. Do not leave
+        functional parts as vague placeholders. Include an execution plan and a
+        validation plan tied to real acceptance criteria and known failure modes.
+        Commit one coherent plan when it is sufficient to guide real work.
+
+        The workflow is a coordination boundary, not the objective. There is no
+        reward for advancing it. Advance only when the engineering meaning of PLAN
+        is genuinely complete.
+      actions: [cad_commit, codex_generate_image, transition]
+      grants: [file_read, image_generate, transition]
+      writeScopes: [project:deliverable]
+      recordObligations:
+        - {ref: plan, type: workspace_commit, closeWith: cad_commit}
+      evidenceObligations:
+        - {ref: concept-image, type: concept_image, closeWith: codex_generate_image, required: false}
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions:
+        plan_ready: {target: cook, requiresPhaseObligations: true}
+    cook:
+      purpose: Execute the engineering plan autonomously until the real candidate is genuinely ready for independent review.
+      guidance: >-
+        Complete the user's engineering task, not the workflow. Use PLAN as the
+        primary engineering reference and choose the execution order yourself.
+        The workflow does not prescribe part design, assembly, analysis, probing,
+        manufacturing checks, or revision.
+
+        Concept sketches may be rough and CAD may be incomplete, but CAD cannot be
+        fake. Do not substitute boxes, cylinders, slabs, envelopes, fake rigid
+        transforms, scaling tricks, or other stand-ins for planned functional
+        geometry merely to build successfully. An unfinished real part is
+        acceptable. A finished-looking fake part is not.
+
+        If PLAN generated a concept image, use the image already appended to the
+        model context and execute the committed geometry plan. After the
+        first complete candidate and after major form changes, render canonical CAD
+        views and compare them with the concept. Ignoring dimensions and materials,
+        judge silhouette, proportions, topology, curvature, and major feature
+        relationships. Repair every material mismatch before dimensional probes.
+
+        Builds and probes are tools, not milestones. A successful B-rep does not
+        prove correctness, completeness, manufacturability, visual fidelity, or
+        function. Test real requirements and failure modes; avoid weak checks that
+        prove only solid count, nonzero volume, approximate envelope, or endpoint
+        motion.
+
+        Continuously compare the candidate with the request, PLAN, authoritative
+        references, visual concept, acceptance criteria, and engineering evidence.
+        Before review, perform an explicit final self-audit and continue while any
+        material requirement, interface, motion, manufacturing issue, reference
+        mismatch, visual mismatch, or assumption remains unresolved.
+
+        Only then freeze one immutable review-candidate commit containing the latest
+        ArtifactRef, deterministic source, relevant deliverables, acceptance
+        summary, and structured evidence. Do not transition because a build passed,
+        a commit exists, or a transition is available.
+      actions: [cad_build_step, cad_commit, cad_simulate, transition]
+      grants: [file_read, file_edit_source, model_build, observe, observe_interference, observe_programmable, shell, transition, simulate]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions:
+        candidate_ready: {target: final}
+    final:
+      purpose: Independently judge the immutable candidate against the real engineering task.
+      guidance: >-
+        Review the exact immutable review-candidate from COOK against the user's
+        request, PLAN, authoritative references, acceptance criteria, geometry,
+        interfaces, motion, manufacturing intent, visual concept, and evidence.
+        Activity volume and successful tool calls are not proof of completion.
+        Placeholder geometry and materially unverified requirements fail review.
+        Return to COOK when implementation is wrong or incomplete. Return to PLAN
+        only when requirements, architecture, assumptions, or strategy need
+        material reconsideration. Report the defect and evidence; do not prescribe
+        a workflow-shaped repair route.
+      actions: [cad_submit_for_review]
+      grants: [file_read, observe, observe_interference, observe_programmable]
+      writeScopes: [run:observation]
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: []
+      reviewProfile: mechanical.final-review
+      transitions:
+        accepted: {target: done, reviewVerdicts: [pass]}
+        revise: {target: cook, reviewVerdicts: [fail]}
+        replan: {target: plan, reviewVerdicts: [fail], invalidate: [plan]}
+    done:
+      purpose: Preserve the independently reviewed engineering result.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

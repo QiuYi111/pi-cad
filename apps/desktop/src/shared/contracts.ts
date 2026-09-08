@@ -335,6 +335,7 @@ export interface DesktopApi {
     steer(message: string, images?: Array<{ data: string; mimeType: string }>): Promise<void>;
     newSession(): Promise<unknown[]>;
     switchSession(path: string): Promise<unknown[]>;
+    setSessionName(name: string): Promise<void>;
     abort(): Promise<void>;
     getModels(): Promise<ModelChoice[]>;
     setModel(provider: string, model: string): Promise<void>;
@@ -413,6 +414,7 @@ export const IPC = {
   runtimeSteer: "runtime:steer",
   runtimeNewSession: "runtime:new-session",
   runtimeSwitchSession: "runtime:switch-session",
+  runtimeSetSessionName: "runtime:set-session-name",
   runtimeAbort: "runtime:abort",
   runtimeModels: "runtime:models",
   runtimeSetModel: "runtime:set-model",

@@ -25,6 +25,7 @@ export class DemoRuntime extends EventEmitter {
   }
   async steer(message: string) { this.emit("event", { type: "message_start", message: { role: "user", content: message } }); }
   async newSession() { this.messages = []; return []; }
+  async setSessionName(_name: string) {}
   async switchSession(_path?: string) {
     this.messages = [
       { id: "demo-history-user", role: "user", content: "Design a folding stand" },
