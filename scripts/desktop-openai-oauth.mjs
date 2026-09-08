@@ -12,13 +12,6 @@ const prime = resolve(primeArg);
 const agentDir = resolve(agentDirArg);
 process.env.PRIME_AGENT_CODING_AGENT_DIR = agentDir;
 
-// Prime's OAuth helper uses fetch for the token exchange. Install the proxy
-// dispatcher explicitly because WSL traffic may bypass a Windows TUN adapter.
-if (process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy) {
-  const { EnvHttpProxyAgent, setGlobalDispatcher } = await import("undici");
-  setGlobalDispatcher(new EnvHttpProxyAgent());
-}
-
 const { loginOpenAICodex } = await import(pathToFileURL(join(prime, "packages/ai/dist/oauth.js")));
 const input = createInterface({ input: process.stdin, terminal: false });
 const manualValues = [];

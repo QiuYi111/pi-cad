@@ -50,12 +50,6 @@ for (const name of ["agent", "ai", "coding-agent", "tui"]) {
   await cp(join(prime, "packages", name, "package.json"), join(primeDestination, "packages", name, "package.json"));
   await cp(join(prime, "packages", name, "dist"), join(primeDestination, "packages", name, "dist"), { recursive: true });
 }
-const openAiOAuth = join(primeDestination, "packages", "ai", "dist", "utils", "oauth", "openai-codex.js");
-const openAiOAuthSource = await readFile(openAiOAuth, "utf8");
-await writeFile(openAiOAuth, openAiOAuthSource.replace(
-  "OpenAI authentication completed. You can close this window.",
-  "Browser authorization received. Return to Reify while sign-in finishes.",
-));
 await cp(join(prime, "node_modules"), join(primeDestination, "node_modules"), {
   recursive: true,
   filter: (path) =>
