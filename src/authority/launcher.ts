@@ -143,6 +143,19 @@ export interface LaunchPaths {
 // Prime's CLI requires positive autonomous limits. Max-safe values leave the
 // ordinary reviewer free of practical rollout, token, continuation, and time caps.
 const REVIEWER_UNBOUNDED_LIMIT = String(Number.MAX_SAFE_INTEGER);
+const PRIME_PYTHON_SKILLS = [
+  "agent-message", "agent-observe", "attach-image", "compact", "edit",
+  "goal", "refine", "rlm-heartbeat", "websearch",
+];
+
+function primePythonPath(primeRoot: string, kernelSitePackages: string, sandboxed: boolean): string {
+  const root = sandboxed ? "/opt/prime" : primeRoot;
+  const sitePackages = sandboxed ? `/opt/prime-kernel-venv/${kernelSitePackages}` : kernelSitePackages;
+  return [
+    sitePackages,
+    ...PRIME_PYTHON_SKILLS.map((name) => join(root, "packages", "coding-agent", "dist", "skills", name, "src")),
+  ].join(":");
+}
 
 export function resolvePrimeRepository(repository: string, primeAgentDir: string, explicit = process.env.PRIME_AGENT_REPO): string {
   const configPath = join(primeAgentDir, PRIME_CAD_CONFIG_FILE);
@@ -185,7 +198,7 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PI_CAD_REVIEW_ID", input.reviewId,
     "--setenv", "PI_CAD_REVIEWER_MODE", "1", "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad", "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
-    "--setenv", "PYTHONPATH", `/opt/prime-kernel-venv/${paths.kernelSitePackages}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
+    "--setenv", "PYTHONPATH", `${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime", "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
     "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
     "--setenv", "PI_OFFLINE", "1",
@@ -249,7 +262,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad",
     "--setenv", "PI_CAD_BLENDER_RUNTIME", "/opt/pi-cad/blender-runtime",
-    "--setenv", "PYTHONPATH", `/opt/prime-kernel-venv/${paths.kernelSitePackages}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
+    "--setenv", "PYTHONPATH", `${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime",
     "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
@@ -443,7 +456,7 @@ function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string,
     PI_CAD_PROJECT_CWD: reviewer ? join(paths.runtimeDirectory, "reviewer-workspace") : paths.project,
     PI_CAD_REPO: paths.repository,
     PI_CAD_BLENDER_RUNTIME: join(paths.repository, ".runtime", "blender"),
-    PYTHONPATH: `${join(paths.primeKernelVenv, paths.kernelSitePackages)}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
+    PYTHONPATH: `${primePythonPath(paths.primeRoot, join(paths.primeKernelVenv, paths.kernelSitePackages), false)}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
     PYTHONDONTWRITEBYTECODE: "1", PRIME_AGENT_REPO: paths.primeRoot,
     PRIME_AGENT_CODING_AGENT_DIR: agentDir,
     PRIME_AGENT_SESSION_DIR: reviewer ? undefined : join(paths.project, ".prime-sessions"),
