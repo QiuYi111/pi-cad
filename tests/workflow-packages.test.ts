@@ -11,7 +11,7 @@ import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { canonicalDigest } from "../src/harness/canonical.ts";
 import { legalWorkflowTransitions, transitionRun } from "../src/harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
-import { resolveWorkflowPackage } from "../src/harness/workflow/packages.ts";
+import { resolveWorkflowPackage, workflowUserDirectory } from "../src/harness/workflow/packages.ts";
 
 test("installed Mechanical packages expose only default and naked modes", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
@@ -47,9 +47,9 @@ test("installed Mechanical packages expose only default and naked modes", async 
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
-test("project-authored package YAML is compiler-admitted and source edits cannot alter a pinned run", async () => {
+test("user-authored package YAML is compiler-admitted and source edits cannot alter a pinned run", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-authoring-"));
-  const directory = join(cwd, "workflows");
+  const directory = workflowUserDirectory();
   const path = join(directory, "custom.yaml");
   const source = (purpose: string) => `
 schema: 1
@@ -87,7 +87,7 @@ workflow:
       terminal: true
 `;
   try {
-    await mkdir(directory);
+    await mkdir(directory, { recursive: true });
     await writeFile(path, source("Original pinned purpose."));
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
     assert.ok(listed.some((item) => item.id === "custom.arbitrary"));
@@ -107,15 +107,15 @@ test("administrator adoption selects an exact workflow version while existing ru
   const upgradedCwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-adoption-next-"));
   const packageSource = (version: string, purpose: string) => `schema: 1\nid: custom.versioned\ndescription: Versioned workflow.\ntags: [custom]\nversion: ${version}\nworkflow:\n  schema: 1\n  id: custom.versioned\n  version: ${version}\n  parametersSchema: {type: object, additionalProperties: false}\n  initialPhase: work\n  phases:\n    work:\n      purpose: ${purpose}\n      actions: []\n      grants: [file_read]\n      writeScopes: []\n      recordObligations: []\n      evidenceObligations: []\n      contextProviders: [kernel.current-action]\n      hooks: []\n      transitions: {}\n      terminal: true\n`;
   try {
-    await mkdir(join(cwd, "workflows")); await writeFile(join(cwd, "workflows", "v1.yaml"), packageSource("1.0.0", "Version one.")); await writeFile(join(cwd, "workflows", "v2.yaml"), packageSource("2.0.0", "Version two."));
+    const directory = workflowUserDirectory();
+    await mkdir(directory, { recursive: true }); await writeFile(join(directory, "v1.yaml"), packageSource("1.0.0", "Version one.")); await writeFile(join(directory, "v2.yaml"), packageSource("2.0.0", "Version two."));
     await assert.rejects(resolveWorkflowPackage(cwd, "custom.versioned", mechanicalRegistries), /administrator adoption is required/);
-    await mkdir(join(cwd, ".pi-cad", "admin"), { recursive: true });
+    const policyPath = join(directory, "..", "workflow-adoptions.json");
     const policy = (version: string) => ({ schema: 1, globalSafetyPolicyVersion: "safety-1", adopted: { "custom.versioned": { version, adoptedBy: "admin", adoptedAt: "2026-03-10T00:00:00.000Z" } }, history: [{ id: "custom.versioned", to: version, adoptedBy: "admin", adoptedAt: "2026-03-10T00:00:00.000Z" }] });
-    await writeFile(join(cwd, ".pi-cad", "admin", "workflow-adoptions.json"), JSON.stringify(policy("1.0.0")));
+    await writeFile(policyPath, JSON.stringify(policy("1.0.0")));
     const first = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "custom.versioned" }) as any; const firstRun = first.runId;
     assert.equal(first.workflowVersion, "1.0.0");
-    await mkdir(join(upgradedCwd, "workflows")); await writeFile(join(upgradedCwd, "workflows", "v1.yaml"), packageSource("1.0.0", "Version one.")); await writeFile(join(upgradedCwd, "workflows", "v2.yaml"), packageSource("2.0.0", "Version two.")); await mkdir(join(upgradedCwd, ".pi-cad", "admin"), { recursive: true });
-    await writeFile(join(upgradedCwd, ".pi-cad", "admin", "workflow-adoptions.json"), JSON.stringify(policy("2.0.0")));
+    await writeFile(policyPath, JSON.stringify(policy("2.0.0")));
     const second = await handleAgentApi(upgradedCwd, { schema: 1, op: "workflow-start", id: "custom.versioned" }) as any;
     assert.equal(second.workflowVersion, "2.0.0");
     const restored = await new HarnessRunStoreV7(cwd, firstRun).load(mechanicalRegistries);

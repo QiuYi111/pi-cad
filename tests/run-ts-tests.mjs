@@ -1,4 +1,7 @@
 import { createJiti } from "jiti";
+import { cpSync, mkdtempSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 // Legacy behavior tests are explicit v6 compatibility gates. Individual v7
 // tests call the v7 services directly or override this variable.
@@ -6,6 +9,10 @@ process.env.PI_CAD_KERNEL ??= "v6";
 // Python subprocesses import the canonical Plan C skill directly from its
 // source tree. Test execution must never leave bytecode inside a packaged skill.
 process.env.PYTHONDONTWRITEBYTECODE ??= "1";
+process.env.PI_CAD_WORKFLOW_HOME = mkdtempSync(join(tmpdir(), "pi-cad-workflow-home-"));
+const testWorkflowRoot = join(process.env.PI_CAD_WORKFLOW_HOME, ".pi-cad", "workflows");
+mkdirSync(testWorkflowRoot, { recursive: true });
+cpSync(new URL("../workflow-packages/mechanical/default.yaml", import.meta.url), join(testWorkflowRoot, "mechanical-default.yaml"));
 
 const jiti = createJiti(import.meta.url, { moduleCache: false });
 await jiti.import("./state-machine.test.ts", { default: true });

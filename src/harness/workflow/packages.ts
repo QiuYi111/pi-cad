@@ -1,6 +1,7 @@
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { RegistrySet } from "../registry.ts";
@@ -28,6 +29,11 @@ export interface WorkflowAdoptionsV1 {
 }
 
 const BUILTIN_PACKAGES = fileURLToPath(new URL("../../../workflow-packages", import.meta.url));
+const BUILTIN_MECHANICAL = resolve(BUILTIN_PACKAGES, "mechanical");
+
+export function workflowUserDirectory(): string {
+  return resolve(process.env.PI_CAD_WORKFLOW_HOME ?? process.env.HOME ?? homedir(), ".pi-cad", "workflows");
+}
 
 function inside(root: string, candidate: string): boolean {
   const path = relative(resolve(root), resolve(candidate));
@@ -90,24 +96,24 @@ function semverDescending(a: string, b: string): number {
 
 /** Discover every installed version. Selection is a separate administrator decision. */
 export async function discoverInstalledWorkflowPackages(cwd: string, registries: RegistrySet): Promise<InstalledWorkflowPackage[]> {
-  const roots = [BUILTIN_PACKAGES, resolve(cwd, "workflows")];
+  void cwd;
+  const sources = [resolve(BUILTIN_MECHANICAL, "naked.yaml"), ...await yamlFiles(workflowUserDirectory())];
   const packages: InstalledWorkflowPackage[] = [];
-  const identities = new Set<string>();
-  for (const root of roots) {
-    for (const path of await yamlFiles(root)) {
-      const item = parsePackage(parseYamlDocument(await readFile(path, "utf-8"), path), path, registries);
-      const identity = `${item.id}@${item.version}`;
-      if (identities.has(identity)) throw new Error(`duplicate installed workflow package: ${identity}`);
-      identities.add(identity);
-      packages.push(item);
-    }
+  const identities = new Map<string, number>();
+  for (const path of sources) {
+    const item = parsePackage(parseYamlDocument(await readFile(path, "utf-8"), path), path, registries);
+    const identity = `${item.id}@${item.version}`;
+    if (identities.has(identity)) throw new Error(`duplicate installed workflow package: ${identity}`);
+    identities.set(identity, packages.length);
+    packages.push(item);
   }
   return packages.sort((a, b) => a.id.localeCompare(b.id) || semverDescending(a.version, b.version));
 }
 
 export async function readWorkflowAdoptions(cwd: string): Promise<WorkflowAdoptionsV1> {
+  void cwd;
   try {
-    const value = JSON.parse(await readFile(resolve(cwd, ".pi-cad", "admin", "workflow-adoptions.json"), "utf-8")) as WorkflowAdoptionsV1;
+    const value = JSON.parse(await readFile(resolve(workflowUserDirectory(), "..", "workflow-adoptions.json"), "utf-8")) as WorkflowAdoptionsV1;
     if (value.schema !== 1 || !value.adopted || !Array.isArray(value.history) || typeof value.globalSafetyPolicyVersion !== "string") throw new Error("invalid workflow adoption policy");
     return value;
   } catch (error) {

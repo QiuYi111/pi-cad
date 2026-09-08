@@ -251,8 +251,11 @@ test("complete desktop product path", async () => {
 
   await page.getByRole("button", { name: "Workflows" }).click();
   await expect(page.getByRole("heading", { name: "mechanical.default" })).toBeVisible();
-  await page.getByRole("button", { name: /concept/i }).click();
-  await expect(page.getByText("image.generate")).toBeVisible();
+  await page.getByRole("button", { name: /plan.*obligations/i }).click();
+  await expect(page.getByText("codex_generate_image")).toBeVisible();
+  await page.getByRole("button", { name: /mechanical\.naked/i }).click();
+  await expect(page.getByText("Runtime mode", { exact: true })).toBeVisible();
+  await expect(page.getByText("cad_simulate")).toBeVisible();
   await page.getByRole("button", { name: "New workflow" }).click();
   await expect(page.getByRole("heading", { name: "custom.workflow" })).toBeVisible();
   await page.getByRole("button", { name: "Save workflow" }).click();
@@ -308,14 +311,10 @@ test("complete desktop product path", async () => {
   await page.reload();
   await expect(page.getByPlaceholder("Ask anything about the design")).toHaveValue("Draft survives restart");
   await expect(page.locator(".viewer-file-identity")).toContainText("part.step");
-  await page.getByRole("button", { name: "Rename Folding stand" }).click();
-  await page.getByLabel("Conversation title for Folding stand").fill("Bracket review");
-  await page.getByLabel("Conversation title for Folding stand").press("Enter");
-  await expect(page.getByText("Bracket review", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "新对话" }).click();
   await expect(page.getByTestId("conversation")).not.toContainText("I checked the interfaces before building.");
   await expect(page.locator(".session-menu")).toHaveCount(0);
-  await page.getByText("Bracket review", { exact: true }).click();
+  await page.getByText("Folding stand", { exact: true }).click();
   await expect(page.getByText("I checked the interfaces before building.")).toBeVisible();
   await page.locator(".chat-header .open-step").click();
   await expect(page.getByTestId("parameter-unbound")).toBeVisible();

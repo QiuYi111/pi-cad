@@ -189,7 +189,8 @@ function registerIpc() {
   const demo = desktopE2E;
   const demoParameterValues: Record<string, ModelParameterValue> = { width: 40, depth: 24, height: 12 };
   let demoEvaluation: { quality: number; difficulty: number; feedback?: string } | undefined;
-  const demoWorkflow: WorkflowDocument = { id: "mechanical.default", version: "2.0.0", description: "Plan, build, and review an engineering result", phases: ["plan", "cook", "final", "done"].map((id, index) => ({ id, title: id, purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: index === 1 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.default\nversion: 2.0.0\nworkflow:\n  phases:\n    plan: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/default.yaml" };
+  const demoWorkflow: WorkflowDocument = { id: "mechanical.default", version: "2.0.0", description: "Plan, build, and review an engineering result", editable: true, phases: ["plan", "cook", "final", "done"].map((id, index) => ({ id, title: id, purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: id === "plan" ? ["codex_generate_image", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.default\nversion: 2.0.0\nworkflow:\n  phases:\n    plan: {}\n", sourcePath: "/home/demo/.pi-cad/workflows/mechanical-default.yaml" };
+  const demoNakedWorkflow: WorkflowDocument = { id: "mechanical.naked", version: "1.0.0", description: "Full tools with no prescribed workflow", phases: [{ id: "work", title: "work", purpose: "Complete the engineering task", status: "active", transitions: [], capabilities: ["cad_build_step", "cad_commit", "cad_simulate", "codex_generate_image"], obligations: [] }], raw: "", sourcePath: "/runtime/workflow-packages/mechanical/naked.yaml" };
   ipcMain.handle(IPC.settingsGet, () => settingsStore.get());
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
   ipcMain.handle(IPC.settingsChooseProject, async () => {
@@ -260,7 +261,7 @@ function registerIpc() {
   ipcMain.handle(IPC.authManualCode, async (_event, value: string) => (await ensureAuth()).submitManualCode(value));
   ipcMain.handle(IPC.authCancel, async () => (await ensureAuth()).cancel());
   ipcMain.handle(IPC.authSignOut, async () => (await ensureAuth()).signOut(await settingsStore.get()));
-  ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
+  ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow, demoNakedWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.workflowCurrent, async () => demo ? {
     workflowId: demoWorkflow.id, workflowVersion: demoWorkflow.version, workflowHash: "demo", runId: "e2e", phase: "concept", status: "active",
     phaseHistory: ["grilling", "spec", "concept"], phases: demoWorkflow.phases, authoritative: false,
