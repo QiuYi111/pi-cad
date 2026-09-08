@@ -75,6 +75,7 @@
     "python",
     "assets",
     "recipes",
+    "third_party/blender-mcp",
     "benchmarks/README.md",
     "benchmarks/corpus.json",
     "benchmarks/run.mjs",

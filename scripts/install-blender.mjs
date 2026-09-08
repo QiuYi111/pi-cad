@@ -110,8 +110,21 @@ export async function installBlender({ root, python, env = process.env, fetchImp
   // distribution directory is extracted so the binary finds its libs.
   const distribution = entry.binary.split("/")[0];
   try {
-    console.log(`[pi-cad] downloading Blender ${version} for ${key}...`);
-    await downloadArchive(entry.url, archivePath, env, fetchImpl);
+    const urls = [...new Set([entry.url, entry.mirror].filter(Boolean))];
+    let lastDownloadError;
+    for (const url of urls) {
+      try {
+        console.log(`[pi-cad] downloading Blender ${version} for ${key} from ${new URL(url).host}...`);
+        rmSync(archivePath, { force: true });
+        await downloadArchive(url, archivePath, env, fetchImpl);
+        lastDownloadError = undefined;
+        break;
+      } catch (error) {
+        lastDownloadError = error;
+        console.warn(`[pi-cad] Blender download source failed (${new URL(url).host}): ${String(error?.message ?? error)}`);
+      }
+    }
+    if (lastDownloadError || !existsSync(archivePath)) throw lastDownloadError ?? new Error("no Blender download source configured");
     const digest = sha256File(archivePath);
     if (digest !== entry.sha256) {
       throw new Error(`sha256 mismatch: expected ${entry.sha256}, got ${digest}`);

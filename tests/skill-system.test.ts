@@ -54,10 +54,12 @@ test("CAD skill routes simulation to managed backends before Python discovery", 
   }
 });
 
-test("Blender product rendering uses the managed runtime and requires visual preview review", () => {
+test("Blender product rendering uses official MCP and requires visual preview review", () => {
   const skill = readFileSync(join(skills, "blender-product-rendering", "SKILL.md"), "utf-8");
-  assert.match(skill, /cadctl blender/);
-  assert.match(skill, /managed runtime/i);
+  assert.match(skill, /mcp\.list_tools\("blender"\)/);
+  assert.match(skill, /mcp\.call_tool\("blender"/);
+  assert.match(skill, /blender-bridge/);
+  assert.match(skill, /managed Blender 5\.1 runtime/i);
   assert.match(skill, /low-resolution preview/i);
   assert.match(skill, /Animation requires user intent/i);
   assert.doesNotMatch(skill, /subprocess\.(?:run|Popen)\(\[?["']blender["']/);

@@ -1,0 +1,37 @@
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.autopep8]
+max_line_length = 120
+ignore = [
+    "E721",
+    "E722",
+    "E402",
+    "W690",
+]
+aggressive = 2
+
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py314"
+
+[tool.ruff.lint]
+ignore = [
+    # Don't suggest f-string.
+    # Why disable? Personal preference.
+    "UP032",
+    # Do not catch blind exception: `Exception`.
+    # Why disable? There are times we *need* to be generic.
+    "BLE001",
+    # Combine `if` statements using `and`.
+    # Why disable? Makes the code more dense and difficult to refator (at times).
+    "SIM102",
+    # Combine `if` branches using logical `or` operator.
+    # Why disable? Code may be grouped in ways that make sense conceptually.
+    "SIM114",
+    # `__slots__` is not sorted.
+    # Why disable? Slots are often grouped logically, matching `__init__`, sometimes using groups.
+    "RUF023",
+]
+

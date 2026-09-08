@@ -692,6 +692,12 @@ def _cmd_blender(args: argparse.Namespace) -> int:
     return subprocess.run([binary, *command], env=env, check=False).returncode
 
 
+def _cmd_blender_bridge(args: argparse.Namespace) -> int:
+    from .blender_bridge import prepare_blender_bundle
+    print(json.dumps(prepare_blender_bundle(args.artifact, args.output_dir, args.source), indent=2))
+    return 0
+
+
 def _cmd_optimize(args: argparse.Namespace) -> int:
     from .simulation.topology import run_topology
 
@@ -823,6 +829,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--print-path", action="store_true", help="Print the managed Blender path and exit")
     p.add_argument("blender_args", nargs=argparse.REMAINDER)
     p.set_defaults(func=_cmd_blender)
+
+    p = sub.add_parser("blender-bridge", help="Tessellate STEP into a labeled Blender import bundle")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--source", default=None)
+    p.set_defaults(func=_cmd_blender_bridge)
 
     p = sub.add_parser("optimize", help="Run deterministic differentiable topology optimization")
     p.add_argument("--spec", required=True)

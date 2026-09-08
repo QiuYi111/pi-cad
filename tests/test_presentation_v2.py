@@ -48,7 +48,7 @@ class PresentationSchema(unittest.TestCase):
         from cadctl.cli import main
 
         completed = SimpleNamespace(returncode=7)
-        with patch("cadctl.presentation.blender_binary", return_value=("/managed/blender", "4.5.3/linux-x64")), patch(
+        with patch("cadctl.presentation.blender_binary", return_value=("/managed/blender", "5.1.2/linux-x64")), patch(
             "cadctl.cli.subprocess.run", return_value=completed
         ) as run:
             self.assertEqual(main(["blender", "--", "--background", "--python", "scene.py"]), 7)
@@ -70,14 +70,14 @@ class PresentationSchema(unittest.TestCase):
         from unittest.mock import patch
 
         with tempfile.TemporaryDirectory() as tmp:
-            managed = Path(tmp) / "4.5.3" / "linux-x64" / "blender"
+            managed = Path(tmp) / "5.1.2" / "linux-x64" / "blender"
             managed.parent.mkdir(parents=True)
             managed.write_text("binary")
             managed.chmod(0o755)
             with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": tmp}, clear=False), patch(
                 "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
             ):
-                self.assertEqual(blender_binary(), (str(managed.resolve()), "4.5.3/linux-x64"))
+                self.assertEqual(blender_binary(), (str(managed.resolve()), "5.1.2/linux-x64"))
 
     def test_managed_blender_uses_exact_manifest_version_and_platform(self):
         import os
@@ -85,7 +85,7 @@ class PresentationSchema(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            pinned = root / "runtime" / "4.5.3" / "linux-x64" / "blender"
+            pinned = root / "runtime" / "5.1.2" / "linux-x64" / "blender"
             newer = root / "runtime" / "4.6.0" / "linux-x64" / "blender"
             foreign = root / "runtime" / "9.0.0" / "win32-x64" / "blender"
             for binary in (pinned, newer, foreign):
@@ -94,7 +94,7 @@ class PresentationSchema(unittest.TestCase):
                 binary.chmod(0o755)
             manifest = root / "blender-manifest.json"
             manifest.write_text(json.dumps({
-                "version": "4.5.3",
+                "version": "5.1.2",
                 "platforms": {"linux-x64": {"binary": "distribution/blender", "sha256": "pinned"}},
             }))
             with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": str(root / "runtime")}, clear=False), patch(
@@ -102,7 +102,7 @@ class PresentationSchema(unittest.TestCase):
             ), patch("cadctl.presentation._blender_platform_key", return_value="linux-x64"), patch(
                 "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
             ):
-                self.assertEqual(blender_binary(), (str(pinned.resolve()), "4.5.3/linux-x64"))
+                self.assertEqual(blender_binary(), (str(pinned.resolve()), "5.1.2/linux-x64"))
 
     def test_cycles_prefers_available_gpu_and_falls_back_to_cpu(self):
         class Device:
