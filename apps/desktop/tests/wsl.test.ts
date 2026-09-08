@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, nodeInstallScript, parseWindowsProxyServer, runtimeChecksReady, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
+import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, nodeInstallScript, runtimeChecksReady, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
 import { engineeringKnowledgeProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
 
@@ -48,14 +48,6 @@ describe("WSL path conversion", () => {
   });
 });
 
-describe("Windows proxy forwarding", () => {
-  it("maps a configured local mixed proxy into WSL", () => {
-    expect(parseWindowsProxyServer("127.0.0.1:7890")).toBe("http://127.0.0.1:7890");
-    expect(parseWindowsProxyServer("http=127.0.0.1:7890;https=127.0.0.1:7890")).toBe("http://127.0.0.1:7890");
-    expect(parseWindowsProxyServer("proxy.example.com:8080")).toBeUndefined();
-  });
-});
-
 describe("WSL runtime environment", () => {
   it("installs the optional torch-fem component as WSL root and verifies it", async () => {
     const bridge = new WslBridge("Ubuntu");
@@ -72,15 +64,11 @@ describe("WSL runtime environment", () => {
       PI_CAD_CANONICAL_PROJECT_DIR: "/tmp/canonical",
       PI_CAD_EXPERIENCE_ROOT: "/tmp/experience",
       PI_CAD_DISTILL_COMMAND_JSON: "[\"node\"]",
-      HTTPS_PROXY: "http://127.0.0.1:7890",
       UNRELATED_SECRET: "do-not-forward",
     });
     expect(env.WSLENV?.split(":")).toEqual([
       "PATH/p", "PI_CAD_CANONICAL_PROJECT_DIR", "PI_CAD_EXPERIENCE_ROOT", "PI_CAD_DISTILL_COMMAND_JSON",
-      "HTTP_PROXY", "HTTPS_PROXY", "NODE_USE_ENV_PROXY",
     ]);
-    expect(env.HTTP_PROXY).toBe("http://127.0.0.1:7890");
-    expect(env.NODE_USE_ENV_PROXY).toBe("1");
     expect(env.WSLENV).not.toContain("UNRELATED_SECRET");
   });
 

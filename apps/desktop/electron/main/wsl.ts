@@ -1,4 +1,4 @@
-import { execFile, execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
@@ -31,30 +31,10 @@ const WSL_RUNTIME_ENV_KEYS = [
   "PI_CAD_REPLAY_SUITE_TIMEOUT_MS",
 ] as const;
 
-let configuredProxy: string | null | undefined;
-export function parseWindowsProxyServer(value: string): string | undefined {
-  const entries = value.trim().split(";").map((item) => item.trim()).filter(Boolean);
-  const mapped = Object.fromEntries(entries.filter((item) => item.includes("=")).map((item) => item.split(/=(.*)/s).slice(0, 2)));
-  const candidate = mapped.https || mapped.http || (entries.length === 1 && !entries[0]!.includes("=") ? entries[0] : "");
-  if (!candidate || !/^(?:localhost|127\.0\.0\.1|\[::1\]):\d+$/.test(candidate)) return undefined;
-  return `http://${candidate}`;
-}
-
-function windowsProxy(): string | undefined {
-  if (configuredProxy !== undefined) return configuredProxy || undefined;
-  try {
-    const output = execFileSync("reg.exe", ["query", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings", "/v", "ProxyServer"], { encoding: "utf8", windowsHide: true });
-    configuredProxy = parseWindowsProxyServer(String(output).match(/ProxyServer\s+REG_SZ\s+(.+)$/m)?.[1] || "") || null;
-  } catch { configuredProxy = null; }
-  return configuredProxy || undefined;
-}
-
 export function forwardWslRuntimeEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const proxy = source.HTTPS_PROXY || source.https_proxy || source.HTTP_PROXY || source.http_proxy || windowsProxy();
-  source = proxy ? { ...source, HTTP_PROXY: proxy, HTTPS_PROXY: proxy, NODE_USE_ENV_PROXY: "1" } : source;
   const entries = (source.WSLENV || "").split(":").filter(Boolean);
   const present = new Set(entries.map((entry) => entry.split("/")[0]));
-  for (const key of [...WSL_RUNTIME_ENV_KEYS, "HTTP_PROXY", "HTTPS_PROXY", "NODE_USE_ENV_PROXY"] as const) {
+  for (const key of WSL_RUNTIME_ENV_KEYS) {
     if (source[key] !== undefined && !present.has(key)) entries.push(key);
   }
   return { ...source, WSLENV: entries.join(":") };
