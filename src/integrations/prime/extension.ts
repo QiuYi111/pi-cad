@@ -29,6 +29,18 @@ interface ReviewHandle {
   result?: ReviewResult;
 }
 
+interface CompletionGate {
+  complete: boolean;
+  reason: string;
+  runId?: string;
+}
+
+/** Keep execution and learning separate while an engineering run is active. */
+export function refineGateDecision(gate: CompletionGate | null): { skip: true } | undefined {
+  if (!gate?.runId || gate.complete) return undefined;
+  return { skip: true };
+}
+
 /** A late watcher must not wake the author for a superseded review. */
 export function isCurrentReviewCompletion(completed: ReviewHandle, latest: ReviewHandle | null): boolean {
   return Boolean(
@@ -88,6 +100,10 @@ function originalUserRequest(messages: any[]): string | null {
 /** Append immutable phase contracts to the durable transcript; never rewrite provider history. */
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
   registerExperienceTools(pi);
+  pi.on("session_before_refine", async () => {
+    const gate = await requestAuthority<CompletionGate>({ op: "completion-gate" }).catch(() => null);
+    return refineGateDecision(gate);
+  });
   let reviewWatch: Promise<void> | null = null;
   const notifiedReviews = new Set<string>();
   // Some compatible-model providers will finish a turn after an IPython error

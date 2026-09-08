@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { renderCurrentActionCard } from "../src/core/agent-contract.ts";
-import { isCurrentReviewCompletion, persistedReviewNotificationIds } from "../src/integrations/prime/extension.ts";
+import { isCurrentReviewCompletion, persistedReviewNotificationIds, refineGateDecision } from "../src/integrations/prime/extension.ts";
 
 function nextActionFromInstalledContext(actionCard: string): string {
   const line = actionCard.split(/\r?\n/).find((item) => item.startsWith("Recommended next action:"));
@@ -66,6 +66,15 @@ test("Prime review completion uses ExtensionAPI messaging rather than event cont
   assert.match(extension, /persistedReviewNotificationIds\(event\.messages\)/);
   assert.match(extension, /op: "review-current"/);
   assert.match(extension, /pi\.sendMessage\(reviewCompletionMessage\(current\), \{ deliverAs: "steer" \}\)/);
+  assert.match(extension, /pi\.on\("session_before_refine"/);
+  assert.match(extension, /op: "completion-gate"/);
+});
+
+test("Prime refine is blocked only while a canonical engineering workflow is active", () => {
+  assert.equal(refineGateDecision(null), undefined);
+  assert.equal(refineGateDecision({ complete: false, reason: "no canonical workflow run exists" }), undefined);
+  assert.deepEqual(refineGateDecision({ complete: false, reason: "workflow running", runId: "run-1" }), { skip: true });
+  assert.equal(refineGateDecision({ complete: true, reason: "workflow done", runId: "run-1" }), undefined);
 });
 
 test("Prime review notification identity survives resume and imported legacy messages", () => {
