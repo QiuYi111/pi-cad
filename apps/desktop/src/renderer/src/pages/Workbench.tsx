@@ -114,6 +114,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     const needsStart = prime.status.state !== "ready" && prime.status.state !== "streaming";
     await prime.prompt(text, images, async () => {
       if (needsStart) await start();
+    }, async () => {
       if (automaticTitle) {
         await prime.setSessionName(automaticTitle).catch(() => undefined);
         await refreshSessions(false);
@@ -249,8 +250,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     setOpenedMesh(null);
     setUploadedConcepts([]);
     setOpenStepError("");
-    if (prime.status.state === "ready") await prime.newSession();
-    else prime.clearConversation();
+    await prime.newSession();
     await refreshSessions();
   };
   const switchSession = async (path: string) => {

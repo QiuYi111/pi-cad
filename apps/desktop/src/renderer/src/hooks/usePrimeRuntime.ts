@@ -11,6 +11,7 @@ export function usePrimeRuntime() {
   const [messages, dispatch] = useReducer(reducePrimeEvent, seed);
   const [status, setStatus] = useState<RuntimeStatus>({ state: "idle", checks: [] });
   const eventQueue = useRef<unknown[]>([]);
+  const pendingNewSession = useRef(false);
   const frame = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -33,12 +34,17 @@ export function usePrimeRuntime() {
     }).catch(() => undefined);
   }, []);
 
-  const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>, prepare?: () => Promise<void>) => {
+  const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>, prepare?: () => Promise<void>, sessionReady?: () => Promise<void>) => {
     dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text });
     const steering = status.state === "streaming";
     if (!steering) dispatch({ type: "desktop_agent_pending" });
     try {
       await prepare?.();
+      if (pendingNewSession.current) {
+        pendingNewSession.current = false;
+        await window.piCad.runtime.newSession();
+      }
+      await sessionReady?.();
       if (steering) await window.piCad.runtime.steer(text, images);
       else await window.piCad.runtime.prompt(text, images);
     }
@@ -49,11 +55,12 @@ export function usePrimeRuntime() {
   };
 
   const newSession = async () => {
-    const loaded = await window.piCad.runtime.newSession();
-    dispatch({ type: "desktop_session_loaded", messages: loaded });
+    pendingNewSession.current = status.state === "ready";
+    dispatch({ type: "desktop_session_loaded", messages: [] });
   };
 
   const switchSession = async (path: string) => {
+    pendingNewSession.current = false;
     const loaded = await window.piCad.runtime.switchSession(path);
     dispatch({ type: "desktop_session_loaded", messages: loaded });
   };
