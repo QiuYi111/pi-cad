@@ -98,7 +98,7 @@ export function initializeWslUserScript(): string {
     "set -e",
     "picad_user=$1",
     "id -u \"$picad_user\" >/dev/null 2>&1 || useradd -m -s /bin/bash \"$picad_user\"",
-    "printf '[user]\\ndefault=%s\\n' \"$picad_user\" > /etc/wsl.conf",
+    "printf '[boot]\\nsystemd=true\\n\\n[user]\\ndefault=%s\\n' \"$picad_user\" > /etc/wsl.conf",
   ].join("\n");
 }
 
@@ -226,13 +226,15 @@ export class WslBridge implements RuntimeBridge {
       return { state: "error", checks, message: "Install WSL 2 and Ubuntu to continue." };
     }
     try {
-      await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "true"], { encoding: "utf8", timeout: 15_000, windowsHide: true });
+      const { stdout } = await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "id", "-u"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+      if (String(stdout || "").replaceAll("\0", "").trim() === "0") throw new Error("Ubuntu still uses root as its default user");
     } catch {
       try {
         const user = wslDefaultUserName();
         await this.pipe(["bash", "-s", "--", user], initializeWslUserScript(), 3 * 60_000, "root");
         await execFileAsync("wsl.exe", ["--terminate", settings.distro], { encoding: "utf8", timeout: 30_000, windowsHide: true });
-        await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "true"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+        const { stdout } = await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "id", "-u"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+        if (String(stdout || "").replaceAll("\0", "").trim() === "0") throw new Error("Ubuntu default user is still root after initialization");
       } catch {
         return {
           state: "action-required", checks, action: "initialize-ubuntu", progress: 0.28,
