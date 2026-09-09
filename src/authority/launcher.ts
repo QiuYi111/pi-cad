@@ -266,6 +266,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PI_CAD_BLENDER_RUNTIME", "/opt/pi-cad/blender-runtime",
     "--setenv", "PI_CAD_BLENDER_MCP_ROOT", "/opt/pi-cad/blender-mcp",
     "--setenv", "BLENDER_MCP_PORT", process.env.PI_CAD_BLENDER_MCP_PORT ?? "9876",
+    "--setenv", "PI_CAD_PYTHON", "/opt/pi-cad/python/.venv/bin/python",
     "--setenv", "PYTHONPATH", `/opt/pi-cad/blender-mcp/deps:/opt/pi-cad/blender-mcp/mcp:${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime",
@@ -378,7 +379,7 @@ async function copyPrimeBootstrap(source: string, destination: string): Promise<
   }
 }
 
-async function configureBlenderMcp(agentDir: string, command: string): Promise<void> {
+async function configureBlenderMcp(agentDir: string, command: string, env: Record<string, { env: string }>): Promise<void> {
   const path = join(agentDir, "settings.json");
   let settings: Record<string, unknown> = {};
   try {
@@ -391,7 +392,7 @@ async function configureBlenderMcp(agentDir: string, command: string): Promise<v
     ? settings.mcpServers as Record<string, unknown> : {};
   settings.mcpServers = {
     ...current,
-    blender: { type: "stdio", command, args: [], startupTimeoutMs: 20_000, callTimeoutMs: 300_000 },
+    blender: { type: "stdio", command, args: [], env, startupTimeoutMs: 20_000, callTimeoutMs: 300_000 },
   };
   await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
 }
@@ -537,6 +538,7 @@ function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string,
     PI_CAD_BLENDER_RUNTIME: join(paths.repository, ".runtime", "blender"),
     PI_CAD_BLENDER_MCP_ROOT: join(paths.repository, "third_party", "blender-mcp"),
     BLENDER_MCP_PORT: process.env.PI_CAD_BLENDER_MCP_PORT,
+    PI_CAD_PYTHON: join(paths.repository, "python", ".venv", "bin", "python"),
     PYTHONPATH: `${join(paths.repository, "third_party", "blender-mcp", "deps")}:${join(paths.repository, "third_party", "blender-mcp", "mcp")}:${primePythonPath(paths.primeRoot, join(paths.primeKernelVenv, paths.kernelSitePackages), false)}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
     PYTHONDONTWRITEBYTECODE: "1", PRIME_AGENT_REPO: paths.primeRoot,
     PRIME_AGENT_CODING_AGENT_DIR: agentDir,
@@ -617,7 +619,6 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
   await copyPrimeBootstrap(primeAgentDir, ephemeralAgentDir);
   await copyPrimeBootstrap(primeAgentDir, reviewerAgentDir);
-  await configureBlenderMcp(ephemeralAgentDir, process.platform === "darwin" ? join(repository, "scripts", "blender-mcp-server.sh") : "/opt/pi-cad/scripts/blender-mcp-server.sh");
   await mkdir(reviewerWorkspace, { recursive: true, mode: 0o700 });
   process.env.PI_CAD_CANONICAL_PROJECT_DIR = defaultCanonicalProjectDirectory(project);
   await mkdir(process.env.PI_CAD_CANONICAL_PROJECT_DIR, { recursive: true, mode: 0o700 });
@@ -657,6 +658,15 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   launchPaths = paths;
   reviewerSocketDirectory = resolve(sidecar.reviewerSocket, "..");
   const blenderMcp = process.platform === "linux" ? await startManagedBlenderMcp(repository) : null;
+  await configureBlenderMcp(
+    ephemeralAgentDir,
+    process.platform === "darwin" ? join(repository, "scripts", "blender-mcp-server.sh") : "/opt/pi-cad/scripts/blender-mcp-server.sh",
+    {
+      PRIME_AGENT_KERNEL_PYTHON: { env: "PRIME_AGENT_KERNEL_PYTHON" },
+      PI_CAD_BLENDER_MCP_ROOT: { env: "PI_CAD_BLENDER_MCP_ROOT" },
+      BLENDER_MCP_PORT: { env: "BLENDER_MCP_PORT" },
+    },
+  );
   try {
     const result = process.platform === "darwin"
       ? await (async () => {

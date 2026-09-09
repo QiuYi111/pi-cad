@@ -59,6 +59,7 @@ test("Blender product rendering uses official MCP and requires visual preview re
   assert.match(skill, /mcp\.list_tools\("blender"\)/);
   assert.match(skill, /mcp\.call_tool\("blender"/);
   assert.match(skill, /blender-bridge/);
+  assert.match(skill, /PI_CAD_PYTHON/);
   assert.match(skill, /managed Blender 5\.1 runtime/i);
   assert.match(skill, /low-resolution preview/i);
   assert.match(skill, /Animation requires user intent/i);

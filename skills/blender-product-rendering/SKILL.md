@@ -21,8 +21,8 @@ Do not run `blender`, `/usr/bin/blender`, subprocess Blender, or the legacy pres
 Before import, create a labeled mesh bundle with provenance:
 
 ```python
-import subprocess, sys
-subprocess.run([sys.executable, "-m", "cadctl", "blender-bridge", "--artifact", step_path, "--source", source_path, "--output-dir", bundle_dir], check=True)
+import os, subprocess
+subprocess.run([os.environ["PI_CAD_PYTHON"], "-m", "cadctl", "blender-bridge", "--artifact", step_path, "--source", source_path, "--output-dir", bundle_dir], check=True)
 ```
 
 Read `manifest.json`, import each STL through `execute_blender_code`, and use `occurrenceKey` as the Blender object name. Keep `provenance.json` beside the final `.blend` and renders.

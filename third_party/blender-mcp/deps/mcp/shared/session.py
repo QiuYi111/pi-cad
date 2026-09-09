@@ -283,9 +283,9 @@ class BaseSession(
             # request read timeout takes precedence over session read timeout
             timeout = None
             if request_read_timeout_seconds is not None:  # pragma: no cover
-                timeout = request_read_timeout_seconds.total_seconds()
+                timeout = request_read_timeout_seconds.total_seconds() if hasattr(request_read_timeout_seconds, "total_seconds") else float(request_read_timeout_seconds)
             elif self._session_read_timeout_seconds is not None:  # pragma: no cover
-                timeout = self._session_read_timeout_seconds.total_seconds()
+                timeout = self._session_read_timeout_seconds.total_seconds() if hasattr(self._session_read_timeout_seconds, "total_seconds") else float(self._session_read_timeout_seconds)
 
             try:
                 with anyio.fail_after(timeout):
