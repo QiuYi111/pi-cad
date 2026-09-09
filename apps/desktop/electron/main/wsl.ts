@@ -306,7 +306,7 @@ export class WslBridge implements RuntimeBridge {
     if (status.checks.some((item) => item.id === "wsl" && item.status !== "ready")) return status;
     const missing = new Set(status.checks.filter((item) => item.status !== "ready").map((item) => item.id));
     if (missing.has("python") || missing.has("bwrap")) {
-      await runStep("Installing Python and the secure sandbox…", 0.15, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates xz-utils"], {
+      await runStep("Installing Python and the secure sandbox…", 0.15, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates xz-utils libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
         encoding: "utf8", timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
       }).then(() => undefined));
     }
@@ -347,6 +347,9 @@ export class WslBridge implements RuntimeBridge {
     }
     await runStep("Installing the core CAD packages…", 0.78,
       () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000));
+    await runStep("Preparing Blender system libraries…", 0.84, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "DEBIAN_FRONTEND=noninteractive apt-get install -y libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
+      encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+    }).then(() => undefined));
     await runStep("Preparing the managed Blender runtime…", 0.88,
       () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\ncd ${JSON.stringify(paths.piCadRepo)}\nnode scripts/install-blender.mjs\n`, 30 * 60_000));
     await runStep("Connecting Prime Agent to Reify…", 0.94, () => this.pipe(["bash", "-s"], [

@@ -235,4 +235,5 @@ describe("WSL first-install status", () => {
 
     expect(pipe).toHaveBeenCalledWith(["bash", "-s"], expect.stringContaining("picad_node_machine=$(uname -m"), 10 * 60_000);
   });
+
 });
