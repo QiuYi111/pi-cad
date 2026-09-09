@@ -126,16 +126,16 @@ export class WslBridge implements RuntimeBridge {
     return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") };
   }
 
-  spawn(args: string[]): ChildProcessWithoutNullStreams {
-    return spawn("wsl.exe", ["-d", this.distro, "--", ...args], {
+  spawn(args: string[], user?: string): ChildProcessWithoutNullStreams {
+    return spawn("wsl.exe", ["-d", this.distro, ...(user ? ["-u", user] : []), "--", ...args], {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       env: forwardWslRuntimeEnvironment(process.env),
     });
   }
 
-  async pipe(args: string[], input: string, timeout = 30_000): Promise<{ stdout: string; stderr: string }> {
-    const child = this.spawn(args);
+  async pipe(args: string[], input: string, timeout = 30_000, user?: string): Promise<{ stdout: string; stderr: string }> {
+    const child = this.spawn(args, user);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
@@ -230,9 +230,7 @@ export class WslBridge implements RuntimeBridge {
     } catch {
       try {
         const user = wslDefaultUserName();
-        await execFileAsync("wsl.exe", ["-d", settings.distro, "-u", "root", "--", "bash", "-s", "--", user], {
-          encoding: "utf8", timeout: 60_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, input: initializeWslUserScript(),
-        } as Parameters<typeof execFileAsync>[2]);
+        await this.pipe(["bash", "-s", "--", user], initializeWslUserScript(), 3 * 60_000, "root");
         await execFileAsync("wsl.exe", ["--terminate", settings.distro], { encoding: "utf8", timeout: 30_000, windowsHide: true });
         await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "true"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
       } catch {
