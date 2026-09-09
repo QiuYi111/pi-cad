@@ -263,7 +263,6 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     setUploadedConcepts([]);
     setOpenStepError("");
     try {
-      if (prime.status.state !== "ready") await start();
       await prime.switchSession(path);
     } finally {
       setRestoringSession("");

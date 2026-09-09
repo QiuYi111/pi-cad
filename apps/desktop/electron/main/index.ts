@@ -234,7 +234,7 @@ function registerIpc() {
   ipcMain.handle(IPC.runtimePrompt, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).prompt(message, images));
   ipcMain.handle(IPC.runtimeSteer, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).steer(message, images));
   ipcMain.handle(IPC.runtimeNewSession, async () => (await ensureRuntime()).newSession());
-  ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => (await ensureRuntime()).switchSession(path));
+  ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => (await ensureRuntime()).switchSession(path, await settingsStore.get()));
   ipcMain.handle(IPC.runtimeSetSessionName, async (_event, name: string) => (await ensureRuntime()).setSessionName(name));
   ipcMain.handle(IPC.runtimeAbort, async () => (await ensureRuntime()).abort());
   ipcMain.handle(IPC.runtimeModels, async () => (await ensureRuntime()).getModels());

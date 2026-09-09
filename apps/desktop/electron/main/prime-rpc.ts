@@ -18,7 +18,7 @@ export class PrimeRpc extends EventEmitter {
 
   constructor(private readonly bridge: RuntimeBridge) { super(); }
 
-  async start(settings: AppSettings): Promise<RuntimeStatus> {
+  async start(settings: AppSettings, resumePath?: string): Promise<RuntimeStatus> {
     if (this.child && !this.child.killed) return this.status;
     await ensureRuntimeReady(this.bridge, settings, (status) => this.setStatus(status));
     const paths = await this.bridge.resolveRuntimePaths(settings);
@@ -49,6 +49,7 @@ export class PrimeRpc extends EventEmitter {
       "--model", settings.model,
       "--thinking", settings.thinking,
       ...reviewer,
+      ...(resumePath ? ["--resume", sandboxSessionPath(resumePath)] : []),
     ];
     this.setStatus({ state: "starting", checks: [], message: "Starting Prime and the Reify engineering runtime…" });
     this.child = this.bridge.spawn(args);
@@ -129,7 +130,12 @@ export class PrimeRpc extends EventEmitter {
     return (await this.request("get_messages"))?.messages || [];
   }
 
-  async switchSession(path: string): Promise<unknown[]> {
+  async switchSession(path: string, settings?: AppSettings): Promise<unknown[]> {
+    if (!this.child || this.child.killed) {
+      if (!settings) throw new Error("Settings are required to restore a session before Prime starts.");
+      await this.start(settings, path);
+      return this.getMessages();
+    }
     const result = await this.request("switch_session", { sessionPath: sandboxSessionPath(path) });
     if (result?.cancelled) throw new Error("Session switch was cancelled.");
     const [state, messages] = await Promise.all([this.request("get_state"), this.request("get_messages")]);

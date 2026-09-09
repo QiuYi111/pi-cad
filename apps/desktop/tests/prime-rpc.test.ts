@@ -35,6 +35,17 @@ describe("Prime runtime setup", () => {
     expect(payload.name).toHaveLength(80);
     expect(payload.name.startsWith("折叠 手机支架 ")).toBe(true);
   });
+  it("restores a saved session directly when Prime is stopped", async () => {
+    const runtime = new PrimeRpc({} as never);
+    const start = vi.spyOn(runtime, "start").mockResolvedValue({ state: "ready", checks: [], sessionId: "saved" });
+    const messages = vi.spyOn(runtime, "getMessages").mockResolvedValue([{ role: "user", text: "saved" }]);
+    const request = vi.spyOn(runtime, "request");
+    const path = "C:\\project\\.prime-sessions\\saved.jsonl";
+    await expect(runtime.switchSession(path, settings)).resolves.toEqual([{ role: "user", text: "saved" }]);
+    expect(start).toHaveBeenCalledWith(settings, path);
+    expect(messages).toHaveBeenCalledOnce();
+    expect(request).not.toHaveBeenCalledWith("switch_session", expect.anything());
+  });
   it("uses an existing runtime without reinstalling", async () => {
     const bridge = { check: vi.fn().mockResolvedValue(ready), install: vi.fn() };
     await expect(ensureRuntimeReady(bridge as any, settings)).resolves.toEqual(ready);
