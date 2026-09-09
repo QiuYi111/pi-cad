@@ -6,13 +6,13 @@ import { Wordmark } from "../components/Brand";
 export function setupErrorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   if (/404|not found/i.test(text) && /node|nodejs/i.test(text)) return "Node.js 安装包下载失败。请检查网络后重试。";
-  const architecture = text.match(/Unsupported WSL CPU architecture:\s*([^\r\n]+)/i);
-  if (architecture) return `当前 WSL 处理器架构无法识别：${architecture[1]!.trim()}`;
-  const clean = text
+  const lines = text
     .replace(/^Error:\s*/i, "")
     .replace(/^Error invoking remote method '[^']+':\s*/i, "")
-    .split(/\r?\n/)
-    .find((line) => line.trim() && !/^(command failed:|picad_|case |curl |tar |ln |mkdir |export )/i.test(line.trim()));
+    .split(/\r?\n/);
+  const architecture = lines.find((line) => /^Unsupported WSL CPU architecture:\s*/i.test(line.trim()) && !line.includes("$picad_"));
+  if (architecture) return `当前 WSL 处理器架构无法识别：${architecture.trim().replace(/^Unsupported WSL CPU architecture:\s*/i, "")}`;
+  const clean = lines.find((line) => line.trim() && !/^(command failed:|picad_|case |curl\s|tar |ln |mkdir |export )/i.test(line.trim()));
   return (clean || "安装失败，请重试。").trim().slice(0, 220);
 }
 

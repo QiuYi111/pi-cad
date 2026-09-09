@@ -66,7 +66,7 @@ export function classifyWslInstallResult(result: { exitCode: number; distroPrese
 
 export function wslInstallPowerShellCommand(distro: string): string {
   const escaped = distro.replaceAll("'", "''");
-  return `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -PassThru -ArgumentList @('--install','--distribution','${escaped}','--no-launch'); $process.WaitForExit(); exit $process.ExitCode`;
+  return `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -PassThru -ArgumentList @('--install','--distribution','${escaped}','--no-launch','--web-download'); $process.WaitForExit(); if ($process.ExitCode -ne 0) { Write-Error ('wsl.exe exited with code {0}' -f $process.ExitCode) }; exit $process.ExitCode`;
 }
 
 export function nodeInstallScript(version = "v22.23.2"): string {
@@ -241,7 +241,7 @@ export class WslBridge implements RuntimeBridge {
         : "printf 'bundle=ready\\n'",
       "printf 'python=%s\\n' \"$(command -v python3 || true)\"",
     ].join("; ");
-    const { stdout } = await this.exec(["bash", "-lc", script], { timeout: 120_000 });
+    const { stdout } = await this.pipe(["bash", "-s"], `${script}\n`, 120_000);
     const values = Object.fromEntries(stdout.trim().split("\n").map((line) => line.split(/=(.*)/s).slice(0, 2))) as Record<string, string>;
     const nodeMajor = Number(values.node?.split(".")[0] || 0);
     add("node", "Node.js 22+", nodeMajor >= 22, values.node || "Not installed");
@@ -312,11 +312,11 @@ export class WslBridge implements RuntimeBridge {
     }
     if (missing.has("uv")) {
       await runStep("Installing the Python package runner…", 0.36,
-        () => this.exec(["bash", "-lc", "curl -LsSf https://astral.sh/uv/install.sh | sh"], { timeout: 5 * 60_000 }));
+        () => this.pipe(["bash", "-s"], "set -e\ncurl -LsSf https://astral.sh/uv/install.sh | sh\n", 5 * 60_000));
     }
     if (missing.has("node")) {
       await runStep("Downloading and installing Node.js…", 0.48,
-        () => this.exec(["bash", "-lc", nodeInstallScript()], { timeout: 10 * 60_000 }));
+        () => this.pipe(["bash", "-s"], nodeInstallScript(), 10 * 60_000));
     }
     let paths = await this.resolveRuntimePaths(settings);
     if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath) {
@@ -334,7 +334,7 @@ export class WslBridge implements RuntimeBridge {
         `chmod +x ${JSON.stringify(destination)}/prime-agent/prime-agent.sh`,
       ].join("; ");
       await runStep("Unpacking the bundled engineering runtime…", 0.62,
-        () => this.exec(["bash", "-lc", installBundled], { timeout: 15 * 60_000 }));
+        () => this.pipe(["bash", "-s"], installBundled, 15 * 60_000));
       paths = await this.resolveRuntimePaths(settings);
     }
     try {
@@ -346,15 +346,15 @@ export class WslBridge implements RuntimeBridge {
       throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Reify or select development checkouts in Settings.`);
     }
     await runStep("Installing the core CAD packages…", 0.78,
-      () => this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; export PI_CAD_BASE_RUNTIME=1; cd ${JSON.stringify(paths.piCadRepo)} && if ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi && npm run setup:python`], { timeout: 15 * 60_000 }));
+      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000));
     await runStep("Preparing the managed Blender runtime…", 0.88,
-      () => this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; cd ${JSON.stringify(paths.piCadRepo)} && node scripts/install-blender.mjs`], { timeout: 30 * 60_000 }));
-    await runStep("Connecting Prime Agent to Reify…", 0.94, () => this.exec(["bash", "-lc", [
+      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\ncd ${JSON.stringify(paths.piCadRepo)}\nnode scripts/install-blender.mjs\n`, 30 * 60_000));
+    await runStep("Connecting Prime Agent to Reify…", 0.94, () => this.pipe(["bash", "-s"], [
       "set -e",
       `mkdir -p ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/coding-agent ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-coding-agent`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/ai ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-ai`,
-    ].join("; ")]).then(() => undefined));
+    ].join("\n"), 30_000).then(() => undefined));
     report("Verifying the installation…", 0.97);
     status = await this.check(settings);
     onStatus?.(status);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, nodeInstallScript, runtimeChecksReady, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
 import { engineeringKnowledgeProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
+import { setupErrorMessage } from "../src/renderer/src/pages/FirstRun";
 
 describe("WSL path conversion", () => {
   const bridge = new WslBridge("Ubuntu");
@@ -48,7 +49,38 @@ describe("WSL path conversion", () => {
   });
 });
 
+describe("first-run setup errors", () => {
+  it("does not mistake the architecture guard embedded in a failed command for the failure", () => {
+    const error = new Error('Command failed: wsl.exe bash -lc case "$picad_node_machine" in *) echo "Unsupported WSL CPU architecture: uname=$picad_node_machine dpkg=$picad_dpkg_arch" ;; esac\ncurl: (56) OpenSSL SSL_read: connection reset');
+    expect(setupErrorMessage(error)).toBe("curl: (56) OpenSSL SSL_read: connection reset");
+  });
+
+  it("still reports a real unsupported architecture", () => {
+    expect(setupErrorMessage(new Error("Unsupported WSL CPU architecture: uname=riscv64 dpkg=riscv64")))
+      .toBe("当前 WSL 处理器架构无法识别：uname=riscv64 dpkg=riscv64");
+  });
+});
+
 describe("WSL runtime environment", () => {
+  it("streams the multi-line runtime check over stdin", async () => {
+    const bridge = new WslBridge("Ubuntu", "/bundle");
+    vi.spyOn(bridge, "toLinuxPath").mockImplementation(async (value) => value === "/bundle" ? "/bundle" : value);
+    vi.spyOn(bridge, "homeDirectory").mockResolvedValue("/home/tester");
+    vi.spyOn(bridge, "resolveRuntimePaths").mockResolvedValue({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent", projectPath: "/workspace" });
+    vi.spyOn(bridge, "exec").mockResolvedValue({ stdout: "Ubuntu\n", stderr: "" });
+    const pipe = vi.spyOn(bridge, "pipe").mockResolvedValue({
+      stdout: "node=22.23.2\nuv=/home/tester/.local/bin/uv\nbwrap=/usr/bin/bwrap\nparaview=\nprime=ready\npicad=ready\nknowledge=4\nbundle=ready\npython=/usr/bin/python3\n",
+      stderr: "",
+    });
+
+    await expect(bridge.check({
+      distro: "Ubuntu", projectPath: "/workspace", piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent",
+      provider: "openai-codex", model: "gpt-5.6-sol", thinking: "minimal", permission: "workspace", reviewer: { mode: "inherit" },
+    })).resolves.toMatchObject({ state: "idle" });
+
+    expect(pipe).toHaveBeenCalledWith(["bash", "-s"], expect.stringContaining("printf 'node='"), 120_000);
+  });
+
   it("installs the optional torch-fem component as WSL root and verifies it", async () => {
     const bridge = new WslBridge("Ubuntu");
     vi.spyOn(bridge, "resolveRuntimePaths").mockResolvedValue({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "", projectPath: "/workspace" });
@@ -125,7 +157,9 @@ describe("WSL first-install status", () => {
   it("does not let the hidden installer wait for Ubuntu's interactive user setup", () => {
     const command = wslInstallPowerShellCommand("Ubuntu");
     expect(command).toContain("'--no-launch'");
+    expect(command).toContain("'--web-download'");
     expect(command).toContain(".WaitForExit()");
+    expect(command).toContain("wsl.exe exited with code");
     expect(command).not.toMatch(/Start-Process.+\s-Wait(?:\s|;)/);
   });
 
@@ -174,8 +208,31 @@ describe("WSL first-install status", () => {
     vi.spyOn(bridge, "toLinuxPath").mockResolvedValue("/bundle");
     vi.spyOn(bridge, "homeDirectory").mockResolvedValue("/home/tester");
     const exec = vi.spyOn(bridge, "exec").mockResolvedValue({ stdout: "", stderr: "" });
+    const pipe = vi.spyOn(bridge, "pipe").mockResolvedValue({ stdout: "", stderr: "" });
 
     await expect(bridge.install(settings)).resolves.toMatchObject({ state: "idle" });
-    expect(exec.mock.calls.some(([args]) => args.some((arg) => arg.includes("setup:python")))).toBe(true);
+    expect(exec).toHaveBeenCalled();
+    expect(pipe.mock.calls.some(([, input]) => input.includes("setup:python"))).toBe(true);
+  });
+
+  it("streams shell programs over stdin instead of placing them on the Windows command line", async () => {
+    const bridge = new WslBridge("Ubuntu");
+    const missing = {
+      state: "error", checks: [
+        { id: "wsl", label: "WSL", status: "ready", detail: "Ubuntu", installable: true },
+        { id: "node", label: "Node", status: "missing", detail: "missing", installable: true },
+      ],
+    } as const;
+    vi.spyOn(bridge, "check").mockResolvedValueOnce(missing).mockResolvedValueOnce({ state: "idle", checks: [] });
+    vi.spyOn(bridge, "resolveRuntimePaths").mockResolvedValue({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent", projectPath: "/workspace" });
+    vi.spyOn(bridge, "exec").mockResolvedValue({ stdout: "", stderr: "" });
+    const pipe = vi.spyOn(bridge, "pipe").mockResolvedValue({ stdout: "", stderr: "" });
+
+    await bridge.install({
+      distro: "Ubuntu", projectPath: "/workspace", piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent",
+      provider: "openai-codex", model: "gpt-5.6-sol", thinking: "minimal", permission: "workspace", reviewer: { mode: "inherit" },
+    });
+
+    expect(pipe).toHaveBeenCalledWith(["bash", "-s"], expect.stringContaining("picad_node_machine=$(uname -m"), 10 * 60_000);
   });
 });
