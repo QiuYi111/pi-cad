@@ -35,7 +35,7 @@ export interface RuntimeStatus {
   message?: string;
   progress?: number;
   elapsedSeconds?: number;
-  action?: "restart-windows" | "initialize-ubuntu" | "retry";
+  action?: "restart-windows" | "install-ubuntu" | "initialize-ubuntu" | "retry";
   sessionId?: string;
 }
 export interface InstallationInfo { version: string; platform: "windows" | "linux" | "macos"; arch: string; channel: "nsis" | "portable" | "deb" | "appimage" | "dmg" | "development"; packaged: boolean; userDataPath: string; projectPath: string; updateMode: "manual"; updateInstructions: string; signature: "runtime-verified" | "release-signature-required" }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, initializeWslUserScript, nodeInstallScript, runtimeChecksReady, wslDefaultUserName, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
+import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, initializeWslUserScript, isNonRootWslUid, missingDistroStatus, nodeInstallScript, runtimeChecksReady, wslDefaultUserName, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
 import { engineeringKnowledgeProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
 import { setupErrorMessage } from "../src/renderer/src/pages/FirstRun";
@@ -136,6 +136,18 @@ describe("WSL first-install status", () => {
     expect(wslDefaultUserName("123")).toBe("reify");
     expect(initializeWslUserScript()).toContain('useradd -m -s /bin/bash "$picad_user"');
     expect(initializeWslUserScript()).toContain("/etc/wsl.conf");
+  });
+
+  it("rejects root and malformed WSL default-user output", () => {
+    expect(isNonRootWslUid("0\0\r\n")).toBe(false);
+    expect(isNonRootWslUid("1000\r\n")).toBe(true);
+    expect(isNonRootWslUid("unexpected output")).toBe(false);
+  });
+
+  it("distinguishes a missing Ubuntu distro from a missing WSL engine", () => {
+    const checks = [{ id: "wsl", label: "WSL", status: "missing", detail: "Ubuntu is not installed", installable: true }] as const;
+    expect(missingDistroStatus(true, [...checks])).toMatchObject({ action: "install-ubuntu", message: "WSL is ready. Install Ubuntu to continue." });
+    expect(missingDistroStatus(false, [...checks])).toMatchObject({ action: undefined, message: "Install WSL 2 and Ubuntu to continue." });
   });
 
   it("downloads the Node archive format published for both supported WSL architectures", () => {

@@ -93,6 +93,22 @@ export function wslDefaultUserName(windowsUser = process.env.USERNAME || ""): st
   return normalized || "reify";
 }
 
+export function isNonRootWslUid(value: unknown): boolean {
+  const uid = String(value ?? "").replaceAll("\0", "").trim();
+  return /^\d+$/.test(uid) && uid !== "0";
+}
+
+export function missingDistroStatus(wslEngineAvailable: boolean, checks: DependencyCheck[]): RuntimeStatus {
+  return {
+    state: "error",
+    checks,
+    action: wslEngineAvailable ? "install-ubuntu" : undefined,
+    message: wslEngineAvailable
+      ? "WSL is ready. Install Ubuntu to continue."
+      : "Install WSL 2 and Ubuntu to continue.",
+  };
+}
+
 export function initializeWslUserScript(): string {
   return [
     "set -e",
@@ -220,21 +236,26 @@ export class WslBridge implements RuntimeBridge {
       const distributions = String(stdout || "").replaceAll("\0", "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
       const found = distributions.some((item) => item.toLowerCase() === settings.distro.toLowerCase());
       add("wsl", "WSL 2 and Ubuntu", found, found ? settings.distro : `${settings.distro} is not installed`, true);
-      if (!found) return { state: "error", checks, message: "Install WSL 2 and Ubuntu to continue." };
+      if (!found) {
+        const wslEngineAvailable = await execFileAsync("wsl.exe", ["--version"], {
+          encoding: "utf8", timeout: 10_000, windowsHide: true,
+        }).then(() => true, () => false);
+        return missingDistroStatus(wslEngineAvailable, checks);
+      }
     } catch (error) {
       add("wsl", "WSL 2 and Ubuntu", false, String(error), true);
       return { state: "error", checks, message: "Install WSL 2 and Ubuntu to continue." };
     }
     try {
       const { stdout } = await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "id", "-u"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
-      if (String(stdout || "").replaceAll("\0", "").trim() === "0") throw new Error("Ubuntu still uses root as its default user");
+      if (!isNonRootWslUid(stdout)) throw new Error("Ubuntu still uses root or an invalid default user");
     } catch {
       try {
         const user = wslDefaultUserName();
         await this.pipe(["bash", "-s", "--", user], initializeWslUserScript(), 3 * 60_000, "root");
         await execFileAsync("wsl.exe", ["--terminate", settings.distro], { encoding: "utf8", timeout: 30_000, windowsHide: true });
         const { stdout } = await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "id", "-u"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
-        if (String(stdout || "").replaceAll("\0", "").trim() === "0") throw new Error("Ubuntu default user is still root after initialization");
+        if (!isNonRootWslUid(stdout)) throw new Error("Ubuntu default user is still root or invalid after initialization");
       } catch {
         return {
           state: "action-required", checks, action: "initialize-ubuntu", progress: 0.28,
