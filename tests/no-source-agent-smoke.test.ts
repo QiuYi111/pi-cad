@@ -48,11 +48,10 @@ test("Prime CAD skill forbids nested Python adaptation and maps CadQuery tasks t
   assert.match(skill, /complete public signatures[\s\S]*cad\.model\.build[\s\S]*cad\.probe\.run[\s\S]*cad\.review\.submit/i);
   assert.match(skill, /There is no\s+reason to call `inspect\.signature\(\)`/i);
   assert.match(skill, /Every rebuild must overwrite[\s\S]*artifact = await cad\.model\.build/i);
-  assert.match(skill, /review\.submit\(\).*accepts the returned `Commit`/i);
-  assert.match(skill, /do not rediscover or guess commit identifiers/i);
-  assert.match(skill, /parent=final_commit[\s\S]*artifacts=list\(final_commit\.artifacts\)/i);
-  assert.match(skill, /phase obligation ->[\s\S]*build -> probe -> review-candidate commit -> transition -> review\.submit/i);
-  assert.match(skill, /parts-geometry[\s\S]*parts-visual[\s\S]*never call `cad\.commit` with those names/i);
+  assert.match(skill, /cad\.plan\.current\(\)/i);
+  assert.match(skill, /cad\.review\.prepare\(candidate\)/i);
+  assert.match(skill, /candidate_defect[\s\S]*plan_stale[\s\S]*missing_evidence/i);
+  assert.match(skill, /Do not spawn[\s\S]*reviewers by default/i);
 });
 
 test("Prime review completion uses ExtensionAPI messaging rather than event context", async () => {

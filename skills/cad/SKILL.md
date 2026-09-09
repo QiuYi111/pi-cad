@@ -32,6 +32,8 @@ cad.commit(
     variables: dict | None = None,
     artifacts: list[str | Path | ArtifactRef] | None = None,
 ) -> Commit
+cad.plan.current() -> Commit | None
+cad.plan.update(*, variables: dict | None = None, artifacts: list | None = None) -> Commit
 cad.model.build(
     source: str | Path,
     output: str | Path | None = None,
@@ -48,6 +50,7 @@ cad.probe.run(
 ) -> ProbeResult
 cad.review.submit(final_commit: Commit) -> dict
 cad.review.current(handle: dict) -> dict | None
+cad.review.prepare(candidate: Commit) -> dict
 ```
 
 The three engineering calls are therefore canonical exactly as
@@ -62,8 +65,8 @@ reason to call `inspect.signature()` before using them.
   packages; never assume a fixed default or a fixed catalog. Compare the request
   with each workflow's description and tags. A matching project workflow takes
   precedence. Use `mechanical.default` for normal production work: plan the real
-  task, execute freely, then submit one immutable candidate to independent final
-  review. Use `mechanical.naked` only when the user requests a tools-only run or
+  task, execute freely, and finish when the real task is complete. Review is an
+  optional capability in this workflow, not a gate. Use `mechanical.naked` only when the user requests a tools-only run or
   an explicit baseline experiment; it provides no Phase Contract, milestones,
   obligations, or prescribed process. The author model makes this routing choice
   after reading the live catalog. An adopted version selects the version after
@@ -84,6 +87,12 @@ reason to call `inspect.signature()` before using them.
   `await cad.workflow.advance(event)`; do not invent a friendlier commit name,
   guess legacy semantic APIs, or inspect Pi-CAD source to discover events.
 - Freeze stable handoffs with `await cad.commit(name, variables=..., artifacts=...)`.
+- The Plan is living state backed by immutable commits. Use
+  `await cad.plan.current()` to load only the latest Plan. When new user input,
+  evidence, or a material strategy change makes it stale, call
+  `await cad.plan.update(variables=..., artifacts=["plan.md"])` from COOK. Keep
+  current requirements and acceptance criteria separate from revisable execution
+  strategy. Later user instructions override older Plan versions.
 - Load handoffs by ID with `await cad.load(id)`; do not copy child transcripts.
 - Use `cad.templates` only as optional conveniences. Workflow never requires
   their schema unless a project workflow says so explicitly.
@@ -153,61 +162,25 @@ reason to call `inspect.signature()` before using them.
   The read-only render is hash-bound, recorded as an immutable observation,
   and attached directly to Prime. Do not ask the author or user for another
   screenshot when this operation can answer the question.
-- Submit an immutable final handoff with `handle = await cad.review.submit(commit)`.
-  After the managed build and probes, create this handoff as a separate commit
-  whose `artifacts` include the returned STEP `ArtifactRef` and its deterministic
-  source (for example `final_commit = await cad.commit("review-candidate",
-  artifacts=[artifact, "part.py"], variables=checks)`). Never submit an earlier
-  phase-obligation commit or an empty commit; design review admission requires
-  the exact canonical candidate path and hash.
-  This returns immediately and is idempotent for the same workflow, contract,
-  and artifact identity while a review is running or has a PASS/FAIL result.
-  Runtime failures do not invalidate the candidate and may be resubmitted as a
-  new reviewer attempt. Do not poll: the sidecar notifies Prime and triggers a
-  new parent turn when the ordinary Fresh Reviewer template completes. The
-  reviewer chooses the PASS/FAIL disposition and the sidecar atomically applies
-  the corresponding workflow transition; the author must not guess or repeat
-  it. On the new turn inspect `await cad.review.current(handle)` and continue
-  from the newly injected Phase Card. Never treat admission as completion or
-  import transcripts.
+- In `mechanical.default`, spawn temporary specialist reviewers only when they are
+  likely to add information. First freeze a candidate commit, then call
+  `brief = await cad.review.prepare(candidate)` and give that brief to the spawned
+  reviewer. The reviewer loads the exact candidate and latest Plan, visually
+  inspects it, and runs targeted probes when useful. It returns `findings`,
+  `uncertainties`, and `suggested_checks`, classifying material issues as
+  `candidate_defect`, `plan_stale`, or `missing_evidence`. Its advice never changes
+  workflow state; the author verifies it and decides what to do. Multiple focused
+  reviewers may run concurrently when each has a distinct question. Do not spawn
+  reviewers by default.
+- `cad.review.submit()` is reserved for workflows whose active phase explicitly
+  exposes an authoritative review action. Submit an immutable final handoff with
+  `handle = await cad.review.submit(commit)` only in such a workflow. Follow that
+  workflow's live Phase Card; these rules do not apply to `mechanical.default`.
 - Keep one current candidate variable. Every rebuild must overwrite both the
   same project output and that variable: `artifact = await cad.model.build(
   "part.py", "part.step")`. A successful rebuild invalidates every older
   `ArtifactRef`; never retain alternate `artifact_fixed`/`artifact_step`
-  variables or submit a prior build. Use this exact final handoff shape:
-
-  ```python
-  checks = await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")
-  final_commit = await cad.commit(
-      "review-candidate",
-      artifacts=[artifact, "part.py"],
-      variables={"checks": checks.value},
-  )
-  handle = await cad.review.submit(final_commit)
-  ```
-
-  This `final_commit` must be created while still in the build-capable PARTS or
-  ASSEMBLY phase, after its required phase-obligation commit and before calling
-  the transition into FINAL_REVIEW. The order is strictly phase obligation ->
-  build -> probe -> review-candidate commit -> transition -> review.submit.
-  FINAL_REVIEW intentionally cannot create or repair workspace commits.
-  In PARTS, `cad.commit` closes only the `parts` workspace obligation.
-  `parts-geometry` and `parts-visual` are evidence obligations closed by
-  `cad.model.build`; never call `cad.commit` with those names. If the returned
-  visual or a probe reveals a defect, edit the deterministic source and call
-  `cad.model.build` again. A successful rebuild atomically revises those
-  evidence obligations and invalidates every older `ArtifactRef`; overwrite the
-  same `artifact` variable and never probe or submit an older handle. Never
-  advance with an event that is absent from the current Phase Card `NEXT`.
-  The first artifact must be the latest returned `ArtifactRef`, not its string
-  path. `review.submit()` accepts the returned `Commit`, never an `ArtifactRef`,
-  record ID, guessed ID, or earlier phase-obligation commit. Retain these Python
-  objects directly; do not rediscover or guess commit identifiers.
-  After the host review-complete event reports PASS, the workflow is already in
-  RELEASE. Create the `release` obligation with
-  `parent=final_commit` and `artifacts=list(final_commit.artifacts)`. This exact
-  parent and artifact identity is required by the completion gate; do not
-  reconstruct the list from paths or omit the deterministic source.
+  variables or inspect a prior build as if it were current.
 - Write task-specific engineering checks in Python. There is no `cad.verify`.
 - Keep large payloads in variables/files and print only selected summaries.
 

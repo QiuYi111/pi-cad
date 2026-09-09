@@ -32,6 +32,24 @@ async def current(handle: Any) -> dict[str, Any] | None:
     return await request("review-current", reviewId=_review_id(handle))
 
 
+async def prepare(candidate: Any) -> dict[str, Any]:
+    """Prepare compact context for an optional, advisory specialist reviewer."""
+    from . import plan as living_plan
+
+    candidate_id = _commit_id(candidate)
+    current_plan = await living_plan.current()
+    return {
+        "candidateCommitId": candidate_id,
+        "currentPlanCommitId": current_plan.id if current_plan else None,
+        "instructions": (
+            "Act as an advisory specialist. Load only the candidate and current Plan above. "
+            "Inspect the candidate visually and run targeted probes when useful. Return findings, "
+            "uncertainties, and suggested checks. Classify each material issue as candidate_defect, "
+            "plan_stale, or missing_evidence. Do not issue a binding verdict or control workflow state."
+        ),
+    }
+
+
 async def inspect() -> dict[str, Any]:
     """Load immutable review context and attach its canonical visual observations."""
     payload = await request("review-evidence")

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-import warnings
 
 from ._attachments import display_inline_image
 from .client import CadApiError, project_path, request
@@ -29,8 +28,8 @@ async def _attach_images(images: list[dict[str, str]], artifact: ArtifactRef | N
             view = image.get("name") or image.get("view")
             view_label = f"[{str(view).upper()}]" if view else "[VIEW]"
             label = (
-                f"Built {artifact!r}. Inspect the attached views carefully as the primary observation of the geometry before continuing. "
-                f"Probe the artifact for any facts you need to verify.\n\n{view_label}"
+                f"Built {artifact!r}. Inspect the attached views carefully as the primary observation of the actual geometry. "
+                f"Reason about what the geometry actually does before your next action. Probe only for facts you need to verify.\n\n{view_label}"
                 if index == 0 and artifact is not None else view_label
             )
             display_inline_image(image, label=label)
@@ -67,13 +66,6 @@ async def build(
     artifact = next((item for item in artifacts if item.get("kind") == "step"), artifacts[0] if artifacts else None)
     if not artifact or not output_path.is_file():
         raise CadApiError(f"Pi-CAD model build did not create {output_relative.as_posix()}", error_type="ModelBuildError")
-    deferred = ((response.get("geometry") or {}).get("payload") or {}).get("validity", {}).get("deferredChecks") or []
-    if deferred:
-        warnings.warn(
-            f"Pi-CAD deferred expensive checks for this build: {', '.join(deferred)}; use validation='full' before release",
-            RuntimeWarning,
-            stacklevel=2,
-        )
     digest = artifact.get("sha256") if artifact else None
     ref = ArtifactRef(output_relative, digest, "candidate")
     await _attach_images(response.get("images") or [], ref)

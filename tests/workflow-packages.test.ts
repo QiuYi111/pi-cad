@@ -21,14 +21,16 @@ test("installed Mechanical packages expose only default and naked modes", async 
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
     const standard = await resolveWorkflowPackage(cwd, "mechanical.default", mechanicalRegistries);
     assert.equal(standard.workflow.initialPhase, "plan");
-    assert.deepEqual(Object.keys(standard.workflow.phases), ["cook", "done", "final", "plan"]);
+    assert.deepEqual(Object.keys(standard.workflow.phases), ["cook", "done", "plan"]);
     assert.deepEqual(standard.workflow.phases.plan!.recordObligations.map((item) => item.ref), ["plan"]);
     assert.equal(standard.workflow.phases.plan!.evidenceObligations[0]?.ref, "concept-image");
     assert.equal(standard.workflow.phases.plan!.evidenceObligations[0]?.required, false);
     assert.deepEqual(standard.workflow.phases.cook!.recordObligations, []);
     assert.deepEqual(standard.workflow.phases.cook!.evidenceObligations, []);
     assert.match(standard.workflow.phases.cook!.guidance, /CAD cannot be\s+fake/);
-    assert.deepEqual(Object.keys(standard.workflow.phases.final!.transitions), ["accepted", "replan", "revise"]);
+    assert.deepEqual(Object.keys(standard.workflow.phases.cook!.transitions), ["finished"]);
+    assert.match(standard.workflow.phases.cook!.guidance, /latest commit named `plan`/);
+    assert.match(standard.workflow.phases.cook!.guidance, /findings, uncertainties, and suggested checks as advice/);
     assert.equal(standard.workflow.phases.done!.terminal, true);
     const naked = await resolveWorkflowPackage(cwd, "mechanical.naked", mechanicalRegistries);
     assert.equal(naked.workflow.initialPhase, "work");

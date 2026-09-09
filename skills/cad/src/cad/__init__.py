@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from . import artifacts, model, review, simulation, snapshot, templates, workflow
+from . import artifacts, model, plan, review, simulation, snapshot, templates, workflow
 from .client import CadApiError, project_path, request
 from .probe import probe
 from .refs import ArtifactRef, Commit, SaveAndCheckResult
@@ -70,5 +70,5 @@ async def save_and_check(
 
 
 __all__ = [
-    "ArtifactRef", "CadApiError", "Commit", "SaveAndCheckResult", "artifacts", "commit", "history", "load", "model", "probe", "review", "save_and_check", "simulation", "snapshot", "templates", "workflow",
+    "ArtifactRef", "CadApiError", "Commit", "SaveAndCheckResult", "artifacts", "commit", "history", "load", "model", "plan", "probe", "review", "save_and_check", "simulation", "snapshot", "templates", "workflow",
 ]

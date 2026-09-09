@@ -30,7 +30,7 @@ const quickRoute = {
   maturity: "prototype",
 } as const;
 
-test("default workflow performs one independent final review", () => {
+test("default workflow leaves review optional and keeps benchmark review independent", () => {
   const runner = readFileSync(join(process.cwd(), "benchmarks", "cadtestbench", "run.mjs"), "utf-8");
   const workflow = readFileSync(join(process.cwd(), "workflow-packages", "mechanical", "default.yaml"), "utf-8");
   assert.match(runner, /PI_CAD_HEADLESS:\s*"1"/);
@@ -40,8 +40,9 @@ test("default workflow performs one independent final review", () => {
   assert.match(runner, /evaluatorAuthority: "CADTestBench PR\/RS"/);
   assert.match(runner, /single adversarial requirements reviewer/);
   assert.match(runner, /--reviewer-inherit-author/);
-  assert.match(workflow, /reviewProfile: mechanical\.final-review/);
-  assert.match(workflow, /Execute the engineering plan autonomously/);
+  assert.doesNotMatch(workflow, /reviewProfile:/);
+  assert.match(workflow, /Execute the engineering task autonomously/);
+  assert.match(workflow, /finished: \{target: done\}/);
   assert.match(runner, /tarExtract\(vaultTarPath\(e\.tar\), preloadDir\)/);
   assert.doesNotMatch(runner, /tarExtract\(vaultTarPath\(e\.tar\), join\(preloadDir, key\)\)/);
 });
