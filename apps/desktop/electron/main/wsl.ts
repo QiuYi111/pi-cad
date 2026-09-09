@@ -88,6 +88,20 @@ export function nodeInstallScript(version = "v22.23.2"): string {
   ].join("; ");
 }
 
+export function wslDefaultUserName(windowsUser = process.env.USERNAME || ""): string {
+  const normalized = windowsUser.toLowerCase().replace(/[^a-z0-9_-]+/g, "").replace(/^[^a-z_]+/, "").slice(0, 32);
+  return normalized || "reify";
+}
+
+export function initializeWslUserScript(): string {
+  return [
+    "set -e",
+    "picad_user=$1",
+    "id -u \"$picad_user\" >/dev/null 2>&1 || useradd -m -s /bin/bash \"$picad_user\"",
+    "printf '[user]\\ndefault=%s\\n' \"$picad_user\" > /etc/wsl.conf",
+  ].join("\n");
+}
+
 function uncWslPath(value: string): { distro: string; path: string } | null {
   const match = value.match(/^\\\\wsl(?:\.localhost)?\\([^\\]+)\\(.*)$/i);
   if (!match) return null;
@@ -214,10 +228,19 @@ export class WslBridge implements RuntimeBridge {
     try {
       await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "true"], { encoding: "utf8", timeout: 15_000, windowsHide: true });
     } catch {
-      return {
-        state: "action-required", checks, action: "initialize-ubuntu", progress: 0.28,
-        message: "Ubuntu needs its one-time setup. Open Ubuntu from the Start menu, create its user, then check again.",
-      };
+      try {
+        const user = wslDefaultUserName();
+        await execFileAsync("wsl.exe", ["-d", settings.distro, "-u", "root", "--", "bash", "-s", "--", user], {
+          encoding: "utf8", timeout: 60_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true, input: initializeWslUserScript(),
+        } as Parameters<typeof execFileAsync>[2]);
+        await execFileAsync("wsl.exe", ["--terminate", settings.distro], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+        await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "true"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+      } catch {
+        return {
+          state: "action-required", checks, action: "initialize-ubuntu", progress: 0.28,
+          message: "Ubuntu initialization did not finish. Retry, or open Ubuntu once if Windows requests it.",
+        };
+      }
     }
     const paths = await this.resolveRuntimePaths(settings);
     const usesBundledRuntime = !settings.piCadRepo && !settings.primeAgentRepo && Boolean(this.bundledRuntimePath);

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, nodeInstallScript, runtimeChecksReady, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
+import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, initializeWslUserScript, nodeInstallScript, runtimeChecksReady, wslDefaultUserName, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
 import { engineeringKnowledgeProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
 import { setupErrorMessage } from "../src/renderer/src/pages/FirstRun";
@@ -131,6 +131,13 @@ describe("bundled engineering knowledge", () => {
 });
 
 describe("WSL first-install status", () => {
+  it("derives a safe Linux user name and creates it non-interactively", () => {
+    expect(wslDefaultUserName("Reify.Test 42")).toBe("reifytest42");
+    expect(wslDefaultUserName("123")).toBe("reify");
+    expect(initializeWslUserScript()).toContain('useradd -m -s /bin/bash "$picad_user"');
+    expect(initializeWslUserScript()).toContain("/etc/wsl.conf");
+  });
+
   it("downloads the Node archive format published for both supported WSL architectures", () => {
     const script = nodeInstallScript();
     expect(script).toContain("x86_64:*|amd64:*|*:amd64) picad_node_arch=x64");

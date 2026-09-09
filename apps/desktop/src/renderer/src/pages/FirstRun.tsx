@@ -86,7 +86,7 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
             ? <RuntimeProgress progress={runtime.progress} elapsedSeconds={runtime.elapsedSeconds || 0} />
             : runtime.state === "checking" || runtime.state === "installing" ? <SetupMotion label="正在检查系统" /> : null}
           {runtime.state === "action-required"
-            ? <button className="setup-secondary" disabled={Boolean(working)} onClick={() => void check()}>{runtime.action === "restart-windows" ? "Check after restart" : "I initialized Ubuntu — check again"}</button>
+            ? <button className="setup-secondary" disabled={Boolean(working)} onClick={() => void check()}>{runtime.action === "restart-windows" ? "Check after restart" : "Retry Ubuntu initialization"}</button>
             : wslMissing ? <button className="primary" disabled={Boolean(working)} onClick={() => void installWsl()}>{working === "wsl" ? "Waiting for Windows…" : "Install WSL and Ubuntu"}<ChevronRight size={14} /></button>
               : !runtimeReady && runtime.state !== "checking" && runtime.state !== "installing" ? <button className="primary" disabled={Boolean(working)} onClick={() => void installRuntime()}>{working === "runtime" ? "Preparing runtime…" : "Install bundled runtime"}<ChevronRight size={14} /></button> : null}
         </SetupCard>
