@@ -65,6 +65,12 @@ async function registerSetupResume() {
   await execFilePromise("reg.exe", ["ADD", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", "/v", "ReifySetupResume", "/t", "REG_SZ", "/d", command, "/f"]);
 }
 
+async function setupResumeRegistered(): Promise<boolean> {
+  if (!app.isPackaged || process.platform !== "win32") return false;
+  return execFilePromise("reg.exe", ["QUERY", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", "/v", "ReifySetupResume"])
+    .then(() => true, () => false);
+}
+
 function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
 }
@@ -221,12 +227,19 @@ function registerIpc() {
   });
   ipcMain.handle(IPC.runtimeCheck, async () => {
     if (desktopE2E) return demoRuntimeStatus;
+    if (await setupResumeRegistered()) return {
+      state: "action-required", checks: [], action: "restart-windows", progress: 0.25,
+      message: "Windows 已准备好 WSL。重启后 Reify 会自动继续安装。",
+    } satisfies RuntimeStatus;
     return (await bridge()).check(await settingsStore.get());
   });
   ipcMain.handle(IPC.runtimeInstallWsl, async () => {
     if (desktopE2E) return demoRuntimeStatus;
     const status = await (await bridge()).installWsl((value) => send(IPC.runtimeStatus, value));
-    if (status.action === "restart-windows") await registerSetupResume();
+    if (status.action === "restart-windows") {
+      await registerSetupResume();
+      mainWindow?.webContents.reload();
+    }
     return status;
   });
   ipcMain.handle(IPC.runtimeRestartWindows, async () => {
