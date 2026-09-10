@@ -305,7 +305,7 @@ function registerIpc() {
       { provider: "openai-codex", id: "gpt-5.6-luna", name: "GPT-5.6 Luna", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh", "max"], input: ["text", "image"], available: true },
     ] },
     { id: "zai", name: "ZAI", oauth: false, auth: { provider: "zai", state: "signed-out", configured: false, message: "Not configured" }, models: [
-      { provider: "zai", id: "glm-5", name: "GLM-5", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], input: ["text"], available: false },
+      { provider: "zai", id: "glm-5.3", name: "GLM-5.3", reasoning: true, thinkingLevels: ["off", "minimal", "low", "medium", "high"], input: ["text"], available: false },
     ] },
   ], favorites: [{ provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" }, { provider: "openai-codex", modelId: "gpt-5.6-luna", thinkingLevel: "low" }], defaults: { provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" } });
   ipcMain.handle(IPC.authCatalog, async () => authE2E ? demoCatalog() : (await ensurePrimeConfig()).catalog(await settingsStore.get()));

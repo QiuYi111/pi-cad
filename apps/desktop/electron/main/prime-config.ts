@@ -8,14 +8,14 @@ export class PrimeConfigService {
     const { piCadRepo, primeAgentRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
     const home = await this.bridge.homeDirectory();
     const node = await this.bridge.commandPath("node");
-    const result = await this.bridge.exec([
+    const result = await this.bridge.pipe([
       node,
       `${piCadRepo}/scripts/desktop-prime-config.mjs`,
       primeAgentRepo,
       `${home}/.prime/agent`,
       projectPath || home,
       command,
-    ], { input: JSON.stringify(input), timeout: command === "catalog" ? 60_000 : 30_000 });
+    ], JSON.stringify(input), command === "catalog" ? 60_000 : 30_000);
     return JSON.parse(result.stdout.trim() || "{}");
   }
 
