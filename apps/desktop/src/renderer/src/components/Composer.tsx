@@ -1,8 +1,7 @@
 import { ArrowUp, Box, Plus, ShieldCheck, Sparkles, Square } from "./icons";
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, RuntimeStatus, ThinkingLevel } from "@shared/contracts";
+import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "@shared/contracts";
 
-const models = ["gpt-5.6-sol", "gpt-5.6-luna"];
 const efforts: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 type PendingRequest = { id: string; text: string };
@@ -11,7 +10,7 @@ type RunningIntent = "queue" | "replace" | "note";
 export function Composer({ settings, status, queueKey, draftRequest, onSettingsChange, onSend, onNote, onAbort, onDraftChange, onImagesAdded }: { settings: AppSettings; status: RuntimeStatus; queueKey: string; draftRequest?: { id: string; text: string }; onSettingsChange: (patch: Partial<AppSettings>) => Promise<void>; onSend: (text: string, images?: Array<{ data: string; mimeType: string }>) => Promise<void>; onNote: (text: string) => void; onAbort: () => Promise<void>; onDraftChange?: (hasDraft: boolean) => void; onImagesAdded?: (images: Array<{ name: string; data: string; mimeType: string }>) => void }) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<Array<{ name: string; data: string; mimeType: string }>>([]);
-  const [availableModels, setAvailableModels] = useState(models);
+  const [availableModels, setAvailableModels] = useState<ModelChoice[]>([{ provider: settings.provider, id: settings.model, name: settings.model }]);
   const [attachmentError, setAttachmentError] = useState("");
   const [stopping, setStopping] = useState(false);
   const [runningIntent, setRunningIntent] = useState<RunningIntent>("queue");
@@ -25,12 +24,12 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const streaming = status.state === "streaming";
   const starting = status.state === "starting";
   useEffect(() => {
-    if (status.state !== "ready") return;
-    void window.piCad.runtime.getModels().then((choices) => {
-      const ids = choices.filter((choice) => choice.provider === settings.provider).map((choice) => choice.id);
-      if (ids.length) setAvailableModels(ids);
+    void window.piCad.auth.catalog().then((catalog) => {
+      const all = catalog.providers.flatMap((provider) => provider.models);
+      const scoped = catalog.favorites.map((favorite) => all.find((model) => model.provider === favorite.provider && model.id === favorite.modelId)).filter((model): model is ModelChoice => Boolean(model));
+      if (scoped.length) setAvailableModels(scoped);
     }).catch(() => undefined);
-  }, [status.state, settings.provider]);
+  }, [status.state, settings.provider, settings.model]);
   const storageKey = `reify.pending.${queueKey || "unconfigured"}`;
   const draftKey = `reify.draft.${queueKey || "unconfigured"}`;
   useEffect(() => { imagesRef.current = images; }, [images]);
@@ -101,8 +100,10 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
     }
   };
   const changeModel = async (model: string) => {
-    await onSettingsChange({ model });
-    if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.setModel(settings.provider, model);
+    const choice = availableModels.find((item) => item.id === model);
+    const provider = choice?.provider || settings.provider;
+    await onSettingsChange({ provider, model });
+    if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.setModel(provider, model);
   };
   const changeThinking = async (thinking: ThinkingLevel) => {
     await onSettingsChange({ thinking });
@@ -133,7 +134,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       <button className="round-button" aria-label="Attach" onClick={() => void attach()}><Plus size={18} /></button>
       {streaming && <label className="composer-chip">Send as<select aria-label="Running request action" value={runningIntent} onChange={(event) => setRunningIntent(event.target.value as RunningIntent)}><option value="queue">After current task</option><option value="replace">Stop and modify</option><option value="note">Note only</option></select></label>}
       <label className="composer-chip"><ShieldCheck size={14} /><select aria-label="Permission" value={settings.permission} onChange={(event) => void changePermission(event.target.value as AppSettings["permission"])}><option value="workspace">Workspace</option><option value="read-only">Read only</option></select></label>
-      <label className="composer-chip"><Box size={14} /><select aria-label="Model" value={settings.model} onChange={(event) => void changeModel(event.target.value)}>{[...new Set([settings.model, ...availableModels])].map((model) => <option key={model} value={model}>{shortModel(model)}</option>)}</select></label>
+      <label className="composer-chip"><Box size={14} /><select aria-label="Model" value={settings.model} onChange={(event) => void changeModel(event.target.value)}>{availableModels.map((model) => <option key={`${model.provider}/${model.id}`} value={model.id}>{shortModel(model.name)}</option>)}</select></label>
       <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={settings.thinking} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{efforts.map((level) => <option key={level}>{level}</option>)}</select></label>
       <span className="composer-spacer" />
       <button className={`send-button ${starting || stopping || (streaming && !text.trim()) ? "busy" : ""}`} onClick={() => streaming && !text.trim() ? void abort() : void send()} aria-label={stopping ? "Stopping" : streaming && !text.trim() ? "Stop" : streaming ? runningIntent === "queue" ? "Queue request" : runningIntent === "replace" ? "Stop and modify" : "Save note" : "Send"} disabled={starting || stopping}>

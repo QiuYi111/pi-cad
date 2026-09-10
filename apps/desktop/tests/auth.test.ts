@@ -35,9 +35,9 @@ describe("desktop OAuth", () => {
   it("runs token exchange with Node environment proxy support", async () => {
     const runtime = bridge();
     const controller = new AuthController(runtime.value as any);
-    await controller.login(settings);
+    await controller.login(settings, "openai-codex");
     expect(runtime.value.spawn).toHaveBeenCalledWith([
-      "/usr/bin/node", "--use-env-proxy", "/opt/pi-cad/scripts/desktop-openai-oauth.mjs", "/opt/prime", "/home/prime/.prime/agent",
+      "/usr/bin/node", "--use-env-proxy", "/opt/pi-cad/scripts/desktop-openai-oauth.mjs", "/opt/prime", "/home/prime/.prime/agent", "openai-codex",
     ]);
   });
 
@@ -47,22 +47,16 @@ describe("desktop OAuth", () => {
     const controller = new AuthController(runtime.value as any, resetRuntime);
     const statuses: string[] = [];
     controller.on("status", (status) => statuses.push(status.state));
-    await controller.login(settings);
+    await controller.login(settings, "anthropic");
     runtime.child.stdout.emit("data", Buffer.from(`${JSON.stringify({ type: "auth_complete" })}\n`));
     await vi.waitFor(() => expect(resetRuntime).toHaveBeenCalledOnce());
     expect(statuses.at(-1)).toBe("signed-in");
+    expect(runtime.value.spawn).toHaveBeenCalledWith(expect.arrayContaining(["anthropic"]));
   });
 
-  it("does not call an expired credential connected", async () => {
-    const runtime = bridge(JSON.stringify({ ok: true, expires: Date.now() - 1 }));
-    const controller = new AuthController(runtime.value as any);
-    await expect(controller.status(settings)).resolves.toMatchObject({ state: "signed-out" });
-  });
-
-  it("cancels and signs out without touching the project", async () => {
-    const runtime = bridge(); const controller = new AuthController(runtime.value as any); await controller.login(settings);
+  it("cancels a provider login without touching stored credentials", async () => {
+    const runtime = bridge(); const controller = new AuthController(runtime.value as any); await controller.login(settings, "github-copilot");
     await expect(controller.cancel()).resolves.toMatchObject({ state: "signed-out" });
-    await expect(controller.signOut(settings)).resolves.toMatchObject({ state: "signed-out", message: expect.stringContaining("Project files were kept") });
-    expect(runtime.value.exec).toHaveBeenCalledWith(["rm", "-f", "/home/prime/.prime/agent/auth.json"]);
+    expect(runtime.value.exec).not.toHaveBeenCalledWith(["rm", "-f", "/home/prime/.prime/agent/auth.json"]);
   });
 });

@@ -1,61 +1,44 @@
-import { useEffect, useState } from "react";
-import { Check, ChevronRight, FolderOpen, RefreshCw, Wrench } from "../components/icons";
-import type { AppSettings, AuthStatus, InstallationInfo, RuntimeStatus, ThinkingLevel } from "@shared/contracts";
+import { useEffect, useMemo, useState } from "react";
+import { Check, FolderOpen, RefreshCw, Wrench } from "../components/icons";
+import type { AppSettings, AuthStatus, InstallationInfo, ModelCatalog, ModelChoice, ModelFavorite, RuntimeStatus, ThinkingLevel } from "@shared/contracts";
 
-const levels: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
-
+const emptyCatalog: ModelCatalog = { providers: [], favorites: [], defaults: {} };
 export function Settings({ value, onChange }: { value: AppSettings; onChange: (value: AppSettings) => void | Promise<void> }) {
-  const [draft, setDraft] = useState(value);
-  const [runtime, setRuntime] = useState<RuntimeStatus>({ state: "checking", checks: [] });
-  const [saving, setSaving] = useState(false);
-  const [saveMessage, setSaveMessage] = useState("");
-  const [auth, setAuth] = useState<AuthStatus>({ provider: "openai-codex", state: "checking" });
-  const [authInput, setAuthInput] = useState("");
-  const [installation, setInstallation] = useState<InstallationInfo | null>(null);
-  const check = () => window.piCad.runtime.check().then(setRuntime).catch((error) => setRuntime({ state: "error", checks: [], message: String(error) }));
-  useEffect(() => {
-    void check();
-    void window.piCad.auth.status().then(setAuth);
-    void window.piCad.system.installationInfo().then(setInstallation);
-    return window.piCad.auth.onStatus(setAuth);
-  }, []);
-  useEffect(() => { setDraft(value); }, [value]);
-  const patch = <K extends keyof AppSettings>(key: K, next: AppSettings[K]) => setDraft((current) => ({ ...current, [key]: next }));
-  const dirty = JSON.stringify(draft) !== JSON.stringify(value);
-  const save = async () => {
-    setSaving(true); setSaveMessage("");
-    try { const next = await window.piCad.settings.update(draft); await onChange(next); setDraft(next); setSaveMessage("Changes saved."); }
-    catch (error) { setSaveMessage(`Save failed: ${error instanceof Error ? error.message : String(error)}`); }
-    finally { setSaving(false); }
-  };
-  const chooseProject = async () => { const path = await window.piCad.settings.chooseProject(); if (path) patch("projectPath", path); };
-  return <div className="settings-page page-scroll" data-testid="settings-page">
-    <header className="page-heading"><div><span>Preferences</span><h1>Providers and runtime</h1><p>Choose where engineering runs and which models make decisions.</p></div><div className="settings-save"><button className="primary" disabled={!dirty || saving} onClick={() => void save()}>{saving ? "Saving…" : dirty ? "Save changes" : "Saved"}</button>{saveMessage && <small role={saveMessage.startsWith("Save failed") ? "alert" : "status"}>{saveMessage}</small>}</div></header>
-    <nav className="settings-index" aria-label="Settings sections"><button onClick={() => document.getElementById("settings-project")?.scrollIntoView({ behavior: "smooth" })}>Project</button><button onClick={() => document.getElementById("settings-model")?.scrollIntoView({ behavior: "smooth" })}>Account & model</button><button onClick={() => document.getElementById("settings-runtime")?.scrollIntoView({ behavior: "smooth" })}>Runtime</button><button onClick={() => document.getElementById("settings-advanced")?.scrollIntoView({ behavior: "smooth" })}>Advanced</button></nav>
+  const [draft, setDraft] = useState(value), [runtime, setRuntime] = useState<RuntimeStatus>({ state: "checking", checks: [] });
+  const [catalog, setCatalog] = useState(emptyCatalog), [error, setError] = useState(""), [notice, setNotice] = useState("");
+  const [auth, setAuth] = useState<AuthStatus>({ provider: value.provider, state: "checking" });
+  const [secret, setSecret] = useState(""), [authInput, setAuthInput] = useState(""), [search, setSearch] = useState("");
+  const [modelsConfig, setModelsConfig] = useState(""), [installation, setInstallation] = useState<InstallationInfo | null>(null);
+  const refresh = async () => { try { setCatalog(await window.piCad.auth.catalog()); setError(""); } catch (e) { setError(String(e)); } };
+  useEffect(() => { void refresh(); void window.piCad.runtime.check().then(setRuntime); void window.piCad.auth.readModelsConfig().then(v => setModelsConfig(v.text)); void window.piCad.system.installationInfo().then(setInstallation); return window.piCad.auth.onStatus(s => { setAuth(s); void refresh(); }); }, []);
+  useEffect(() => setDraft(value), [value]);
+  const patch = <K extends keyof AppSettings>(key: K, next: AppSettings[K]) => setDraft(v => ({ ...v, [key]: next }));
+  const provider = catalog.providers.find(p => p.id === draft.provider) || catalog.providers[0], models = provider?.models || [];
+  const model = models.find(m => m.id === draft.model), levels = model?.thinkingLevels?.length ? model.thinkingLevels : ["off"] as ThinkingLevel[];
+  useEffect(() => { if (provider) setAuth(provider.auth); }, [provider?.id, provider?.auth.state, provider?.auth.source]);
+  const favorites = catalog.favorites.filter((x): x is ModelFavorite & {provider:string;modelId:string} => !!x.provider && !!x.modelId);
+  const fav = new Set(favorites.map(x => `${x.provider}/${x.modelId}`));
+  const results = useMemo(() => search.trim() ? catalog.providers.flatMap(p => p.models).filter(m => `${m.provider}/${m.id} ${m.name}`.toLowerCase().includes(search.toLowerCase())).slice(0, 50) : [], [catalog, search]);
+  const selectProvider = (id:string) => { const p=catalog.providers.find(x=>x.id===id), m=p?.models.find(x=>x.available)||p?.models[0]; setDraft(v=>({...v,provider:id,model:m?.id||"",thinking:m?.thinkingLevels?.[0]||"off"})); setSecret(""); };
+  const toggle = async (m:ModelChoice) => { const key=`${m.provider}/${m.id}`; const next=fav.has(key)?favorites.filter(x=>`${x.provider}/${x.modelId}`!==key):[...favorites,{provider:m.provider,modelId:m.id,thinkingLevel:m.thinkingLevels?.[0]}]; const saved=await window.piCad.auth.saveFavorites(next); setCatalog(v=>({...v,favorites:saved.favorites})); };
+  const save = async () => { try { const next=await window.piCad.settings.update(draft); await onChange(next); setNotice("Saved."); } catch(e){setNotice(`Save failed: ${String(e)}`);} };
+  return <div className="settings-page page-scroll" data-testid="settings-page"><header className="page-heading"><div><span>Preferences</span><h1>Providers and runtime</h1><p>Models and credentials come from Prime Agent.</p></div><button className="primary" onClick={()=>void save()}>Save changes</button></header>
+    <nav className="settings-index" aria-label="Settings sections"><button>Project</button><button>Account & model</button><button>Favorites</button><button>Runtime</button><button>Advanced</button></nav>
     <div className="settings-grid">
-      <section id="settings-project" className="settings-card wide"><header><div><span className="setting-icon"><FolderOpen size={18} /></span><div><h2>Project</h2><p>Prime and Reify only receive this workspace.</p></div></div></header><div className="path-picker"><code>{draft.projectPath || "No project selected"}</code><button onClick={() => void chooseProject()}>Choose folder</button></div></section>
-      <section id="settings-model" className="settings-card"><header><div><span className="setting-icon blue"><span className="provider-mark" /></span><div><h2>Author model</h2><p>Used for design and engineering work.</p></div></div></header>
-        <label>Provider<select value={draft.provider} onChange={(event) => patch("provider", event.target.value)}><option value="openai-codex">OpenAI Codex</option><option value="prime">Prime Inference</option><option value="zai">Z.AI</option><option value="openrouter">OpenRouter</option></select></label>
-        <label>Default model<input value={draft.model} onChange={(event) => patch("model", event.target.value)} /></label>
-        <label>Reasoning<select value={draft.thinking} onChange={(event) => patch("thinking", event.target.value as ThinkingLevel)}>{levels.map((level) => <option key={level}>{level}</option>)}</select></label>
-        <div className="auth-row"><div><i className={auth.state === "signed-in" ? "online" : ""} /><span>{auth.message || auth.state}</span></div>{auth.state === "signed-in" ? <button onClick={() => void window.piCad.auth.signOut().then(setAuth)}>退出登录</button> : auth.state === "waiting" ? <button onClick={() => void window.piCad.auth.cancel().then(setAuth)}>Cancel</button> : <button onClick={() => void window.piCad.auth.login().then(setAuth)}>Sign in with ChatGPT</button>}</div>
-        {auth.input && <div className="auth-input">{auth.input.kind === "select" ? <select value={authInput} onChange={(event) => setAuthInput(event.target.value)}><option value="">Choose an account</option>{auth.input.options.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}</select> : <input value={authInput} placeholder={auth.input.placeholder || "Paste the redirect URL"} onChange={(event) => setAuthInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && authInput.trim()) { void window.piCad.auth.submitManualCode(authInput.trim()); setAuthInput(""); } }} />}<button className="primary" disabled={!authInput.trim()} onClick={() => { void window.piCad.auth.submitManualCode(authInput.trim()); setAuthInput(""); }}>Continue</button></div>}
+      <section className="settings-card wide"><header><div><span className="setting-icon"><FolderOpen size={18}/></span><div><h2>Project</h2></div></div></header><div className="path-picker"><code>{draft.projectPath||"No project selected"}</code><button onClick={()=>void window.piCad.settings.chooseProject().then(p=>p&&patch("projectPath",p))}>Choose folder</button></div></section>
+      <section className="settings-card"><header><div><span className="setting-icon blue"><span className="provider-mark"/></span><div><h2>Author model</h2><p>Prime model catalog</p></div></div><button onClick={()=>void refresh()}><RefreshCw size={14}/></button></header>
+        {error&&<p role="alert">{error}</p>}<label>Provider<select value={provider?.id||draft.provider} onChange={e=>selectProvider(e.target.value)}>{catalog.providers.map(p=><option key={p.id} value={p.id}>{p.name} · {p.auth.configured?"connected":"not configured"}</option>)}</select></label>
+        <label>Model<select value={draft.model} onChange={e=>{const m=models.find(x=>x.id===e.target.value);setDraft(v=>({...v,model:e.target.value,thinking:m?.thinkingLevels?.includes(v.thinking)?v.thinking:m?.thinkingLevels?.[0]||"off"}))}}>{models.map(m=><option key={m.id} value={m.id}>{m.name}{m.available?"":" · needs credentials"}{m.input?.includes("image")?" · vision":""}</option>)}</select></label>
+        <label>Reasoning<select value={levels.includes(draft.thinking)?draft.thinking:levels[0]} onChange={e=>patch("thinking",e.target.value as ThinkingLevel)}>{levels.map(x=><option key={x}>{x}</option>)}</select></label>
+        <button disabled={!model?.available} onClick={()=>void window.piCad.auth.saveDefault({provider:draft.provider,modelId:draft.model,thinkingLevel:draft.thinking}).then(()=>setNotice("Default model saved."),e=>setNotice(`Save failed: ${String(e)}`))}>Set as default</button>
+        <div className="auth-row"><div><i className={auth.state==="signed-in"?"online":""}/><span>{auth.message||auth.state}{auth.source?` · ${auth.source}`:""}</span></div>{auth.state==="signed-in"?<button onClick={()=>void window.piCad.auth.signOut(draft.provider).then(s=>{setAuth(s);void refresh()})}>Remove credential</button>:provider?.oauth?<button onClick={()=>void window.piCad.auth.login(draft.provider).then(setAuth)}>Sign in</button>:null}</div>
+        {provider&&provider.id!=="openai-codex"&&provider.id!=="github-copilot"&&<div className="auth-input"><input type="password" value={secret} placeholder={`API key for ${provider.name}`} onChange={e=>setSecret(e.target.value)}/><button disabled={!secret.trim()} onClick={()=>void window.piCad.auth.setApiKey(draft.provider,secret).then(s=>{setAuth(s);setSecret("");void refresh()},e=>setAuth({provider:draft.provider,state:"error",message:String(e)}))}>{auth.configured?"Replace key":"Save key"}</button></div>}
+        {auth.input&&<div className="auth-input">{auth.input.kind==="select"?<select value={authInput} onChange={e=>setAuthInput(e.target.value)}><option value="">Choose</option>{auth.input.options.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}</select>:<input value={authInput} onChange={e=>setAuthInput(e.target.value)} placeholder={auth.input.placeholder}/>}<button onClick={()=>{void window.piCad.auth.submitManualCode(authInput);setAuthInput("")}}>Continue</button></div>}
       </section>
-      <section className="settings-card"><header><div><span className="setting-icon"><Check size={18} /></span><div><h2>Independent reviewer</h2><p>Defaults to the active author model.</p></div></div></header>
-        <div className="segmented"><button className={draft.reviewer.mode === "inherit" ? "active" : ""} onClick={() => patch("reviewer", { mode: "inherit" })}>Inherit author</button><button className={draft.reviewer.mode === "fixed" ? "active" : ""} onClick={() => patch("reviewer", { mode: "fixed", provider: draft.provider, model: draft.model, thinking: "medium" })}>Separate model</button></div>
-        {draft.reviewer.mode === "fixed" && <><label>Provider<input value={draft.reviewer.provider || ""} onChange={(event) => patch("reviewer", { ...draft.reviewer, provider: event.target.value })} /></label><label>Model<input value={draft.reviewer.model || ""} onChange={(event) => patch("reviewer", { ...draft.reviewer, model: event.target.value })} /></label></>}
-      </section>
-      <section id="settings-advanced" className="settings-card"><header><div><span className="setting-icon"><Check size={18} /></span><div><h2>Git remote publishing</h2><p>Administrators explicitly allow tag publication. Pull remains disabled.</p></div></div></header>
-        <label><input type="checkbox" checked={draft.remotePublish.enabled} onChange={(event) => patch("remotePublish", { ...draft.remotePublish, enabled: event.target.checked })} /> Enable remote tag publishing</label>
-        <label>Allowed remotes<input value={draft.remotePublish.allowedRemotes.join(", ")} onChange={(event) => patch("remotePublish", { ...draft.remotePublish, allowedRemotes: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label>
-        <small>Publishes the approved source commit as a tag. It does not upload the formal package.</small>
-      </section>
-      <section id="settings-runtime" className="settings-card wide runtime-card"><header><div><span className="setting-icon"><Wrench size={18} /></span><div><h2>Engineering runtime</h2><p>WSL keeps the authority sidecar and CAD tools isolated from the desktop.</p></div></div><button className="icon-text" onClick={() => void check()}><RefreshCw size={14} />Check again</button></header>
-        <label>Windows WSL distribution<input value={draft.distro} onChange={(event) => patch("distro", event.target.value)} /></label>
-        <div className="dependency-list">{runtime.checks.map((item) => <div key={item.id}><span className={`dependency-state ${item.status}`}>{item.status === "ready" ? <Check size={13} /> : "!"}</span><div><strong>{item.label}</strong><small>{item.detail}</small></div><span>{item.status}</span></div>)}</div>
-        {runtime.state === "error" && <div className="runtime-action"><p>{runtime.message}</p><button className="primary" onClick={() => void window.piCad.runtime.install().then(setRuntime)}>Install missing dependencies<ChevronRight size={15} /></button></div>}
-      </section>
-      {installation && <section className="settings-card wide"><header><div><span className="setting-icon"><RefreshCw size={18} /></span><div><h2>Installation and updates</h2><p>Reify {installation.version} · {installation.platform}/{installation.arch} · {installation.channel}</p></div></div></header><p>{installation.updateInstructions}</p><small>User data: {installation.userDataPath}</small><small>Project: {installation.projectPath || "not selected"}</small><small>Updates are manual and must wait until active Agent work is stopped. Uninstalling the app does not delete either location.</small></section>}
-    </div>
-  </div>;
+      <section className="settings-card"><header><div><span className="setting-icon"><Check size={18}/></span><div><h2>Independent reviewer</h2><p>Shares catalog and credentials.</p></div></div></header><div className="segmented"><button className={draft.reviewer.mode==="inherit"?"active":""} onClick={()=>patch("reviewer",{mode:"inherit"})}>Inherit author</button><button className={draft.reviewer.mode==="fixed"?"active":""} onClick={()=>patch("reviewer",{mode:"fixed",provider:draft.provider,model:draft.model,thinking:draft.thinking})}>Separate model</button></div>{draft.reviewer.mode==="fixed"&&<><label>Provider<select value={draft.reviewer.provider} onChange={e=>{const p=catalog.providers.find(x=>x.id===e.target.value);patch("reviewer",{...draft.reviewer,provider:e.target.value,model:p?.models[0]?.id,thinking:p?.models[0]?.thinkingLevels?.[0]||"off"})}}>{catalog.providers.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label><label>Model<select value={draft.reviewer.model} onChange={e=>patch("reviewer",{...draft.reviewer,model:e.target.value})}>{(catalog.providers.find(p=>p.id===draft.reviewer.provider)?.models||[]).map(m=><option key={m.id} value={m.id}>{m.name}{m.available?"":" · needs credentials"}</option>)}</select></label></>}</section>
+      <section className="settings-card wide"><header><div><span className="setting-icon">☆</span><div><h2>Favorite models</h2><p>Fast switching scope</p></div></div></header><label>Find model<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Provider, model or ID"/></label>{results.length>0&&<div className="model-search-results">{results.map(m=><button key={`${m.provider}/${m.id}`} onClick={()=>void toggle(m)}>{fav.has(`${m.provider}/${m.id}`)?"★":"☆"} {m.name} <small>{m.provider}</small></button>)}</div>}<div className="favorite-models">{favorites.map((x,i)=><div key={`${x.provider}/${x.modelId}`}><span>{i+1}</span><code>{x.provider}/{x.modelId}</code><small>{x.thinkingLevel}</small><button onClick={()=>void window.piCad.auth.saveFavorites(favorites.filter(y=>y!==x)).then(r=>setCatalog(v=>({...v,favorites:r.favorites})))}>Remove</button></div>)}</div></section>
+      <section className="settings-card wide"><header><div><span className="setting-icon"><Check size={18}/></span><div><h2>Custom Prime providers</h2><p>Prime models.json</p></div></div></header><textarea rows={12} value={modelsConfig} onChange={e=>setModelsConfig(e.target.value)} spellCheck={false}/><button onClick={()=>void window.piCad.auth.writeModelsConfig(modelsConfig).then(r=>{setModelsConfig(r.text);setNotice("Custom providers saved.");void refresh()},e=>setNotice(`Save failed: ${String(e)}`))}>Validate and save</button></section>
+      <section className="settings-card wide"><header><div><span className="setting-icon"><Wrench size={18}/></span><div><h2>Engineering runtime</h2></div></div></header><label>WSL distribution<input value={draft.distro} onChange={e=>patch("distro",e.target.value)}/></label>{runtime.checks.map(x=><div key={x.id}><strong>{x.label}</strong> <small>{x.detail}</small></div>)}</section>
+      {installation&&<section className="settings-card wide"><h2>Installation</h2><p>Reify {installation.version} · {installation.channel}</p></section>}{notice&&<small role={notice.startsWith("Save failed")?"alert":"status"}>{notice}</small>}
+    </div></div>;
 }

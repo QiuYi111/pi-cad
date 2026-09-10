@@ -1,18 +1,17 @@
 #!/usr/bin/env node
 
 import { createInterface } from "node:readline";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [primeArg, agentDirArg] = process.argv.slice(2);
-if (!primeArg || !agentDirArg) throw new Error("usage: desktop-openai-oauth.mjs <prime-repo> <agent-dir>");
+const [primeArg, agentDirArg, providerArg = "openai-codex"] = process.argv.slice(2);
+if (!primeArg || !agentDirArg) throw new Error("usage: desktop-openai-oauth.mjs <prime-repo> <agent-dir> [provider]");
 
 const prime = resolve(primeArg);
 const agentDir = resolve(agentDirArg);
 process.env.PRIME_AGENT_CODING_AGENT_DIR = agentDir;
 
-const { loginOpenAICodex } = await import(pathToFileURL(join(prime, "packages/ai/dist/oauth.js")));
+const { AuthStorage } = await import(pathToFileURL(join(prime, "packages/coding-agent/dist/index.js")));
 const input = createInterface({ input: process.stdin, terminal: false });
 const manualValues = [];
 const manualWaiters = [];
@@ -31,8 +30,11 @@ function manualCode() {
 }
 
 try {
-  const credentials = await loginOpenAICodex({
+  const auth = AuthStorage.create(join(agentDir, "auth.json"));
+  if (!auth.getOAuthProviders().some((provider) => provider.id === providerArg)) throw new Error(`Provider does not support OAuth: ${providerArg}`);
+  await auth.login(providerArg, {
     onAuth: ({ url, instructions }) => emit({ type: "auth_url", url, instructions }),
+    onDeviceCode: ({ userCode, verificationUri }) => emit({ type: "auth_device_code", userCode, verificationUri }),
     onPrompt: async ({ message, placeholder }) => {
       emit({ type: "auth_input", message, placeholder });
       return manualCode();
@@ -45,15 +47,7 @@ try {
       return options.some((option) => option.id === selected) ? selected : undefined;
     },
   });
-  await mkdir(agentDir, { recursive: true, mode: 0o700 });
-  const authPath = join(agentDir, "auth.json");
-  let current = {};
-  try { current = JSON.parse(await readFile(authPath, "utf8")); } catch {}
-  const temporary = `${authPath}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify({ ...current, "openai-codex": { type: "oauth", ...credentials } }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, authPath);
-  await chmod(authPath, 0o600);
-  emit({ type: "auth_complete" });
+  emit({ type: "auth_complete", provider: providerArg });
 } catch (error) {
   emit({ type: "auth_error", message: error instanceof Error ? error.message : String(error) });
   process.exitCode = 1;

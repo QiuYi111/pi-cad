@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronRight, FolderOpen, Wrench } from "../components/icons";
-import type { AppSettings, AuthStatus, RuntimeStatus } from "@shared/contracts";
+import type { AppSettings, AuthStatus, ModelCatalog, RuntimeStatus } from "@shared/contracts";
 import { Wordmark } from "../components/Brand";
 
 export function setupErrorMessage(error: unknown): string {
@@ -20,6 +20,8 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   const [runtime, setRuntime] = useState<RuntimeStatus>({ state: "checking", checks: [] });
   const [auth, setAuth] = useState<AuthStatus>({ provider: "openai-codex", state: "checking" });
   const [manual, setManual] = useState("");
+  const [secret, setSecret] = useState("");
+  const [catalog, setCatalog] = useState<ModelCatalog>({ providers: [], favorites: [], defaults: {} });
   const [projectName, setProjectName] = useState("我的第一个设计");
   const [working, setWorking] = useState<"wsl" | "runtime" | "auth" | "project" | "">("");
   const setupAttempt = useRef("");
@@ -40,7 +42,8 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   };
   useEffect(() => {
     void check();
-    void window.piCad.auth.status().then(setAuth).catch(() => setAuth({ provider: "openai-codex", state: "signed-out" }));
+    void window.piCad.auth.catalog().then(setCatalog);
+    void window.piCad.auth.status(settings.provider).then(setAuth).catch(() => setAuth({ provider: settings.provider, state: "signed-out" }));
     const offAuth = window.piCad.auth.onStatus(setAuth);
     const offRuntime = window.piCad.runtime.onStatus(setRuntime);
     return () => { offAuth(); offRuntime(); };
@@ -98,9 +101,11 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   }, [runtime, runtimeReady, working, wslMissing]);
   const login = async () => {
     setWorking("auth");
-    try { setAuth(await window.piCad.auth.login()); }
+    try { setAuth(await window.piCad.auth.login(settings.provider)); }
     finally { setWorking(""); }
   };
+  const currentProvider = catalog.providers.find((item) => item.id === settings.provider);
+  const saveKey = async () => { setWorking("auth"); try { setAuth(await window.piCad.auth.setApiKey(settings.provider, secret)); setSecret(""); } finally { setWorking(""); } };
   const chooseProject = async () => {
     setWorking("project");
     try {
@@ -129,9 +134,11 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
               ? <button className="primary" disabled={Boolean(working)} onClick={prepareEnvironment}>{working ? "正在准备…" : "准备工程环境"}<ChevronRight size={14} /></button>
               : null}
         </SetupCard>
-        <SetupCard index="02" title="连接 ChatGPT" ready={auth.state === "signed-in"} active={runtimeReady && auth.state !== "signed-in"} icon={<span className="provider-mark" />}>
-          <p>{auth.message || (auth.state === "signed-in" ? "ChatGPT 已连接。" : "使用 ChatGPT 账号登录，无需 API Key。")}</p>
-          {auth.state !== "signed-in" && <span><button className="setup-secondary" disabled={!runtimeReady || Boolean(working)} onClick={() => void login()}>{working === "auth" || auth.state === "waiting" ? "等待浏览器登录…" : auth.state === "error" ? "重试登录" : "使用 ChatGPT 登录"}</button>{auth.state === "waiting" && <button onClick={() => void window.piCad.auth.cancel().then(setAuth)}>取消</button>}</span>}
+        <SetupCard index="02" title="连接模型服务" ready={auth.state === "signed-in"} active={runtimeReady && auth.state !== "signed-in"} icon={<span className="provider-mark" />}>
+          <label>提供商<select value={settings.provider} onChange={(event) => { const provider=catalog.providers.find(x=>x.id===event.target.value); const model=provider?.models.find(x=>x.available)||provider?.models[0]; onSettings({...settings,provider:event.target.value,model:model?.id||"",thinking:model?.thinkingLevels?.[0]||"off"}); setAuth(provider?.auth||{provider:event.target.value,state:"signed-out"}); }}>{catalog.providers.map(provider=><option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+          <p>{auth.message || "配置所选提供商后继续。"}</p>
+          {auth.state !== "signed-in" && currentProvider?.oauth && <span><button className="setup-secondary" disabled={!runtimeReady || Boolean(working)} onClick={() => void login()}>{working === "auth" || auth.state === "waiting" ? "等待登录…" : "网页登录"}</button>{auth.state === "waiting" && <button onClick={() => void window.piCad.auth.cancel().then(setAuth)}>取消</button>}</span>}
+          {auth.state !== "signed-in" && currentProvider && currentProvider.id !== "openai-codex" && currentProvider.id !== "github-copilot" && <div className="setup-auth-input"><input type="password" value={secret} onChange={event=>setSecret(event.target.value)} placeholder="API key"/><button disabled={!secret.trim()} onClick={()=>void saveKey()}>保存</button></div>}
           {auth.input && <div className="setup-auth-input"><input value={manual} onChange={(event) => setManual(event.target.value)} placeholder={auth.input.kind === "text" ? auth.input.placeholder || "粘贴浏览器返回地址" : "在浏览器选择账号"} /><button disabled={!manual.trim()} onClick={() => { void window.piCad.auth.submitManualCode(manual.trim()); setManual(""); }}>继续</button></div>}
         </SetupCard>
         <SetupCard index="03" title="项目位置" ready={Boolean(settings.projectPath)} active={runtimeReady && auth.state === "signed-in" && !settings.projectPath} icon={<FolderOpen size={17} />}>

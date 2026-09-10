@@ -5,6 +5,26 @@ export interface ModelChoice {
   id: string;
   name: string;
   reasoning?: boolean;
+  thinkingLevels?: ThinkingLevel[];
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  available?: boolean;
+}
+
+export interface ModelFavorite { provider: string; modelId: string; thinkingLevel?: ThinkingLevel; pattern?: string }
+export interface ModelSelection { provider: string; modelId: string; thinkingLevel: ThinkingLevel }
+export interface ProviderChoice {
+  id: string;
+  name: string;
+  oauth: boolean;
+  auth: AuthStatus;
+  models: ModelChoice[];
+}
+export interface ModelCatalog {
+  providers: ProviderChoice[];
+  favorites: ModelFavorite[];
+  defaults: Partial<ModelSelection>;
 }
 
 export interface AppSettings {
@@ -41,10 +61,12 @@ export interface RuntimeStatus {
 export interface InstallationInfo { version: string; platform: "windows" | "linux" | "macos"; arch: string; channel: "nsis" | "portable" | "deb" | "appimage" | "dmg" | "development"; packaged: boolean; userDataPath: string; projectPath: string; updateMode: "manual"; updateInstructions: string; signature: "runtime-verified" | "release-signature-required" }
 
 export interface AuthStatus {
-  provider: "openai-codex";
+  provider: string;
   state: "checking" | "signed-out" | "waiting" | "signed-in" | "error";
   message?: string;
   expiresAt?: number;
+  configured?: boolean;
+  source?: "stored" | "runtime" | "environment" | "prime_cli" | "fallback" | "models_json_key" | "models_json_command" | "stale";
   input?: { kind: "text"; placeholder?: string } | { kind: "select"; options: Array<{ id: string; label: string }> };
 }
 
@@ -348,11 +370,17 @@ export interface DesktopApi {
     onUiRequest(listener: (request: ExtensionUiRequest) => void): () => void;
   };
   auth: {
-    status(): Promise<AuthStatus>;
-    login(): Promise<AuthStatus>;
+    catalog(): Promise<ModelCatalog>;
+    status(provider: string): Promise<AuthStatus>;
+    setApiKey(provider: string, key: string): Promise<AuthStatus>;
+    login(provider: string): Promise<AuthStatus>;
     submitManualCode(value: string): Promise<void>;
     cancel(): Promise<AuthStatus>;
-    signOut(): Promise<AuthStatus>;
+    signOut(provider: string): Promise<AuthStatus>;
+    saveFavorites(models: ModelFavorite[]): Promise<{ favorites: ModelFavorite[] }>;
+    saveDefault(value: ModelSelection): Promise<ModelSelection>;
+    readModelsConfig(): Promise<{ text: string }>;
+    writeModelsConfig(text: string): Promise<{ text: string }>;
     onStatus(listener: (status: AuthStatus) => void): () => void;
   };
   workflow: {
@@ -427,10 +455,16 @@ export const IPC = {
   runtimeStatus: "runtime:status",
   runtimeUiRequest: "runtime:ui-request",
   authStatusGet: "auth:status-get",
+  authCatalog: "auth:catalog",
+  authSetApiKey: "auth:set-api-key",
   authLogin: "auth:login",
   authManualCode: "auth:manual-code",
   authCancel: "auth:cancel",
   authSignOut: "auth:sign-out",
+  authSaveFavorites: "auth:save-favorites",
+  authSaveDefault: "auth:save-default",
+  authReadModelsConfig: "auth:read-models-config",
+  authWriteModelsConfig: "auth:write-models-config",
   authStatus: "auth:status",
   workflowList: "workflow:list",
   workflowCurrent: "workflow:current",

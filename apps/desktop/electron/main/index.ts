@@ -6,7 +6,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AppSettings, ModelParameterValue, ReleaseResult, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
+import type { AppSettings, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
@@ -18,6 +18,7 @@ import { ViewerBackend } from "./viewer.js";
 import { TraceStore } from "./traces.js";
 import { DemoRuntime } from "./demo-runtime.js";
 import { AuthController } from "./auth.js";
+import { PrimeConfigService } from "./prime-config.js";
 import { ParaViewBackend } from "./paraview.js";
 import { BlenderBackend } from "./blender.js";
 import { HumanApprovalStore } from "./approvals.js";
@@ -32,6 +33,8 @@ const settingsStore = new SettingsStore();
 const approvalStore = new HumanApprovalStore(join(app.getPath("userData"), "human-approvals"));
 let runtime: PrimeRpc | DemoRuntime | null = null;
 let authController: AuthController | null = null;
+let primeConfig: PrimeConfigService | null = null;
+let primeConfigBridge: RuntimeBridge | null = null;
 let runtimeBridge: RuntimeBridge | null = null;
 let runtimeBridgeKey = "";
 let paraView: ParaViewBackend | null = null;
@@ -145,6 +148,15 @@ async function ensureAuth() {
   });
   authController.on("status", (status) => send(IPC.authStatus, status));
   return authController;
+}
+
+async function ensurePrimeConfig() {
+  const current = await bridge();
+  if (!primeConfig || primeConfigBridge !== current) {
+    primeConfig = new PrimeConfigService(current);
+    primeConfigBridge = current;
+  }
+  return primeConfig;
 }
 
 async function ensureParaView() {
@@ -287,11 +299,30 @@ function registerIpc() {
     }));
   });
   ipcMain.handle(IPC.runtimeUiResponse, async (_event, id: string, response: Record<string, unknown>) => (await ensureRuntime()).respondToUi(id, response));
-  ipcMain.handle(IPC.authStatusGet, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).status(await settingsStore.get()));
-  ipcMain.handle(IPC.authLogin, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).login(await settingsStore.get()));
+  const demoCatalog = () => ({ providers: [
+    { id: "openai-codex", name: "OpenAI Codex", oauth: true, auth: { provider: "openai-codex", state: "signed-in", configured: true, source: "stored", message: "ChatGPT connected" }, models: [
+      { provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh", "max"], input: ["text", "image"], available: true },
+      { provider: "openai-codex", id: "gpt-5.6-luna", name: "GPT-5.6 Luna", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh", "max"], input: ["text", "image"], available: true },
+    ] },
+    { id: "zai", name: "ZAI", oauth: false, auth: { provider: "zai", state: "signed-out", configured: false, message: "Not configured" }, models: [
+      { provider: "zai", id: "glm-5", name: "GLM-5", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], input: ["text"], available: false },
+    ] },
+  ], favorites: [{ provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" }, { provider: "openai-codex", modelId: "gpt-5.6-luna", thinkingLevel: "low" }], defaults: { provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" } });
+  ipcMain.handle(IPC.authCatalog, async () => authE2E ? demoCatalog() : (await ensurePrimeConfig()).catalog(await settingsStore.get()));
+  ipcMain.handle(IPC.authStatusGet, async (_event, provider: string) => authE2E ? demoCatalog().providers.find((item) => item.id === provider)?.auth : (await ensurePrimeConfig()).status(await settingsStore.get(), provider));
+  ipcMain.handle(IPC.authSetApiKey, async (_event, provider: string, key: string) => authE2E ? { provider, state: "signed-in", configured: true, source: "stored", message: "Connected" } : (await ensurePrimeConfig()).setApiKey(await settingsStore.get(), provider, key));
+  ipcMain.handle(IPC.authLogin, async (_event, provider: string) => authE2E ? { provider, state: "signed-in", configured: true, source: "stored", message: "Connected" } : (await ensureAuth()).login(await settingsStore.get(), provider));
   ipcMain.handle(IPC.authManualCode, async (_event, value: string) => (await ensureAuth()).submitManualCode(value));
   ipcMain.handle(IPC.authCancel, async () => (await ensureAuth()).cancel());
-  ipcMain.handle(IPC.authSignOut, async () => (await ensureAuth()).signOut(await settingsStore.get()));
+  ipcMain.handle(IPC.authSignOut, async (_event, provider: string) => authE2E ? { provider, state: "signed-out", configured: false, message: "Not configured" } : (await ensurePrimeConfig()).logout(await settingsStore.get(), provider));
+  ipcMain.handle(IPC.authSaveFavorites, async (_event, models: ModelFavorite[]) => authE2E ? { favorites: models } : (await ensurePrimeConfig()).saveFavorites(await settingsStore.get(), models));
+  ipcMain.handle(IPC.authSaveDefault, async (_event, value: ModelSelection) => {
+    if (!authE2E) await (await ensurePrimeConfig()).saveDefault(await settingsStore.get(), value);
+    await settingsStore.update({ provider: value.provider, model: value.modelId, thinking: value.thinkingLevel });
+    return value;
+  });
+  ipcMain.handle(IPC.authReadModelsConfig, async () => authE2E ? { text: "{\n  \"providers\": {}\n}\n" } : (await ensurePrimeConfig()).readModelsConfig(await settingsStore.get()));
+  ipcMain.handle(IPC.authWriteModelsConfig, async (_event, text: string) => authE2E ? { text } : (await ensurePrimeConfig()).writeModelsConfig(await settingsStore.get(), text));
   ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow, demoNakedWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.workflowCurrent, async () => demo ? {
     workflowId: demoWorkflow.id, workflowVersion: demoWorkflow.version, workflowHash: "demo", runId: "e2e", phase: "concept", status: "active",
