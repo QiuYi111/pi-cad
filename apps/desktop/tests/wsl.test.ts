@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, initializeWslUserScript, isNonRootWslUid, missingDistroStatus, nodeInstallScript, runtimeChecksReady, wslDefaultUserName, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
+import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, initializeWslUserScript, isNonRootWslUid, missingDistroStatus, nodeInstallScript, runtimeChecksReady, wslDefaultUserName, wslElevatedInstallScript, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
 import { engineeringKnowledgeProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
 import { setupErrorMessage } from "../src/renderer/src/pages/FirstRun";
@@ -175,10 +175,16 @@ describe("WSL first-install status", () => {
 
   it("does not let the hidden installer wait for Ubuntu's interactive user setup", () => {
     const command = wslInstallPowerShellCommand("Ubuntu");
-    expect(command).toContain("'--no-launch'");
-    expect(command).toContain("'--web-download'");
+    const elevated = wslElevatedInstallScript("Ubuntu");
+    expect(command).toContain("'-EncodedCommand'");
+    expect(elevated).toContain("--no-launch --web-download");
+    expect(elevated).toContain("Microsoft-Windows-Subsystem-Linux");
+    expect(elevated).toContain("VirtualMachinePlatform");
+    expect(elevated).toContain("$picadStates -contains 'EnablePending'");
+    expect(elevated).toContain("Tee-Object -FilePath $picadLog");
     expect(command).toContain(".WaitForExit()");
     expect(command).toContain("wsl.exe exited with code");
+    expect(command).toContain("Get-Content -Raw $picadLog");
     expect(command).not.toMatch(/Start-Process.+\s-Wait(?:\s|;)/);
   });
 

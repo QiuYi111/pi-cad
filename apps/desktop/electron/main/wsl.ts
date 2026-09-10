@@ -64,9 +64,25 @@ export function classifyWslInstallResult(result: { exitCode: number; distroPrese
   return { state: "checking", checks: [], progress: 0.3, message: "Ubuntu is ready. Checking the engineering runtime…" };
 }
 
-export function wslInstallPowerShellCommand(distro: string): string {
+export function wslElevatedInstallScript(distro: string): string {
   const escaped = distro.replaceAll("'", "''");
-  return `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -PassThru -ArgumentList @('--install','--distribution','${escaped}','--no-launch','--web-download'); $process.WaitForExit(); if ($process.ExitCode -ne 0) { Write-Error ('wsl.exe exited with code {0}' -f $process.ExitCode) }; exit $process.ExitCode`;
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    "$picadLog = Join-Path $env:LOCALAPPDATA 'Pi-CAD\\wsl-install.log'",
+    "New-Item -ItemType Directory -Force -Path (Split-Path $picadLog) | Out-Null",
+    `& wsl.exe --install --distribution '${escaped}' --no-launch --web-download 2>&1 | Tee-Object -FilePath $picadLog`,
+    "$picadExitCode = $LASTEXITCODE",
+    "if ($picadExitCode -eq 0) { exit 0 }",
+    "$picadFeatures = @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')",
+    "$picadStates = @($picadFeatures | ForEach-Object { (Get-WindowsOptionalFeature -Online -FeatureName $_ -ErrorAction SilentlyContinue).State.ToString() })",
+    "if ($picadStates.Count -eq 2 -and $picadStates -contains 'EnablePending' -and @($picadStates | Where-Object { $_ -notin @('Enabled', 'EnablePending') }).Count -eq 0) { exit 0 }",
+    "exit $picadExitCode",
+  ].join("; ");
+}
+
+export function wslInstallPowerShellCommand(distro: string): string {
+  const encoded = Buffer.from(wslElevatedInstallScript(distro), "utf16le").toString("base64");
+  return `$picadLog = Join-Path $env:LOCALAPPDATA 'Pi-CAD\\wsl-install.log'; $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'); $process.WaitForExit(); if ($process.ExitCode -ne 0) { $detail = if (Test-Path $picadLog) { Get-Content -Raw $picadLog } else { '' }; Write-Error (('wsl.exe exited with code {0}. {1}' -f $process.ExitCode, $detail).Trim()) }; exit $process.ExitCode`;
 }
 
 export function nodeInstallScript(version = "v22.23.2"): string {
@@ -308,19 +324,14 @@ export class WslBridge implements RuntimeBridge {
     onStatus?.(wslInstallHeartbeat(0));
     const heartbeat = setInterval(() => onStatus?.(wslInstallHeartbeat(Date.now() - startedAt)), 2_000);
     try {
-      const engineAvailable = await execFileAsync("wsl.exe", ["--version"], {
-        encoding: "utf8", timeout: 10_000, windowsHide: true,
-      }).then(() => true, () => false);
-      if (engineAvailable) {
-        await execFileAsync("wsl.exe", ["--install", "--distribution", this.distro, "--no-launch", "--web-download"], {
-          encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
-        });
-      } else {
-        const command = wslInstallPowerShellCommand(this.distro);
-        await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
-          encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
-        });
-      }
+      // Windows 10's inbox wsl.exe prints help and exits successfully for
+      // `--version`, even while both required optional features are disabled.
+      // Installing without elevation then becomes a no-op that looks successful.
+      // Always request elevation for the Windows-owned installation command.
+      const command = wslInstallPowerShellCommand(this.distro);
+      await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
+        encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
+      });
       let distroPresent = false;
       try {
         const { stdout } = await execFileAsync("wsl.exe", ["-l", "-q"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
