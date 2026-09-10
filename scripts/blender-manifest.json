@@ -1,6 +1,6 @@
 {
   "version": "4.5.3",
-  "notes": "Blender LTS runtime for release presentation (optional capability, fail-soft). PATH blender always wins; this manifest pins the official download when none is installed.",
+  "notes": "Blender LTS runtime for release presentation (optional capability, fail-soft). The exact manifest version and current platform win; PATH is fallback only.",
   "platforms": {
     "linux-x64": {
       "url": "https://download.blender.org/release/Blender4.5/blender-4.5.3-linux-x64.tar.xz",

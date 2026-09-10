@@ -5,7 +5,7 @@
  * Release presentation is an optional capability: a failed download must
  * never break `npm install`. PI_CAD_SKIP_BLENDER=1 opts out entirely;
  * PI_CAD_BLENDER_BIN bypasses the managed runtime with an external binary;
- * a blender already on PATH always wins (the backend resolves PATH first).
+ * the pinned runtime wins over a PATH fallback.
  *
  * Layout: .runtime/blender/<version>/<platform>/blender
  * The manifest pins the official release URL and its SHA256. Entries whose
