@@ -33,7 +33,10 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   const check = async () => {
     setRuntime({ state: "checking", checks: [], message: "正在检查 Windows 和 WSL…" });
     try { setRuntime(await window.piCad.runtime.check()); }
-    catch (error) { setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) }); }
+    catch (error) {
+      localStorage.removeItem("reify.environment-setup-pending.v1");
+      setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) });
+    }
   };
   useEffect(() => {
     void check();
@@ -56,7 +59,10 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   const installRuntime = async () => {
     setWorking("runtime");
     try { setRuntime(await window.piCad.runtime.install()); }
-    catch (error) { setRuntime({ state: "error", checks: runtime.checks, message: setupErrorMessage(error) }); }
+    catch (error) {
+      localStorage.removeItem("reify.environment-setup-pending.v1");
+      setRuntime({ state: "error", checks: runtime.checks, message: setupErrorMessage(error) });
+    }
     finally { setWorking(""); }
   };
   const prepareEnvironment = () => {
