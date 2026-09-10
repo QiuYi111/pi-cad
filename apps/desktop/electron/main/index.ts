@@ -43,6 +43,7 @@ let viewer: ViewerBackend | null = null;
 let viewerBridge: RuntimeBridge | null = null;
 let blender: BlenderBackend | null = null;
 let blenderBridge: RuntimeBridge | null = null;
+let managedRuntimeBootstrap: Promise<void> = Promise.resolve();
 const trustedReleases = new Map<string, ReleaseResult>();
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
 const desktopE2EOpenStep = process.env.PI_CAD_DESKTOP_E2E_OPEN_STEP
@@ -76,6 +77,30 @@ async function setupResumeRegistered(): Promise<boolean> {
 
 function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
+}
+
+async function syncManagedRuntime() {
+  if (desktopE2E) return;
+  const settings = await settingsStore.get();
+  const currentBridge = await bridge();
+  const status = await currentBridge.check(settings);
+  const wslReady = status.checks.find((item) => item.id === "wsl")?.status === "ready";
+  const managedRuntimeStale = status.checks.some((item) => (item.id === "prime" || item.id === "picad") && item.status !== "ready");
+  if (wslReady && managedRuntimeStale && currentBridge.bundledRuntimePath) {
+    await new Promise<void>((resolve, reject) => {
+      let filesReady = false;
+      void currentBridge.install(settings, (value) => {
+        send(IPC.runtimeStatus, value);
+        if (!filesReady && (value.progress ?? 0) >= 0.78) {
+          filesReady = true;
+          resolve();
+        }
+      }).then(() => resolve(), (error) => {
+        if (filesReady) send(IPC.runtimeEvent, { type: "runtime_diagnostic", message: `Managed dependency update failed: ${String(error)}` });
+        else reject(error);
+      });
+    });
+  }
 }
 
 function createWindow() {
@@ -308,7 +333,11 @@ function registerIpc() {
       { provider: "zai", id: "glm-5.3", name: "GLM-5.3", reasoning: true, thinkingLevels: ["off", "minimal", "low", "medium", "high"], input: ["text"], available: false },
     ] },
   ], favorites: [{ provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" }, { provider: "openai-codex", modelId: "gpt-5.6-luna", thinkingLevel: "low" }], defaults: { provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" } });
-  ipcMain.handle(IPC.authCatalog, async () => authE2E ? demoCatalog() : (await ensurePrimeConfig()).catalog(await settingsStore.get()));
+  ipcMain.handle(IPC.authCatalog, async () => {
+    if (authE2E) return demoCatalog();
+    await managedRuntimeBootstrap;
+    return (await ensurePrimeConfig()).catalog(await settingsStore.get());
+  });
   ipcMain.handle(IPC.authStatusGet, async (_event, provider: string) => authE2E ? demoCatalog().providers.find((item) => item.id === provider)?.auth : (await ensurePrimeConfig()).status(await settingsStore.get(), provider));
   ipcMain.handle(IPC.authSetApiKey, async (_event, provider: string, key: string) => authE2E ? { provider, state: "signed-in", configured: true, source: "stored", message: "Connected" } : (await ensurePrimeConfig()).setApiKey(await settingsStore.get(), provider, key));
   ipcMain.handle(IPC.authLogin, async (_event, provider: string) => authE2E ? { provider, state: "signed-in", configured: true, source: "stored", message: "Connected" } : (await ensureAuth()).login(await settingsStore.get(), provider));
@@ -456,6 +485,9 @@ app.whenReady().then(() => {
   protocol.registerFileProtocol("pi-cad", (_request, callback) => callback({ error: -6 }));
   registerIpc();
   createWindow();
+  managedRuntimeBootstrap = syncManagedRuntime().catch((error) => {
+    send(IPC.runtimeEvent, { type: "runtime_diagnostic", message: `Managed runtime update failed: ${String(error)}` });
+  });
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
