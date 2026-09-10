@@ -44,3 +44,12 @@ test("handwritten prompts, routers, and READMEs do not duplicate exact public to
   const paths = [join(root, "README.md"), join(root, "README.zh-CN.md"), ...files(join(root, "src", "prompts")), ...files(skills).filter((path) => path.endsWith("SKILL.md"))];
   for (const path of paths) assert.doesNotMatch(readFileSync(path, "utf-8"), /\bcad_[a-z][a-z_]*/g, `exact tool catalog leaked into handwritten router: ${path}`);
 });
+
+test("CAD skill routes simulation to managed backends before Python discovery", () => {
+  for (const path of [join(skills, "cad", "SKILL.md"), join(skills, "pi-cad", "SKILL.md")]) {
+    const text = readFileSync(path, "utf-8");
+    for (const backend of ["OpenFOAM 14", "SU2 8.5.0", "torch-fem 0.9"]) assert.match(text, new RegExp(backend.replace(".", "\\.")));
+    assert.match(text, /cad\.workflow\.current\(\)/);
+    assert.match(text, /Python (?:packages|imports).*(?:not|never).*solver (?:catalog|availability)/i);
+  }
+});
