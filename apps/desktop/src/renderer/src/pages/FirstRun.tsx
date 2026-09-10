@@ -58,8 +58,21 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   };
   const installRuntime = async () => {
     setWorking("runtime");
-    try { setRuntime(await window.piCad.runtime.install()); }
-    catch (error) {
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          setRuntime(await window.piCad.runtime.install());
+          return;
+        } catch (error) {
+          if (attempt === 0) {
+            setRuntime({ state: "checking", checks: runtime.checks, message: "Ubuntu 正在启动，稍后自动继续…" });
+            await new Promise((resolve) => setTimeout(resolve, 5_000));
+            continue;
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
       localStorage.removeItem("reify.environment-setup-pending.v1");
       setRuntime({ state: "error", checks: runtime.checks, message: setupErrorMessage(error) });
     }
