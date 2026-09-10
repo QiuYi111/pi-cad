@@ -181,6 +181,8 @@ describe("WSL first-install status", () => {
     expect(elevated).toContain("Microsoft-Windows-Subsystem-Linux");
     expect(elevated).toContain("VirtualMachinePlatform");
     expect(elevated).toContain("$picadStates -contains 'EnablePending'");
+    expect(elevated).toContain("wsl.exe --update --web-download");
+    expect(elevated).toContain("Tee-Object -FilePath $picadLog -Append");
     expect(elevated).toContain("Tee-Object -FilePath $picadLog");
     expect(command).toContain(".WaitForExit()");
     expect(command).toContain("wsl.exe exited with code");

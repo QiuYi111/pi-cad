@@ -76,6 +76,7 @@ export function wslElevatedInstallScript(distro: string): string {
     "$picadFeatures = @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')",
     "$picadStates = @($picadFeatures | ForEach-Object { (Get-WindowsOptionalFeature -Online -FeatureName $_ -ErrorAction SilentlyContinue).State.ToString() })",
     "if ($picadStates.Count -eq 2 -and $picadStates -contains 'EnablePending' -and @($picadStates | Where-Object { $_ -notin @('Enabled', 'EnablePending') }).Count -eq 0) { exit 0 }",
+    `if ($picadStates.Count -eq 2 -and @($picadStates | Where-Object { $_ -ne 'Enabled' }).Count -eq 0) { & wsl.exe --update --web-download 2>&1 | Tee-Object -FilePath $picadLog -Append; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & wsl.exe --install --distribution '${escaped}' --no-launch --web-download 2>&1 | Tee-Object -FilePath $picadLog -Append; exit $LASTEXITCODE }`,
     "exit $picadExitCode",
   ].join("; ");
 }
