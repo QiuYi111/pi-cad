@@ -19,6 +19,7 @@ const api: DesktopApi = {
   runtime: {
     check: () => ipcRenderer.invoke(IPC.runtimeCheck),
     installWsl: () => ipcRenderer.invoke(IPC.runtimeInstallWsl),
+    restartWindows: () => ipcRenderer.invoke(IPC.runtimeRestartWindows),
     install: () => ipcRenderer.invoke(IPC.runtimeInstall),
     checkSimulationComponent: () => ipcRenderer.invoke(IPC.runtimeCheckSimulation),
     installSimulationComponent: () => ipcRenderer.invoke(IPC.runtimeInstallSimulation),

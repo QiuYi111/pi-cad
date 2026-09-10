@@ -304,14 +304,23 @@ export class WslBridge implements RuntimeBridge {
 
   async installWsl(onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
     if (!/^[A-Za-z0-9._-]+$/.test(this.distro)) throw new Error("Invalid WSL distribution name.");
-    const command = wslInstallPowerShellCommand(this.distro);
     const startedAt = Date.now();
     onStatus?.(wslInstallHeartbeat(0));
     const heartbeat = setInterval(() => onStatus?.(wslInstallHeartbeat(Date.now() - startedAt)), 2_000);
     try {
-      await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
-        encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
-      });
+      const engineAvailable = await execFileAsync("wsl.exe", ["--version"], {
+        encoding: "utf8", timeout: 10_000, windowsHide: true,
+      }).then(() => true, () => false);
+      if (engineAvailable) {
+        await execFileAsync("wsl.exe", ["--install", "--distribution", this.distro, "--no-launch", "--web-download"], {
+          encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
+        });
+      } else {
+        const command = wslInstallPowerShellCommand(this.distro);
+        await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
+          encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
+        });
+      }
       let distroPresent = false;
       try {
         const { stdout } = await execFileAsync("wsl.exe", ["-l", "-q"], { encoding: "utf8", timeout: 10_000, windowsHide: true });

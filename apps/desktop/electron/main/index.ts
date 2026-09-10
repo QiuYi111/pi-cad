@@ -3,6 +3,7 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { AppSettings, ModelParameterValue, ReleaseResult, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
@@ -53,6 +54,16 @@ const demoRuntimeStatus: RuntimeStatus = { state: "idle", checks: [
   ["wsl", "Windows Subsystem for Linux"], ["node", "Node.js 22+"], ["python", "Python"],
   ["uv", "uv"], ["bwrap", "Bubblewrap"], ["paraview", "ParaView"], ["prime", "Prime Agent"], ["picad", "Reify runtime"],
 ].map(([id, label]) => ({ id: id as RuntimeStatus["checks"][number]["id"], label, status: "ready", detail: "Bundled", installable: false })) };
+
+function execFilePromise(file: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => execFile(file, args, { windowsHide: true }, (error) => error ? reject(error) : resolve()));
+}
+
+async function registerSetupResume() {
+  if (!app.isPackaged || process.platform !== "win32") return;
+  const command = `\"${process.execPath}\" --resume-setup`;
+  await execFilePromise("reg.exe", ["ADD", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", "/v", "ReifySetupResume", "/t", "REG_SZ", "/d", command, "/f"]);
+}
 
 function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
@@ -214,7 +225,14 @@ function registerIpc() {
   });
   ipcMain.handle(IPC.runtimeInstallWsl, async () => {
     if (desktopE2E) return demoRuntimeStatus;
-    return (await bridge()).installWsl((status) => send(IPC.runtimeStatus, status));
+    const status = await (await bridge()).installWsl((value) => send(IPC.runtimeStatus, value));
+    if (status.action === "restart-windows") await registerSetupResume();
+    return status;
+  });
+  ipcMain.handle(IPC.runtimeRestartWindows, async () => {
+    if (desktopE2E) return;
+    await registerSetupResume();
+    await execFilePromise("shutdown.exe", ["/r", "/t", "3", "/c", "Reify 将在重启后继续准备工程环境。"]);
   });
   ipcMain.handle(IPC.runtimeInstall, async () => {
     const current = await settingsStore.get();

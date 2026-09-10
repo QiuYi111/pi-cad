@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronRight, FolderOpen, Wrench } from "../components/icons";
 import type { AppSettings, AuthStatus, RuntimeStatus } from "@shared/contracts";
 import { Wordmark } from "../components/Brand";
@@ -22,6 +22,7 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   const [manual, setManual] = useState("");
   const [projectName, setProjectName] = useState("我的第一个设计");
   const [working, setWorking] = useState<"wsl" | "runtime" | "auth" | "project" | "">("");
+  const setupAttempt = useRef("");
   const wslMissing = runtime.checks.some((item) => item.id === "wsl" && item.status !== "ready");
   const requiredIds = new Set(["host", "wsl", "node", "python", "uv", "sandbox", "bwrap", "prime", "picad"]);
   const requiredChecks = runtime.checks.filter((item) => requiredIds.has(item.id));
@@ -47,7 +48,7 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
     try {
       const result = await window.piCad.runtime.installWsl();
       setRuntime(result);
-      if (result.state === "checking") await check();
+      if (result.action !== "restart-windows") await check();
     }
     catch (error) { setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) }); }
     finally { setWorking(""); }
@@ -58,6 +59,24 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
     catch (error) { setRuntime({ state: "error", checks: runtime.checks, message: setupErrorMessage(error) }); }
     finally { setWorking(""); }
   };
+  const prepareEnvironment = () => {
+    localStorage.setItem("reify.environment-setup-pending.v1", "1");
+    setupAttempt.current = "";
+    void (wslMissing ? installWsl() : installRuntime());
+  };
+  useEffect(() => {
+    if (localStorage.getItem("reify.environment-setup-pending.v1") !== "1") return;
+    if (runtimeReady) {
+      localStorage.removeItem("reify.environment-setup-pending.v1");
+      setupAttempt.current = "";
+      return;
+    }
+    if (working || runtime.state === "checking" || runtime.state === "installing" || runtime.action === "restart-windows") return;
+    const signature = `${runtime.state}:${runtime.action || ""}:${runtime.checks.map((item) => `${item.id}:${item.status}`).join(",")}`;
+    if (setupAttempt.current === signature) return;
+    setupAttempt.current = signature;
+    void (wslMissing ? installWsl() : installRuntime());
+  }, [runtime, runtimeReady, working, wslMissing]);
   const login = async () => {
     setWorking("auth");
     try { setAuth(await window.piCad.auth.login()); }
@@ -85,10 +104,11 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
           {runtime.state === "installing" && runtime.progress !== undefined
             ? <RuntimeProgress progress={runtime.progress} elapsedSeconds={runtime.elapsedSeconds || 0} />
             : runtime.state === "checking" || runtime.state === "installing" ? <SetupMotion label="正在检查系统" /> : null}
-          {runtime.state === "action-required"
-            ? <button className="setup-secondary" disabled={Boolean(working)} onClick={() => void check()}>{runtime.action === "restart-windows" ? "Check after restart" : "Retry Ubuntu initialization"}</button>
-            : wslMissing ? <button className="primary" disabled={Boolean(working)} onClick={() => void installWsl()}>{working === "wsl" ? "Waiting for Windows…" : runtime.action === "install-ubuntu" ? "Install Ubuntu" : "Install WSL and Ubuntu"}<ChevronRight size={14} /></button>
-              : !runtimeReady && runtime.state !== "checking" && runtime.state !== "installing" ? <button className="primary" disabled={Boolean(working)} onClick={() => void installRuntime()}>{working === "runtime" ? "Preparing runtime…" : "Install bundled runtime"}<ChevronRight size={14} /></button> : null}
+          {runtime.action === "restart-windows"
+            ? <button className="primary" disabled={Boolean(working)} onClick={() => void window.piCad.runtime.restartWindows()}>重启并继续<ChevronRight size={14} /></button>
+            : !runtimeReady && runtime.state !== "checking" && runtime.state !== "installing"
+              ? <button className="primary" disabled={Boolean(working)} onClick={prepareEnvironment}>{working ? "正在准备…" : "准备工程环境"}<ChevronRight size={14} /></button>
+              : null}
         </SetupCard>
         <SetupCard index="02" title="连接 ChatGPT" ready={auth.state === "signed-in"} active={runtimeReady && auth.state !== "signed-in"} icon={<span className="provider-mark" />}>
           <p>{auth.message || (auth.state === "signed-in" ? "ChatGPT 已连接。" : "使用 ChatGPT 账号登录，无需 API Key。")}</p>

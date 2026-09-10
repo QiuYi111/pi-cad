@@ -325,6 +325,7 @@ export interface DesktopApi {
   runtime: {
     check(): Promise<RuntimeStatus>;
     installWsl(): Promise<RuntimeStatus>;
+    restartWindows(): Promise<void>;
     install(): Promise<RuntimeStatus>;
     checkSimulationComponent(): Promise<SimulationComponentStatus>;
     installSimulationComponent(): Promise<SimulationComponentStatus>;
@@ -404,6 +405,7 @@ export const IPC = {
   settingsCreateProject: "settings:create-project",
   runtimeCheck: "runtime:check",
   runtimeInstallWsl: "runtime:install-wsl",
+  runtimeRestartWindows: "runtime:restart-windows",
   runtimeInstall: "runtime:install",
   runtimeCheckSimulation: "runtime:check-simulation",
   runtimeInstallSimulation: "runtime:install-simulation",
