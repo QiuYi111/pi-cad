@@ -10,6 +10,8 @@ import { toolCatalog } from "../packages/reify-cad-worker/src/server.mjs";
 import { fakeLauncherFactory } from "./reify-cad-worker-fixtures/fake-prime.mjs";
 
 const sleep = (ms) => new Promise((accept) => setTimeout(accept, ms));
+const originalPiCadRepo = process.env.REIFY_PI_CAD_REPO;
+const originalPrimeAgentRepo = process.env.PRIME_AGENT_REPO;
 const runtime = await mkdtemp(join(tmpdir(), "cad-worker-runtime-"));
 const fakePrimeRepo = join(runtime, "prime-agent");
 await mkdir(fakePrimeRepo, { recursive: true });
@@ -146,3 +148,7 @@ await test("invalid project and empty prompt fail clearly", async () => {
   await assert.rejects(() => core.start({ cwd: "C:\\project" }), /Linux\/WSL path/);
   await assert.rejects(() => core.start({ cwd: "/definitely/missing" }), /does not exist/);
 });
+process.env.REIFY_PI_CAD_REPO = originalPiCadRepo;
+if (originalPrimeAgentRepo === undefined) delete process.env.PRIME_AGENT_REPO;
+else process.env.PRIME_AGENT_REPO = originalPrimeAgentRepo;
+if (originalPiCadRepo === undefined) delete process.env.REIFY_PI_CAD_REPO;
