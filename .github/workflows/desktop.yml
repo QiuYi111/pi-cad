@@ -24,6 +24,7 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci --ignore-scripts
       - run: npm ci
         working-directory: apps/desktop
       - run: npm test
@@ -44,6 +45,7 @@ jobs:
           path: prime-agent
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
+      - uses: astral-sh/setup-uv@v5
       - run: npm ci --ignore-scripts
       - run: npm ci && npm run build
         working-directory: prime-agent
@@ -75,6 +77,7 @@ jobs:
           path: prime-agent
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
+      - uses: astral-sh/setup-uv@v5
       - run: npm ci --ignore-scripts
       - run: npm ci && npm run build
         working-directory: prime-agent

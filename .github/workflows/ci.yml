@@ -29,6 +29,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: astral-sh/setup-uv@v5
 
       # Python runtime (venv + build123d/OCP + torch CPU + torch-fem + gmsh)
       # is built by the package postinstall; cache it keyed on the requirement
