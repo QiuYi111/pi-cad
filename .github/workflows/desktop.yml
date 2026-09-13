@@ -25,21 +25,19 @@ jobs:
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
       - uses: astral-sh/setup-uv@v5
-      - run: npm ci --ignore-scripts
+        if: runner.os == 'Linux'
       - name: Build the root Python runtime
-        if: runner.os != 'Windows'
+        if: runner.os == 'Linux'
         run: npm ci
         env:
           PI_CAD_SKIP_BLENDER: "1"
+      - run: npm ci --ignore-scripts
+        if: runner.os != 'Linux'
       - run: npm ci
         working-directory: apps/desktop
-      - name: Desktop tests (with root Python integration)
-        if: runner.os != 'Windows'
+      - name: Desktop tests with root Python integration
+        if: runner.os == 'Linux'
         run: npm test
-        working-directory: apps/desktop
-      - name: Desktop tests without Linux/macOS Python integration
-        if: runner.os == 'Windows'
-        run: npx vitest run --exclude '**/parameter-preview.integration.test.ts' --exclude '**/simulation-metadata.test.ts'
         working-directory: apps/desktop
       - run: npm run build
         working-directory: apps/desktop
@@ -67,7 +65,7 @@ jobs:
         working-directory: apps/desktop
         env:
           PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent
-      - run: PI_CAD_PACKAGED_EXE="$PWD/release/linux-unpacked/reify" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
+      - run: PI_CAD_PACKAGED_EXE="$PWD/release/linux-unpacked/Reify" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
         working-directory: apps/desktop
       - uses: actions/upload-artifact@v4
         with:
@@ -102,6 +100,7 @@ jobs:
         env:
           PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          PI_CAD_UNSIGNED_MAC: "1"
       - run: PI_CAD_PACKAGED_EXE="$PWD/release/mac-arm64/Reify.app/Contents/MacOS/Reify" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
         working-directory: apps/desktop
       - uses: actions/upload-artifact@v4

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -10,6 +10,13 @@ import { toolCatalog } from "../packages/reify-cad-worker/src/server.mjs";
 import { fakeLauncherFactory } from "./reify-cad-worker-fixtures/fake-prime.mjs";
 
 const sleep = (ms) => new Promise((accept) => setTimeout(accept, ms));
+const runtime = await mkdtemp(join(tmpdir(), "cad-worker-runtime-"));
+const fakePrimeRepo = join(runtime, "prime-agent");
+await mkdir(fakePrimeRepo, { recursive: true });
+await writeFile(join(fakePrimeRepo, "prime-agent.sh"), "#!/bin/sh\n");
+await chmod(join(fakePrimeRepo, "prime-agent.sh"), 0o755);
+process.env.REIFY_PI_CAD_REPO = process.cwd();
+process.env.PRIME_AGENT_REPO = fakePrimeRepo;
 const test = async (name, fn) => {
   try { await fn(); console.log(`ok - ${name}`); }
   catch (error) { console.error(`not ok - ${name}\n${error?.stack || error}`); process.exitCode = 1; }
