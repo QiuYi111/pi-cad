@@ -24,10 +24,22 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: apps/desktop/package-lock.json
+      - uses: astral-sh/setup-uv@v5
       - run: npm ci --ignore-scripts
+      - name: Build the root Python runtime
+        if: runner.os != 'Windows'
+        run: npm ci
+        env:
+          PI_CAD_SKIP_BLENDER: "1"
       - run: npm ci
         working-directory: apps/desktop
-      - run: npm test
+      - name: Desktop tests (with root Python integration)
+        if: runner.os != 'Windows'
+        run: npm test
+        working-directory: apps/desktop
+      - name: Desktop tests without Linux/macOS Python integration
+        if: runner.os == 'Windows'
+        run: npx vitest run --exclude '**/parameter-preview.integration.test.ts' --exclude '**/simulation-metadata.test.ts'
         working-directory: apps/desktop
       - run: npm run build
         working-directory: apps/desktop
