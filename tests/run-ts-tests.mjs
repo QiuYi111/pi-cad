@@ -53,6 +53,7 @@ await jiti.import("./task-lifecycle.test.ts", { default: true });
 await jiti.import("./commands-lifecycle.test.ts", { default: true });
 await jiti.import("./context-memory.test.ts", { default: true });
 await jiti.import("./experience.test.ts", { default: true });
+await import("./reify-cad-worker.test.mjs");
 await import("./cadtestbench-metrics.test.mjs");
 await import("./cadtestbench-clarity-controls.test.mjs");
 await import("./cadtestbench-unit-normalization.test.mjs");

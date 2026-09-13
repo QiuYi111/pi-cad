@@ -49,6 +49,7 @@ test("the skill surface includes the Prime Python capability and grilling skills
     "parametric-cad-modeling",
     "pi-cad",
     "pi-cad-tools",
+    "reify-cad-worker",
     "structural-analysis",
     "thermal-fluid-analysis",
   ]);
