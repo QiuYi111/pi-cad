@@ -1,6 +1,7 @@
 import { readdir, readFile, realpath } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { RegistrySet } from "../registry.ts";
@@ -20,7 +21,19 @@ export interface InstalledWorkflowPackage extends WorkflowPackageMetadata {
   workflow: WorkflowSnapshotV1;
 }
 
+export interface WorkflowAdoptionsV1 {
+  schema: 1;
+  globalSafetyPolicyVersion: string;
+  adopted: Record<string, { version: string; adoptedBy: string; adoptedAt: string }>;
+  history: Array<{ id: string; from?: string; to: string; adoptedBy: string; adoptedAt: string }>;
+}
+
 const BUILTIN_PACKAGES = fileURLToPath(new URL("../../../workflow-packages", import.meta.url));
+const BUILTIN_MECHANICAL = resolve(BUILTIN_PACKAGES, "mechanical");
+
+export function workflowUserDirectory(): string {
+  return resolve(process.env.PI_CAD_WORKFLOW_HOME ?? process.env.HOME ?? homedir(), ".pi-cad", "workflows");
+}
 
 function inside(root: string, candidate: string): boolean {
   const path = relative(resolve(root), resolve(candidate));
@@ -81,25 +94,49 @@ function semverDescending(a: string, b: string): number {
   return 0;
 }
 
-/** Discover built-in and project-authored YAML packages, then select the newest installed version per ID. */
-export async function discoverWorkflowPackages(cwd: string, registries: RegistrySet): Promise<InstalledWorkflowPackage[]> {
-  const roots = [BUILTIN_PACKAGES, resolve(cwd, "workflows")];
+/** Discover every installed version. Selection is a separate administrator decision. */
+export async function discoverInstalledWorkflowPackages(cwd: string, registries: RegistrySet): Promise<InstalledWorkflowPackage[]> {
+  void cwd;
+  const sources = [resolve(BUILTIN_MECHANICAL, "naked.yaml"), ...await yamlFiles(workflowUserDirectory())];
   const packages: InstalledWorkflowPackage[] = [];
-  const identities = new Set<string>();
-  for (const root of roots) {
-    for (const path of await yamlFiles(root)) {
-      const item = parsePackage(parseYamlDocument(await readFile(path, "utf-8"), path), path, registries);
-      const identity = `${item.id}@${item.version}`;
-      if (identities.has(identity)) throw new Error(`duplicate installed workflow package: ${identity}`);
-      identities.add(identity);
-      packages.push(item);
+  const identities = new Map<string, number>();
+  for (const path of sources) {
+    const item = parsePackage(parseYamlDocument(await readFile(path, "utf-8"), path), path, registries);
+    const identity = `${item.id}@${item.version}`;
+    if (identities.has(identity)) throw new Error(`duplicate installed workflow package: ${identity}`);
+    identities.set(identity, packages.length);
+    packages.push(item);
+  }
+  return packages.sort((a, b) => a.id.localeCompare(b.id) || semverDescending(a.version, b.version));
+}
+
+export async function readWorkflowAdoptions(cwd: string): Promise<WorkflowAdoptionsV1> {
+  void cwd;
+  try {
+    const value = JSON.parse(await readFile(resolve(workflowUserDirectory(), "..", "workflow-adoptions.json"), "utf-8")) as WorkflowAdoptionsV1;
+    if (value.schema !== 1 || !value.adopted || !Array.isArray(value.history) || typeof value.globalSafetyPolicyVersion !== "string") throw new Error("invalid workflow adoption policy");
+    return value;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return { schema: 1, globalSafetyPolicyVersion: "builtin-current", adopted: {}, history: [] };
+  }
+}
+
+export async function discoverWorkflowPackages(cwd: string, registries: RegistrySet): Promise<InstalledWorkflowPackage[]> {
+  const installed = await discoverInstalledWorkflowPackages(cwd, registries);
+  const policy = await readWorkflowAdoptions(cwd);
+  const groups = new Map<string, InstalledWorkflowPackage[]>();
+  for (const item of installed) groups.set(item.id, [...(groups.get(item.id) ?? []), item]);
+  return [...groups.entries()].map(([id, versions]) => {
+    const adopted = policy.adopted[id]?.version;
+    if (adopted) {
+      const selected = versions.find((item) => item.version === adopted);
+      if (!selected) throw new Error(`adopted workflow package is not installed: ${id}@${adopted}`);
+      return selected;
     }
-  }
-  const selected = new Map<string, InstalledWorkflowPackage>();
-  for (const item of packages.sort((a, b) => a.id.localeCompare(b.id) || semverDescending(a.version, b.version))) {
-    if (!selected.has(item.id)) selected.set(item.id, item);
-  }
-  return [...selected.values()].sort((a, b) => a.id.localeCompare(b.id));
+    if (versions.length !== 1) throw new Error(`multiple versions installed for ${id}; administrator adoption is required`);
+    return versions[0]!;
+  }).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export async function resolveWorkflowPackage(cwd: string, id: string, registries: RegistrySet): Promise<InstalledWorkflowPackage> {

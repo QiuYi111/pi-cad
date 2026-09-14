@@ -104,6 +104,44 @@ class ProbeTests(unittest.TestCase):
         env = run_probe("while True:\n    pass\n")
         self.assertFalse(env["ok"])
 
+    def test_motion_sweep_finds_collision_between_clear_endpoints(self) -> None:
+        code = """
+fixed, moving = shape.solids()[:2]
+poses = []
+for index in range(21):
+    parameter = index / 20
+    posed = moving.moved(bd.Location((-90 * parameter, 0, 0)))
+    common = posed & fixed
+    penetration = 0.0 if common is None else common.volume
+    poses.append({
+        "parameter": parameter,
+        "clearance": posed.distance_to(fixed),
+        "penetration": penetration,
+    })
+failures = [pose for pose in poses if pose["penetration"] > 1e-6]
+worst = min(poses, key=lambda pose: pose["clearance"])
+result = {
+    "kind": "motion",
+    "analysisLevel": "full",
+    "parameter": {"name": "travel", "unit": "ratio", "requiredRange": [0, 1]},
+    "sampleCount": len(poses),
+    "maxParameterStep": 0.05,
+    "endpointsReached": True,
+    "endpointsClear": poses[0]["penetration"] == 0 and poses[-1]["penetration"] == 0,
+    "minimumClearance": {"value": worst["clearance"], "at": worst["parameter"]},
+    "firstFailure": None if not failures else failures[0]["parameter"],
+    "maximumPenetration": max(pose["penetration"] for pose in poses),
+    "passed": not failures,
+}
+"""
+        env = run_probe(code, ROOT / "tests" / "fixtures" / "interference_clearance.step")
+        self.assertTrue(env["ok"], env)
+        result = env["payload"]["result"]
+        self.assertTrue(result["endpointsClear"])
+        self.assertFalse(result["passed"])
+        self.assertIsNotNone(result["firstFailure"])
+        self.assertGreater(result["maximumPenetration"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

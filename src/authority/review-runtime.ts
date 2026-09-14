@@ -7,6 +7,7 @@ import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { transitionRun } from "../harness/reducer.ts";
 import type { WorkflowSnapshotV1 } from "../harness/workflow/types.ts";
 import type { HarnessRunStateV7 } from "../harness/state.ts";
+import { executeWorkflowGitActions, phaseGitActions } from "./workflow-git.ts";
 
 export type AuthoritativeReviewVerdictV1 = "pass" | "fail" | "clarification_required";
 export interface ReviewHandleV1 { reviewId: string; subjectCommit: string; status: "running" | AuthoritativeReviewVerdictV1 | "unresolved"; }
@@ -142,12 +143,14 @@ export class ReviewRuntime {
       "You are a fresh, rigorous, independent engineering design reviewer running as an ordinary Prime template.",
       "Do not read skills or source files, inspect APIs, inspect signatures, inspect docstrings, or access author transcripts/source-generation history.",
       `In IPython run import cad; subject = await cad.load(${JSON.stringify(subjectCommit)}).`,
-      "Immediately run context = await cad.review.inspect(). It attaches canonical views and returns the immutable original request, design case, legal dispositions, and context['candidate'] as the authoritative ArtifactRef ready for cad.probe.run.",
+      "Immediately run context = await cad.review.inspect(). It attaches the complete canonical seven-view render set and returns the immutable original request, design case, legal dispositions, and context['candidate'] as the authoritative ArtifactRef ready for cad.probe.run.",
       "Evaluate whether the actual immutable candidate faithfully and credibly solves the original user's request and whether the author's submitted design decisions hold up as engineering. The submission describes intent and claims; it is not proof of its own correctness.",
       "Compare the final candidate against the original request and the author's own committed design intent and artifacts, including concept images attached in context.images. Treat those records as the author's declared intent, not geometry authority; identify material discrepancies without prescribing a particular architecture unless the requirements demand one.",
       "Form and execute your own review plan. Use any available observations and as many or as few independent probes as your professional judgment requires; the harness prescribes no checklist, tool minimum, rollout limit, or evidence quota.",
       "You own the review decision. Investigate enough to make it professionally defensible instead of transferring the burden back to the author. A claim that you can inspect, measure, or reason about from the immutable candidate is yours to evaluate.",
       "When a material claim is measurable from context['candidate'], measure it yourself with await cad.probe.run(subject=context['candidate'], purpose=..., code=...). Missing or weak author-supplied proof is not itself a design defect and must not be used as a shortcut to FAIL; it transfers the inspection work to you. Retry and correct your own probe code if necessary.",
+      "Inspect every relevant canonical view yourself. When another direction would resolve a visual question, run the visual preset yourself with await cad.probe.run(subject=context['candidate'], preset='visual', args={'views': ['right']}). You may call it again with other views.",
+      "Never FAIL because the author did not provide another screenshot, photograph, render, annotation, or written proof. Base FAIL on a defect or contradiction you personally establish from the immutable candidate, canonical views, or your own probes.",
       "PASS is an affirmative engineering judgment, not the absence of an obvious visual defect. Do not infer material quantitative, kinematic, assembly, strength, manufacturability, or fit claims from appearance alone. If a material accepted claim is neither established by canonical evidence nor independently verified by your review, FAIL and select the phase where it must be repaired or properly established.",
       "The original request, accepted assumptions, and design contract are already pinned. Do not request more external input and do not return an inconclusive verdict. If the candidate is not credibly supportable against that contract, FAIL it.",
       "Choose exactly one target from context.dispositions whose verdict matches your PASS or FAIL. On FAIL choose the phase where the defect should actually be repaired; the State Engine will perform the legal transition and downstream invalidation atomically.",
@@ -217,7 +220,7 @@ export class ReviewRuntime {
           obligationRef: conceptRecord.obligationRef,
         }))
       : [];
-    const candidateImages = (await loadMandatoryImages(this.cwd, active.state.contextRefs, 2)).map((image) => ({
+    const candidateImages = (await loadMandatoryImages(this.cwd, active.state.contextRefs, 7)).map((image) => ({
       ...image,
       evidenceRef: `visual:${image.sha256}`,
       source: "candidate-view" as const,
@@ -263,7 +266,22 @@ export class ReviewRuntime {
     const status = result.verdict;
     const updated: StoredReview = { ...existing, status, result, updatedAt: new Date().toISOString() };
     const path = `reviews/${reviewId}.json`;
-    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(mechanicalRegistries, (loaded) => {
+    const previewReviewedState = {
+      ...active.state,
+      domainMetadata: { ...(active.state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(active.state), [reviewId]: updated }) },
+      latestReview: { id: reviewId, verdict: status, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(active)), workflowHash: active.workflow.hash, registryContractHash: active.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },
+      updatedAt: updated.updatedAt,
+    } satisfies HarnessRunStateV7;
+    transitionRun(previewReviewedState, active.workflow, choice.event);
+    const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
+    const exitActions = phaseGitActions(active.workflow, active.state.phase, "onExit");
+    const enterActions = phaseGitActions(active.workflow, choice.target, "onEnter");
+    if (exitActions.length || enterActions.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
+    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, exitActions, `complete ${active.state.phase}`);
+    if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
+    const enterGit = await executeWorkflowGitActions(this.cwd, active.workflow, enterActions, `enter ${choice.target}`);
+    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
+    await store.mutate(mechanicalRegistries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         domainMetadata: { ...(loaded.state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(loaded.state), [reviewId]: updated }) },
@@ -291,7 +309,21 @@ export class ReviewRuntime {
       .find((item) => item.verdict === existing.result!.verdict && item.target === existing.result!.target);
     if (!choice) throw new Error(`cached review target ${existing.result.target} is no longer legal for verdict ${existing.result.verdict}`);
     const path = `reviews/${existing.reviewId}.json`;
-    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(mechanicalRegistries, (loaded) => {
+    const previewReviewedState = {
+      ...active.state,
+      latestReview: { id: existing.reviewId, verdict: existing.result.verdict, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(active)), workflowHash: active.workflow.hash, registryContractHash: active.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },
+      updatedAt: new Date().toISOString(),
+    } satisfies HarnessRunStateV7;
+    transitionRun(previewReviewedState, active.workflow, choice.event);
+    const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
+    const exitActions = phaseGitActions(active.workflow, active.state.phase, "onExit");
+    const enterActions = phaseGitActions(active.workflow, choice.target, "onEnter");
+    if (exitActions.length || enterActions.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
+    const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, exitActions, `complete ${active.state.phase}`);
+    if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
+    const enterGit = await executeWorkflowGitActions(this.cwd, active.workflow, enterActions, `enter ${choice.target}`);
+    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
+    await store.mutate(mechanicalRegistries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         latestReview: { id: existing.reviewId, verdict: existing.result!.verdict, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(loaded)), workflowHash: loaded.workflow.hash, registryContractHash: loaded.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },

@@ -66,6 +66,7 @@ initialPhase: alpha
 phases:
   alpha:
     purpose: Arbitrary generic phase
+    rebuildContextOnExit: true
     actions: [transition]
     grants: [transition]
     writeScopes: [run:state]
@@ -88,6 +89,17 @@ phases:
     transitions: {}
     terminal: true
 `;
+
+test("workflow phase may request a context rebuild on exit", () => {
+  registerActions();
+  const snapshot = compileWorkflowDefinition(parseYamlDocument(WORKFLOW_YAML), mechanicalRegistries);
+  assert.equal(snapshot.phases.alpha!.rebuildContextOnExit, true);
+  assert.equal(snapshot.phases.omega!.rebuildContextOnExit, undefined);
+  assert.throws(
+    () => compileWorkflowDefinition(parseYamlDocument(WORKFLOW_YAML.replace("rebuildContextOnExit: true", "rebuildContextOnExit: yes-please")), mechanicalRegistries),
+    /rebuildContextOnExit must be boolean/,
+  );
+});
 
 test("project YAML loads a project-confined arbitrary-phase workflow and defaults when absent", async () => {
   registerActions();

@@ -9,6 +9,7 @@ Choose a realistic process before finalizing detailed geometry. Match tolerance,
 
 - Read [references/process-selection.md](references/process-selection.md) for process and material tradeoffs.
 - Read [references/geometry-rules.md](references/geometry-rules.md) for tolerance discipline, tool access, draft, walls, bends, supports, and inspection.
+- Read [references/process-checklists.md](references/process-checklists.md) only for the selected manufacturing process.
 - Use supplier-specific guidance when a vendor or process is named; do not substitute generic limits for current vendor capability.
 
 Avoid tighter tolerances and finer finishes than function or inspection requires.

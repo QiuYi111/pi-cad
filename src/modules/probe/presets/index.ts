@@ -34,7 +34,11 @@ export interface VisualProbeArgs {
   width: number;
   height: number;
   labels: boolean;
-  display: "solid";
+  display: "solid" | "solid_with_edges" | "hidden_edges" | "wireframe";
+  focus?: string[];
+  hide?: string[];
+  explode?: number;
+  ghostOthers?: boolean;
 }
 
 const visualPreset: ProbePreset<VisualProbeArgs> = {
@@ -47,6 +51,10 @@ const visualPreset: ProbePreset<VisualProbeArgs> = {
       height: args.height,
       labels: args.labels,
       display: args.display,
+      focus: args.focus,
+      hide: args.hide,
+      explode: args.explode,
+      ghostOthers: args.ghostOthers,
     });
     const payload = envelope.payload as {
       views?: Array<{ name: string }>;

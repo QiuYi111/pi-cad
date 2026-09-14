@@ -1,6 +1,6 @@
 import { createServer, type Server, type Socket } from "node:net";
-import { chmod, mkdir, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { chmod, mkdir, readFile, realpath, rm } from "node:fs/promises";
+import { extname, join, relative, resolve, sep } from "node:path";
 
 import { canonicalDigest, jsonValue } from "../harness/canonical.ts";
 import { loadWorkspaceCommit } from "../harness/commit.ts";
@@ -9,22 +9,29 @@ import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
 import { handleAgentApi } from "../agent-api/handlers.ts";
 import type { AgentApiRequest, AgentApiResponse } from "../agent-api/protocol.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
-import { compilePhaseCard } from "../harness/card.ts";
+import { compilePhaseCard, compilePhaseContract, workflowCurrentView } from "../harness/card.ts";
 import { renderAuthorizationDenied, type Operation } from "../harness/permissions.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } from "../harness/run-store.ts";
 import { writeStatusProjection } from "./storage.ts";
 import { ReviewRuntime, type ReviewerExecutor } from "./review-runtime.ts";
 import { findExperience, getExperience, readExperience, searchExperience } from "../experience/store.ts";
 import type { ExperienceSearchOptions } from "../experience/types.ts";
+import { sha256File } from "../shared/store.ts";
+import { commitEvidenceRef } from "../harness/reducer.ts";
 
 export type SidecarRole = "author" | "reviewer";
+// Long, explicit full validation remains bounded by its inner command. The
+// transport must stay open long enough to return that command's real result.
+export const SIDECAR_REQUEST_TIMEOUT_MS = 30 * 60_000;
 type AuthorModelSelection = { provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" };
 
 export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "phase-card" }
+  | { schema: 1; op: "phase-contract" }
   | { schema: 1; op: "completion-gate" }
   | { schema: 1; op: "mission-capture"; mission: string }
   | { schema: 1; op: "author-model"; provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
+  | { schema: 1; op: "image-generated"; path: string }
   | { schema: 1; op: "review-evidence"; reviewId?: string }
   | { schema: 1; op: "authorize"; operation: Operation }
   | { schema: 1; op: "experience-search"; options?: ExperienceSearchOptions }
@@ -33,9 +40,40 @@ export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "experience-read"; identifier: { seq?: number; sha?: string }; startLine?: number; endLine?: number };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "author-model", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "phase-contract", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
+const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture", "image-generated"]);
+const READ_ONLY_OPERATIONS = new Set<Operation>(["workspace.commit", "model.build", "simulation.run", "image.generate", "review.submit", "workflow.transition"]);
+
+function assertValidPng(bytes: Buffer): void {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (bytes.length < 45 || !bytes.subarray(0, 8).equals(signature)) throw new Error("concept image evidence has an invalid PNG signature");
+  let offset = 8;
+  let sawHeader = false;
+  let sawImageData = false;
+  let sawEnd = false;
+  while (offset + 12 <= bytes.length) {
+    const length = bytes.readUInt32BE(offset);
+    const end = offset + 12 + length;
+    if (end > bytes.length) throw new Error("concept image evidence has a truncated PNG chunk");
+    const type = bytes.toString("ascii", offset + 4, offset + 8);
+    if (!sawHeader && (type !== "IHDR" || length !== 13)) throw new Error("concept image evidence lacks a valid PNG header");
+    if (type === "IHDR") {
+      if (sawHeader || bytes.readUInt32BE(offset + 8) < 64 || bytes.readUInt32BE(offset + 12) < 64) throw new Error("concept image evidence has invalid or undersized dimensions");
+      sawHeader = true;
+    } else if (type === "IDAT") {
+      if (!sawHeader || length === 0) throw new Error("concept image evidence has invalid image data");
+      sawImageData = true;
+    } else if (type === "IEND") {
+      if (length !== 0 || !sawImageData || end !== bytes.length) throw new Error("concept image evidence has an invalid PNG ending");
+      sawEnd = true;
+      break;
+    }
+    offset = end;
+  }
+  if (!sawHeader || !sawImageData || !sawEnd) throw new Error("concept image evidence is not a complete PNG");
+}
 
 function errorResponse(error: unknown): AgentApiResponse {
   return {
@@ -60,7 +98,11 @@ async function refreshProjection(cwd: string): Promise<void> {
   const run = loadedProject.state.currentRunId
     ? await new HarnessRunStoreV7(cwd, loadedProject.state.currentRunId).load(mechanicalRegistries)
     : null;
-  await writeStatusProjection(cwd, loadedProject.state, run?.state ?? null);
+  await writeStatusProjection(cwd, loadedProject.state, run ? {
+    state: run.state,
+    workflow: run.workflow,
+    view: workflowCurrentView(run, mechanicalRegistries),
+  } : null);
 }
 
 async function refreshProjectionSafely(cwd: string): Promise<void> {
@@ -79,7 +121,7 @@ function agentExperienceEntry(entry: Record<string, unknown>): Record<string, un
   return safe;
 }
 
-export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void): Promise<AgentApiResponse> {
+export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
   try {
     validateRequest(value);
     if (role === "reviewer" && !REVIEWER_ALLOWED.has(value.op)) {
@@ -87,6 +129,9 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
     }
     if (role === "author" && !AUTHOR_ONLY.has(value.op) && !COMMON_ALLOWED.has(value.op)) {
       throw new Error(`author endpoint does not expose operation: ${value.op}`);
+    }
+    if (role === "author" && options.authorReadOnly && READ_ONLY_AUTHOR_DENIED.has(value.op)) {
+      throw new Error(`desktop read-only mode denies operation: ${value.op}; switch permission to Workspace to modify the project`);
     }
     const reviewerRequestId = role === "reviewer" ? (value as { reviewId?: string }).reviewId : undefined;
     if (role === "reviewer") {
@@ -122,17 +167,28 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
     } else if (value.op === "mission-capture") {
       if (role !== "author") throw new Error("mission capture is author-scoped");
       result = await captureMission(cwd, value.mission);
+    } else if (value.op === "image-generated") {
+      if (role !== "author") throw new Error("generated image evidence is author-scoped");
+      result = await recordGeneratedImage(cwd, value.path);
     } else if (value.op === "phase-card") {
       if (role !== "author") throw new Error("phase-card is author-scoped");
       bootstrapAgentApiContracts();
       result = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
+    } else if (value.op === "phase-contract") {
+      if (role !== "author") throw new Error("phase-contract is author-scoped");
+      bootstrapAgentApiContracts();
+      result = await compilePhaseContract(cwd, { registries: mechanicalRegistries });
     } else if (value.op === "completion-gate") {
       if (role !== "author") throw new Error("completion-gate is author-scoped");
       result = await completionGate(cwd);
     } else if (value.op === "authorize") {
       if (role !== "author") throw new Error("authorization query is author-scoped");
-      const decision = await currentAuthorization(cwd, value.operation, "author");
-      result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
+      if (options.authorReadOnly && READ_ONLY_OPERATIONS.has(value.operation)) {
+        result = { allowed: false, reason: "Desktop is in read-only mode.", legalNextActions: ["Switch permission to Workspace."] };
+      } else {
+        const decision = await currentAuthorization(cwd, value.operation, "author");
+        result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
+      }
     } else if (value.op === "experience-search") {
       result = (await searchExperience(value.options ?? {})).map((entry) => agentExperienceEntry(entry as unknown as Record<string, unknown>));
     } else if (value.op === "experience-get") {
@@ -153,6 +209,42 @@ export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, val
   }
 }
 
+async function recordGeneratedImage(cwd: string, requestedPath: string): Promise<{ recorded: boolean; path: string }> {
+  if (typeof requestedPath !== "string" || !requestedPath.trim()) throw new Error("generated image path is required");
+  const root = await realpath(cwd);
+  const mapped = requestedPath.startsWith("/workspace/")
+    ? resolve(root, requestedPath.slice("/workspace/".length))
+    : resolve(requestedPath);
+  const image = await realpath(mapped);
+  if (image !== root && !image.startsWith(`${root}${sep}`)) throw new Error("generated image must remain inside the project");
+  if (extname(image).toLowerCase() !== ".png") throw new Error("concept image evidence must be a PNG");
+  const bytes = await readFile(image);
+  assertValidPng(bytes);
+  const active = await new HarnessProjectStoreV7(root).currentRun(mechanicalRegistries);
+  if (!active) throw new Error("generated image evidence requires an active workflow");
+  const obligation = active.workflow.phases[active.state.phase]?.evidenceObligations.find((item) => item.closeWith === "codex_generate_image");
+  if (!obligation) throw new Error("the current phase does not require generated image evidence");
+  const digest = await sha256File(image);
+  const evidencePath = `evidence/concept-image/evidence-${digest.slice(0, 20)}.json`;
+  const createdAt = new Date().toISOString();
+  await new HarnessRunStoreV7(root, active.state.runId).mutate(mechanicalRegistries, (loaded) => ({
+    state: commitEvidenceRef(loaded.state, loaded.workflow, loaded.registryContract, {
+      id: `evidence-concept-image-${digest.slice(0, 20)}`,
+      obligationRef: obligation.ref,
+      type: obligation.type,
+      path: evidencePath,
+      sha256: digest,
+      workflowHash: loaded.workflow.hash,
+      registryContractHash: loaded.registryContract.hash,
+      computeIdentity: canonicalDigest({ tool: "codex_generate_image", output: digest }),
+      createdAt,
+    }),
+    payloads: { [evidencePath]: jsonValue({ schema: 1, tool: "codex_generate_image", path: relative(root, image), sha256: digest, createdAt }) },
+    event: { type: "ConceptImageGenerated", data: { path: relative(root, image), sha256: digest } },
+  }));
+  return { recorded: true, path: relative(root, image) };
+}
+
 async function captureMission(cwd: string, requested: string): Promise<{ captured: boolean }> {
   const mission = typeof requested === "string" ? requested.trim() : "";
   if (!mission || Buffer.byteLength(mission) > 32 * 1024) throw new Error("original user request must be between 1 and 32768 bytes");
@@ -170,10 +262,10 @@ async function captureMission(cwd: string, requested: string): Promise<{ capture
   return { captured: true };
 }
 
-async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void): Promise<void> {
+async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<void> {
   const chunks: Buffer[] = [];
   let size = 0;
-  socket.setTimeout(150_000, () => socket.destroy(new Error("sidecar request timeout")));
+  socket.setTimeout(SIDECAR_REQUEST_TIMEOUT_MS, () => socket.destroy(new Error("sidecar request timeout")));
   socket.on("data", (chunk: Buffer) => {
     size += chunk.length;
     if (size > MAX_REQUEST_BYTES) socket.destroy(new Error("sidecar request exceeds byte limit"));
@@ -184,7 +276,7 @@ async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, revi
     let response: AgentApiResponse;
     try {
       const body = Buffer.concat(chunks).toString("utf-8");
-      response = await dispatchSidecarRequest(role, cwd, JSON.parse(body), reviewRuntime, onAuthorModelSelection);
+      response = await dispatchSidecarRequest(role, cwd, JSON.parse(body), reviewRuntime, onAuthorModelSelection, options);
     } catch (error) {
       response = errorResponse(error);
     }
@@ -210,7 +302,7 @@ export interface AuthoritySidecar {
   close(): Promise<void>;
 }
 
-export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor; onAuthorModelSelection?: (selection: AuthorModelSelection) => void }): Promise<AuthoritySidecar> {
+export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor; onAuthorModelSelection?: (selection: AuthorModelSelection) => void; authorReadOnly?: boolean }): Promise<AuthoritySidecar> {
   bootstrapAgentApiContracts();
   const cwd = resolve(input.cwd);
   const authorDirectory = join(resolve(input.runtimeDirectory), "author");
@@ -222,7 +314,7 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
   const authorSocket = join(authorDirectory, "authority.sock");
   const reviewerSocket = join(reviewerDirectory, "authority.sock");
   const reviewRuntime = new ReviewRuntime(cwd, input.reviewerExecutor ?? (async () => { throw new Error("reviewer executor is not configured"); }));
-  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection); });
+  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection, { authorReadOnly: input.authorReadOnly }); });
   const reviewerServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "reviewer", cwd, reviewRuntime); });
   try {
     await listen(authorServer, authorSocket);
@@ -319,6 +411,17 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
     }
     return { complete: false, reason: "admitted requirements are missing current independent PASS authority", runId: loaded.state.runId, workflowId: loaded.workflow.id };
   }
+  const declaresRelease = Boolean(loaded.workflow.phases.release) || Object.values(loaded.workflow.phases).some((candidate) =>
+    candidate.recordObligations.some((obligation) => obligation.ref === "release"));
+  if (!declaresRelease) {
+    return {
+      complete: true,
+      outcome: "complete",
+      reason: "terminal workflow is complete and declares no release record",
+      runId: loaded.state.runId,
+      workflowId: loaded.workflow.id,
+    };
+  }
   const release = loaded.state.records.release;
   if (!release || release.type !== "workspace_commit" || release.workflowHash !== loaded.workflow.hash) {
     return { complete: false, reason: "authoritative release commit is missing or stale", runId: loaded.state.runId, workflowId: loaded.workflow.id };
@@ -363,3 +466,4 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
 function canonicalArtifactContentHash(artifacts: Array<{ path: string; sha256: string }>): string {
   return canonicalDigest(artifacts.map(({ path, sha256 }) => ({ path, sha256 })));
 }
+

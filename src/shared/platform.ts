@@ -1,8 +1,10 @@
-/** Pi-CAD is a Linux agent runtime. WSL is a supported way to run Linux. */
-export function assertLinuxRuntime(where = "Pi-CAD"): void {
-  if (process.platform !== "linux") {
+/** Pi-CAD requires Unix process, socket, and filesystem semantics. */
+export function assertUnixRuntime(where = "Pi-CAD"): void {
+  if (process.platform !== "linux" && process.platform !== "darwin") {
     throw new Error(
-      `${where} must run inside Linux or WSL; Windows-host Node and cross-host WSL execution are unsupported`,
+      `${where} must run on Linux, macOS, or Linux through WSL`,
     );
   }
 }
+
+export const assertLinuxRuntime = assertUnixRuntime;

@@ -1953,8 +1953,34 @@
                         "type": "boolean"
                       },
                       "display": {
-                        "type": "string",
-                        "const": "solid"
+                        "enum": [
+                          "solid",
+                          "solid_with_edges",
+                          "hidden_edges",
+                          "wireframe"
+                        ]
+                      },
+                      "focus": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "hide": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "explode": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 5
+                      },
+                      "ghostOthers": {
+                        "type": "boolean"
                       }
                     },
                     "additionalProperties": false
@@ -2004,8 +2030,34 @@
                         "type": "boolean"
                       },
                       "display": {
-                        "type": "string",
-                        "const": "solid"
+                        "enum": [
+                          "solid",
+                          "solid_with_edges",
+                          "hidden_edges",
+                          "wireframe"
+                        ]
+                      },
+                      "focus": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "hide": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "explode": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 5
+                      },
+                      "ghostOthers": {
+                        "type": "boolean"
                       }
                     },
                     "additionalProperties": false

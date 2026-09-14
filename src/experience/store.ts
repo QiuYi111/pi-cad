@@ -232,7 +232,7 @@ function validateRating(name: string, value: number): void {
   if (!Number.isInteger(value) || value < 1 || value > 5) throw new Error(`${name} must be an integer from 1 to 5`);
 }
 
-export async function recordEvaluation(identifier: { seq?: number; sha?: string }, quality: number, difficulty: number): Promise<ExperienceIndexEntry> {
+export async function recordEvaluation(identifier: { seq?: number; sha?: string }, quality: number, difficulty: number, feedback?: string): Promise<ExperienceIndexEntry> {
   validateRating("quality", quality);
   validateRating("difficulty", difficulty);
   const root = experienceRoot();
@@ -240,6 +240,9 @@ export async function recordEvaluation(identifier: { seq?: number; sha?: string 
   const entry = entries.find((candidate) => identifier.seq !== undefined ? candidate.seq === identifier.seq : candidate.sha === identifier.sha);
   if (!entry) throw new Error("experience trajectory not found");
   const wasPending = entry.evaluation_status === "pending";
+  const nextFeedback = feedback === undefined
+    ? entry.feedback ?? null
+    : feedback.trim().slice(0, 4_000) || null;
   const evaluation: HumanEvaluation = {
     schema_version: EXPERIENCE_SCHEMA_VERSION,
     quality,
@@ -247,6 +250,7 @@ export async function recordEvaluation(identifier: { seq?: number; sha?: string 
     score: computeScore(entry, quality, difficulty),
     score_version: SCORE_VERSION,
     evaluated_at: nowIso(),
+    feedback: nextFeedback,
   };
   await atomicWrite(join(entry.archive_path, "evaluation.json"), JSON.stringify(evaluation, null, 2) + "\n");
   const updated = { ...entry, ...evaluation, evaluation_status: "evaluated" as const };
@@ -471,32 +475,72 @@ async function defaultDistillState(): Promise<DistillState> {
 }
 
 export async function readDistillState(root = experienceRoot()): Promise<DistillState> {
-  return await readJson<DistillState>(join(root, "distill_state.json")) || await defaultDistillState();
+  const state = await readJson<DistillState>(join(root, "distill_state.json")) || await defaultDistillState();
+  const pending = pendingTokenCount(await readIndex(root), state.last_distilled_seq);
+  if (state.pending_transcript_tokens !== pending) {
+    state.pending_transcript_tokens = pending;
+    await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
+  }
+  return state;
+}
+
+function pendingEvaluatedEntries(entries: ExperienceIndexEntry[], lastDistilledSeq: number): ExperienceIndexEntry[] {
+  const latestByRun = new Map<string, ExperienceIndexEntry>();
+  for (const entry of entries) {
+    if (entry.seq <= lastDistilledSeq || entry.evaluation_status !== "evaluated") continue;
+    const identity = entry.run_id || entry.session_path || entry.sha;
+    const current = latestByRun.get(identity);
+    if (!current || entry.seq > current.seq) latestByRun.set(identity, entry);
+  }
+  return [...latestByRun.values()].sort((a, b) => a.seq - b.seq);
+}
+
+function pendingTokenCount(entries: ExperienceIndexEntry[], lastDistilledSeq: number): number {
+  return pendingEvaluatedEntries(entries, lastDistilledSeq)
+    .reduce((sum, entry) => sum + entry.transcript_tokens, 0);
 }
 
 async function addPendingTokens(seq: number, tokens: number, root: string): Promise<void> {
   const state = await readDistillState(root);
   if (seq <= state.last_distilled_seq) return;
   const entries = await readIndex(root);
-  state.pending_transcript_tokens = entries.filter((entry) => entry.seq > state.last_distilled_seq && entry.evaluation_status === "evaluated").reduce((sum, entry) => sum + entry.transcript_tokens, 0);
+  state.pending_transcript_tokens = pendingTokenCount(entries, state.last_distilled_seq);
   await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
 }
 
-export async function maybeBeginDistillation(root = experienceRoot()): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
+async function beginDistillation(root: string, requireThreshold: boolean): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
   const state = await readDistillState(root);
-  if (state.pending_transcript_tokens < state.threshold_tokens || state.active_cutoff_seq !== null) return { triggered: false };
+  if ((requireThreshold && state.pending_transcript_tokens < state.threshold_tokens) || state.pending_transcript_tokens <= 0 || state.active_cutoff_seq !== null) return { triggered: false };
   const lockPath = join(root, "distill.lock");
   let lock;
   try { lock = await open(lockPath, "wx"); } catch { return { triggered: false }; }
   await lock.close();
-  const evaluated = (await readIndex(root)).filter((entry) => entry.seq > state.last_distilled_seq && entry.evaluation_status === "evaluated");
+  const allEntries = await readIndex(root);
+  const evaluated = pendingEvaluatedEntries(allEntries, state.last_distilled_seq);
   const cutoff = Math.max(state.last_distilled_seq, ...evaluated.map((entry) => entry.seq));
   state.active_cutoff_seq = cutoff;
   state.active_started_at = nowIso();
   await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
   const requestPath = join(root, `distill-${state.last_distilled_seq + 1}-${cutoff}.json`);
-  await atomicWrite(requestPath, JSON.stringify({ schema_version: 1, from_seq: state.last_distilled_seq + 1, cutoff_seq: cutoff, transcript_tokens: state.pending_transcript_tokens, created_at: state.active_started_at }, null, 2) + "\n");
+  await atomicWrite(requestPath, JSON.stringify({
+    schema_version: 1,
+    from_seq: state.last_distilled_seq + 1,
+    cutoff_seq: cutoff,
+    selected_seqs: evaluated.map((entry) => entry.seq),
+    selected_run_ids: evaluated.map((entry) => entry.run_id),
+    transcript_tokens: state.pending_transcript_tokens,
+    created_at: state.active_started_at,
+  }, null, 2) + "\n");
   return { triggered: true, cutoff_seq: cutoff, request_path: requestPath };
+}
+
+export async function maybeBeginDistillation(root = experienceRoot()): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
+  return beginDistillation(root, true);
+}
+
+/** Explicit user action: preserve the same lock and immutable cutoff, but do not wait for the automatic token threshold. */
+export async function beginDistillationNow(root = experienceRoot()): Promise<{ triggered: boolean; cutoff_seq?: number; request_path?: string }> {
+  return beginDistillation(root, false);
 }
 
 export async function completeDistillation(success: boolean, root = experienceRoot()): Promise<DistillState> {
@@ -508,7 +552,7 @@ export async function completeDistillation(success: boolean, root = experienceRo
   state.active_cutoff_seq = null;
   state.active_started_at = null;
   const entries = await readIndex(root);
-  state.pending_transcript_tokens = entries.filter((entry) => entry.seq > state.last_distilled_seq && entry.evaluation_status === "evaluated").reduce((sum, entry) => sum + entry.transcript_tokens, 0);
+  state.pending_transcript_tokens = pendingTokenCount(entries, state.last_distilled_seq);
   await atomicWrite(join(root, "distill_state.json"), JSON.stringify(state, null, 2) + "\n");
   await rm(join(root, "distill.lock"), { force: true });
   return state;

@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+import { readFile, writeFile } from "node:fs/promises";
+const [, , input, output] = process.argv; if (!input || !output) throw new Error("input and output paths are required");
+const value=JSON.parse(await readFile(input,"utf8"));const required=["participantId","buildVersion","platform","resolution","timestamps","stalls","helpRequests","stateAnswers","artifactPath","artifactSha256","measurements","outcome"];
+for(const key of required)if(value[key]===undefined)throw new Error(`study record missing ${key}`);if(!/^\d+x\d+$/.test(value.resolution)||!/^[0-9a-f]{64}$/i.test(value.artifactSha256))throw new Error("study resolution or artifact hash is invalid");
+for(const key of ["startedAt","firstFeedbackAt","completedAt"])if(!value.timestamps[key])throw new Error(`study timestamps missing ${key}`);if(!Array.isArray(value.stalls)||!Array.isArray(value.helpRequests)||!Array.isArray(value.measurements))throw new Error("study event fields must be arrays");
+const report={schema:1,...value,metrics:{firstFeedbackMs:Date.parse(value.timestamps.firstFeedbackAt)-Date.parse(value.timestamps.startedAt),completionMs:Date.parse(value.timestamps.completedAt)-Date.parse(value.timestamps.startedAt),stallCount:value.stalls.length,helpCount:value.helpRequests.length},recordedAt:new Date().toISOString()};await writeFile(output,JSON.stringify(report,null,2)+'\n');process.stdout.write(JSON.stringify(report.metrics)+'\n');

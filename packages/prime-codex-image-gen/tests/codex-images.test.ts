@@ -56,9 +56,8 @@ function parseJson(value: string): unknown {
 }
 
 test("FetchHttpTransport cancels a response with an excessive declared size", async () => {
-	const originalFetch = globalThis.fetch;
 	let bodyCancelled = false;
-	globalThis.fetch = async () =>
+	const fetchEndpoint = async () =>
 		new Response(
 			new ReadableStream({
 				cancel() {
@@ -70,19 +69,15 @@ test("FetchHttpTransport cancels a response with an excessive declared size", as
 				headers: { "content-length": String(100 * 1024 * 1024) },
 			},
 		);
-	try {
-		await assert.rejects(
-			new FetchHttpTransport().send({
+	await assert.rejects(
+		new FetchHttpTransport(fetchEndpoint).send({
 				method: "POST",
 				url: "https://chatgpt.com/backend-api/codex/images/generations",
 				headers: {},
 				body: "{}",
 			}),
-		);
-		assert.equal(bodyCancelled, true);
-	} finally {
-		globalThis.fetch = originalFetch;
-	}
+	);
+	assert.equal(bodyCancelled, true);
 });
 
 test("FetchHttpTransport rejects non-Codex endpoints before fetch", async () => {
@@ -109,10 +104,9 @@ test("FetchHttpTransport rejects non-Codex endpoints before fetch", async () => 
 });
 
 test("FetchHttpTransport stops reading an excessive streamed response", async () => {
-	const originalFetch = globalThis.fetch;
 	const chunk = new Uint8Array(1024 * 1024);
 	let pulls = 0;
-	globalThis.fetch = async () =>
+	const fetchEndpoint = async () =>
 		new Response(
 			new ReadableStream<Uint8Array>({
 				pull(controller) {
@@ -123,19 +117,15 @@ test("FetchHttpTransport stops reading an excessive streamed response", async ()
 			}),
 			{ status: 200 },
 		);
-	try {
-		await assert.rejects(
-			new FetchHttpTransport().send({
+	await assert.rejects(
+		new FetchHttpTransport(fetchEndpoint).send({
 				method: "POST",
 				url: "https://chatgpt.com/backend-api/codex/images/generations",
 				headers: {},
 				body: "{}",
 			}),
-		);
-		assert.ok(pulls < 40);
-	} finally {
-		globalThis.fetch = originalFetch;
-	}
+	);
+	assert.ok(pulls < 40);
 });
 
 test("CodexImagesClient calls only the standalone Codex Images endpoint", async () => {
@@ -161,7 +151,10 @@ test("CodexImagesClient calls only the standalone Codex Images endpoint", async 
 		background: "auto",
 		quality: "high",
 		size: "1536x1024",
+		stream: true,
+		partial_images: 0,
 	});
+	assert.equal(transport.requests[0]!.headers.Accept, "text/event-stream");
 	assert.equal(
 		transport.requests[0]!.url,
 		"https://chatgpt.com/backend-api/codex/images/generations",
@@ -222,8 +215,35 @@ test("CodexImagesClient sends reference images to the standalone edits endpoint"
 		background: "auto",
 		quality: "high",
 		size: "1024x1024",
+		stream: true,
+		partial_images: 0,
 	});
 	assert.equal(result.base64, "ZWRpdGVk");
+});
+
+test("CodexImagesClient accepts keepalives and parses the completed image stream", async () => {
+	const transport = new FakeTransport({
+		status: 200,
+		headers: { "content-type": "text/event-stream" },
+		body: [
+			'data: {"type":"keepalive"}',
+			"",
+			'data: {"type":"image_generation.completed","b64_json":"cG5n","created_at":1778832975,"quality":"high","size":"1536x1024"}',
+			"",
+			"data: [DONE]",
+			"",
+		].join("\n"),
+	});
+	const result = await new CodexImagesClient(transport).generate(
+		{ prompt: "streamed fox", quality: "high", size: "1536x1024" },
+		auth,
+	);
+	assert.deepEqual(result, {
+		base64: "cG5n",
+		created: 1778832975,
+		quality: "high",
+		size: "1536x1024",
+	});
 });
 
 test("CodexImagesClient reports terminal provider limits without retrying", async () => {
@@ -418,16 +438,26 @@ test("CodexImagesClient stops after one repeated Cloudflare 520 retry", async ()
 	assert.equal(sleeps.length, 1);
 });
 
-test("CodexImagesClient does not retry ambiguous transport or malformed success failures", async (t) => {
+test("CodexImagesClient retries transport failures and reports the final cause", async (t) => {
 	await t.test("transport failure", async () => {
-		const transport = new FakeTransport(new Error("socket closed after write"));
-		const client = new CodexImagesClient(transport);
+		const transport = new FakeTransport(
+			new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }) }),
+			new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }) }),
+			new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed"), { code: "ECONNRESET" }) }),
+		);
+		const sleeps: number[] = [];
+		const client = new CodexImagesClient(transport, { sleep: async (milliseconds) => { sleeps.push(milliseconds); } });
 		await assert.rejects(
 			client.generate({ prompt: "fox", quality: "auto", size: "auto" }, auth),
 			(error: unknown) =>
-				error instanceof ExtensionError && error.code === "BACKEND_UNAVAILABLE",
+				error instanceof ExtensionError &&
+				error.code === "BACKEND_UNAVAILABLE" &&
+				error.message.includes("after 3 attempts") &&
+				error.message.includes("ECONNRESET") &&
+				error.message.includes("socket closed"),
 		);
-		assert.equal(transport.requests.length, 1);
+		assert.equal(transport.requests.length, 3);
+		assert.equal(sleeps.length, 2);
 	});
 
 	await t.test("malformed success", async () => {
@@ -518,4 +548,3 @@ test("CodexImagesClient maps moderation blocks and empty image data", async (t) 
 		);
 	});
 });
-

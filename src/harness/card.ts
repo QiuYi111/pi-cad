@@ -57,6 +57,7 @@ export interface WorkflowObligationView {
 export interface WorkflowCurrentView {
   runId: string;
   workflowId: string;
+  workflowVersion: string;
   workflowHash: string;
   phase: string;
   purpose: string;
@@ -80,6 +81,7 @@ export interface WorkflowCurrentView {
 }
 
 const DEFAULT_TEXT_CAP = 3200;
+const WORKFLOW_BOUNDARY_RULE = "The workflow is a coordination boundary, not the objective. There is no reward for advancing it; advance only when the engineering meaning of the current phase is complete.";
 const DEFAULT_IMAGE_CAP = 2;
 const IMAGE_MIME = new Map([
   [".png", "image/png"], [".jpg", "image/jpeg"], [".jpeg", "image/jpeg"],
@@ -203,7 +205,7 @@ export function workflowCurrentView(loaded: LoadedHarnessRunV7, registries: Regi
     `snapshot ${loaded.workflow.hash}`,
     `phase ${loaded.state.phase}; status ${loaded.state.status}; interaction ${loaded.state.interactionMode}`,
   ];
-  const goal = [phase.purpose];
+  const goal = [WORKFLOW_BOUNDARY_RULE, phase.purpose];
   const sop = [
     phase.guidance ?? "No phase-specific SOP is declared by the pinned workflow package.",
     ...(phase.recommendedSkills ?? []).map((skill) => `Use the ${skill} skill in this phase.`),
@@ -216,6 +218,7 @@ export function workflowCurrentView(loaded: LoadedHarnessRunV7, registries: Regi
     `registry contract: ${loaded.registryContract.hash}`,
     `phase history: ${loaded.state.phaseHistory.slice(-8).join(" -> ")}`,
     `records: ${Object.keys(loaded.state.records).length}; evidence: ${loaded.state.evidence.length}; stale evidence: ${loaded.state.staleEvidence.length}; artifacts: ${Object.keys(loaded.state.artifacts).length}`,
+    ...(loaded.workflow.versionControl ? [`Git policy: repository init ${loaded.workflow.versionControl.init ? "enabled" : "disabled"}; remote actions ${loaded.workflow.versionControl.allowRemote ? "enabled" : "disabled"}; phase hooks are executed by the authority sidecar`] : []),
     "filesystem files, arbitrary STEP/JSON/images, and natural-language completion have no workflow effect until admitted by the State Engine",
     "generated concept images are spatial hypotheses, never geometry authority; only a referencing commit can place them in workflow history",
     "all engineering mutations are checked against this pinned workflow snapshot and Registry Contract and fail closed on mismatch",
@@ -230,6 +233,7 @@ export function workflowCurrentView(loaded: LoadedHarnessRunV7, registries: Regi
   const base = {
     runId: loaded.state.runId,
     workflowId: loaded.workflow.id,
+    workflowVersion: loaded.workflow.version,
     workflowHash: loaded.workflow.hash,
     phase: loaded.state.phase,
     purpose: phase.purpose,
@@ -320,5 +324,98 @@ export async function compilePhaseCard(cwd: string, options: { registries: Regis
     text, images, digest, workflowHash: loaded.workflow.hash, phase: loaded.state.phase,
     effectiveCapabilities: view.operations.map((item) => item.capability), unmetObligations: view.unmet, legalTransitions: view.next,
     metrics: { durationMs: performance.now() - started, bytesRead, bytesEmitted, estimatedTokens: Math.ceil(bytesEmitted / 4), imageCount: images.length, truncated: rendered.truncated },
+  };
+}
+
+/**
+ * Compile the immutable contract for the current phase.
+ *
+ * Unlike workflowCurrentView(), this deliberately excludes live run state.
+ * Provider context can therefore reconstruct the same item at the same input
+ * position throughout a phase. Live obligations, artifacts, evidence, and
+ * currently legal transitions remain available through cad.workflow.current().
+ */
+export async function compilePhaseContract(
+  cwd: string,
+  options: { registries: RegistrySet; maxTextBytes?: number },
+): Promise<PhaseCard | null> {
+  const started = performance.now();
+  const maxTextBytes = options.maxTextBytes ?? DEFAULT_TEXT_CAP;
+  if (!Number.isInteger(maxTextBytes) || maxTextBytes < 1200) throw new Error("Phase Contract text budget must be at least 1200 bytes");
+
+  const project = await new HarnessProjectStoreV7(cwd).load();
+  if (!project.state.currentRunId) return null;
+  const loaded = await new HarnessRunStoreV7(cwd, project.state.currentRunId).load(options.registries);
+  if (!loaded || ["done", "aborted"].includes(loaded.state.status)) return null;
+  if (loaded.workflow.id === "mechanical.naked") return null;
+  const phase = loaded.workflow.phases[loaded.state.phase];
+  if (!phase) throw new Error(`phase contract cannot resolve phase: ${loaded.state.phase}`);
+
+  const permissions = new PermissionEngineV7(options.registries, loaded.registryContract);
+  const effectiveCapabilities = permissions.enabledActions(loaded.state, loaded.workflow);
+  const obligations = [...phase.recordObligations, ...phase.evidenceObligations]
+    .filter((item) => item.required !== false)
+    .map((item) => ({
+      ref: item.ref,
+      type: item.type,
+      closeWith: item.closeWith,
+      canonicalCall: canonicalCall(item.closeWith, item.ref),
+    }));
+  const transitions = Object.entries(phase.transitions).map(([event, transition]) => ({ event, target: transition.target }));
+  const operations = effectiveCapabilities.map((capability) => ({
+    capability,
+    ...(CANONICAL_CALLS[capability] ? { canonicalCall: CANONICAL_CALLS[capability] } : {}),
+  }));
+  const base = {
+    runId: loaded.state.runId,
+    workflowId: loaded.workflow.id,
+    workflowHash: loaded.workflow.hash,
+    phase: loaded.state.phase,
+    purpose: phase.purpose,
+    guidance: phase.guidance ?? null,
+    status: "phase-contract",
+    unmet: obligations.map((item) => item.ref),
+    transitions,
+    recommendedTemplates: phase.recommendedTemplates ?? [],
+    recommendedSkills: phase.recommendedSkills ?? [],
+    where: [
+      `workflow ${loaded.workflow.id}@${loaded.workflow.version}`,
+      `snapshot ${loaded.workflow.hash}`,
+      `phase ${loaded.state.phase}`,
+    ],
+    goal: [WORKFLOW_BOUNDARY_RULE, phase.purpose],
+    sop: [
+      phase.guidance ?? "No phase-specific SOP is declared by the pinned workflow package.",
+      ...(phase.recommendedSkills ?? []).map((skill) => `Use the ${skill} skill in this phase.`),
+      "Read live state with `await cad.workflow.current()` when deciding the next action.",
+    ],
+    must: obligations.map((item) => `${item.ref} (${item.type}) — close with ${item.canonicalCall}`),
+    can: operations.map((item) => item.canonicalCall ? `${item.capability} — ${item.canonicalCall}` : item.capability),
+    next: transitions.map(({ event, target }) => `${event} -> ${target}`),
+    state: [
+      `canonical authority: sidecar state for run ${loaded.state.runId}`,
+      `registry contract: ${loaded.registryContract.hash}`,
+      "this Phase Contract is immutable for the phase; cad.workflow.current() is the live state view",
+      "workspace files and natural-language claims have no workflow effect until admitted by the State Engine",
+    ],
+    warnings: [],
+    obligations,
+    operations,
+  } satisfies Omit<WorkflowCurrentView, "text">;
+  const rendered = renderBoundedPhaseCard({ ...base, text: renderWorkflowView(base) }, maxTextBytes);
+  const text = rendered.text;
+  const digest = createHash("sha256").update(JSON.stringify({ text, workflowHash: loaded.workflow.hash, phase: loaded.state.phase })).digest("hex");
+  const bytesRead = Buffer.byteLength(JSON.stringify(project.state)) + Buffer.byteLength(JSON.stringify(loaded.state)) + Buffer.byteLength(JSON.stringify(loaded.workflow));
+  const bytesEmitted = Buffer.byteLength(text);
+  return {
+    text,
+    images: [],
+    digest,
+    workflowHash: loaded.workflow.hash,
+    phase: loaded.state.phase,
+    effectiveCapabilities,
+    unmetObligations: obligations.map((item) => item.ref),
+    legalTransitions: transitions.map(({ event, target }) => `${event} -> ${target}`),
+    metrics: { durationMs: performance.now() - started, bytesRead, bytesEmitted, estimatedTokens: Math.ceil(bytesEmitted / 4), imageCount: 0, truncated: rendered.truncated },
   };
 }

@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createWriteStream, type WriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -40,6 +40,19 @@ export interface DetachedProcessOptions {
   args?: string[];
   cwd: string;
   env?: NodeJS.ProcessEnv;
+}
+
+export interface InteractiveProcessOptions extends DetachedProcessOptions {}
+
+/** Start a supervised process with an interactive stdio channel. */
+export function spawnInteractiveProcess(options: InteractiveProcessOptions): ChildProcessWithoutNullStreams {
+  assertLinuxRuntime("Pi-CAD interactive process runner");
+  return spawn(options.command, options.args ?? [], {
+    cwd: options.cwd,
+    env: options.env ?? process.env,
+    detached: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 }
 
 /** Start a deliberately detached supervisor without leaking child_process imports across the runtime. */

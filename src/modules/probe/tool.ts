@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { probePython } from "../../shared/capability.ts";
+import { DEFAULT_VIEWS, probePython } from "../../shared/capability.ts";
 import { CadProjectStore } from "../../shared/store.ts";
 import { bundleFromEnvelope, type ObservationBundle } from "../../observations/bundle.ts";
 import { recordObservation } from "../../core/observation-index.ts";
@@ -51,7 +51,7 @@ const typed = (
 };
 
 export const CadProbeParametersSchema = Type.Union([
-  typed("visual", target({ views: Type.Optional(Type.Array(Type.String())), width: Type.Optional(Type.Integer({ minimum: 64 })), height: Type.Optional(Type.Integer({ minimum: 64 })), labels: Type.Optional(Type.Boolean()), display: Type.Optional(Type.Literal("solid")) })),
+  typed("visual", target({ views: Type.Optional(Type.Array(Type.String())), width: Type.Optional(Type.Integer({ minimum: 64 })), height: Type.Optional(Type.Integer({ minimum: 64 })), labels: Type.Optional(Type.Boolean()), display: Type.Optional(Type.Enum({ solid: "solid", solid_with_edges: "solid_with_edges", hidden_edges: "hidden_edges", wireframe: "wireframe" })), focus: Type.Optional(Type.Array(Type.String({ minLength: 1 }))), hide: Type.Optional(Type.Array(Type.String({ minLength: 1 }))), explode: Type.Optional(Type.Number({ minimum: 0, maximum: 5 })), ghostOthers: Type.Optional(Type.Boolean()) })),
   typed("geometry", target({ output: Type.Optional(Type.String()) })),
   typed("surfaces", target({ labels: Type.Optional(Type.Boolean()), views: Type.Optional(Type.Array(Type.String())) })),
   typed("measure", target({ metric: Type.String({ minLength: 1 }), a: Type.String({ minLength: 1 }), b: Type.Optional(Type.String()) }), true, true),
@@ -87,7 +87,7 @@ export const CadRecallObservationParametersSchema = Type.Object(
 );
 
 export interface CadProbeParams {
-  preset: (typeof CAD_PROBE_PRESET_NAMES)[keyof typeof CAD_PROBE_PRESET_NAMES];
+  preset: string;
   args?: Record<string, unknown>;
   subject?: "current" | "baseline" | AgentArtifactSubject;
   purpose?: string;
@@ -149,8 +149,11 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams) {
   return persistProbeObservation(cwd, params.preset, rendered);
 }
 
-function applyPresetDefaults(preset: CadProbeParams["preset"], args: Record<string, unknown>): void {
-  if (preset === "visual") Object.assign(args, { views: args.views ?? ["iso"], width: args.width ?? 900, height: args.height ?? 700, labels: args.labels ?? false, display: args.display ?? "solid" });
+function applyPresetDefaults(preset: string, args: Record<string, unknown>): void {
+  // A visual probe is an engineering observation, not a presentation shot:
+  // always return the complete orthographic set unless the caller explicitly
+  // asks for a subset.  The renderer stamps each image with its view name.
+  if (preset === "visual") Object.assign(args, { views: args.views ?? [...DEFAULT_VIEWS], width: args.width ?? 900, height: args.height ?? 700, labels: args.labels ?? true, display: args.display ?? "solid" });
   if (preset === "surfaces") Object.assign(args, { labels: args.labels ?? false });
   if (preset === "section") Object.assign(args, { display: args.display ?? "solid", width: args.width ?? 900, height: args.height ?? 700, labels: args.labels ?? false });
 }

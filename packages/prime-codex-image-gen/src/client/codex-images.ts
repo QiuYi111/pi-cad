@@ -1,4 +1,5 @@
 import type { CodexAuth } from "../auth/codex-auth.ts";
+import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
 import { ExtensionError, cancelledError } from "../errors.ts";
 import { abortableSleep, retryDelayMs, type Sleep } from "../runtime/retry.ts";
 import type {
@@ -43,10 +44,13 @@ interface ErrorPayload {
 }
 
 export class FetchHttpTransport implements HttpTransport {
-	async send(
-		request: HttpRequest,
-		signal?: AbortSignal,
-	): Promise<HttpResponse> {
+	private readonly fetchEndpoint: ((url: string, init: RequestInit) => Promise<Response>) | undefined;
+
+	constructor(fetchEndpoint?: (url: string, init: RequestInit) => Promise<Response>) {
+		this.fetchEndpoint = fetchEndpoint;
+	}
+
+	async send(request: HttpRequest, signal?: AbortSignal): Promise<HttpResponse> {
 		const init: RequestInit = {
 			method: request.method,
 			headers: request.headers,
@@ -54,32 +58,24 @@ export class FetchHttpTransport implements HttpTransport {
 			redirect: "error",
 		};
 		if (signal !== undefined) init.signal = signal;
-		const response = await fetchCodexEndpoint(request.url, init);
-		const contentLength = response.headers.get("content-length");
-		if (
-			contentLength !== null &&
-			/^\d+$/.test(contentLength) &&
-			Number(contentLength) > MAX_RESPONSE_BODY_BYTES
-		) {
-			if (response.body !== null) {
-				await response.body.cancel().catch(() => undefined);
+		const dispatcher = this.fetchEndpoint ? undefined : new EnvHttpProxyAgent();
+		try {
+			const response = this.fetchEndpoint
+				? await this.fetchEndpoint(request.url, init)
+				: await fetchCodexEndpoint(request.url, init, dispatcher!);
+			const contentLength = response.headers.get("content-length");
+			if (contentLength !== null && /^\d+$/.test(contentLength) && Number(contentLength) > MAX_RESPONSE_BODY_BYTES) {
+				if (response.body !== null) await response.body.cancel().catch(() => undefined);
+				throw new Error("The Codex image service response exceeded the safe size limit.");
 			}
-			throw new Error(
-				"The Codex image service response exceeded the safe size limit.",
-			);
+			const headers: Record<string, string> = {};
+			response.headers.forEach((value, key) => { headers[key] = value; });
+			return { status: response.status, headers, body: await readBoundedResponseBody(response) };
+		} finally {
+			await dispatcher?.close().catch(() => undefined);
 		}
-		const headers: Record<string, string> = {};
-		response.headers.forEach((value, key) => {
-			headers[key] = value;
-		});
-		return {
-			status: response.status,
-			headers,
-			body: await readBoundedResponseBody(response),
-		};
 	}
 }
-
 async function readBoundedResponseBody(response: Response): Promise<string> {
 	if (response.body === null) return "";
 
@@ -110,12 +106,27 @@ async function readBoundedResponseBody(response: Response): Promise<string> {
 async function fetchCodexEndpoint(
 	url: string,
 	init: RequestInit,
+	dispatcher: EnvHttpProxyAgent,
 ): Promise<Response> {
+	const proxyInit = {
+		method: init.method,
+		headers: init.headers as Record<string, string>,
+		body: typeof init.body === "string" ? init.body : undefined,
+		redirect: init.redirect,
+		signal: init.signal,
+		dispatcher,
+	} as Parameters<typeof undiciFetch>[1];
 	switch (url) {
 		case CODEX_GENERATIONS_ENDPOINT:
-			return fetch(CODEX_GENERATIONS_ENDPOINT, init);
+			return (await undiciFetch(
+				CODEX_GENERATIONS_ENDPOINT,
+				proxyInit,
+			)) as unknown as Response;
 		case CODEX_EDITS_ENDPOINT:
-			return fetch(CODEX_EDITS_ENDPOINT, init);
+			return (await undiciFetch(
+				CODEX_EDITS_ENDPOINT,
+				proxyInit,
+			)) as unknown as Response;
 		default:
 			throw new Error("Unexpected Codex image service endpoint.");
 	}
@@ -146,6 +157,8 @@ export class CodexImagesClient {
 				background: "auto",
 				quality: request.quality,
 				size: request.size,
+				stream: true,
+				partial_images: 0,
 			},
 			auth,
 			signal,
@@ -166,6 +179,8 @@ export class CodexImagesClient {
 				background: "auto",
 				quality: request.quality,
 				size: request.size,
+				stream: true,
+				partial_images: 0,
 			},
 			auth,
 			signal,
@@ -181,7 +196,7 @@ export class CodexImagesClient {
 		const httpRequest: HttpRequest = {
 			method: "POST",
 			url: endpoint,
-			headers: { ...auth.headers },
+			headers: { ...auth.headers, Accept: "text/event-stream" },
 			body: JSON.stringify(body),
 		};
 
@@ -193,9 +208,24 @@ export class CodexImagesClient {
 				response = await this.transport.send(httpRequest, signal);
 			} catch (error) {
 				if (signal?.aborted || isAbortError(error)) throw cancelledError();
+				if (attempt < MAX_ATTEMPTS) {
+					try {
+						await this.sleep(retryDelayMs({}, attempt), signal);
+					} catch (sleepError) {
+						if (
+							signal?.aborted ||
+							isAbortError(sleepError) ||
+							isCancelled(sleepError)
+						)
+							throw cancelledError();
+						throw sleepError;
+					}
+					continue;
+				}
 				throw new ExtensionError(
 					"BACKEND_UNAVAILABLE",
-					"The Codex image service could not be reached. The request was not retried to avoid a duplicate image request.",
+					`The Codex image service could not be reached after ${MAX_ATTEMPTS} attempts. ${describeTransportError(error)}`,
+					{ cause: error },
 				);
 			}
 
@@ -268,6 +298,7 @@ export class CodexImagesClient {
 }
 
 function parseSuccessfulResponse(body: string): GeneratedImageData {
+	if (/^\s*(?:event:|data:)/m.test(body)) return parseStreamingResponse(body);
 	let payload: unknown;
 	try {
 		payload = JSON.parse(body);
@@ -290,6 +321,36 @@ function parseSuccessfulResponse(body: string): GeneratedImageData {
 	if (typeof record.created === "number") result.created = record.created;
 	if (typeof record.quality === "string") result.quality = record.quality;
 	if (typeof record.size === "string") result.size = record.size;
+	return result;
+}
+
+function parseStreamingResponse(body: string): GeneratedImageData {
+	let completed: Record<string, unknown> | undefined;
+	let backendError: Record<string, unknown> | undefined;
+	for (const line of body.split(/\r?\n/)) {
+		if (!line.startsWith("data:")) continue;
+		const raw = line.slice(5).trim();
+		if (!raw || raw === "[DONE]") continue;
+		try {
+			const event = JSON.parse(raw) as Record<string, unknown>;
+			if (event.type === "image_generation.completed") completed = event;
+			if (event.type === "error") backendError = event;
+		} catch {
+			// Ignore malformed progress frames; the final image frame is authoritative.
+		}
+	}
+	if (!completed) {
+		const message = typeof backendError?.message === "string"
+			? backendError.message.replace(/[\r\n\t]+/g, " ").slice(0, 320)
+			: "The Codex image stream ended before a completed image was returned.";
+		throw new ExtensionError("BACKEND_UNAVAILABLE", message);
+	}
+	const base64 = completed.b64_json;
+	if (typeof base64 !== "string" || base64.length === 0) throw noImageError();
+	const result: GeneratedImageData = { base64 };
+	if (typeof completed.created_at === "number") result.created = completed.created_at;
+	if (typeof completed.quality === "string") result.quality = completed.quality;
+	if (typeof completed.size === "string") result.size = completed.size;
 	return result;
 }
 
@@ -326,3 +387,24 @@ function isCancelled(error: unknown): boolean {
 	return error instanceof ExtensionError && error.code === "CANCELLED";
 }
 
+function describeTransportError(error: unknown): string {
+	const details: string[] = [];
+	if (error instanceof Error) {
+		details.push(error.name, error.message);
+		const cause = error.cause;
+		if (cause && typeof cause === "object") {
+			const record = cause as Record<string, unknown>;
+			if (typeof record.code === "string") details.push(record.code);
+			if (typeof record.message === "string") details.push(record.message);
+		}
+	} else {
+		details.push(String(error));
+	}
+	const summary = [...new Set(details)]
+		.join(": ")
+		.replace(/[\r\n\t]+/g, " ")
+		.replace(/\s+/g, " ")
+		.trim()
+		.slice(0, 320);
+	return summary ? `Transport error: ${summary}` : "Transport error: unknown failure.";
+}

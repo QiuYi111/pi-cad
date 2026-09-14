@@ -5,128 +5,53 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
-import { completionGate } from "../src/authority/sidecar.ts";
+import { completionGate, dispatchSidecarRequest } from "../src/authority/sidecar.ts";
 import { commitWorkspace } from "../src/harness/commit.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { canonicalDigest } from "../src/harness/canonical.ts";
 import { legalWorkflowTransitions, transitionRun } from "../src/harness/reducer.ts";
-import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
-import { resolveWorkflowPackage } from "../src/harness/workflow/packages.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
+import { resolveWorkflowPackage, workflowUserDirectory } from "../src/harness/workflow/packages.ts";
 
-test("installed Mechanical packages expose metadata only and compile branchable kernel-generic snapshots", async () => {
+test("installed Mechanical packages expose only default and naked modes", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
   try {
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
-    assert.deepEqual(listed.map((item) => item.id), ["mechanical.analysis", "mechanical.benchmark", "mechanical.benchmark-author-only", "mechanical.benchmark-build", "mechanical.benchmark-triage", "mechanical.modify", "mechanical.one-shot"]);
+    assert.deepEqual(listed.map((item) => item.id), ["mechanical.default", "mechanical.naked"]);
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
-
-    const benchmark = await resolveWorkflowPackage(cwd, "mechanical.benchmark", mechanicalRegistries);
-    assert.equal(benchmark.workflow.initialPhase, "grilling");
-    assert.equal(benchmark.workflow.phases.requirements_review!.reviewProfile, "mechanical.requirements-review");
-    assert.deepEqual(Object.keys(benchmark.workflow.phases.requirements_review!.transitions), ["accepted", "clarification_required", "revise_requirements"]);
-    assert.equal(benchmark.workflow.phases.requirements_review!.transitions.clarification_required!.terminalStatus, "waiting_user");
-    assert.equal(benchmark.workflow.phases.wait_for_user!.actions.length, 0);
-    assert.deepEqual(Object.keys(benchmark.workflow.phases.build!.transitions), ["delivered"]);
-    assert.deepEqual(benchmark.workflow.phases.build!.recordObligations.map((item) => item.ref), ["release"]);
-    assert.deepEqual(benchmark.workflow.phases.build!.evidenceObligations.map((item) => item.ref), ["candidate-geometry", "candidate-visual"]);
-    assert.equal(benchmark.workflow.phases.final_review, undefined);
-    assert.equal(benchmark.workflow.phases.release, undefined);
-    assert.equal(benchmark.workflow.phases.done!.terminal, true);
-
-    const authorOnly = await resolveWorkflowPackage(cwd, "mechanical.benchmark-author-only", mechanicalRegistries);
-    assert.equal(authorOnly.workflow.phases.grilling!.reviewProfile, undefined);
-    assert.deepEqual(Object.keys(authorOnly.workflow.phases.grilling!.transitions), ["clarification_required", "interpreted"]);
-    assert.equal(authorOnly.workflow.phases.grilling!.transitions.clarification_required!.terminalStatus, "waiting_user");
-    assert.equal(authorOnly.workflow.phases.requirements_review, undefined);
-
-    const triage = await resolveWorkflowPackage(cwd, "mechanical.benchmark-triage", mechanicalRegistries);
-    assert.equal(triage.workflow.phases.requirements_review!.reviewProfile, "mechanical.requirements-review");
-    assert.equal(triage.workflow.phases.requirements_review!.transitions.accepted!.target, "admitted");
-    assert.equal(triage.workflow.phases.admitted!.terminal, true);
-    assert.equal(Object.values(triage.workflow.phases).some((phase) => phase.actions.includes("cad_build_step")), false);
-
-    const builder = await resolveWorkflowPackage(cwd, "mechanical.benchmark-build", mechanicalRegistries);
-    assert.equal(builder.workflow.initialPhase, "build");
-    assert.equal(builder.workflow.phases.build!.actions.includes("cad_build_step"), true);
-    assert.equal(builder.workflow.phases.build!.reviewProfile, undefined);
-
-    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
-    const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
-    assert.ok(loaded);
-    assert.equal(loaded.workflow.initialPhase, "grilling");
-    assert.deepEqual(loaded.workflow.phases.grilling!.recommendedSkills, ["grill-me"]);
-    const grillingView = await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as any;
-    assert.match(grillingView.text, /Use the grill-me skill in this phase/);
-    assert.deepEqual(Object.keys(loaded.workflow.phases.concept!.transitions), ["assembly", "single_part"]);
-    assert.ok(loaded.workflow.phases.concept!.grants.includes("image_generate"));
-    assert.equal(loaded.workflow.phases.concept!.actions.includes("cad_build_step"), false);
-    assert.equal(loaded.workflow.phases.parts!.actions.includes("cad_build_step"), true);
-    assert.deepEqual(loaded.workflow.phases.final_review!.reviewProfile, "mechanical.final-review");
-    assert.equal(loaded.workflow.version, "1.0.4");
-    assert.deepEqual(Object.keys(loaded.workflow.phases.final_review!.transitions), ["accepted", "revise_architecture_bom", "revise_assembly", "revise_concept", "revise_interface", "revise_parts", "revise_spec"]);
-    assert.equal(loaded.workflow.phases.done!.terminal, true);
-
-    const record = (ref: string) => ({ obligationRef: ref, type: "workspace_commit", path: `workspace/commits/${ref}.json`, sha256: "a".repeat(64), workflowHash: loaded.workflow.hash, createdAt: "now" });
-    const evidence = (ref: string) => ({ id: ref, obligationRef: ref, type: ref.endsWith("visual") ? "visual" : "geometry", path: `evidence/${ref}`, sha256: "b".repeat(64), workflowHash: loaded.workflow.hash, registryContractHash: loaded.registryContract.hash, createdAt: "now" });
-    const reviewFailure = (state: typeof loaded.state) => ({
-      ...state,
-      latestReview: {
-        id: "review-fail", verdict: "fail", path: "reviews/fail.json", profileId: "mechanical.final-review",
-        subjectHash: canonicalDigest({ workflowHash: loaded.workflow.hash, registryContractHash: state.workflow.registryContractHash, phase: state.phase, records: state.records, artifacts: state.artifacts, evidence: state.evidence }),
-        workflowHash: loaded.workflow.hash, registryContractHash: loaded.registryContract.hash,
-      },
-    });
-    const assemblyReview = reviewFailure({
-      ...loaded.state, phase: "final_review", phaseHistory: ["grilling", "spec", "concept", "interface", "architecture_bom", "parts", "assembly", "final_review"],
-      records: { parts: record("parts"), assembly: record("assembly") },
-      evidence: [evidence("assembly-visual"), evidence("assembly-geometry")],
-    });
-    assert.deepEqual(legalWorkflowTransitions(assemblyReview, loaded.workflow), [
-      { event: "revise_architecture_bom", target: "architecture_bom" },
-      { event: "revise_assembly", target: "assembly" },
-      { event: "revise_concept", target: "concept" },
-      { event: "revise_interface", target: "interface" },
-      { event: "revise_parts", target: "parts" },
-      { event: "revise_spec", target: "spec" },
-    ]);
-    const revisedAssembly = transitionRun(assemblyReview, loaded.workflow, "revise_assembly");
-    assert.equal(revisedAssembly.phase, "assembly");
-    assert.equal(revisedAssembly.records.assembly, undefined);
-    assert.ok(revisedAssembly.records.parts);
-    assert.equal(revisedAssembly.evidence.length, 0);
-    assert.equal(revisedAssembly.staleEvidence.length, 2);
-    assert.equal(revisedAssembly.latestReview, undefined);
-
-    const partReview = reviewFailure({ ...loaded.state, phase: "final_review", phaseHistory: ["grilling", "spec", "concept", "parts", "final_review"] });
-    assert.deepEqual(legalWorkflowTransitions(partReview, loaded.workflow), [
-      { event: "revise_concept", target: "concept" },
-      { event: "revise_parts", target: "parts" },
-      { event: "revise_spec", target: "spec" },
-    ]);
+    const standard = await resolveWorkflowPackage(cwd, "mechanical.default", mechanicalRegistries);
+    assert.equal(standard.workflow.initialPhase, "plan");
+    assert.deepEqual(Object.keys(standard.workflow.phases), ["cook", "done", "plan"]);
+    assert.deepEqual(standard.workflow.phases.plan!.recordObligations.map((item) => item.ref), ["plan"]);
+    assert.equal(standard.workflow.phases.plan!.evidenceObligations[0]?.ref, "concept-image");
+    assert.equal(standard.workflow.phases.plan!.evidenceObligations[0]?.required, false);
+    assert.deepEqual(standard.workflow.phases.cook!.recordObligations, []);
+    assert.deepEqual(standard.workflow.phases.cook!.evidenceObligations, []);
+    assert.match(standard.workflow.phases.cook!.guidance, /CAD cannot be\s+fake/);
+    assert.deepEqual(Object.keys(standard.workflow.phases.cook!.transitions), ["finished"]);
+    assert.match(standard.workflow.phases.cook!.guidance, /latest commit named `plan`/);
+    assert.match(standard.workflow.phases.cook!.guidance, /findings, uncertainties, and suggested checks as advice/);
+    assert.equal(standard.workflow.phases.done!.terminal, true);
+    const naked = await resolveWorkflowPackage(cwd, "mechanical.naked", mechanicalRegistries);
+    assert.equal(naked.workflow.initialPhase, "work");
+    assert.equal(naked.workflow.phases.work!.guidance, undefined);
+    assert.deepEqual(naked.workflow.phases.work!.recordObligations, []);
+    assert.deepEqual(naked.workflow.phases.work!.evidenceObligations, []);
+    assert.equal(naked.workflow.phases.work!.actions.includes("cad_build_step"), true);
+    assert.equal(naked.workflow.phases.work!.actions.includes("cad_simulate"), true);
+    const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" }) as any;
+    assert.equal(started.phase, "plan");
+    assert.deepEqual(started.unmet, ["plan"]);
+    await assert.rejects(handleAgentApi(cwd, { schema: 1, op: "model-build", source: "part.py", output: "build/part.step" }), /model\.build is not granted in workflow phase plan/);
+    await handleAgentApi(cwd, { schema: 1, op: "commit", name: "plan" });
+    const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "plan_ready" }) as any;
+    assert.equal(advanced.phase, "cook");
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
-test("author-only benchmark can stop headless at wait_for_user without reviewer authority", async () => {
-  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-author-only-clarification-"));
-  try {
-    await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.benchmark-author-only", interactionMode: "headless" });
-    await writeFile(join(cwd, "requirements.md"), "Two placements are materially different. Ask which datum owns the offset.");
-    await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "requirements", artifacts: ["requirements.md"] });
-    await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "clarification_required" });
-    const current = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
-    assert.equal(current?.state.phase, "wait_for_user");
-    assert.equal(current?.state.status, "waiting_user");
-    assert.equal(current?.state.latestReview, undefined);
-    const gate = await completionGate(cwd);
-    assert.equal(gate.complete, true);
-    assert.equal(gate.outcome, "clarification_required");
-    assert.match(gate.reason, /author identified/);
-  } finally { await rm(cwd, { recursive: true, force: true }); }
-});
-
-test("project-authored package YAML is compiler-admitted and source edits cannot alter a pinned run", async () => {
+test("user-authored package YAML is compiler-admitted and source edits cannot alter a pinned run", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-authoring-"));
-  const directory = join(cwd, "workflows");
+  const directory = workflowUserDirectory();
   const path = join(directory, "custom.yaml");
   const source = (purpose: string) => `
 schema: 1
@@ -164,7 +89,7 @@ workflow:
       terminal: true
 `;
   try {
-    await mkdir(directory);
+    await mkdir(directory, { recursive: true });
     await writeFile(path, source("Original pinned purpose."));
     const listed = await handleAgentApi(cwd, { schema: 1, op: "workflow-list" }) as any[];
     assert.ok(listed.some((item) => item.id === "custom.arbitrary"));
@@ -177,4 +102,25 @@ workflow:
     assert.equal(current.workflowHash, pinnedHash);
     assert.equal(current.purpose, "Original pinned purpose.");
   } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("administrator adoption selects an exact workflow version while existing runs retain their snapshot", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-adoption-"));
+  const upgradedCwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-adoption-next-"));
+  const packageSource = (version: string, purpose: string) => `schema: 1\nid: custom.versioned\ndescription: Versioned workflow.\ntags: [custom]\nversion: ${version}\nworkflow:\n  schema: 1\n  id: custom.versioned\n  version: ${version}\n  parametersSchema: {type: object, additionalProperties: false}\n  initialPhase: work\n  phases:\n    work:\n      purpose: ${purpose}\n      actions: []\n      grants: [file_read]\n      writeScopes: []\n      recordObligations: []\n      evidenceObligations: []\n      contextProviders: [kernel.current-action]\n      hooks: []\n      transitions: {}\n      terminal: true\n`;
+  try {
+    const directory = workflowUserDirectory();
+    await mkdir(directory, { recursive: true }); await writeFile(join(directory, "v1.yaml"), packageSource("1.0.0", "Version one.")); await writeFile(join(directory, "v2.yaml"), packageSource("2.0.0", "Version two."));
+    await assert.rejects(resolveWorkflowPackage(cwd, "custom.versioned", mechanicalRegistries), /administrator adoption is required/);
+    const policyPath = join(directory, "..", "workflow-adoptions.json");
+    const policy = (version: string) => ({ schema: 1, globalSafetyPolicyVersion: "safety-1", adopted: { "custom.versioned": { version, adoptedBy: "admin", adoptedAt: "2026-03-10T00:00:00.000Z" } }, history: [{ id: "custom.versioned", to: version, adoptedBy: "admin", adoptedAt: "2026-03-10T00:00:00.000Z" }] });
+    await writeFile(policyPath, JSON.stringify(policy("1.0.0")));
+    const first = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "custom.versioned" }) as any; const firstRun = first.runId;
+    assert.equal(first.workflowVersion, "1.0.0");
+    await writeFile(policyPath, JSON.stringify(policy("2.0.0")));
+    const second = await handleAgentApi(upgradedCwd, { schema: 1, op: "workflow-start", id: "custom.versioned" }) as any;
+    assert.equal(second.workflowVersion, "2.0.0");
+    const restored = await new HarnessRunStoreV7(cwd, firstRun).load(mechanicalRegistries);
+    assert.equal(restored?.workflow.version, "1.0.0"); assert.equal(restored?.workflow.phases.work?.purpose, "Version one.");
+  } finally { await rm(cwd, { recursive: true, force: true }); await rm(upgradedCwd, { recursive: true, force: true }); }
 });

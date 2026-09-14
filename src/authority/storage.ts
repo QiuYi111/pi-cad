@@ -5,6 +5,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 import type { HarnessProjectStateV7 } from "../harness/run-store.ts";
+import type { WorkflowSnapshotV1 } from "../harness/workflow/types.ts";
+import type { WorkflowCurrentView } from "../harness/card.ts";
 import type { HarnessRunStateV7 } from "../harness/state.ts";
 
 const CANONICAL_DIRECTORY_ENV = "PI_CAD_CANONICAL_PROJECT_DIR";
@@ -43,10 +45,21 @@ export interface StatusProjectionV1 {
   run: null | {
     id: string;
     workflowId: string;
+    workflowVersion: string;
     workflowHash: string;
     phase: string;
     status: string;
     updatedAt: string;
+    phaseHistory: string[];
+    phases: Array<{
+      id: string;
+      title: string;
+      purpose: string;
+      status: "complete" | "active" | "pending" | "blocked" | "skipped";
+      transitions: Array<{ event: string; target: string }>;
+      capabilities: string[];
+      obligations: string[];
+    }>;
   };
   warning: string;
   updatedAt: string;
@@ -56,7 +69,7 @@ export interface StatusProjectionV1 {
 export async function writeStatusProjection(
   cwd: string,
   project: HarnessProjectStateV7,
-  run: HarnessRunStateV7 | null,
+  run: null | { state: HarnessRunStateV7; workflow: WorkflowSnapshotV1; view: WorkflowCurrentView },
 ): Promise<string> {
   const root = await realpath(resolve(cwd));
   const directory = join(root, ".pi-cad");
@@ -75,12 +88,27 @@ export async function writeStatusProjection(
       ...(project.promotedRunId ? { promotedRunId: project.promotedRunId } : {}),
     },
     run: run ? {
-      id: run.runId,
+      id: run.state.runId,
       workflowId: run.workflow.id,
+      workflowVersion: run.workflow.version,
       workflowHash: run.workflow.hash,
-      phase: run.phase,
-      status: run.status,
-      updatedAt: run.updatedAt,
+      phase: run.state.phase,
+      status: run.state.status,
+      updatedAt: run.state.updatedAt,
+      phaseHistory: [...run.state.phaseHistory],
+      phases: Object.entries(run.workflow.phases).map(([id, phase]) => ({
+        id,
+        title: id.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+        purpose: phase.purpose,
+        status: id === run.state.phase
+          ? (run.state.status === "done" ? "complete" : ["blocked_user", "blocked_external", "waiting_user", "aborted"].includes(run.state.status) ? "blocked" : "active")
+          : run.state.phaseHistory.includes(id) ? "complete" : ["done", "aborted"].includes(run.state.status) ? "skipped" : "pending",
+        transitions: id === run.state.phase
+          ? run.view.next.map((item) => ({ event: item.event, target: item.target }))
+          : Object.entries(phase.transitions).map(([event, transition]) => ({ event, target: transition.target })),
+        capabilities: id === run.state.phase ? run.view.operations.map((item) => item.capability) : [],
+        obligations: id === run.state.phase ? [...run.view.unmet] : [],
+      })),
     } : null,
     warning: "Projection only. Editing this file has no workflow or review authority.",
     updatedAt: new Date().toISOString(),

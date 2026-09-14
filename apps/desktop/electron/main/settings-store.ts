@@ -1,0 +1,61 @@
+import { app } from "electron";
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import type { AppSettings } from "../../src/shared/contracts.js";
+
+const defaults = (): AppSettings => ({
+  distro: process.env.PI_CAD_WSL_DISTRO || "Ubuntu",
+  projectPath: process.env.PI_CAD_PROJECT_CWD || (process.argv.includes("--pi-cad-e2e") ? "/workspace/demo" : ""),
+  piCadRepo: process.env.PI_CAD_REPO || (app.isPackaged ? "" : resolve(app.getAppPath(), "../..")),
+  primeAgentRepo: process.env.PRIME_AGENT_REPO || "",
+  provider: "openai-codex",
+  model: "gpt-5.6-sol",
+  thinking: "minimal",
+  permission: "workspace",
+  reviewer: { mode: "inherit" },
+  remotePublish: { enabled: false, allowedRemotes: ["origin"] },
+  onboardingComplete: false,
+});
+
+export class SettingsStore {
+  readonly path: string;
+  private mutation: Promise<void> = Promise.resolve();
+
+  constructor(path = join(app.getPath("userData"), "settings.json")) {
+    this.path = path;
+  }
+
+  async get(): Promise<AppSettings> {
+    try {
+      const parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<AppSettings>;
+      return { ...defaults(), ...parsed, reviewer: { ...defaults().reviewer, ...parsed.reviewer }, remotePublish: { ...defaults().remotePublish, ...parsed.remotePublish } };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      return defaults();
+    }
+  }
+
+  async update(patch: Partial<AppSettings>): Promise<AppSettings> {
+    const pending = this.mutation.then(async () => {
+      const current = await this.get();
+      const next: AppSettings = {
+        ...current,
+        ...patch,
+        reviewer: patch.reviewer ? { ...current.reviewer, ...patch.reviewer } : current.reviewer,
+        remotePublish: patch.remotePublish ? { ...current.remotePublish, ...patch.remotePublish } : current.remotePublish,
+      };
+      await mkdir(dirname(this.path), { recursive: true });
+      const temporary = `${this.path}.${process.pid}.${Date.now()}.tmp`;
+      await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+      try { await rename(temporary, this.path); }
+      catch (error) {
+        if (!["EEXIST", "EPERM"].includes((error as NodeJS.ErrnoException).code || "")) throw error;
+        await copyFile(temporary, this.path);
+        await unlink(temporary);
+      }
+      return next;
+    });
+    this.mutation = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
+}

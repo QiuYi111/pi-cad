@@ -1,0 +1,39 @@
+schema: 1
+id: mechanical.naked
+description: Full Pi-CAD tools with no prescribed engineering process.
+tags: [cad, mechanical, naked, baseline]
+version: 1.0.0
+workflow:
+  schema: 1
+  id: mechanical.naked
+  version: 1.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: work
+  versionControl:
+    init: true
+    allowRemote: false
+    phases:
+      work: {onExit: [commit]}
+  phases:
+    work:
+      purpose: Complete the user's engineering task.
+      actions: [cad_build_step, cad_commit, cad_simulate, codex_generate_image]
+      grants: [file_read, file_edit_source, image_generate, model_build, observe, observe_interference, observe_programmable, shell, simulate]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [mechanical.mission]
+      hooks: []
+      transitions:
+        finished: {target: done}
+    done:
+      terminal: true
+      purpose: Preserve completed work.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: []
+      hooks: []
+      transitions: {}

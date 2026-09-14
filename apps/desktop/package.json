@@ -1,0 +1,122 @@
+{
+  "name": "pi-cad-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reify turns ideas into inspectable mechanical designs with Prime Agent",
+  "author": { "name": "Reify contributors", "email": "maintainers@pi-cad.dev" },
+  "homepage": "https://github.com/QiuYi111/pi-cad",
+  "desktopName": "Reify.desktop",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+    "preview": "electron-vite preview",
+    "test": "vitest run",
+    "test:e2e": "npm run build && playwright test",
+    "test:package": "playwright test tests/e2e/package.spec.ts",
+    "test:windows:host": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Test-PiCadInstaller.ps1",
+    "test:windows:sandbox": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Open-PiCadSandbox.ps1",
+    "stage:runtime": "node scripts/stage-runtime.mjs",
+    "package:win": "npm run stage:runtime && npm run build && node scripts/package-windows.mjs",
+    "package:linux": "npm run stage:runtime && npm run build && electron-builder --linux AppImage deb",
+    "package:mac": "node scripts/check-mac-release.mjs && npm run stage:runtime && npm run build && electron-builder --mac dmg zip",
+    "test:linux:packages": "bash tests/linux/Test-ReifyPackages.sh"
+  },
+  "dependencies": {
+    "@fontsource-variable/geist": "^5.2.8",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "three": "^0.184.0",
+    "three-cad-viewer": "^5.0.4",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@types/three": "^0.184.0",
+    "@vitejs/plugin-react": "^5.0.2",
+    "electron": "^37.4.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^4.0.0",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.4",
+    "vitest": "^3.2.4"
+  },
+  "build": {
+    "appId": "com.picad.desktop",
+    "productName": "Reify",
+    "executableName": "Reify",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/runtime",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "Reify-Setup-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "Engineering",
+      "maintainer": "Reify contributors <maintainers@pi-cad.dev>",
+      "syncDesktopName": true,
+      "target": ["AppImage", "deb"],
+      "artifactName": "Reify-Linux-${arch}.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": ["dmg", "zip"],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "Reify-macOS-${arch}.${ext}"
+    },
+    "dmg": {
+      "sign": false,
+      "backgroundColor": "#090a0b",
+      "window": { "width": 620, "height": 420 },
+      "contents": [
+        { "x": 170, "y": 210, "type": "file" },
+        { "x": 450, "y": 210, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Reify"
+    },
+    "portable": {
+      "artifactName": "Reify-Portable-${arch}.${ext}"
+    }
+  },
+  "allowScripts": {}
+}

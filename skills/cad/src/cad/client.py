@@ -71,6 +71,11 @@ async def request(op: str, **payload: Any) -> Any:
             stdout = b"".join(chunks)
             writer.close()
             await writer.wait_closed()
+            if not stdout:
+                raise CadApiError(
+                    "Pi-CAD authority sidecar closed before the operation returned a result",
+                    error_type="SidecarUnavailable",
+                )
             response = json.loads(stdout.decode())
         except CadApiError:
             raise

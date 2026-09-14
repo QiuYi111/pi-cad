@@ -44,6 +44,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import type { CadRequirements, CadRunState } from "../shared/protocol.ts";
 import { CadProjectStore, CadRunStore, nowIso } from "../shared/store.ts";
+import type { LoadedHarnessRunV7 } from "../harness/run-store.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
+import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
+import { selectKernelEngine } from "../harness/engine-router.ts";
+import type { WorkflowPhaseDefinition } from "../harness/workflow/types.ts";
 import { readJsonLinesTail, readTextPrefix } from "../shared/bounded-files.ts";
 import { maybeAutoContinue } from "./continuation.ts";
 
@@ -653,11 +658,74 @@ export async function renderTaskContext(cwd: string, state: CadRunState): Promis
   return sections.join("\n\n");
 }
 
+/** Re-inject the compact working memory written beside a v7 transaction store. */
+export async function renderV7WorkingContext(cwd: string, runId: string): Promise<string> {
+  const v7 = new HarnessRunStoreV7(cwd, runId);
+  const run = { runDir: v7.runDirectory } as CadRunStore;
+  const meta = await readWorkingMeta(run);
+  if (meta.status === "stale") return "";
+  const working = (await readText(workingPath(run))).trim();
+  if (!working) return "";
+  const { refs, truncated } = await readRecentRefs(run);
+  const index = refs.slice(-ARCHIVE_INDEX_LIMIT).map((ref) => `- ${ref.id}: ${ref.summary} (${ref.path})`);
+  return [
+    "## Pi-CAD Working Context",
+    clip(working, WORKING_CONTEXT_MAX_CHARS),
+    ...(index.length ? ["", "### Archived context", ...index, ...(truncated ? ["- Earlier entries omitted; see context/refs.jsonl."] : [])] : []),
+  ].join("\n");
+}
+
 /**
  * Per-run compaction bookkeeping. Keyed by cwd:runId so two projects or
  * sessions sharing this process never block each other.
  */
 const pendingCompactions = new Set<string>();
+const rebuiltPhaseExits = new Set<string>();
+
+export function contextRebuildReasonV7(
+  state: Pick<LoadedHarnessRunV7["state"], "phase" | "phaseHistory">,
+  phases: Record<string, Pick<WorkflowPhaseDefinition, "rebuildContextOnExit">>,
+  usage: { percent: number | null; tokens: number | null } | null,
+): "phase_exit" | "threshold" | null {
+  const exited = state.phaseHistory.length > 1 ? state.phaseHistory.at(-2) : undefined;
+  if (exited && exited !== state.phase && phases[exited]?.rebuildContextOnExit === true) return "phase_exit";
+  if (usage?.percent != null && usage.tokens != null && usage.percent >= thresholdPercent()) return "threshold";
+  return null;
+}
+
+export function maybeRebuildContextV7(
+  pi: ExtensionAPI,
+  loaded: LoadedHarnessRunV7,
+  ctx: ExtensionContext,
+): boolean {
+  const usage = ctx.getContextUsage();
+  const reason = contextRebuildReasonV7(loaded.state, loaded.workflow.phases, usage);
+  if (!reason) return false;
+  const exitKey = `${ctx.cwd}:${loaded.state.runId}:${loaded.state.phaseHistory.length}`;
+  if (reason === "phase_exit" && rebuiltPhaseExits.has(exitKey)) return false;
+  const key = `${ctx.cwd}:${loaded.state.runId}`;
+  if (pendingCompactions.has(key)) return false;
+  pendingCompactions.add(key);
+  if (reason === "phase_exit") rebuiltPhaseExits.add(exitKey);
+
+  const resume = () => {
+    pendingCompactions.delete(key);
+    void (async () => {
+      const latest = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+      if (!latest || latest.state.status !== "active") return;
+      try {
+        pi.sendUserMessage(
+          `Pi-CAD context rebuild complete (${reason}). Continue phase ${latest.state.phase} from canonical state and take the next explicit cad_* action.`,
+          { deliverAs: "followUp" },
+        );
+      } catch {
+        // A replacement session owns the next continuation.
+      }
+    })().catch(() => {});
+  };
+  ctx.compact({ onComplete: resume, onError: resume });
+  return true;
+}
 
 /**
  * Decide whether to rebuild context now. Pi's `ctx.compact()` is
@@ -722,6 +790,32 @@ export function maybeRebuildContext(
 export function registerContextCompaction(pi: ExtensionAPI): void {
   pi.on("session_before_compact", async (event, ctx) => {
     if (event.signal.aborted) return undefined;
+    if (await selectKernelEngine(ctx.cwd) === "v7") {
+      const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+      if (!loaded || ["done", "aborted"].includes(loaded.state.status)) return undefined;
+      const messages = [...event.preparation.messagesToSummarize, ...event.preparation.turnPrefixMessages];
+      if (!messages.length) return undefined;
+      const v7 = new HarnessRunStoreV7(ctx.cwd, loaded.state.runId);
+      const run = { runDir: v7.runDirectory, runId: v7.runId, appendEvent: async () => {} } as CadRunStore;
+      let archived: ArchivedTrajectory | null = null;
+      try {
+        archived = await archiveTrajectory(run, messages, { reason: event.reason, tokensBefore: event.preparation.tokensBefore, firstKeptEntryId: event.preparation.firstKeptEntryId });
+      } catch {}
+      const { updated, usage, stopReason } = await updateWorkingContext(ctx, run, messages, event.signal);
+      if (!updated) {
+        await noteUpdateFailure(run, { stopReason, checkpointId: archived?.ref.id });
+        return undefined;
+      }
+      return {
+        compaction: {
+          summary: `Pi-CAD rebuilt working context for v7 run ${loaded.state.runId}. Canonical workflow state will be injected on the next turn; working memory is in context/working.md.`,
+          firstKeptEntryId: event.preparation.firstKeptEntryId,
+          tokensBefore: event.preparation.tokensBefore,
+          usage,
+          details: { reason: event.reason, runId: loaded.state.runId, checkpointId: archived?.ref.id },
+        },
+      };
+    }
     const store = new CadProjectStore(ctx.cwd);
     const state = await store.load();
     if (!state || state.status === "done" || state.status === "aborted") return undefined;

@@ -705,7 +705,11 @@ export function hasCurrentEvidence(state: CadRunState, kind: EvidenceRef["kind"]
 }
 
 export function evidenceFromBuild(
-  envelope: { artifacts: Array<{ path: string; kind: string; sha256: string }>; tool?: string },
+  envelope: {
+    artifacts: Array<{ path: string; kind: string; sha256: string }>;
+    inputArtifacts?: EvidenceInputArtifact[];
+    tool?: string;
+  },
   artifactHash: string,
   sourceHash: string,
 ): EvidenceRef {
@@ -718,6 +722,7 @@ export function evidenceFromBuild(
     sourceHash,
     paths: envelope.artifacts.map((artifact) => artifact.path),
     artifacts: envelope.artifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
+    ...(envelope.inputArtifacts?.length ? { inputArtifacts: envelope.inputArtifacts } : {}),
     createdAt: nowIso(),
   };
 }

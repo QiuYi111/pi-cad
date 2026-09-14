@@ -10,6 +10,8 @@ Model design intent, not a single frozen shape. Keep authoritative dimensions na
 - Read [references/model-structure.md](references/model-structure.md) for parameter organization, datum strategy, and feature ordering.
 - Read [references/robustness.md](references/robustness.md) for topology stability, validation, and STEP delivery.
 - Read [references/cookbook.md](references/cookbook.md) and start from the part/assembly assets for executable authoring examples.
+- Read [references/build123d-patterns.md](references/build123d-patterns.md) only when writing or repairing build123d source.
+- Read [references/repair-and-check.md](references/repair-and-check.md) after a failed build, suspicious render, or fragile regeneration.
 - Use `pi-cad-tools` for the current code-generated tool contract.
 
 Do not encode acceptance-critical dimensions as unexplained numeric literals or depend on generated face order remaining stable.

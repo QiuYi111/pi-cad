@@ -19,6 +19,8 @@ test("cad_probe schema is preset-discriminated and fail-closed", () => {
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", args: { artifact: "part.step" } }), true);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry" }), false);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: "current", args: { artifact: "part.step" } }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "visual", subject: "current", args: { views: ["iso_opposite"], display: "hidden_edges", focus: ["arm"], explode: 0.5 } }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "visual", subject: "current", args: { display: "nonsense" } }), false);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "compare", args: { before: "a.step", after: "b.step" } }), true);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "compare", args: { artifact: "a.step" } }), false);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", code: "result = 1" }), true);

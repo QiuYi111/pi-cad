@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<VTKFile type="UnstructuredGrid" version="0.1" byte_order="LittleEndian">
+  <UnstructuredGrid><Piece NumberOfPoints="4" NumberOfCells="1">
+    <FieldData><DataArray type="String" Name="model_source" format="ascii">build/tetra.step#sha256-known</DataArray></FieldData>
+    <PointData Scalars="stress" Vectors="displacement">
+      <DataArray type="Float64" Name="von Mises stress" Unit="MPa" format="ascii">10 25 40 82</DataArray>
+      <DataArray type="Float64" Name="displacement" Unit="mm" NumberOfComponents="3" format="ascii">0 0 0 0.1 0 0 0 0.2 0 0 0.34</DataArray>
+    </PointData>
+    <CellData/>
+    <Points><DataArray type="Float64" NumberOfComponents="3" format="ascii">0 0 0 40 0 0 0 30 0 0 0 12</DataArray></Points>
+    <Cells>
+      <DataArray type="Int32" Name="connectivity" format="ascii">0 1 2 3</DataArray>
+      <DataArray type="Int32" Name="offsets" format="ascii">4</DataArray>
+      <DataArray type="UInt8" Name="types" format="ascii">10</DataArray>
+    </Cells>
+  </Piece></UnstructuredGrid>
+</VTKFile>

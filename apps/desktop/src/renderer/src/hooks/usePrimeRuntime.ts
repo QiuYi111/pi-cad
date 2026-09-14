@@ -1,0 +1,74 @@
+import { useEffect, useReducer, useRef, useState } from "react";
+import type { ChatMessage, RuntimeStatus } from "@shared/contracts";
+import { reducePrimeEvent } from "../lib/activity";
+
+const seed: ChatMessage[] = [{
+  id: "welcome", role: "assistant", createdAt: Date.now(),
+  text: "Welcome. I can help define requirements, explore concepts, build, inspect, and release this design.",
+}];
+
+export function usePrimeRuntime() {
+  const [messages, dispatch] = useReducer(reducePrimeEvent, seed);
+  const [status, setStatus] = useState<RuntimeStatus>({ state: "idle", checks: [] });
+  const eventQueue = useRef<unknown[]>([]);
+  const pendingNewSession = useRef(false);
+  const frame = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    const offEvent = window.piCad.runtime.onEvent((event) => {
+      eventQueue.current.push(event);
+      if (frame.current !== undefined) return;
+      frame.current = window.requestAnimationFrame(() => {
+        frame.current = undefined;
+        const events = eventQueue.current.splice(0);
+        dispatch({ type: "desktop_event_batch", events });
+      });
+    });
+    const offStatus = window.piCad.runtime.onStatus(setStatus);
+    return () => { offEvent(); offStatus(); if (frame.current !== undefined) window.cancelAnimationFrame(frame.current); };
+  }, []);
+  useEffect(() => {
+    void window.piCad.runtime.restore().then((snapshot) => {
+      setStatus(snapshot.status);
+      if (snapshot.messages.length) dispatch({ type: "desktop_session_loaded", messages: snapshot.messages });
+    }).catch(() => undefined);
+  }, []);
+
+  const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>, prepare?: () => Promise<void>, sessionReady?: () => Promise<void>) => {
+    dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text });
+    const steering = status.state === "streaming";
+    if (!steering) dispatch({ type: "desktop_agent_pending" });
+    try {
+      await prepare?.();
+      if (pendingNewSession.current) {
+        pendingNewSession.current = false;
+        await window.piCad.runtime.newSession();
+      }
+      await sessionReady?.();
+      if (steering) await window.piCad.runtime.steer(text, images);
+      else await window.piCad.runtime.prompt(text, images);
+    }
+    catch (error) {
+      dispatch({ type: "desktop_agent_error", message: error instanceof Error ? error.message : String(error) });
+      throw error;
+    }
+  };
+
+  const newSession = async () => {
+    pendingNewSession.current = status.state === "ready";
+    dispatch({ type: "desktop_session_loaded", messages: [] });
+  };
+
+  const switchSession = async (path: string) => {
+    pendingNewSession.current = false;
+    const loaded = await window.piCad.runtime.switchSession(path);
+    dispatch({ type: "desktop_session_loaded", messages: loaded });
+  };
+  const setSessionName = (name: string) => window.piCad.runtime.setSessionName(name);
+  const clearConversation = () => dispatch({ type: "desktop_session_loaded", messages: [] });
+  const note = (text: string) => dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text: `Note · ${text}` });
+
+  return { messages, status, prompt, note, newSession, switchSession, setSessionName, clearConversation, start: () => window.piCad.runtime.start(), stop: () => window.piCad.runtime.stop(), abort: () => window.piCad.runtime.abort() };
+}
+
+export type PrimeRuntimeController = ReturnType<typeof usePrimeRuntime>;

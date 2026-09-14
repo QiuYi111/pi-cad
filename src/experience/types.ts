@@ -8,6 +8,7 @@ export interface HumanEvaluation {
   score: number | null;
   score_version: number;
   evaluated_at: string | null;
+  feedback?: string | null;
 }
 
 export interface BenchmarkEvaluation {
@@ -58,6 +59,7 @@ export interface ExperienceIndexEntry extends ExperienceMetadata {
   processed_tokens: number | null;
   duration_s: number | null;
   evaluation_status: "pending" | "evaluated";
+  feedback?: string | null;
   benchmark_evaluation: BenchmarkEvaluation | null;
 }
 

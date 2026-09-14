@@ -11,7 +11,7 @@ import { CadProjectStore, migrateProjectOnce, nowIso } from "../shared/store.ts"
 import { runBaselineAuto, runCandidateAuto, runConvertCandidateAuto, type PersistFn } from "./auto-actions.ts";
 import { recordObservation } from "./observation-index.ts";
 import { composeSystemPrompt } from "./context.ts";
-import { maybeRebuildContext, registerContextCompaction, renderTaskContext } from "./context-memory.ts";
+import { maybeRebuildContext, maybeRebuildContextV7, registerContextCompaction, renderTaskContext, renderV7WorkingContext } from "./context-memory.ts";
 import { maybeAutoContinue } from "./continuation.ts";
 import { registerControlTools, type ControllerDeps } from "./controller.ts";
 import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
@@ -392,7 +392,8 @@ export default function cadCore(pi: ExtensionAPI) {
         aggregateReadBudget: 1024 * 1024,
         aggregateEmitBudget: 96 * 1024,
       });
-      return { systemPrompt: `${event.systemPrompt}\n\n## Pi-CAD Harness Kernel v7\nworkflow=${loaded.workflow.id}@${loaded.workflow.version} hash=${loaded.workflow.hash}\nregistryContract=${loaded.registryContract.hash}\n\n${compiled.text}` };
+      const working = await renderV7WorkingContext(ctx.cwd, loaded.state.runId);
+      return { systemPrompt: `${event.systemPrompt}\n\n## Pi-CAD Harness Kernel v7\nworkflow=${loaded.workflow.id}@${loaded.workflow.version} hash=${loaded.workflow.hash}\nregistryContract=${loaded.registryContract.hash}\n\n${compiled.text}${working ? `\n\n${working}` : ""}` };
     }
     const store = new CadProjectStore(ctx.cwd);
     const [project, state] = await Promise.all([store.loadProject(), store.load()]);
@@ -510,7 +511,11 @@ export default function cadCore(pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    if (await selectKernelEngine(ctx.cwd) === "v7") return;
+    if (await selectKernelEngine(ctx.cwd) === "v7") {
+      const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+      if (loaded && loaded.state.status === "active") maybeRebuildContextV7(pi, loaded, ctx);
+      return;
+    }
     const store = new CadProjectStore(ctx.cwd);
     const state = await guardState(store);
     if (!state) return;

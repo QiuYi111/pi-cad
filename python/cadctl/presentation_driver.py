@@ -16,7 +16,7 @@ Never imported by cadctl itself. Deterministic by construction:
     sequence address the right occurrences
   - the assembly ANIMATION follows the declared install sequence: step 1
     parts assemble first, unlisted leftovers last
-  - CYCLES on CPU with a fixed seed and fixed sample count
+  - CYCLES on the first available GPU, with a CPU fallback and fixed settings
 
 The driver renders what the spec says, records how it interpreted the
 spec's vocabulary in the render report, and never judges aesthetic
@@ -131,6 +131,26 @@ def material_params(material: dict) -> tuple[tuple[float, float, float, float], 
     if pattern:
         roughness = min(max(roughness + MATERIAL_PATTERNS[pattern], 0.02), 1.0)
     return (*color, 1.0), metallic, roughness
+
+
+def configure_cycles_device(scene, preferences) -> dict:
+    """Select an available Cycles GPU without making rendering fail closed."""
+    for backend in ("CUDA", "OPTIX", "HIP", "ONEAPI", "METAL"):
+        try:
+            preferences.compute_device_type = backend
+            preferences.get_devices()
+        except (TypeError, ValueError, RuntimeError):
+            continue
+        devices = list(preferences.devices)
+        gpu_devices = [device for device in devices if device.type != "CPU"]
+        if not gpu_devices:
+            continue
+        for device in devices:
+            device.use = device in gpu_devices
+        scene.cycles.device = "GPU"
+        return {"backend": backend, "device": ", ".join(device.name for device in gpu_devices)}
+    scene.cycles.device = "CPU"
+    return {"backend": "CPU", "device": "CPU"}
 
 
 def _scene_bbox(objects):
@@ -315,7 +335,8 @@ def main() -> int:
 
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
-    scene.cycles.device = "CPU"
+    cycles_preferences = bpy.context.preferences.addons["cycles"].preferences
+    report["renderer"] = configure_cycles_device(scene, cycles_preferences)
     scene.cycles.samples = args["samples"]
     # The manifest declares seed 0; set it explicitly (the refactor that
     # added denoising handling dropped this line, leaving the manifest
