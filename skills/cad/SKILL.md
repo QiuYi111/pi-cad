@@ -42,6 +42,7 @@ cad.model.build(
     validation: str = "auto",
     parameters: dict[str, dict] | None = None,
 ) -> ArtifactRef
+cad.model.import_step(source: str | Path, output: str | Path | None = None) -> ArtifactRef
 cad.probe.run(
     *,
     subject: str | ArtifactRef = "current",
@@ -55,6 +56,7 @@ cad.review.prepare(candidate: Commit) -> dict
 
 The three engineering calls are therefore canonical exactly as
 `await cad.model.build("part.py", "part.step")`,
+`await cad.model.import_step("imports/reference.step")` for existing STEP files in the project,
 `await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")`,
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.

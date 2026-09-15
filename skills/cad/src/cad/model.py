@@ -70,3 +70,16 @@ async def build(
     ref = ArtifactRef(output_relative, digest, "candidate")
     await _attach_images(response.get("images") or [], ref)
     return ref
+
+
+async def import_step(
+    source: str | Path,
+    output: str | Path | None = None,
+    *,
+    force: bool = False,
+    validation: str = "auto",
+) -> ArtifactRef:
+    """Import a project STEP file through the normal validated, seven-view build path."""
+    if Path(source).suffix.lower() not in {".step", ".stp"}:
+        raise CadApiError("STEP import requires a .step or .stp file", error_type="ModelBuildError")
+    return await build(source, output, force=force, validation=validation)

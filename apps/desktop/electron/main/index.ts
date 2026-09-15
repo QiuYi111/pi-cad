@@ -385,8 +385,22 @@ function registerIpc() {
     if (testOpenSteps.length) return testOpenSteps.shift()!;
     if (desktopE2E && desktopE2EOpenStep) return desktopE2EOpenStep;
     const settings = await settingsStore.get();
-    const result = await dialog.showOpenDialog(mainWindow!, { title: "Open STEP model", defaultPath: settings.projectPath || undefined, properties: ["openFile"], filters: [{ name: "STEP model", extensions: ["step", "stp"] }] });
-    return result.canceled ? null : result.filePaths[0] || null;
+    const result = await dialog.showOpenDialog(mainWindow!, { title: "Import STEP into project", defaultPath: settings.projectPath || undefined, properties: ["openFile"], filters: [{ name: "STEP model", extensions: ["step", "stp"] }] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const runtime = await bridge();
+    const { projectPath } = await runtime.resolveRuntimePaths(settings);
+    if (!projectPath) throw new Error("Choose a project before importing STEP.");
+    const source = await runtime.toRuntimePath(result.filePaths[0]);
+    const name = result.filePaths[0].split(/[\\/]/).at(-1) || "model.step";
+    if (!/^[^\\/]+\.(step|stp)$/i.test(name)) throw new Error("Select a .step or .stp file.");
+    const hash = (await runtime.exec(["sha256sum", "--", source])).stdout.split(/\s/)[0];
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error("Could not verify the selected STEP file.");
+    const relative = `imports/${hash.slice(0, 16)}-${name}`;
+    const destination = `${projectPath}/${relative}`;
+    if (source === destination) return relative;
+    await runtime.exec(["mkdir", "-p", "--", `${projectPath}/imports`]);
+    await runtime.exec(["cp", "-n", "--", source, destination], { timeout: 120_000 });
+    return relative;
   });
   ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? demoMesh(path) : (await ensureViewer()).loadStep(await settingsStore.get(), path));
   ipcMain.handle(IPC.viewerExportStep, async (_event, source: string) => {

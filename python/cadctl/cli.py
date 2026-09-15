@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Sequence
@@ -69,7 +71,24 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 )
                 return 0
 
-            result = run_source(source, output, parameters=parameters)
+            if source.suffix.lower() in {".step", ".stp"}:
+                if parameters is not None:
+                    raise ValueError("STEP import does not accept model parameters")
+                if source.resolve() == output.resolve():
+                    raise ValueError("STEP import output must differ from its source")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".step", delete=False) as temporary:
+                    temporary_path = Path(temporary.name)
+                    try:
+                        with source.open("rb") as original:
+                            shutil.copyfileobj(original, temporary)
+                    except BaseException:
+                        temporary_path.unlink(missing_ok=True)
+                        raise
+                os.replace(temporary_path, output)
+                result = {"exitCode": 0, "sourceFiles": [str(source.resolve())], "stdout": "", "stderr": ""}
+            else:
+                result = run_source(source, output, parameters=parameters)
             if result.get("exitCode", 1) != 0:
                 emit_error(
                     "cad_build_step",

@@ -70,6 +70,21 @@ class CadctlBackendTests(unittest.TestCase):
         self.assertEqual(envelope["artifacts"][0]["kind"], "step")
         self.assertEqual(envelope["artifacts"][0]["sha256"], envelope["outputHashes"][str(step)])
 
+    def test_import_step_preserves_bytes_and_tracks_source(self) -> None:
+        source = self.build / "original.step"
+        self._build_plate()
+        source.write_bytes((self.build / "plate.step").read_bytes())
+        output = self.build / "imported.step"
+        first = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        second = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        self.assertTrue(first["ok"], first)
+        self.assertEqual(source.read_bytes(), output.read_bytes())
+        self.assertEqual(first["payload"]["cache"], "miss")
+        self.assertEqual(second["payload"]["cache"], "hit")
+        self.assertIn(str(source.resolve()), first["payload"]["sourceFiles"])
+        inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
+        self.assertTrue(inspected["payload"]["validity"]["ok"])
+
     def test_parameterized_build_calls_explicit_entrypoint(self) -> None:
         source = self.cwd / "parameterized.py"
         source.write_text(
