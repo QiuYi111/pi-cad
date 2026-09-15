@@ -763,7 +763,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "probe",
-        help="Run a read-only programmable B-Rep probe: arbitrary Python computation over the subject STEP, JSON result only",
+        help="Run arbitrary Python on a disposable STEP copy; return a JSON result without changing the candidate",
     )
     p.add_argument("--artifact", required=True)
     p.add_argument("--code-file", required=True, help="Path to the probe script (harness-managed temporary file)")

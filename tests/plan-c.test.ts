@@ -362,7 +362,7 @@ test("a managed rebuild revises build evidence and exposes the transition only a
   }
 });
 
-test("Python-facing probe bridge stays inside the existing fenced programmable backend", async () => {
+test("Python-facing probe runs arbitrary code on a disposable artifact", async () => {
   probeExtension({ registerTool() {} } as any);
   const { cwd, loaded } = await projectFixture();
   try {
@@ -413,10 +413,17 @@ test("Python-facing probe bridge stays inside the existing fenced programmable b
       }),
       /escapes the project root/,
     );
-    await assert.rejects(
-      handleAgentApi(cwd, { schema: 1, op: "probe", subject: "current", purpose: "blocked filesystem", code: "result = open('/tmp/nope')" }),
-      /NameError|failed/i,
-    );
+    const stateBefore = await store.load(mechanicalRegistries);
+    const scratch = await handleAgentApi(cwd, {
+      schema: 1, op: "probe", subject: "current", purpose: "cut a temporary section",
+      code: "import os\nfrom pathlib import Path\ncut = shape - bd.Box(1, 1, 1)\nprint('temporary section')\nPath('note.txt').write_text(str(cut.volume))\nPath(artifact_path).write_bytes(b'scratch changed')\nresult = {'volume': cut.volume, 'cwd': os.getcwd(), 'invocation': os.getenv('PI_CAD_INVOCATION_CWD'), 'note': Path('note.txt').read_text()}",
+    });
+    assert.ok((scratch as any).value.volume > 0);
+    assert.match((scratch as any).stdout, /temporary section/);
+    assert.notEqual((scratch as any).value.invocation, cwd);
+    await assert.rejects(import("node:fs/promises").then(({ access }) => access((scratch as any).value.cwd)), /ENOENT/);
+    assert.deepEqual(await import("node:fs/promises").then(({ readFile }) => readFile(join(cwd, artifact))), content);
+    assert.deepEqual((await store.load(mechanicalRegistries)).state.artifacts, stateBefore.state.artifacts);
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
