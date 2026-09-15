@@ -31,6 +31,11 @@ export function engineeringKnowledgeProbe(piCadRoot: string): { count: number; c
   };
 }
 
+export function managedPythonProbe(piCadRoot: string): string {
+  const python = `${piCadRoot}/python/.venv/bin/python`;
+  return `if ${JSON.stringify(python)} -c 'import build123d, cadctl' >/dev/null 2>&1; then printf 'cadpython=ready\\n'; else printf 'cadpython=missing\\n'; fi`;
+}
+
 export async function withCanonicalProjectEnvironment(
   bridge: RuntimeBridge,
   projectPath: string,
