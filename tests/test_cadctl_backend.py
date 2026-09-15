@@ -85,6 +85,24 @@ class CadctlBackendTests(unittest.TestCase):
         inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
         self.assertTrue(inspected["payload"]["validity"]["ok"])
 
+    def test_solidify_only_closed_step_surfaces(self) -> None:
+        import build123d as bd
+
+        closed = self.cwd / "closed-faces.step"
+        bd.export_step(bd.Compound(children=bd.Box(10, 20, 30).faces()), str(closed))
+        output = self.build / "closed-solid.step"
+        converted = run_cadctl("build", "--source", str(closed), "--output", str(output), "--solidify", cwd=self.cwd)
+        self.assertTrue(converted["ok"], converted)
+        inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
+        self.assertTrue(inspected["payload"]["validity"]["ok"], inspected)
+        self.assertEqual(inspected["payload"]["solidCount"], 1)
+
+        open_faces = self.cwd / "open-faces.step"
+        bd.export_step(bd.Rectangle(10, 20), str(open_faces))
+        rejected = run_cadctl("build", "--source", str(open_faces), "--output", str(self.build / "open-solid.step"), "--solidify", cwd=self.cwd)
+        self.assertFalse(rejected["ok"])
+        self.assertFalse((self.build / "open-solid.step").exists())
+
     def test_parameterized_build_calls_explicit_entrypoint(self) -> None:
         source = self.cwd / "parameterized.py"
         source.write_text(

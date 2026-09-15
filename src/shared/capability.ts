@@ -110,6 +110,7 @@ export interface CapabilityBuildInput {
   output: string;
   force?: boolean;
   parameters?: Record<string, ModelParameterValue>;
+  solidify?: boolean;
 }
 
 export async function buildStep(
@@ -127,6 +128,7 @@ export async function buildStep(
     output,
   ];
   if (input.parameters) args.push("--parameters-json", JSON.stringify(input.parameters));
+  if (input.solidify) args.push("--solidify");
   if (input.force) args.push("--force");
   return runCadctl(args, { cwd, timeoutMs });
 }

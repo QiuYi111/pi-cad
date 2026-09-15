@@ -256,6 +256,7 @@ def inspect_geometry(artifact: str | Path, validation: ValidationMode = "auto") 
         "volume": round(float(shape.volume), 6),
         "surfaceArea": round(float(shape.area), 6),
         "solidCount": len(solids),
+        "faceCount": len(shape.faces()),
         "validity": _validity(shape, validation),
         "occurrenceCount": max(len(solids), 1),
         "occurrences": [

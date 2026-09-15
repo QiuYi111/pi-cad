@@ -313,6 +313,54 @@ test("managed build rejects an objectively invalid B-Rep before it becomes workf
   }
 });
 
+test("STEP reference import observes a surface without making it a CAD candidate", async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-surface-reference-canonical-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  const { cwd, loaded } = await projectFixture();
+  try {
+    await writeFile(join(cwd, "surface.py"), "import build123d as bd\nresult = bd.Face.make_rect(10, 20)\n");
+    await assert.rejects(handleAgentApi(cwd, { schema: 1, op: "model-build", source: "surface.py", output: "build/surface.step" }), /noSolid/);
+    const imported = await handleAgentApi(cwd, {
+      schema: 1, op: "model-build", source: "build/surface.step", output: "references/surface.step", importMode: "reference",
+    }) as any;
+    assert.equal(imported.referenceType, "surface-reference");
+    assert.equal(imported.images.length, 7);
+    assert.deepEqual(await readFile(join(cwd, "build/surface.step")), await readFile(join(cwd, "references/surface.step")));
+    const current = await new HarnessRunStoreV7(cwd, loaded.state.runId).load(mechanicalRegistries);
+    assert.equal(current?.state.artifacts["candidate:authoritative"], undefined);
+    assert.equal(current?.state.evidence.length, 0);
+  } finally {
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});
+
+test("closed STEP faces solidify through the managed tool into a validated candidate", async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-closed-step-canonical-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  const { cwd, loaded } = await projectFixture();
+  try {
+    await writeFile(join(cwd, "closed-faces.py"), "import build123d as bd\nresult = bd.Compound(children=bd.Box(10, 20, 30).faces())\n");
+    await assert.rejects(handleAgentApi(cwd, { schema: 1, op: "model-build", source: "closed-faces.py", output: "build/closed-faces.step" }), /noSolid/);
+    const solidified = await handleAgentApi(cwd, {
+      schema: 1, op: "model-build", source: "build/closed-faces.step", output: "build/closed-solid.step", importMode: "solidify",
+    }) as any;
+    assert.equal(solidified.geometry.payload.solidCount, 1);
+    assert.equal(solidified.images.length, 7);
+    const current = await new HarnessRunStoreV7(cwd, loaded.state.runId).load(mechanicalRegistries);
+    assert.equal(current?.state.artifacts["candidate:authoritative"]?.path, "build/closed-solid.step");
+  } finally {
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});
+
 test("a managed rebuild revises build evidence and exposes the transition only after success", async () => {
   const canonical = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-rebuild-canonical-"));
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-rebuild-"));
