@@ -37,6 +37,19 @@ test("status bar reports retry, tool and stop phases", async () => {
     await page.waitForFunction(() => document.querySelector(".conversation-turn span")?.textContent === "Retrying 1/3", null, { timeout: 30_000, polling: 25 });
     await expect(page.getByText("Recovered after one retry.")).toBeAttached({ timeout: 30_000 });
 
+    // A reasoning limit is a live phase of the turn, not a terminal: the row
+    // keeps its clocks and reports no terminal reason until the retry arrives.
+    await composer.fill("Reasoning limit please");
+    await composer.press("Enter");
+    await page.waitForFunction(() => {
+      const row = document.querySelector(".conversation-turn");
+      return row?.querySelector("span")?.textContent === "Reasoning limit"
+        && Boolean(row.querySelector("time[data-timer='turn']"))
+        && !row.hasAttribute("data-terminal-reason");
+    }, null, { timeout: 30_000, polling: 25 });
+    await page.waitForFunction(() => document.querySelector(".conversation-turn span")?.textContent === "Retrying 1/3", null, { timeout: 30_000, polling: 25 });
+    await expect(page.getByText("Recovered from the reasoning limit.")).toBeAttached({ timeout: 30_000 });
+
     await composer.fill("Long calculation");
     await composer.press("Enter");
     await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Running tool", null, { timeout: 30_000, polling: 25 });
@@ -49,6 +62,7 @@ test("status bar reports retry, tool and stop phases", async () => {
     await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Stopped", null, { timeout: 30_000, polling: 25 });
     await expect(kernel).toHaveText("Stopped");
     await expect(page.locator(".stream-state").last()).toContainText("Stopped");
+    await expect(page.locator(".stream-state").last().locator("time")).toHaveCount(0);
   } finally {
     await application.close();
     await rm(root, { recursive: true, force: true });

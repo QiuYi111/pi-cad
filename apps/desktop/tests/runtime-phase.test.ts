@@ -46,6 +46,48 @@ describe("runtime turn projection", () => {
     expect(turnTimerParts(view!)).toEqual([]);
   });
 
+  it("keeps a failure live while the runtime may still retry it", () => {
+    // The runtime holds `failed` during the retry grace window: the turn has no
+    // terminal reason and no finish time, so the row must stay live with its clocks.
+    const view = turnPhaseView(status({
+      phase: "failed",
+      reason: "provider_unavailable",
+      message: "529 overloaded_error: Overloaded",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 9_000, phaseStartedAt: now - 1_000, lastEventAt: now - 1_000, retryAttempt: 0, phase: "failed", error: "529 overloaded_error: Overloaded" },
+    }), now)!;
+    expect(view).toMatchObject({ label: "Failed", terminal: false, reason: undefined });
+    expect(turnTimerParts(view).map((part) => part.key)).toEqual(["phase", "turn"]);
+  });
+
+  it("never reads a terminal outcome out of a phase name alone", () => {
+    for (const phase of ["aborted", "reasoning_limit", "provider_timeout", "rpc_timeout", "failed"] as const) {
+      const view = turnPhaseView(status({
+        phase,
+        turn: { id: "t1", kind: "prompt", startedAt: now - 3_000, phaseStartedAt: now - 3_000, lastEventAt: now - 3_000, retryAttempt: 0, phase },
+      }), now)!;
+      expect(view.terminal).toBe(false);
+      expect(turnTimerParts(view).map((part) => part.key)).toEqual(["phase", "turn"]);
+    }
+  });
+
+  it("takes the terminal reason from the turn record when the status omits it", () => {
+    const view = turnPhaseView(status({
+      state: "ready",
+      phase: "aborted",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 3_000, phaseStartedAt: now - 3_000, lastEventAt: now - 3_000, retryAttempt: 0, phase: "aborted", finishedAt: now, terminalReason: "aborted" },
+    }), now)!;
+    expect(view).toMatchObject({ label: "Stopped", terminal: true, reason: "aborted" });
+    expect(turnTimerParts(view)).toEqual([]);
+  });
+
+  it("hides a completed turn reported only on the turn record", () => {
+    expect(turnPhaseView(status({
+      state: "ready",
+      phase: "ready",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 3_000, phaseStartedAt: now - 3_000, lastEventAt: now - 3_000, retryAttempt: 0, phase: "ready", finishedAt: now, terminalReason: "completed" },
+    }), now)).toBeUndefined();
+  });
+
   it("shows nothing once a turn completed with an answer", () => {
     expect(turnPhaseView(status({
       state: "ready",

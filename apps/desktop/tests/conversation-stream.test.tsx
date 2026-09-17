@@ -59,4 +59,28 @@ describe("conversation turn row", () => {
     })} />);
     expect(html).not.toContain("stream-state");
   });
+
+  it("keeps the row and its clocks while a failure waits out the retry grace", () => {
+    const html = renderToStaticMarkup(<Conversation messages={messages} status={status({
+      phase: "failed",
+      reason: "provider_unavailable",
+      message: "529 overloaded_error: Overloaded",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 9_000, phaseStartedAt: now - 1_000, lastEventAt: now - 1_000, retryAttempt: 0, phase: "failed", error: "529 overloaded_error: Overloaded" },
+    })} />);
+    expect(html).toContain("Failed");
+    expect(html).not.toContain("data-terminal-reason");
+    expect(html).toContain("turn 9s");
+  });
+
+  it("marks the row terminal only once the runtime ends the turn", () => {
+    const html = renderToStaticMarkup(<Conversation messages={[{ ...messages[1]!, stream: { startedAt: now - 4_000, finishedAt: now } }]} status={status({
+      state: "ready",
+      phase: "aborted",
+      terminalReason: "aborted",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 4_000, phaseStartedAt: now - 1_000, lastEventAt: now - 1_000, retryAttempt: 0, phase: "aborted", finishedAt: now, terminalReason: "aborted" },
+    })} />);
+    expect(html).toContain("Stopped");
+    expect(html).toContain('data-terminal-reason="aborted"');
+    expect(html).not.toContain("data-timer");
+  });
 });

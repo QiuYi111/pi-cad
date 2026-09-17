@@ -80,6 +80,22 @@ export class DemoRuntime extends EventEmitter {
       this.messages.push({ id: `demo-assistant-${generation}`, role: "assistant", content: "Recovered after one retry." });
       return;
     }
+    if (/reasoning limit/i.test(message)) {
+      // A reasoning limit is not the end of the turn: the runtime holds the
+      // phase through the retry grace, so clients can see it as a live state.
+      this.event({ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "Still working" }], stopReason: "error", errorMessage: "Reasoning budget exhausted for this turn", id: "demo-limit" } });
+      await this.waitForTurn(900, generation);
+      if (generation !== this.generation) return;
+      this.event({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 600, errorMessage: "Reasoning budget exhausted for this turn" });
+      await this.waitForTurn(650, generation);
+      if (generation !== this.generation) return;
+      this.event({ type: "auto_retry_end", success: true, attempt: 1 });
+      this.event({ type: "message_update", message: { role: "assistant", id: "demo-limit" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Recovered from the reasoning limit." } });
+      this.event({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Recovered from the reasoning limit." }], id: "demo-limit", stopReason: "stop" } });
+      this.event({ type: "agent_end", messages: [] });
+      this.messages.push({ id: `demo-assistant-${generation}`, role: "assistant", content: "Recovered from the reasoning limit." });
+      return;
+    }
     if (/simulate interruption/i.test(message)) {
       this.event({ type: "agent_abort" });
       this.runtime.base({ state: "error", message: "The demo worker exited unexpectedly." });

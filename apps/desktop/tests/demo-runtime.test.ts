@@ -21,6 +21,23 @@ describe("demo runtime phases", () => {
     expect(runtime.status).toMatchObject({ state: "ready", phase: "ready", terminalReason: "completed" });
   });
 
+  it("holds a reasoning limit as a live phase until the retry grace resolves it", async () => {
+    const runtime = new DemoRuntime();
+    const seen: RuntimeStatus[] = [];
+    runtime.on("status", (status: RuntimeStatus) => seen.push(status));
+    await runtime.start(settings);
+    const running = runtime.prompt("Reasoning limit please");
+    await new Promise((accept) => setTimeout(accept, 300));
+    // Inside the grace window the runtime reports the limit but has not ended the turn.
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "reasoning_limit" });
+    expect(runtime.status.terminalReason).toBeUndefined();
+    expect(runtime.status.turn?.finishedAt).toBeUndefined();
+    await running;
+    expect(seen.some((status) => status.phase === "reasoning_limit")).toBe(true);
+    expect(seen.some((status) => status.phase === "retrying")).toBe(true);
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "ready", terminalReason: "completed" });
+  });
+
   it("confirms stop with an aborted terminal state", async () => {
     const runtime = new DemoRuntime();
     await runtime.start(settings);

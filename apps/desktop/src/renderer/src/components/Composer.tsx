@@ -39,6 +39,8 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const currentModel = catalogModels.find((model) => model.provider === settings.provider && model.id === settings.model)
     || availableModels.find((model) => model.id === settings.model);
   const thinkingLevels = thinkingLevelOptions(currentModel, settings.thinking);
+  const thinkingValue = thinkingLevels.includes(settings.thinking) ? settings.thinking : thinkingLevels[0]!;
+  const normalizedThinking = normalizeThinkingLevel(currentModel, settings.thinking);
   const storageKey = `reify.pending.${queueKey || "unconfigured"}`;
   const draftKey = `reify.draft.${queueKey || "unconfigured"}`;
   useEffect(() => { imagesRef.current = images; }, [images]);
@@ -118,6 +120,12 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
     await onSettingsChange({ thinking });
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.setThinking(thinking);
   };
+  // A saved level the model does not list is folded into a real one as soon as
+  // the catalog answers; the runtime would reject the stale value anyway.
+  useEffect(() => {
+    if (normalizedThinking === settings.thinking) return;
+    void changeThinking(normalizedThinking);
+  }, [normalizedThinking, settings.thinking]);
   const changePermission = async (permission: AppSettings["permission"]) => {
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();
     await onSettingsChange({ permission });
@@ -144,7 +152,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       {streaming && <label className="composer-chip">Send as<select aria-label="Running request action" value={runningIntent} onChange={(event) => setRunningIntent(event.target.value as RunningIntent)}><option value="queue">After current task</option><option value="replace">Stop and modify</option><option value="note">Note only</option></select></label>}
       <label className="composer-chip"><ShieldCheck size={14} /><select aria-label="Permission" value={settings.permission} onChange={(event) => void changePermission(event.target.value as AppSettings["permission"])}><option value="workspace">Workspace</option><option value="read-only">Read only</option></select></label>
       <label className="composer-chip"><Box size={14} /><select aria-label="Model" value={settings.model} onChange={(event) => void changeModel(event.target.value)}>{availableModels.map((model) => <option key={`${model.provider}/${model.id}`} value={model.id}>{shortModel(model.name)}</option>)}</select></label>
-      <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={settings.thinking} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{thinkingLevels.map((level) => <option key={level} value={level}>{thinkingLevelLabel(level)}</option>)}</select></label>
+      <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={thinkingValue} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{thinkingLevels.map((level) => <option key={level} value={level}>{thinkingLevelLabel(level)}</option>)}</select></label>
       <span className="composer-spacer" />
       <button className={`send-button ${starting || stopping || (streaming && !text.trim()) ? "busy" : ""}`} onClick={() => streaming && !text.trim() ? void abort() : void send()} aria-label={stopping ? "Stopping" : streaming && !text.trim() ? "Stop" : streaming ? runningIntent === "queue" ? "Queue request" : runningIntent === "replace" ? "Stop and modify" : "Save note" : "Send"} disabled={starting || stopping}>
         {streaming && !text.trim() ? <><Square size={13} fill="currentColor" />{stopping && <span>Stopping…</span>}</> : <ArrowUp size={18} />}
@@ -161,10 +169,27 @@ export function supportedThinkingLevels(model: ModelChoice | undefined): Thinkin
   return model?.thinkingLevels?.length ? model.thinkingLevels : FALLBACK_THINKING_LEVELS;
 }
 
-/** Selector options, keeping the saved level visible if the catalog does not list it yet. */
+/**
+ * Selector options. Once the catalog answers, the options are exactly the
+ * levels that model can run, so a saved level the model does not support is
+ * dropped instead of staying selectable. Before the catalog answers the saved
+ * level is kept visible, otherwise the selector would have nothing to show.
+ */
 export function thinkingLevelOptions(model: ModelChoice | undefined, current: ThinkingLevel): ThinkingLevel[] {
   const levels = supportedThinkingLevels(model);
+  if (model?.thinkingLevels?.length) return levels;
   return levels.includes(current) ? levels : [current, ...levels];
+}
+
+/**
+ * The level the model can actually run: the saved one when the catalog lists
+ * it, otherwise the model's own first level. Unknown catalogs keep the saved
+ * value, because nothing better is known yet.
+ */
+export function normalizeThinkingLevel(model: ModelChoice | undefined, current: ThinkingLevel): ThinkingLevel {
+  const levels = model?.thinkingLevels;
+  if (!levels?.length || levels.includes(current)) return current;
+  return levels[0]!;
 }
 
 export { thinkingLevelLabel };

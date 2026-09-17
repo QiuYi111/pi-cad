@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { thinkingLevelLabel, thinkingLevelOptions } from "../src/renderer/src/components/Composer";
+import { normalizeThinkingLevel, thinkingLevelLabel, thinkingLevelOptions } from "../src/renderer/src/components/Composer";
 import type { ModelChoice } from "../src/shared/contracts";
 
 const model = (thinkingLevels?: ModelChoice["thinkingLevels"]): ModelChoice => ({ provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, thinkingLevels });
@@ -14,8 +14,19 @@ describe("composer thinking selector", () => {
     expect(thinkingLevelLabel("off")).toBe("Off");
   });
 
-  it("keeps the saved level visible before the catalog answers", () => {
+  it("drops a saved level the catalog does not list instead of offering it back", () => {
+    expect(thinkingLevelOptions(model(["off", "high"]), "xhigh")).toEqual(["off", "high"]);
+    expect(thinkingLevelOptions(model(["minimal", "low", "medium"]), "max")).toEqual(["minimal", "low", "medium"]);
+  });
+
+  it("folds a saved level into one the model really supports", () => {
+    expect(normalizeThinkingLevel(model(["off", "high"]), "xhigh")).toBe("off");
+    expect(normalizeThinkingLevel(model(["minimal", "low", "medium"]), "medium")).toBe("medium");
+  });
+
+  it("keeps the saved level until the catalog answers", () => {
     expect(thinkingLevelOptions(undefined, "medium")).toContain("medium");
-    expect(thinkingLevelOptions(model(["off"]), "xhigh")[0]).toBe("xhigh");
+    expect(normalizeThinkingLevel(undefined, "medium")).toBe("medium");
+    expect(normalizeThinkingLevel({ provider: "openai-codex", id: "gpt-5.6-luna", name: "GPT-5.6 Luna" }, "xhigh")).toBe("xhigh");
   });
 });

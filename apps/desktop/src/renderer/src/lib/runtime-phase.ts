@@ -1,9 +1,7 @@
-import type { RuntimePhase, RuntimeStatus } from "@shared/contracts";
+import type { RuntimePhase, RuntimeStatus, RuntimeTerminalReason } from "@shared/contracts";
 
 /** Below this a silent gap is too short to be worth a reading. */
 const SILENT_VISIBLE_MS = 5_000;
-
-const TERMINAL_PHASES = new Set<RuntimePhase>(["aborted", "reasoning_limit", "provider_timeout", "rpc_timeout", "failed"]);
 
 /**
  * Name the phase the runtime reported. Every value comes from `RuntimeStatus`;
@@ -42,6 +40,8 @@ export interface TurnPhaseView {
   phase: RuntimePhase;
   label: string;
   terminal: boolean;
+  /** The runtime's terminal reason, once the turn is over. */
+  reason?: RuntimeTerminalReason;
   turnSeconds: number;
   phaseSeconds: number;
   silentSeconds: number;
@@ -63,15 +63,21 @@ export function turnPhaseView(status: RuntimeStatus, now: number): TurnPhaseView
   const turn = status.turn;
   if (!turn) return undefined;
   const phase = status.phase ?? turn.phase;
-  const terminal = Boolean(turn.finishedAt) || TERMINAL_PHASES.has(phase);
+  // Only the runtime decides a turn is over. A terminal phase name is not
+  // enough: while a provider failure waits out its retry grace the runtime
+  // holds `failed` / `provider_timeout` / `reasoning_limit` and the turn is
+  // still alive, so the row must stay live instead of flashing a terminal.
+  const reason = status.terminalReason ?? turn.terminalReason;
+  const terminal = Boolean(turn.finishedAt) || Boolean(reason);
   // A completed turn ends in the answer text; only abnormal ends keep a row.
-  if (terminal && status.terminalReason === "completed") return undefined;
+  if (terminal && reason === "completed") return undefined;
   const end = turn.finishedAt || now;
   const silentMs = Math.max(0, end - turn.lastEventAt);
   return {
     phase,
     label: phaseLabel({ ...status, phase }),
     terminal,
+    reason,
     turnSeconds: Math.max(0, (end - turn.startedAt) / 1_000),
     phaseSeconds: Math.max(0, (end - turn.phaseStartedAt) / 1_000),
     silentSeconds: silentMs / 1_000,

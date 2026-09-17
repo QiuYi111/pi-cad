@@ -39,7 +39,7 @@ const TurnPhaseRow = memo(function TurnPhaseRow({ status }: { status: RuntimeSta
     return () => window.clearInterval(timer);
   }, [active]);
   if (!view) return null;
-  return <div className={`conversation-turn stream-state ${view.phase}`} data-terminal-reason={view.terminal ? status.terminalReason : undefined}>
+  return <div className={`conversation-turn stream-state ${view.phase}`} data-terminal-reason={view.terminal ? view.reason : undefined}>
     <i /><span>{view.label}</span>
     {turnTimerParts(view).map((part) => <time key={part.key} data-timer={part.key}>{part.text}</time>)}
   </div>;
