@@ -222,6 +222,54 @@ describe("Prime runtime phases", () => {
   });
 });
 
+describe("runtime journal", () => {
+  it("records the turn, every phase move and the terminal reason in order", () => {
+    const runtime = new PrimeRuntimeState({ state: "ready", checks: [] }, { now: () => 1_000 });
+    runtime.beginTurn("prompt", "turn-1");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: ".." } });
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: ".." } });
+    runtime.applyEvent({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2_000, errorMessage: "529 overloaded_error: Overloaded" });
+    runtime.applyEvent({ type: "auto_retry_end", success: true, attempt: 1 });
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: "ok" } });
+    runtime.applyEvent({ type: "agent_end", messages: [] });
+
+    const entries = runtime.drain();
+    // Repeated stream deltas stay inside one phase: only real moves are journaled.
+    expect(entries.map((entry) => entry.event)).toEqual([
+      "turn_started",
+      "phase:waiting_provider",
+      "phase:thinking",
+      "phase:retrying",
+      "phase:provider_wait",
+      "phase:responding",
+      "terminal:completed",
+    ]);
+    expect(entries.every((entry) => entry.turnId === "turn-1")).toBe(true);
+    expect(entries.every((entry) => /T\d{2}:\d{2}:\d{2}\.\d{3}[+-]\d{2}:\d{2}$/.test(entry.at))).toBe(true);
+    expect(entries.at(-1)).toMatchObject({ phase: "ready", detail: "turn_complete" });
+    expect(entries[3]).toMatchObject({ phase: "retrying", detail: "provider_unavailable" });
+    expect(runtime.drain()).toEqual([]);
+  });
+
+  it("keeps one terminal line when stale events arrive after an abort", () => {
+    const runtime = state();
+    runtime.beginTurn("prompt", "turn-1");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.beginStopping();
+    runtime.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "aborted" } });
+    runtime.applyEvent({ type: "agent_end", messages: [{ role: "assistant", stopReason: "aborted" }] });
+    runtime.applyEvent({ type: "agent_status", taskState: "needs_input", summary: "" });
+
+    expect(runtime.drain().map((entry) => entry.event)).toEqual([
+      "turn_started",
+      "phase:waiting_provider",
+      "phase:stopping",
+      "terminal:aborted",
+    ]);
+  });
+});
+
 describe("provider failure classification", () => {
   it.each([
     ["Request timed out", "provider_timeout"],

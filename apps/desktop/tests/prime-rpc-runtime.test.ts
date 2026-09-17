@@ -1,6 +1,8 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PrimeRpc } from "../electron/main/prime-rpc";
+import { PrimeRpc, projectRuntimeJournal } from "../electron/main/prime-rpc";
+import type { RuntimeTraceEntry } from "../electron/main/runtime-state";
+import type { RuntimeBridge } from "../electron/main/runtime-bridge";
 import type { RuntimeStatus } from "../src/shared/contracts";
 
 /** Minimal stand-in for the Prime sidecar process. */
@@ -131,5 +133,60 @@ describe("PrimeRpc runtime state", () => {
     const { runtime, request } = harness();
     await runtime.abort();
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("writes the runtime journal while a turn moves", async () => {
+    const { runtime, send } = harness();
+    const lines: RuntimeTraceEntry[] = [];
+    (runtime as any).journal = async (entries: RuntimeTraceEntry[]) => { lines.push(...entries); };
+
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    send({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 1_000, errorMessage: "529 overloaded_error: Overloaded" });
+    send({ type: "auto_retry_end", success: true, attempt: 1 });
+    send({ type: "agent_end", messages: [] });
+
+    expect(lines.map((line) => line.event)).toEqual([
+      "turn_started",
+      "phase:waiting_provider",
+      "phase:retrying",
+      "phase:provider_wait",
+      "terminal:completed",
+    ]);
+    expect(lines.every((line) => line.turnId === "turn-1")).toBe(true);
+  });
+});
+
+describe("runtime journal file", () => {
+  function bridge(calls: Array<{ args: string[]; input: string }>): Pick<RuntimeBridge, "pipe"> {
+    return {
+      pipe: async (args: string[], input: string) => {
+        calls.push({ args, input });
+        return { stdout: "", stderr: "" };
+      },
+    } as Pick<RuntimeBridge, "pipe">;
+  }
+
+  it("appends journal entries as JSON lines beside the project", async () => {
+    const calls: Array<{ args: string[]; input: string }> = [];
+    const journal = projectRuntimeJournal(bridge(calls), "/home/eng/demo/");
+    expect(journal).toBeDefined();
+    await journal!([
+      { at: "2026-09-17T20:00:00.000+08:00", phase: "retrying", event: "phase:retrying", turnId: "turn-1", detail: "attempt 1 of 3" },
+      { at: "2026-09-17T20:00:02.000+08:00", phase: "provider_wait", event: "phase:provider_wait", turnId: "turn-1" },
+    ]);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.args[2]).toContain("/home/eng/demo/.pi-cad/desktop-runtime.jsonl");
+    const written = calls[0]!.input.trim().split("\n").map((line) => JSON.parse(line));
+    expect(written).toHaveLength(2);
+    expect(written[0]).toMatchObject({ event: "phase:retrying", phase: "retrying", turnId: "turn-1", detail: "attempt 1 of 3" });
+    expect(calls[0]!.input.endsWith("\n")).toBe(true);
+  });
+
+  it("skips the journal when the project folder is unknown", async () => {
+    const calls: Array<{ args: string[]; input: string }> = [];
+    expect(projectRuntimeJournal(bridge(calls), "")).toBeUndefined();
+    expect(calls).toHaveLength(0);
   });
 });

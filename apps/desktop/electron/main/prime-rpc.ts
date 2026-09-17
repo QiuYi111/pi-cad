@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
 import { runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
-import { MODEL_WAIT_PHASES, PrimeRuntimeState } from "./runtime-state.js";
+import { MODEL_WAIT_PHASES, PrimeRuntimeState, type RuntimeTraceEntry } from "./runtime-state.js";
 
 interface PendingRequest {
   accept: (value: any) => void;
@@ -36,6 +36,7 @@ export class PrimeRpc extends EventEmitter {
   private stallTimer?: NodeJS.Timeout;
   private failureTimer?: NodeJS.Timeout;
   private turnWaiters = new Set<() => void>();
+  private journal?: (entries: RuntimeTraceEntry[]) => Promise<void>;
 
   constructor(private readonly bridge: RuntimeBridge, options: PrimeRpcOptions = {}) {
     super();
@@ -57,6 +58,7 @@ export class PrimeRpc extends EventEmitter {
     await ensureRuntimeReady(this.bridge, settings, (status) => this.merge(status));
     const paths = await this.bridge.resolveRuntimePaths(settings);
     if (!paths.projectPath) throw new Error("Choose a project folder before starting Prime.");
+    this.journal = projectRuntimeJournal(this.bridge, paths.projectPath);
     try {
       await this.bridge.exec(["test", "-d", paths.projectPath]);
     } catch {
@@ -283,11 +285,19 @@ export class PrimeRpc extends EventEmitter {
       action();
     } finally {
       this.syncTimers();
+      this.flushTrace();
       if (this.runtime.status !== before) this.emit("status", this.runtime.status);
       if (!this.runtime.activeTurn()) {
         for (const waiter of [...this.turnWaiters]) waiter();
       }
     }
+  }
+
+  /** Append the journal lines the state machine produced since the last flush. */
+  private flushTrace() {
+    const entries = this.runtime.drain();
+    if (!this.journal || !entries.length) return;
+    void this.journal(entries).catch(() => undefined);
   }
 
   private syncTimers() {
@@ -330,6 +340,31 @@ export function sandboxSessionPath(path: string): string {
   const name = path.replaceAll("\\", "/").split("/").at(-1) || "";
   if (!/^[A-Za-z0-9._-]+\.jsonl$/.test(name)) throw new Error("Invalid session path.");
   return `/workspace/.prime-sessions/${name}`;
+}
+
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * The runtime journal is the replayable record of Prime turn states: it lives
+ * beside the project so a stalled, retried or aborted run can be reconstructed
+ * later instead of only being visible in the moment.
+ */
+export function projectRuntimeJournal(
+  bridge: Pick<RuntimeBridge, "pipe">,
+  projectPath: string,
+  relative = ".pi-cad/desktop-runtime.jsonl",
+): ((entries: RuntimeTraceEntry[]) => Promise<void>) | undefined {
+  if (!projectPath) return undefined;
+  const target = `${projectPath.replace(/\/+$/, "")}/${relative}`;
+  const directory = target.slice(0, target.lastIndexOf("/"));
+  const command = `mkdir -p ${shellQuote(directory)} && cat >> ${shellQuote(target)}`;
+  return async (entries) => {
+    if (!entries.length) return;
+    const lines = `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+    await bridge.pipe(["sh", "-c", command], lines, 10_000);
+  };
 }
 
 export async function ensureRuntimeReady(

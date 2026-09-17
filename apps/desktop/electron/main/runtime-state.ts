@@ -58,6 +58,36 @@ export interface ProviderFailure {
   reason: string;
 }
 
+/**
+ * One replayable line of the runtime journal. The desktop appends these to
+ * `<project>/.pi-cad/desktop-runtime.jsonl` so a stalled, retried or aborted
+ * run can be reconstructed after the fact.
+ */
+export interface RuntimeTraceEntry {
+  /** Local ISO-8601 with the machine's UTC offset, so the log matches the wall clock. */
+  at: string;
+  phase: RuntimePhase;
+  event: string;
+  turnId?: string;
+  detail?: string;
+}
+
+/** Local ISO-8601 with the machine's UTC offset, so logs read like the lab clock. */
+export function localIso(millis: number): string {
+  const date = new Date(millis);
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes < 0 ? "-" : "+";
+  const absolute = Math.abs(offsetMinutes);
+  const pad = (value: number, size = 2) => String(value).padStart(size, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}${sign}${pad(Math.floor(absolute / 60))}:${pad(absolute % 60)}`;
+}
+
+function traceDetail(value: unknown, limit = 200): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  return trimmed ? trimmed.slice(0, limit) : undefined;
+}
+
 /** Map a provider/SDK error message to one distinguishable terminal reason. */
 export function classifyProviderFailure(message?: string): ProviderFailure {
   const text = String(message ?? "").toLowerCase();
@@ -151,6 +181,7 @@ export class PrimeRuntimeState {
   private readonly now: () => number;
   private pending?: { terminalReason: RuntimeTerminalReason; reason: string; message?: string };
   private sequence = 0;
+  private readonly entries: RuntimeTraceEntry[] = [];
 
   constructor(initial: RuntimeStatus = { state: "idle", checks: [] }, options: PrimeRuntimeStateOptions = {}) {
     this.status = initial;
@@ -166,6 +197,11 @@ export class PrimeRuntimeState {
   activeTurn(): RuntimeTurn | undefined {
     const turn = this.status.turn;
     return turn && !turn.terminalReason ? turn : undefined;
+  }
+
+  /** Take the journal lines recorded since the last call; the caller persists them. */
+  drain(): RuntimeTraceEntry[] {
+    return this.entries.splice(0, this.entries.length);
   }
 
   /** Merge lifecycle fields produced outside the turn (setup, install, start, stop). */
@@ -216,6 +252,7 @@ export class PrimeRuntimeState {
       turn,
       lastEventAt: now,
     };
+    this.record("turn_started", `${kind} accepted`);
   }
 
   /** Apply one raw Prime RPC event. All events are JSON records from stdout. */
@@ -251,7 +288,10 @@ export class PrimeRuntimeState {
         if (event.message?.role !== "assistant") break;
         const failure = classifyMessageEnd(event.message);
         if (failure) this.noteFailure(event.message?.errorMessage, failure);
-        else this.touch(event.message?.stopReason === "length" ? "output_limit" : undefined);
+        else {
+          this.touch(event.message?.stopReason === "length" ? "output_limit" : undefined);
+          this.record("message_end", traceDetail(event.message?.stopReason));
+        }
         break;
       }
       case "tool_execution_start":
@@ -320,7 +360,14 @@ export class PrimeRuntimeState {
             reason: "extension_error",
             message: String(event.error ?? "Prime extension failed"),
           };
+          this.record("event:extension_error", traceDetail(event.error));
         }
+        break;
+      case "agent_status":
+        // Prime reports its own verdict next to the runtime phases; keep it as
+        // evidence without letting it move the phase the state machine owns.
+        this.record("event:agent_status", traceDetail(event.status?.summary ?? event.summary));
+        this.touch();
         break;
       case "session_action_update":
         this.touch();
@@ -368,6 +415,7 @@ export class PrimeRuntimeState {
       // The stop handshake is still running; keep its phase and record the
       // transport timeout as the reason.
       this.status = { ...this.status, reason: "rpc_timeout", message };
+      this.record("rpc_timeout", message);
       return;
     }
     // Prime may still be working; record the transport timeout without
@@ -399,6 +447,7 @@ export class PrimeRuntimeState {
   processExited(code: number | null, signal: string | null, forced = false): void {
     const detail = `Prime exited (${signal || code || 0})`;
     this.pending = undefined;
+    this.record("process_exit", detail);
     const settled = this.status.turn?.terminalReason;
     if (settled) {
       if (!forced && settled === "completed") {
@@ -431,6 +480,7 @@ export class PrimeRuntimeState {
       terminalReason: undefined,
       turn: undefined,
     };
+    this.record("session_ready", sessionId);
   }
 
   private startOrResumeTurn(): void {
@@ -462,6 +512,7 @@ export class PrimeRuntimeState {
       turn,
       lastEventAt: now,
     };
+    this.record("turn_started", "agent_start");
   }
 
   private noteFailure(message?: string, classified?: ProviderFailure): void {
@@ -485,6 +536,7 @@ export class PrimeRuntimeState {
         lastEventAt: now,
       };
     }
+    this.record(`failure:${failure.reason}`, detail);
   }
 
   /** Move to a live phase of the active turn. */
@@ -492,6 +544,10 @@ export class PrimeRuntimeState {
     const now = this.now();
     const turn = this.activeTurn();
     if (!turn) return;
+    // Stream deltas re-enter the same phase; only real phase moves get a journal line.
+    const changed = turn.phase !== phase
+      || (options.reason !== undefined && options.reason !== turn.reason)
+      || (options.retryAttempt !== undefined && options.retryAttempt !== turn.retryAttempt);
     const nextTurn: RuntimeTurn = {
       ...turn,
       phase,
@@ -512,6 +568,7 @@ export class PrimeRuntimeState {
       turn: nextTurn,
       lastEventAt: now,
     };
+    if (changed) this.record(`phase:${phase}`, traceDetail(options.message) ?? options.reason);
   }
 
   private touch(reason?: string): void {
@@ -524,6 +581,16 @@ export class PrimeRuntimeState {
       lastEventAt: now,
       turn: { ...turn, reason: reason ?? turn.reason, lastEventAt: now },
     };
+  }
+
+  private record(event: string, detail?: string): void {
+    this.entries.push({
+      at: localIso(this.now()),
+      phase: this.status.phase ?? "ready",
+      event,
+      ...(this.status.turn?.id ? { turnId: this.status.turn.id } : {}),
+      ...(detail ? { detail } : {}),
+    });
   }
 
   /** Terminal outcome for the current turn. Stale or lower-priority terminals are ignored. */
@@ -564,5 +631,6 @@ export class PrimeRuntimeState {
         lastEventAt: now,
       };
     }
+    this.record(`terminal:${reason}`, traceDetail(options.message) ?? options.reason);
   }
 }
