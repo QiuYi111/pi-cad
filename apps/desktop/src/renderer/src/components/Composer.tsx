@@ -43,9 +43,17 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
         accepted: () => { setThinkingSyncError(undefined); },
         rejected: (message) => setThinkingSyncError(message),
         retry: (delayMs) => { thinkingRetry.current = setTimeout(() => setThinkingAttempt((attempt) => attempt + 1), delayMs); },
+        // The setting moved back onto the level the session already runs, or the
+        // session was switched to one that matches: the split is gone, so the
+        // warning has to go with it instead of waiting for a new delivery.
+        consistent: () => { setThinkingSyncError(undefined); },
       },
     });
   }
+  // Statuses are ordered where the renderer commits them, so the reconciliation
+  // can tell a split Prime reported after a delivery from a render that was
+  // already on screen when the delivery landed.
+  thinkingReconciler.current.noteReading(status);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = runtimeTurnActive(status);
   const starting = status.state === "starting";

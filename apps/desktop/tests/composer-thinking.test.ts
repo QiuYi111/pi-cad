@@ -79,8 +79,9 @@ describe("composer thinking level delivery", () => {
     const delivered = { sessionId: "session-a", level: "high" as const };
     const switched = status("ready", { sessionId: "session-b", thinking: "medium" });
     expect(pendingThinkingLevel(switched, "high", delivered)).toBe("high");
-    // Once that session has been told, the same level is not sent again.
-    expect(pendingThinkingLevel(switched, "high", { sessionId: "session-b", level: "high" })).toBeUndefined();
+    // That session is still reported on another level than the saved one, so the
+    // marker for the level it was told does not settle the question.
+    expect(pendingThinkingLevel(switched, "high", { sessionId: "session-b", level: "high" })).toBe("high");
     // The status the switch published is enough even without a marker.
     expect(pendingThinkingLevel(switched, "high")).toBe("high");
   });
@@ -91,6 +92,14 @@ describe("composer thinking level delivery", () => {
     expect(pendingThinkingLevel(status("ready", { sessionId: "session-b", thinking: "high" }), "high")).toBeUndefined();
     expect(pendingThinkingLevel(status("ready", { sessionId: "session-b", thinking: "medium" }), "high")).toBe("high");
     expect(pendingThinkingLevel(status("ready", { sessionId: "session-b" }), "high", { sessionId: "session-b", level: "high" })).toBeUndefined();
+  });
+
+  // A session that was already told `high` can be reported on `medium` later —
+  // the old request landed last, or the sidecar recovered on its own. The fresh
+  // report has to win over the delivered marker, or the split stays forever.
+  it("reconciles a level Prime reports after that level was delivered", () => {
+    const reported = status("ready", { sessionId: "session-b", thinking: "medium" });
+    expect(pendingThinkingLevel(reported, "high", { sessionId: "session-b", level: "high" })).toBe("high");
   });
 
   // A rejected RPC must leave the marker empty, otherwise the next
@@ -157,14 +166,17 @@ function recordingEvents() {
   const accepted: ThinkingDelivery[] = [];
   const rejected: string[] = [];
   const retries: number[] = [];
+  const consistent: string[] = [];
   return {
     accepted,
     rejected,
     retries,
+    consistent,
     events: {
       accepted: (delivery: ThinkingDelivery) => { accepted.push(delivery); },
       rejected: (message: string) => { rejected.push(message); },
       retry: (delayMs: number) => { retries.push(delayMs); },
+      consistent: () => { consistent.push("consistent"); },
     },
   };
 }
@@ -277,5 +289,90 @@ describe("composer thinking reconciliation ordering", () => {
     // Once the runtime reports the delivered level there is nothing to do either.
     reconciler.sync(status("ready", { sessionId: "session-a", thinking: "high" }), "high");
     expect(runtime.sent).toEqual(["high"]);
+  });
+});
+
+/**
+ * A reconciliation that is no longer needed has to say so. `accepted` only
+ * fires for a delivery, so a warning about a split the runtime closed on its own
+ * — the setting moves back onto the level the session runs, or the session is
+ * switched to one that already matches — would otherwise stay on screen
+ * forever, with no RPC left to clear it.
+ */
+describe("composer thinking reconciliation consistency", () => {
+  it("reports the split resolved without sending another level", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    const split = status("ready", { sessionId: "session-a", thinking: "medium" });
+    reconciler.sync(split, "high");
+    runtime.calls[0]!.decline(new Error("Prime rejected set_thinking_level"));
+    await flush();
+    expect(recorded.rejected).toHaveLength(1);
+
+    // The user moves the setting onto the level the session already runs: there
+    // is nothing left to send, and the warning has to go with the split.
+    reconciler.sync(split, "medium");
+    expect(runtime.sent).toEqual(["high"]);
+    expect(recorded.accepted).toEqual([]);
+    expect(recorded.consistent).toHaveLength(1);
+  });
+
+  it("reports the split resolved when the setting returns to the delivered level", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    const runs = status("ready", { sessionId: "session-a", thinking: "medium" });
+    reconciler.noteReading(runs);
+    reconciler.sync(runs, "high");
+    runtime.calls[0]!.accept();
+    await flush();
+
+    // The user moves away from the delivered level and that request is
+    // rejected, so the split is visible on the component.
+    reconciler.sync(runs, "low");
+    runtime.calls[1]!.decline(new Error("Prime rejected set_thinking_level"));
+    await flush();
+    expect(recorded.rejected).toHaveLength(1);
+
+    // Back onto the level this session was already told: the delivery still
+    // answers it, so there is nothing to send and the warning goes with it.
+    reconciler.sync(runs, "high");
+    expect(runtime.sent).toEqual(["high", "low"]);
+    expect(recorded.consistent).toHaveLength(1);
+  });
+
+  it("reconciles a reading Prime publishes after a delivery but not one already on screen", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    const before = status("ready", { sessionId: "session-a", thinking: "medium" });
+    reconciler.noteReading(before);
+    reconciler.sync(before, "high");
+    // Prime publishes its level before the request settles, so the renderer
+    // already holds this reading when the delivery lands.
+    const published = status("ready", { sessionId: "session-a", thinking: "medium" });
+    reconciler.noteReading(published);
+    runtime.calls[0]!.accept();
+    await flush();
+    expect(recorded.accepted).toEqual([{ sessionId: "session-a", level: "high" }]);
+
+    // That reading was on screen when the level landed, so it cannot be a newer
+    // report about the session: the delivered level is not asked for again.
+    reconciler.sync(published, "high");
+    expect(runtime.sent).toEqual(["high"]);
+    // Nothing is pending either: the delivery still answers this request.
+    expect(recorded.consistent).toHaveLength(1);
+
+    // A reading the renderer receives after the delivery is a report from
+    // Prime, so the saved level is reconciled against it again.
+    const later = status("ready", { sessionId: "session-a", thinking: "low" });
+    reconciler.noteReading(later);
+    reconciler.sync(later, "high");
+    expect(runtime.sent).toEqual(["high", "high"]);
+    expect(recorded.rejected).toEqual([]);
   });
 });

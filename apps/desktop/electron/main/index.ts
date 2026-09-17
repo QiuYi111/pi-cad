@@ -6,7 +6,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AppSettings, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
+import type { AppSettings, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, ThinkingLevel, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
@@ -58,6 +58,10 @@ const desktopE2ESlowThinking = Number(
   || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-slow-thinking="))?.slice("--pi-cad-e2e-slow-thinking=".length)
   || 0,
 );
+const desktopE2ERevertThinking = (
+  process.env.PI_CAD_DESKTOP_E2E_REVERT_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-revert-thinking="))?.slice("--pi-cad-e2e-revert-thinking=".length)
+) as ThinkingLevel | undefined;
 const testOpenSteps = process.argv
   .filter((argument) => argument.startsWith("--pi-cad-test-open-step="))
   .map((argument) => argument.slice("--pi-cad-test-open-step=".length));
@@ -170,6 +174,7 @@ async function ensureRuntime() {
     ? new DemoRuntime({
       rejectThinkingAttempts: Number.isFinite(desktopE2ERejectThinking) ? desktopE2ERejectThinking : 0,
       slowThinkingMs: Number.isFinite(desktopE2ESlowThinking) ? desktopE2ESlowThinking : 0,
+      revertThinkingLevel: desktopE2ERevertThinking,
     })
     : new PrimeRpc(await bridge());
   runtime.on("event", (event) => send(IPC.runtimeEvent, event));

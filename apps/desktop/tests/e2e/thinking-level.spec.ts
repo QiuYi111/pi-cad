@@ -235,3 +235,93 @@ test("a newer thinking reconcile waits for the request still on the wire", async
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * The marker for a delivered level must not outrank Prime. The restored session
+ * is told `high`, the call is accepted, and the sidecar then reports that the
+ * session ended up back on `medium` — a report that comes after the delivery.
+ * Prime owns the answer to "which level does this session run", so that report
+ * has to reconcile again; trusting the marker would leave the sidecar on the
+ * old level while the UI shows the saved one.
+ */
+test("a level Prime reports after a delivery is reconciled again", async () => {
+  const { application, page, root, settingsPath } = await launchReify(
+    "reify-reverted-thinking-",
+    { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high", onboardingComplete: true },
+    ["--pi-cad-e2e-open-step=/workspace/demo/imported.step", "--pi-cad-e2e-revert-thinking=medium"],
+  );
+  try {
+    await page.getByPlaceholder("Ask anything about the design").waitFor({ timeout: 20_000 });
+    await recordRuntime(page);
+
+    await page.evaluate(() => window.piCad.runtime.start());
+    await expect.poll(() => sessionLevels(page, "desktop-e2e"), { timeout: 30_000 }).toContain("high");
+
+    const shell = page.locator(".workbench-page");
+    if (!(await shell.getAttribute("class"))?.includes("mode-conversation")) await page.keyboard.press("Control+Backslash");
+    await expect(shell).toHaveClass(/mode-conversation/);
+    await page.getByText("Folding stand", { exact: true }).click();
+
+    // The restored session runs `medium`, the saved `high` is delivered, and
+    // then the runtime reports `medium` again.
+    await expect.poll(() => thinkingAttempts(page), { timeout: 30_000 }).toEqual([
+      "set_thinking_level high attempt 1",
+      "set_thinking_level high attempt 2",
+    ]);
+    // The later report won over the delivery marker: the sidecar ends on the
+    // saved level, and the saved setting never moved.
+    await expect.poll(async () => (await sessionLevels(page, "demo-restored")).at(-1), { timeout: 30_000 }).toBe("high");
+    expect(levelChanges(await sessionLevels(page, "demo-restored"))).toEqual(["medium", "high", "medium", "high"]);
+    expect(JSON.parse(await readFile(settingsPath, "utf8")).thinking).toBe("high");
+  } finally {
+    await application.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * A split is not the only thing that has to be reported — the end of a split is
+ * too. The saved `high` cannot be delivered at all here, so the warning shows.
+ * Moving the setting onto the level the session already runs leaves nothing to
+ * reconcile, and the warning has to disappear then: `accepted` never fires for
+ * a no-op, so a warning that waits for one would stay on screen forever.
+ */
+test("a sync error clears when the setting moves onto the level the session runs", async () => {
+  const { application, page, root, settingsPath } = await launchReify(
+    "reify-sync-cleared-",
+    { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high", onboardingComplete: true },
+    ["--pi-cad-e2e-open-step=/workspace/demo/imported.step", "--pi-cad-e2e-reject-thinking=99"],
+  );
+  try {
+    await page.getByPlaceholder("Ask anything about the design").waitFor({ timeout: 20_000 });
+    await recordRuntime(page);
+
+    await page.evaluate(() => window.piCad.runtime.start());
+    await expect.poll(() => sessionLevels(page, "desktop-e2e"), { timeout: 30_000 }).toContain("high");
+
+    const shell = page.locator(".workbench-page");
+    if (!(await shell.getAttribute("class"))?.includes("mode-conversation")) await page.keyboard.press("Control+Backslash");
+    await expect(shell).toHaveClass(/mode-conversation/);
+    await page.getByText("Folding stand", { exact: true }).click();
+
+    // The restored session runs `medium` and every `high` attempt is rejected,
+    // so the split stays visible.
+    await expect(page.getByTestId("thinking-sync-error")).toBeVisible({ timeout: 30_000 });
+
+    // The user moves the setting onto the level the session already runs: there
+    // is nothing to reconcile, so the warning goes without an RPC.
+    await page.getByLabel("Effort").selectOption("medium");
+    await expect(page.getByTestId("thinking-sync-error")).toHaveCount(0, { timeout: 30_000 });
+
+    // A retry that was already on its way is allowed to land; nothing new goes
+    // out after that, because the runtime already holds the saved level.
+    await page.waitForTimeout(1_500);
+    const settled = await thinkingAttempts(page);
+    await page.waitForTimeout(1_500);
+    expect(await thinkingAttempts(page)).toEqual(settled);
+    expect(JSON.parse(await readFile(settingsPath, "utf8")).thinking).toBe("medium");
+  } finally {
+    await application.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

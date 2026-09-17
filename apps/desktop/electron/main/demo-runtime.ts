@@ -25,6 +25,12 @@ export interface DemoRuntimeOptions {
    * the ordering between two overlapping reconciles is observable.
    */
   slowThinkingMs?: number;
+  /**
+   * Report this level once, a moment after a `set_thinking_level` was accepted.
+   * Used by the E2E suite to play a sidecar that ends up on another level than
+   * the one it was just told, so the renderer has to reconcile it again.
+   */
+  revertThinkingLevel?: ThinkingLevel;
 }
 
 /**
@@ -40,6 +46,7 @@ export class DemoRuntime extends EventEmitter {
   private failureTimer?: NodeJS.Timeout;
   private failureDeadline?: number;
   private saved?: AppSettings;
+  private revertedThinking = false;
 
   constructor(private readonly options: DemoRuntimeOptions = {}) {
     super();
@@ -95,7 +102,7 @@ export class DemoRuntime extends EventEmitter {
   async setModel(_provider: string, _model: string) {}
   async setThinking(level: ThinkingLevel) {
     this.thinkingAttempts += 1;
-    if (this.options.rejectThinkingAttempts || this.options.slowThinkingMs) {
+    if (this.options.rejectThinkingAttempts || this.options.slowThinkingMs || this.options.revertThinkingLevel) {
       // The renderer counts these to tell "retried" from "gave up"; a rejection
       // must not publish the level, exactly like a failed Prime RPC.
       this.event({ type: "runtime_diagnostic", message: `set_thinking_level ${level} attempt ${this.thinkingAttempts}` });
@@ -106,6 +113,16 @@ export class DemoRuntime extends EventEmitter {
     if (this.thinkingAttempts === 1 && this.options.slowThinkingMs) await wait(this.options.slowThinkingMs);
     this.runtime.noteThinking(level);
     this.publish();
+    // Answer the call first: the level is delivered, and only then does the
+    // sidecar report that it ended up somewhere else.
+    if (this.options.revertThinkingLevel && !this.revertedThinking) {
+      this.revertedThinking = true;
+      const reverted = this.options.revertThinkingLevel;
+      setTimeout(() => {
+        this.runtime.sessionReady(this.status.sessionId, reverted);
+        this.publish();
+      }, 200);
+    }
   }
   async respondToUi(_id: string, _response: Record<string, unknown>) {}
 
