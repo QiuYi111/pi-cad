@@ -89,17 +89,39 @@ export function classifyProviderFailure(message?: string): ProviderFailure {
 }
 
 /**
+ * Explicit evidence that the model stopped because its thinking/reasoning budget
+ * ran out.
+ *
+ * `stopReason === "length"` alone is not enough: an answer cut at the output
+ * limit looks the same. Require either error text that names the reasoning
+ * budget, or a response that was still thinking and never produced an answer.
+ */
+export function reasoningLimitEvidence(message: any): string | undefined {
+  const text = `${message?.errorMessage ?? ""} ${message?.rawStopReason ?? ""}`.toLowerCase();
+  if (/reasoning|thinking|thought/.test(text) && /(budget|limit|exhaust|exceed|cap|truncat)/.test(text)) {
+    return "reasoning_budget";
+  }
+  const content = Array.isArray(message?.content) ? message.content : [];
+  const answered = content.some((part: any) => part?.type === "text" || part?.type === "toolCall");
+  const last = content[content.length - 1];
+  if (!answered && last?.type === "thinking") return "thinking_truncated";
+  return undefined;
+}
+
+/**
  * Terminal meaning of an assistant message, if it ended the turn.
  *
- * `length` on a reasoning model is the observable form of hitting the
- * thinking/output budget; keep it distinct from provider errors.
+ * `error` carries the provider failure. `length` is only a reasoning limit when
+ * there is evidence the thinking budget ran out; a plain answer that hit the
+ * output limit is not a failure, so the caller reports it as `output_limit`.
  */
 export function classifyMessageEnd(message: any): ProviderFailure | undefined {
   const stopReason = message?.stopReason;
   if (stopReason === "aborted") return { terminalReason: "aborted", reason: "user_abort" };
   if (stopReason === "error") return classifyProviderFailure(message?.errorMessage);
   if (stopReason === "length") {
-    return { terminalReason: "reasoning_limit", reason: message?.errorMessage ? "output_limit" : "reasoning_budget" };
+    const evidence = reasoningLimitEvidence(message);
+    return evidence ? { terminalReason: "reasoning_limit", reason: evidence } : undefined;
   }
   return undefined;
 }
@@ -217,8 +239,10 @@ export class PrimeRuntimeState {
         else if (delta.type === "text_start" || delta.type === "text_delta") this.phase("responding", { reason: "answering" });
         else if (typeof delta.type === "string" && delta.type.startsWith("toolcall")) this.phase("responding", { reason: "tool_call" });
         else if (delta.type === "error") {
-          if (delta.reason === "aborted") this.finish("aborted", { reason: "user_abort" });
-          else this.noteFailure(event.message?.errorMessage);
+          // The error body lives on the stream event; `message` is only the partial.
+          const failed = delta.error ?? event.message;
+          if (delta.reason === "aborted" || failed?.stopReason === "aborted") this.finish("aborted", { reason: "user_abort" });
+          else this.noteFailure(failed?.errorMessage ?? event.message?.errorMessage, classifyMessageEnd(failed));
         } else if (delta.type === "start") this.phase("waiting_provider", { reason: "provider_request" });
         else this.touch();
         break;
@@ -227,7 +251,7 @@ export class PrimeRuntimeState {
         if (event.message?.role !== "assistant") break;
         const failure = classifyMessageEnd(event.message);
         if (failure) this.noteFailure(event.message?.errorMessage, failure);
-        else this.touch();
+        else this.touch(event.message?.stopReason === "length" ? "output_limit" : undefined);
         break;
       }
       case "tool_execution_start":
@@ -286,7 +310,7 @@ export class PrimeRuntimeState {
         const last = lastAssistantMessage(event.messages);
         const failure = classifyMessageEnd(last);
         if (failure) this.noteFailure(last?.errorMessage, failure);
-        else this.finish("completed", { reason: "turn_complete" });
+        else this.finish("completed", { reason: last?.stopReason === "length" ? "output_limit" : "turn_complete" });
         break;
       }
       case "extension_error":
@@ -315,14 +339,16 @@ export class PrimeRuntimeState {
   }
 
   /**
-   * No provider-side event for longer than the provider timeout budget. This is
-   * a live signal, not a terminal one: Prime still owns the request, so a later
-   * provider event clears it.
+   * No provider-side event for longer than the provider timeout budget.
+   *
+   * This is a live signal, not a terminal one: Prime still owns the request, a
+   * later provider event clears it, and a real `provider_timeout` must come from
+   * an explicit provider/SDK timeout instead.
    */
   providerStall(idleMs: number): void {
     if (!this.activeTurn()) return;
     if (!MODEL_WAIT_PHASES.includes(this.status.phase ?? "ready")) return;
-    this.phase("provider_timeout", { reason: "provider_no_events", message: `No provider response for ${Math.round(idleMs / 1000)}s` });
+    this.phase("stalled", { reason: "provider_silent", message: `No provider response for ${Math.round(idleMs / 1000)}s` });
   }
 
   /** A Prime RPC command failed before or during the turn. */
@@ -364,10 +390,22 @@ export class PrimeRuntimeState {
     this.finish(pending.terminalReason, { reason: pending.reason, message: pending.message });
   }
 
-  /** The Prime child process exited. */
+  /**
+   * The Prime child process exited.
+   *
+   * A process lifecycle event must never rewrite a turn that already settled:
+   * stopping the runtime normally leaves the last completed turn completed.
+   */
   processExited(code: number | null, signal: string | null, forced = false): void {
     const detail = `Prime exited (${signal || code || 0})`;
     this.pending = undefined;
+    const settled = this.status.turn?.terminalReason;
+    if (settled) {
+      if (!forced && settled === "completed") {
+        this.status = { ...this.status, state: code === 0 ? "idle" : "error", ...(code === 0 ? {} : { message: detail }) };
+      }
+      return;
+    }
     if (forced) {
       this.finish("forced_stop", { reason: "stop_timeout", message: detail, state: "error" });
       return;
@@ -476,11 +514,16 @@ export class PrimeRuntimeState {
     };
   }
 
-  private touch(): void {
+  private touch(reason?: string): void {
     const now = this.now();
     const turn = this.activeTurn();
     if (!turn) return;
-    this.status = { ...this.status, lastEventAt: now, turn: { ...turn, lastEventAt: now } };
+    this.status = {
+      ...this.status,
+      reason: reason ?? this.status.reason,
+      lastEventAt: now,
+      turn: { ...turn, reason: reason ?? turn.reason, lastEventAt: now },
+    };
   }
 
   /** Terminal outcome for the current turn. Stale or lower-priority terminals are ignored. */

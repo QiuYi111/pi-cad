@@ -12,6 +12,7 @@ describe("runtime status label", () => {
     expect(phaseLabel(status({ phase: "running_tool" }))).toBe("Running tool");
     expect(phaseLabel(status({ phase: "provider_wait" }))).toBe("Waiting for provider");
     expect(phaseLabel(status({ phase: "stopping", state: "stopping" }))).toBe("Stopping");
+    expect(phaseLabel(status({ phase: "stalled" }))).toBe("No provider response");
     expect(phaseLabel(status({ phase: "provider_timeout" }))).toBe("Provider timeout");
     expect(phaseLabel(status({ phase: "rpc_timeout" }))).toBe("Runtime RPC timeout");
     expect(phaseLabel(status({ phase: "reasoning_limit" }))).toBe("Reasoning limit");

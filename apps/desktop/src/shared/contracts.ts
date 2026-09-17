@@ -67,6 +67,7 @@ export type RuntimePhase =
   | "compacting"
   | "retrying"
   | "provider_wait"
+  | "stalled"
   | "stopping"
   | "aborted"
   | "reasoning_limit"

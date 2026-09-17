@@ -76,6 +76,27 @@ describe("PrimeRpc runtime state", () => {
     expect(runtime.status).toMatchObject({ state: "ready", phase: "provider_timeout", terminalReason: "provider_timeout" });
   });
 
+  it("marks a silent provider as stalled instead of a terminal timeout", async () => {
+    vi.useFakeTimers();
+    const { runtime, send } = harness({ providerTimeoutMs: 200 });
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    await vi.advanceTimersByTimeAsync(230);
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "stalled", reason: "provider_silent", terminalReason: undefined });
+    expect(runtime.status.turn?.terminalReason).toBeUndefined();
+
+    send({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "back" } });
+    expect(runtime.status).toMatchObject({ phase: "thinking", terminalReason: undefined });
+  });
+
+  it("classifies a streaming error from the event body", async () => {
+    const { runtime, send } = harness();
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    send({ type: "message_update", message: { role: "assistant", content: [] }, assistantMessageEvent: { type: "error", reason: "error", error: { role: "assistant", content: [], stopReason: "error", errorMessage: "reasoning budget exhausted" } } });
+    expect(runtime.status).toMatchObject({ phase: "reasoning_limit", reason: "reasoning_limit", terminalReason: undefined });
+  });
+
   it("completes the abort handshake on message_end(aborted)", async () => {
     const { runtime, request, send } = harness();
     await runtime.prompt("start");

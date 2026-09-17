@@ -73,13 +73,53 @@ describe("Prime runtime phases", () => {
     expect(runtime.status).toMatchObject({ phase: "provider_timeout", terminalReason: undefined });
     runtime.settleFailure();
     expect(runtime.status).toMatchObject({ state: "ready", phase: "provider_timeout", terminalReason: "provider_timeout", reason: "provider_timeout" });
+  });
 
-    const limited = state();
-    limited.beginTurn("prompt");
-    limited.applyEvent({ type: "agent_start" });
-    limited.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "length" } });
-    limited.settleFailure();
-    expect(limited.status).toMatchObject({ phase: "reasoning_limit", terminalReason: "reasoning_limit" });
+  it("takes a streaming error from assistantMessageEvent.error, not the partial message", () => {
+    const runtime = state();
+    runtime.beginTurn("prompt");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.applyEvent({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "error", reason: "error", error: { role: "assistant", content: [], stopReason: "error", errorMessage: "reasoning budget exhausted" } },
+    });
+    expect(runtime.status).toMatchObject({ phase: "reasoning_limit", reason: "reasoning_limit", terminalReason: undefined });
+    runtime.settleFailure();
+    expect(runtime.status).toMatchObject({ terminalReason: "reasoning_limit", reason: "reasoning_limit" });
+
+    const aborted = state();
+    aborted.beginTurn("prompt");
+    aborted.applyEvent({ type: "agent_start" });
+    aborted.applyEvent({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "error", reason: "aborted", error: { role: "assistant", content: [], stopReason: "aborted" } },
+    });
+    expect(aborted.status).toMatchObject({ phase: "aborted", terminalReason: "aborted" });
+  });
+
+  it("only calls a length stop a reasoning limit when the thinking budget is the evidence", () => {
+    const truncated = state();
+    truncated.beginTurn("prompt");
+    truncated.applyEvent({ type: "agent_start" });
+    truncated.applyEvent({ type: "agent_end", messages: [{ role: "assistant", content: [{ type: "text", text: "partial answer" }], stopReason: "length" }] });
+    expect(truncated.status).toMatchObject({ state: "ready", phase: "ready", terminalReason: "completed", reason: "output_limit" });
+
+    const thinking = state();
+    thinking.beginTurn("prompt");
+    thinking.applyEvent({ type: "agent_start" });
+    thinking.applyEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "still reasoning" }], stopReason: "length" } });
+    expect(thinking.status).toMatchObject({ phase: "reasoning_limit", terminalReason: undefined });
+    thinking.settleFailure();
+    expect(thinking.status).toMatchObject({ terminalReason: "reasoning_limit", reason: "thinking_truncated" });
+
+    const named = state();
+    named.beginTurn("prompt");
+    named.applyEvent({ type: "agent_start" });
+    named.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "length", errorMessage: "thinking budget exceeded" } });
+    named.settleFailure();
+    expect(named.status).toMatchObject({ terminalReason: "reasoning_limit", reason: "reasoning_budget" });
   });
 
   it("keeps exhausted retries terminal even when a late agent_end arrives", () => {
@@ -105,11 +145,30 @@ describe("Prime runtime phases", () => {
     runtime.beginTurn("prompt");
     runtime.applyEvent({ type: "agent_start" });
     runtime.providerStall(600_000);
-    expect(runtime.status).toMatchObject({ state: "streaming", phase: "provider_timeout", reason: "provider_no_events", terminalReason: undefined });
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "stalled", reason: "provider_silent", terminalReason: undefined });
     expect(runtime.activeTurn()).toBeDefined();
     runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "..." } });
     expect(runtime.status.phase).toBe("thinking");
     expect(runtime.status.reason).toBe("reasoning");
+  });
+
+  it("keeps the last completed turn when the runtime stops normally", () => {
+    const runtime = state();
+    runtime.beginTurn("prompt");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.applyEvent({ type: "agent_end", messages: [] });
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "ready", terminalReason: "completed" });
+
+    runtime.processExited(0, null);
+    expect(runtime.status).toMatchObject({ state: "idle", phase: "ready", terminalReason: "completed" });
+    expect(runtime.status.turn?.terminalReason).toBe("completed");
+
+    const aborted = state();
+    aborted.beginTurn("prompt");
+    aborted.applyEvent({ type: "agent_start" });
+    aborted.applyEvent({ type: "agent_abort" });
+    aborted.processExited(0, null);
+    expect(aborted.status).toMatchObject({ phase: "aborted", terminalReason: "aborted" });
   });
 
   it("separates RPC timeouts from provider timeouts", () => {

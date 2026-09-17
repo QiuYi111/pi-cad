@@ -13,6 +13,7 @@ export function phaseLabel(status: RuntimeStatus): string {
     case "compacting": return "Compacting";
     case "retrying": return status.retry ? `Retrying ${status.retry.attempt}/${status.retry.maxAttempts}` : "Retrying";
     case "provider_wait": return "Waiting for provider";
+    case "stalled": return "No provider response";
     case "stopping": return "Stopping";
     case "aborted": return "Stopped";
     case "reasoning_limit": return "Reasoning limit";

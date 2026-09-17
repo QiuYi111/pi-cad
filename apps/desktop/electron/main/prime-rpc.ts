@@ -11,7 +11,7 @@ interface PendingRequest {
 }
 
 export interface PrimeRpcOptions {
-  /** No provider-side event for this long marks `provider_timeout`. 0 disables it. */
+  /** No provider-side event for this long marks the turn `stalled`. 0 disables it. */
   providerTimeoutMs?: number;
   /** How long the abort handshake waits for `message_end(aborted)` / `agent_end`. */
   abortTimeoutMs?: number;
