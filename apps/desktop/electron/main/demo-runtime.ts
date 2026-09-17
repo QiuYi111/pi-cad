@@ -19,6 +19,12 @@ export interface DemoRuntimeOptions {
    * being remembered as delivered.
    */
   rejectThinkingAttempts?: number;
+  /**
+   * Hold the first `set_thinking_level` call open for this long. Used by the
+   * E2E suite to move the target while one reconcile is still on the wire, so
+   * the ordering between two overlapping reconciles is observable.
+   */
+  slowThinkingMs?: number;
 }
 
 /**
@@ -89,7 +95,7 @@ export class DemoRuntime extends EventEmitter {
   async setModel(_provider: string, _model: string) {}
   async setThinking(level: ThinkingLevel) {
     this.thinkingAttempts += 1;
-    if (this.options.rejectThinkingAttempts) {
+    if (this.options.rejectThinkingAttempts || this.options.slowThinkingMs) {
       // The renderer counts these to tell "retried" from "gave up"; a rejection
       // must not publish the level, exactly like a failed Prime RPC.
       this.event({ type: "runtime_diagnostic", message: `set_thinking_level ${level} attempt ${this.thinkingAttempts}` });
@@ -97,6 +103,7 @@ export class DemoRuntime extends EventEmitter {
     if (this.thinkingAttempts <= (this.options.rejectThinkingAttempts ?? 0)) {
       throw new Error("Prime rejected set_thinking_level");
     }
+    if (this.thinkingAttempts === 1 && this.options.slowThinkingMs) await wait(this.options.slowThinkingMs);
     this.runtime.noteThinking(level);
     this.publish();
   }

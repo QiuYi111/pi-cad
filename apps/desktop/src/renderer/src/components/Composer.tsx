@@ -1,6 +1,7 @@
 import { ArrowUp, Box, Plus, ShieldCheck, Sparkles, Square } from "./icons";
 import { useEffect, useRef, useState } from "react";
 import { runtimeTurnActive, type AppSettings, type ModelChoice, type RuntimeStatus, type ThinkingLevel } from "@shared/contracts";
+import { ThinkingReconciler } from "./thinking-sync";
 
 /**
  * Only used until the model catalog answers. Real levels come from the catalog,
@@ -13,10 +14,6 @@ const FALLBACK_THINKING_LEVELS: ThinkingLevel[] = ["minimal", "low", "medium", "
  * order, never the order a catalog happens to list a model's levels in.
  */
 const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-
-/** First retry delay for a rejected reconciliation, doubling up to the cap. */
-const THINKING_SYNC_RETRY_MS = 1_200;
-const THINKING_SYNC_RETRY_MAX_MS = 15_000;
 
 type PendingRequest = { id: string; text: string };
 type RunningIntent = "queue" | "replace" | "note";
@@ -35,13 +32,20 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const imagesRef = useRef(images);
   const draining = useRef(false);
   const loadingQueue = useRef(false);
-  const [deliveredThinking, setDeliveredThinking] = useState<ThinkingDelivery | undefined>(undefined);
   const [thinkingSyncError, setThinkingSyncError] = useState<string | undefined>(undefined);
   const [thinkingAttempt, setThinkingAttempt] = useState(0);
-  const thinkingInFlight = useRef<string | undefined>(undefined);
-  const thinkingTarget = useRef<string | undefined>(undefined);
-  const thinkingFailures = useRef(0);
   const thinkingRetry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const thinkingReconciler = useRef<ThinkingReconciler | undefined>(undefined);
+  if (!thinkingReconciler.current) {
+    thinkingReconciler.current = new ThinkingReconciler({
+      send: (level) => window.piCad.runtime.setThinking(level),
+      events: {
+        accepted: () => { setThinkingSyncError(undefined); },
+        rejected: (message) => setThinkingSyncError(message),
+        retry: (delayMs) => { thinkingRetry.current = setTimeout(() => setThinkingAttempt((attempt) => attempt + 1), delayMs); },
+      },
+    });
+  }
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = runtimeTurnActive(status);
   const starting = status.state === "starting";
@@ -154,33 +158,20 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   // already runs it", and a ref that is cleared on failure re-renders nothing,
   // so the effect would never run again. The failure path therefore publishes
   // state: it shows the split and retries the reconciliation on its own.
+  //
+  // The reconciler serializes the RPCs: a target that moves while a request is
+  // still on the wire waits for it instead of racing it. Two requests in flight
+  // would otherwise let the older one land last and push the sidecar back to a
+  // level nobody asks for, and its late callback would clear the marker of the
+  // request that replaced it.
   useEffect(() => {
-    const level = pendingThinkingLevel(status, settings.thinking, deliveredThinking);
-    if (!level) return;
-    const request = thinkingRequestKey(status.sessionId, level);
-    if (thinkingInFlight.current === request) return;
-    thinkingInFlight.current = request;
-    if (thinkingTarget.current !== request) {
-      thinkingTarget.current = request;
-      thinkingFailures.current = 0;
-    }
-    void window.piCad.runtime.setThinking(level).then(() => {
-      thinkingInFlight.current = undefined;
-      thinkingFailures.current = 0;
-      setThinkingSyncError(undefined);
-      setDeliveredThinking({ sessionId: status.sessionId, level });
-    }).catch((error) => {
-      thinkingInFlight.current = undefined;
-      const failures = (thinkingFailures.current += 1);
-      setThinkingSyncError(thinkingSyncMessage(error));
-      thinkingRetry.current = setTimeout(() => setThinkingAttempt((attempt) => attempt + 1), thinkingRetryDelayMs(failures));
-    });
+    thinkingReconciler.current?.sync(status, settings.thinking);
     return () => {
       if (thinkingRetry.current === undefined) return;
       clearTimeout(thinkingRetry.current);
       thinkingRetry.current = undefined;
     };
-  }, [settings.thinking, status.state, status.sessionId, status.thinking, deliveredThinking, thinkingAttempt]);
+  }, [settings.thinking, status.state, status.sessionId, status.thinking, thinkingAttempt]);
   const changePermission = async (permission: AppSettings["permission"]) => {
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();
     await onSettingsChange({ permission });
@@ -264,47 +255,7 @@ export function normalizeThinkingLevel(model: ModelChoice | undefined, current: 
   return levels[0]!;
 }
 
-/** A level already handed to the runtime, and the session it was handed to. */
-export interface ThinkingDelivery { sessionId?: string; level: ThinkingLevel }
-
-/** Identifies one reconciliation: the level one session still has to be told. */
-export function thinkingRequestKey(sessionId: string | undefined, level: ThinkingLevel): string {
-  return `${sessionId ?? ""}:${level}`;
-}
-
-/**
- * Backoff for a runtime that keeps rejecting `set_thinking_level`. The first
- * retry follows the first failure closely; later ones wait longer so a runtime
- * that stays down is not hammered, while the split stays visible.
- */
-export function thinkingRetryDelayMs(failures: number): number {
-  const steps = Math.min(Math.max(failures, 1) - 1, 6);
-  return Math.min(THINKING_SYNC_RETRY_MS * 2 ** steps, THINKING_SYNC_RETRY_MAX_MS);
-}
-
-/** Shown while the saved level and the running session sit on different levels. */
-export function thinkingSyncMessage(error: unknown): string {
-  const detail = error instanceof Error ? error.message : String(error);
-  return `Effort is not synced with the running session: ${detail}. Retrying…`;
-}
-
-/**
- * The level the running session still has to be told, or `undefined` when it
- * already holds the saved one.
- *
- * The runtime only takes a level while it is up, so a value folded by the
- * catalog during `starting` is delivered as soon as it is ready. A delivery
- * only counts for the session it was made in: a switch can restore a session
- * that runs a different level while the saved setting never moves, and that
- * switch has to be reconciled instead of being skipped as "already delivered".
- */
-export function pendingThinkingLevel(status: RuntimeStatus, saved: ThinkingLevel, delivered?: ThinkingDelivery): ThinkingLevel | undefined {
-  if (status.state !== "ready" && status.state !== "streaming") return undefined;
-  // Prime reports the level the live session holds, which is authoritative even
-  // when this renderer never sent one.
-  if (status.thinking === saved) return undefined;
-  if (delivered && delivered.sessionId === status.sessionId && delivered.level === saved) return undefined;
-  return saved;
-}
-
 export { thinkingLevelLabel };
+// The reconciliation bookkeeping lives in its own module so the ordering rules
+// can be exercised without a renderer; re-exported here for existing callers.
+export { pendingThinkingLevel, thinkingRequestKey, thinkingRetryDelayMs, thinkingSyncMessage, type ThinkingDelivery } from "./thinking-sync";

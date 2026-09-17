@@ -53,6 +53,11 @@ const desktopE2ERejectThinking = Number(
   || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-reject-thinking="))?.slice("--pi-cad-e2e-reject-thinking=".length)
   || 0,
 );
+const desktopE2ESlowThinking = Number(
+  process.env.PI_CAD_DESKTOP_E2E_SLOW_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-slow-thinking="))?.slice("--pi-cad-e2e-slow-thinking=".length)
+  || 0,
+);
 const testOpenSteps = process.argv
   .filter((argument) => argument.startsWith("--pi-cad-test-open-step="))
   .map((argument) => argument.slice("--pi-cad-test-open-step=".length));
@@ -162,7 +167,10 @@ async function bridge(): Promise<RuntimeBridge> {
 async function ensureRuntime() {
   if (runtime) return runtime;
   runtime = desktopE2E
-    ? new DemoRuntime({ rejectThinkingAttempts: Number.isFinite(desktopE2ERejectThinking) ? desktopE2ERejectThinking : 0 })
+    ? new DemoRuntime({
+      rejectThinkingAttempts: Number.isFinite(desktopE2ERejectThinking) ? desktopE2ERejectThinking : 0,
+      slowThinkingMs: Number.isFinite(desktopE2ESlowThinking) ? desktopE2ESlowThinking : 0,
+    })
     : new PrimeRpc(await bridge());
   runtime.on("event", (event) => send(IPC.runtimeEvent, event));
   runtime.on("status", (status) => send(IPC.runtimeStatus, status));

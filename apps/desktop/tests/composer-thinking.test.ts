@@ -8,7 +8,8 @@ import {
   thinkingRetryDelayMs,
   thinkingSyncMessage,
 } from "../src/renderer/src/components/Composer";
-import type { ModelChoice, RuntimeState, RuntimeStatus } from "../src/shared/contracts";
+import { ThinkingReconciler, type ThinkingDelivery } from "../src/renderer/src/components/thinking-sync";
+import type { ModelChoice, RuntimeState, RuntimeStatus, ThinkingLevel } from "../src/shared/contracts";
 
 const model = (thinkingLevels?: ModelChoice["thinkingLevels"]): ModelChoice => ({ provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, thinkingLevels });
 const status = (state: RuntimeState, extra: Partial<RuntimeStatus> = {}): RuntimeStatus => ({ state, checks: [], ...extra });
@@ -122,5 +123,159 @@ describe("composer thinking sync retry", () => {
     const message = thinkingSyncMessage(new Error("Prime rejected set_thinking_level"));
     expect(message).toContain("Prime rejected set_thinking_level");
     expect(thinkingSyncMessage("offline")).toContain("offline");
+  });
+});
+
+/** Lets a test decide when one `set_thinking_level` call settles. */
+function deferred() {
+  let accept!: () => void;
+  let decline!: (error: unknown) => void;
+  const promise = new Promise<void>((resolve, reject) => { accept = resolve; decline = reject; });
+  return { promise, accept, decline };
+}
+
+function flush() { return new Promise((resolve) => setTimeout(resolve, 0)); }
+
+/**
+ * A runtime that applies whichever level it accepted, like `noteThinking()`
+ * does: the level is recorded when the RPC settles, not when it was sent.
+ */
+function recordingRuntime() {
+  const sent: ThinkingLevel[] = [];
+  const applied: ThinkingLevel[] = [];
+  const calls: Array<ReturnType<typeof deferred>> = [];
+  const send = (level: ThinkingLevel) => {
+    sent.push(level);
+    const call = deferred();
+    calls.push(call);
+    return call.promise.then(() => { applied.push(level); });
+  };
+  return { send, sent, applied, calls };
+}
+
+function recordingEvents() {
+  const accepted: ThinkingDelivery[] = [];
+  const rejected: string[] = [];
+  const retries: number[] = [];
+  return {
+    accepted,
+    rejected,
+    retries,
+    events: {
+      accepted: (delivery: ThinkingDelivery) => { accepted.push(delivery); },
+      rejected: (message: string) => { rejected.push(message); },
+      retry: (delayMs: number) => { retries.push(delayMs); },
+    },
+  };
+}
+
+/**
+ * The request that is still on the wire is the only one that may touch the
+ * reconciliation. Two levels in flight at once let the older one land last and
+ * push the sidecar back to a level nobody asks for, and its late callback used
+ * to clear the marker of the request that replaced it.
+ */
+describe("composer thinking reconciliation ordering", () => {
+  it("holds a newer target until the request on the wire settles", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    // session-a runs `low` while `high` is saved, so `high` goes on the wire —
+    // and it is slow to answer.
+    reconciler.sync(status("ready", { sessionId: "session-a", thinking: "low" }), "high");
+    expect(runtime.sent).toEqual(["high"]);
+
+    // The target moves to session-b, which runs `high` while `medium` is now
+    // saved, and that request is still pending. Sending `medium` now would let
+    // the `high` request settle afterwards and leave the sidecar on high.
+    reconciler.sync(status("ready", { sessionId: "session-b", thinking: "high" }), "medium");
+    expect(runtime.sent).toEqual(["high"]);
+
+    runtime.calls[0]!.accept();
+    await flush();
+    expect(runtime.sent).toEqual(["high", "medium"]);
+    // `high` settled before `medium` went out, so `medium` is the level the
+    // runtime ends on, and it is sent once — not once per late callback.
+    expect(runtime.applied).toEqual(["high"]);
+    expect(recorded.accepted).toEqual([]);
+
+    runtime.calls[1]!.accept();
+    await flush();
+    expect(runtime.applied).toEqual(["high", "medium"]);
+    expect(recorded.accepted).toEqual([{ sessionId: "session-b", level: "medium" }]);
+    expect(recorded.rejected).toEqual([]);
+    expect(recorded.retries).toEqual([]);
+  });
+
+  it("drops a late failure that a newer target has already replaced", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    reconciler.sync(status("ready", { sessionId: "session-a", thinking: "low" }), "high");
+    reconciler.sync(status("ready", { sessionId: "session-b", thinking: "high" }), "medium");
+    runtime.calls[0]!.decline(new Error("Prime rejected set_thinking_level"));
+    await flush();
+
+    // The split belongs to a session nobody is targeting any more: it must not
+    // surface, and it must not schedule a retry that fights the newer target.
+    expect(recorded.rejected).toEqual([]);
+    expect(recorded.retries).toEqual([]);
+    expect(runtime.sent).toEqual(["high", "medium"]);
+
+    runtime.calls[1]!.accept();
+    await flush();
+    expect(runtime.applied).toEqual(["medium"]);
+    expect(recorded.accepted).toEqual([{ sessionId: "session-b", level: "medium" }]);
+  });
+
+  it("still retries and reports a rejection that nothing replaced", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    const still = status("ready", { sessionId: "session-a", thinking: "low" });
+    reconciler.sync(still, "high");
+    // The same target seen again while it is on the wire is not a second call.
+    reconciler.sync(still, "high");
+    runtime.calls[0]!.decline(new Error("Prime rejected set_thinking_level"));
+    await flush();
+
+    expect(runtime.sent).toEqual(["high"]);
+    expect(recorded.rejected).toHaveLength(1);
+    expect(recorded.retries).toEqual([thinkingRetryDelayMs(1)]);
+
+    // What the retry timer does: reconcile the same target once the RPC settled.
+    reconciler.sync(still, "high");
+    expect(runtime.sent).toEqual(["high", "high"]);
+    runtime.calls[1]!.accept();
+    await flush();
+    expect(recorded.accepted).toEqual([{ sessionId: "session-a", level: "high" }]);
+  });
+
+  // A React effect can still run against a render from before the delivery
+  // landed, so the component may ask for a level the runtime has already been
+  // told. The marker lives with the reconciliation, not with the render, so
+  // that ask is answered with "nothing to do" instead of a second RPC.
+  it("does not send a level again when a stale render asks for it", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    const before = status("ready", { sessionId: "session-a", thinking: "medium" });
+    reconciler.sync(before, "high");
+    runtime.calls[0]!.accept();
+    await flush();
+    expect(recorded.accepted).toEqual([{ sessionId: "session-a", level: "high" }]);
+
+    // The runtime has not published `high` yet, so this render still sees the
+    // level the session ran before the delivery.
+    reconciler.sync(before, "high");
+    expect(runtime.sent).toEqual(["high"]);
+
+    // Once the runtime reports the delivered level there is nothing to do either.
+    reconciler.sync(status("ready", { sessionId: "session-a", thinking: "high" }), "high");
+    expect(runtime.sent).toEqual(["high"]);
   });
 });

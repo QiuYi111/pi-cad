@@ -47,6 +47,11 @@ function thinkingAttempts(page: Page) {
   });
 }
 
+/** Collapses the repeats the runtime publishes for one level. */
+function levelChanges(levels: Array<string | undefined>) {
+  return levels.filter((level, index) => level !== levels[index - 1]);
+}
+
 /** Records both the published statuses and every thinking RPC attempt. */
 function recordRuntime(page: Page) {
   return page.evaluate(() => {
@@ -173,6 +178,58 @@ test("a rejected thinking reconcile is retried instead of being marked delivered
     await page.waitForTimeout(2_000);
     expect(await thinkingAttempts(page)).toHaveLength(2);
     expect(JSON.parse(await readFile(settingsPath, "utf8")).thinking).toBe("high");
+  } finally {
+    await application.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The other way a reconcile can be wrong is ordering. A session that runs
+ * `medium` gets the saved `high` pushed into it; the demo holds that call open.
+ * If the user moves the level to `low` while the first call is still on the
+ * wire, a renderer that sends both levels at once lets the slow `high` land
+ * last — the sidecar ends on a level nobody asks for any more. The newer target
+ * has to wait for the request in flight, so the level that lands last is the
+ * level that was picked last.
+ */
+test("a newer thinking reconcile waits for the request still on the wire", async () => {
+  const { application, page, root, settingsPath } = await launchReify(
+    "reify-slow-thinking-",
+    { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high", onboardingComplete: true },
+    ["--pi-cad-e2e-open-step=/workspace/demo/imported.step", "--pi-cad-e2e-slow-thinking=3000"],
+  );
+  try {
+    await page.getByPlaceholder("Ask anything about the design").waitFor({ timeout: 20_000 });
+    await recordRuntime(page);
+
+    await page.evaluate(() => window.piCad.runtime.start());
+    await expect.poll(() => sessionLevels(page, "desktop-e2e"), { timeout: 30_000 }).toContain("high");
+
+    const shell = page.locator(".workbench-page");
+    if (!(await shell.getAttribute("class"))?.includes("mode-conversation")) await page.keyboard.press("Control+Backslash");
+    await expect(shell).toHaveClass(/mode-conversation/);
+    await page.getByText("Folding stand", { exact: true }).click();
+
+    // The restored session runs `medium`, so the renderer pushes the saved
+    // `high` — and the demo holds that first call open.
+    await expect.poll(() => thinkingAttempts(page), { timeout: 30_000 }).toEqual(["set_thinking_level high attempt 1"]);
+
+    // The user picks `low` while `high` is still unanswered.
+    await page.getByLabel("Effort").selectOption("low");
+
+    // Wait for the slow request to land before reading the final state, so the
+    // order below is the order the sidecar ended up applying.
+    await expect.poll(async () => (await sessionLevels(page, "demo-restored")).includes("high"), { timeout: 30_000 }).toBe(true);
+    // `high` lands first, `low` after it: the sidecar ends on the level that was
+    // picked last, and the newer target is not sent a second time.
+    await expect.poll(async () => (await sessionLevels(page, "demo-restored")).at(-1), { timeout: 30_000 }).toBe("low");
+    expect(levelChanges(await sessionLevels(page, "demo-restored"))).toEqual(["medium", "high", "low"]);
+    expect(await thinkingAttempts(page)).toEqual([
+      "set_thinking_level high attempt 1",
+      "set_thinking_level low attempt 2",
+    ]);
+    expect(JSON.parse(await readFile(settingsPath, "utf8")).thinking).toBe("low");
   } finally {
     await application.close();
     await rm(root, { recursive: true, force: true });
