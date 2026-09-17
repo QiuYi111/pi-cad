@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyProviderFailure, PrimeRuntimeState } from "../electron/main/runtime-state";
+import { classifyProviderFailure, PrimeRuntimeState, reasoningLimitEvidence } from "../electron/main/runtime-state";
 
 function state(failureGraceMs = 0) {
   const runtime = new PrimeRuntimeState({ state: "ready", checks: [] }, { failureGraceMs });
@@ -192,6 +192,24 @@ describe("Prime runtime phases", () => {
     expect(runtime.status).toMatchObject({ phase: "reasoning_limit", reason: "reasoning_limit", terminalReason: undefined });
     runtime.settleFailure();
     expect(runtime.status).toMatchObject({ terminalReason: "reasoning_limit", reason: "reasoning_limit" });
+  });
+
+  it("reads the legacy reasoning-limit hint from Prime's raw stop reason", () => {
+    // Prime calls the field `stopReasonRaw`; any other name reads `undefined`
+    // and silently disables the legacy `stopReason === "length"` fallback.
+    expect(reasoningLimitEvidence({ stopReason: "length", stopReasonRaw: "reasoning budget exceeded" })).toBe("reasoning_budget");
+    expect(reasoningLimitEvidence({ stopReason: "length", rawStopReason: "reasoning budget exceeded" })).toBeUndefined();
+
+    const runtime = state();
+    runtime.beginTurn("prompt");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.applyEvent({
+      type: "message_end",
+      message: { role: "assistant", content: [], stopReason: "length", stopReasonRaw: "thinking budget exceeded" },
+    });
+    expect(runtime.status).toMatchObject({ phase: "reasoning_limit", reason: "reasoning_budget", terminalReason: undefined });
+    runtime.settleFailure();
+    expect(runtime.status).toMatchObject({ terminalReason: "reasoning_limit", reason: "reasoning_budget" });
   });
 
   it("keeps exhausted retries terminal even when a late agent_end arrives", () => {

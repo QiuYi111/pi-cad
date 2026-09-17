@@ -148,11 +148,12 @@ export function classifyProviderFailure(message?: string): ProviderFailure {
  * ran out.
  *
  * `stopReason === "length"` alone is not enough: an answer cut at the output
- * limit looks the same. Require either error text that names the reasoning
- * budget, or a response that was still thinking and never produced an answer.
+ * limit looks the same. Require either error text (or Prime's own
+ * `stopReasonRaw` hint) that names the reasoning budget, or a response that was
+ * still thinking and never produced an answer.
  */
 export function reasoningLimitEvidence(message: any): string | undefined {
-  const text = `${message?.errorMessage ?? ""} ${message?.rawStopReason ?? ""}`.toLowerCase();
+  const text = `${message?.errorMessage ?? ""} ${message?.stopReasonRaw ?? ""}`.toLowerCase();
   if (/reasoning|thinking|thought/.test(text) && /(budget|limit|exhaust|exceed|cap|truncat)/.test(text)) {
     return "reasoning_budget";
   }
