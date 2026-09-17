@@ -8,6 +8,12 @@ import { runtimeTurnActive, type AppSettings, type ModelChoice, type RuntimeStat
  */
 const FALLBACK_THINKING_LEVELS: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
+/**
+ * Prime's own level order (`packages/ai/src/models.ts`). Clamping walks this
+ * order, never the order a catalog happens to list a model's levels in.
+ */
+const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
 type PendingRequest = { id: string; text: string };
 type RunningIntent = "queue" | "replace" | "note";
 
@@ -25,6 +31,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const imagesRef = useRef(images);
   const draining = useRef(false);
   const loadingQueue = useRef(false);
+  const deliveredThinking = useRef<ThinkingLevel | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = runtimeTurnActive(status);
   const starting = status.state === "starting";
@@ -39,8 +46,8 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const currentModel = catalogModels.find((model) => model.provider === settings.provider && model.id === settings.model)
     || availableModels.find((model) => model.id === settings.model);
   const thinkingLevels = thinkingLevelOptions(currentModel, settings.thinking);
-  const thinkingValue = thinkingLevels.includes(settings.thinking) ? settings.thinking : thinkingLevels[0]!;
   const normalizedThinking = normalizeThinkingLevel(currentModel, settings.thinking);
+  const thinkingValue = normalizedThinking;
   const storageKey = `reify.pending.${queueKey || "unconfigured"}`;
   const draftKey = `reify.draft.${queueKey || "unconfigured"}`;
   useEffect(() => { imagesRef.current = images; }, [images]);
@@ -118,7 +125,6 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   };
   const changeThinking = async (thinking: ThinkingLevel) => {
     await onSettingsChange({ thinking });
-    if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.setThinking(thinking);
   };
   // A saved level the model does not list is folded into a real one as soon as
   // the catalog answers; the runtime would reject the stale value anyway.
@@ -126,6 +132,17 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
     if (normalizedThinking === settings.thinking) return;
     void changeThinking(normalizedThinking);
   }, [normalizedThinking, settings.thinking]);
+  // The renderer cannot see which level a live sidecar holds, and a start reads
+  // the saved level before the catalog may have folded it. So the saved level is
+  // sent once, the first time the runtime is able to take one, and again
+  // whenever it moves. Without this a fold during `starting` would leave the
+  // setting and the running sidecar on two different levels.
+  useEffect(() => {
+    const level = pendingThinkingLevel(status, settings.thinking, deliveredThinking.current);
+    if (!level) return;
+    deliveredThinking.current = level;
+    void window.piCad.runtime.setThinking(level).catch(() => { deliveredThinking.current = undefined; });
+  }, [settings.thinking, status.state]);
   const changePermission = async (permission: AppSettings["permission"]) => {
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();
     await onSettingsChange({ permission });
@@ -183,13 +200,39 @@ export function thinkingLevelOptions(model: ModelChoice | undefined, current: Th
 
 /**
  * The level the model can actually run: the saved one when the catalog lists
- * it, otherwise the model's own first level. Unknown catalogs keep the saved
- * value, because nothing better is known yet.
+ * it, otherwise the closest level the model does support. Unknown catalogs keep
+ * the saved value, because nothing better is known yet.
+ *
+ * This mirrors Prime's `clampThinkingLevel()`: search upwards from the requested
+ * level, then downwards. A model that only lists `[off, high]` must answer
+ * `high` for `medium`, and `xhigh` on `[off, minimal, low, medium, high]` must
+ * not collapse to `off` just because `off` comes first in the model's list.
  */
 export function normalizeThinkingLevel(model: ModelChoice | undefined, current: ThinkingLevel): ThinkingLevel {
   const levels = model?.thinkingLevels;
-  if (!levels?.length || levels.includes(current)) return current;
+  if (!levels?.length) return current;
+  if (levels.includes(current)) return current;
+  const requested = THINKING_LEVEL_ORDER.indexOf(current);
+  if (requested < 0) return levels[0]!;
+  for (let index = requested; index < THINKING_LEVEL_ORDER.length; index += 1) {
+    const candidate = THINKING_LEVEL_ORDER[index]!;
+    if (levels.includes(candidate)) return candidate;
+  }
+  for (let index = requested - 1; index >= 0; index -= 1) {
+    const candidate = THINKING_LEVEL_ORDER[index]!;
+    if (levels.includes(candidate)) return candidate;
+  }
   return levels[0]!;
+}
+
+/**
+ * The level the runtime still has to be told, or `undefined` when it already
+ * runs the saved one. The runtime only takes a level while it is up, so a value
+ * folded by the catalog during `starting` is delivered as soon as it is ready.
+ */
+export function pendingThinkingLevel(status: RuntimeStatus, saved: ThinkingLevel, delivered: ThinkingLevel | undefined): ThinkingLevel | undefined {
+  if (status.state !== "ready" && status.state !== "streaming") return undefined;
+  return saved === delivered ? undefined : saved;
 }
 
 export { thinkingLevelLabel };
