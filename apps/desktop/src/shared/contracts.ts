@@ -1,5 +1,15 @@
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+/** Prime's level order, lowest first. */
+export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Prime reports state over JSON, so a level has to be checked before it is trusted. */
+export function asThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  return typeof value === "string" && (THINKING_LEVELS as readonly string[]).includes(value)
+    ? value as ThinkingLevel
+    : undefined;
+}
+
 export interface ModelChoice {
   provider: string;
   id: string;
@@ -131,6 +141,14 @@ export interface RuntimeStatus {
   elapsedSeconds?: number;
   action?: "restart-windows" | "install-ubuntu" | "initialize-ubuntu" | "retry";
   sessionId?: string;
+  /**
+   * Level the live Prime session holds, as Prime itself reported it.
+   *
+   * A session switch can restore a session that runs a different level than the
+   * saved setting, so the renderer reconciles against this instead of assuming
+   * the level it last sent is still in force.
+   */
+  thinking?: ThinkingLevel;
 }
 
 /** True while a turn is running, including the stop handshake. */

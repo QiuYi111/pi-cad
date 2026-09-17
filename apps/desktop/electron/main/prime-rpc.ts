@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
+import { asThinkingLevel } from "../../src/shared/contracts.js";
 import { runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
 import { MODEL_WAIT_PHASES, PrimeRuntimeState, type RuntimeTraceEntry } from "./runtime-state.js";
 
@@ -105,7 +106,7 @@ export class PrimeRpc extends EventEmitter {
       this.mutate(() => this.runtime.processExited(code, signal));
     });
     const state = await this.request("get_state", {}, 45_000);
-    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId, asThinkingLevel(state?.thinkingLevel)));
     return this.status;
   }
 
@@ -177,7 +178,7 @@ export class PrimeRpc extends EventEmitter {
   async newSession(): Promise<unknown[]> {
     await this.request("new_session");
     const state = await this.request("get_state");
-    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId, asThinkingLevel(state?.thinkingLevel)));
     return (await this.request("get_messages"))?.messages || [];
   }
   async getMessages(): Promise<unknown[]> {
@@ -193,7 +194,9 @@ export class PrimeRpc extends EventEmitter {
     const result = await this.request("switch_session", { sessionPath: sandboxSessionPath(path) });
     if (result?.cancelled) throw new Error("Session switch was cancelled.");
     const [state, messages] = await Promise.all([this.request("get_state"), this.request("get_messages")]);
-    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
+    // The restored session reports its own level; carrying the old one over is
+    // what let the setting and the running sidecar drift apart.
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId, asThinkingLevel(state?.thinkingLevel)));
     return messages?.messages || [];
   }
 
@@ -214,7 +217,10 @@ export class PrimeRpc extends EventEmitter {
   }
 
   async setModel(provider: string, model: string) { await this.request("set_model", { provider, modelId: model }); }
-  async setThinking(level: ThinkingLevel) { await this.request("set_thinking_level", { level }); }
+  async setThinking(level: ThinkingLevel) {
+    await this.request("set_thinking_level", { level });
+    this.mutate(() => this.runtime.noteThinking(level));
+  }
 
   /**
    * Stop the current turn and wait for Prime to confirm it.

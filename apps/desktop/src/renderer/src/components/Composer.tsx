@@ -31,7 +31,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const imagesRef = useRef(images);
   const draining = useRef(false);
   const loadingQueue = useRef(false);
-  const deliveredThinking = useRef<ThinkingLevel | undefined>(undefined);
+  const deliveredThinking = useRef<ThinkingDelivery | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = runtimeTurnActive(status);
   const starting = status.state === "starting";
@@ -132,17 +132,18 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
     if (normalizedThinking === settings.thinking) return;
     void changeThinking(normalizedThinking);
   }, [normalizedThinking, settings.thinking]);
-  // The renderer cannot see which level a live sidecar holds, and a start reads
-  // the saved level before the catalog may have folded it. So the saved level is
-  // sent once, the first time the runtime is able to take one, and again
-  // whenever it moves. Without this a fold during `starting` would leave the
-  // setting and the running sidecar on two different levels.
+  // A start reads the saved level before the catalog may have folded it, and a
+  // restored session keeps the level it was saved with. So the saved level is
+  // reconciled against the running session as soon as the runtime can take one:
+  // once per session, and again whenever it moves. Without this a fold during
+  // `starting` — or a switch to a session that runs another level — would leave
+  // the setting and the running sidecar on two different levels.
   useEffect(() => {
     const level = pendingThinkingLevel(status, settings.thinking, deliveredThinking.current);
     if (!level) return;
-    deliveredThinking.current = level;
+    deliveredThinking.current = { sessionId: status.sessionId, level };
     void window.piCad.runtime.setThinking(level).catch(() => { deliveredThinking.current = undefined; });
-  }, [settings.thinking, status.state]);
+  }, [settings.thinking, status.state, status.sessionId, status.thinking]);
   const changePermission = async (permission: AppSettings["permission"]) => {
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();
     await onSettingsChange({ permission });
@@ -225,14 +226,26 @@ export function normalizeThinkingLevel(model: ModelChoice | undefined, current: 
   return levels[0]!;
 }
 
+/** A level already handed to the runtime, and the session it was handed to. */
+export interface ThinkingDelivery { sessionId?: string; level: ThinkingLevel }
+
 /**
- * The level the runtime still has to be told, or `undefined` when it already
- * runs the saved one. The runtime only takes a level while it is up, so a value
- * folded by the catalog during `starting` is delivered as soon as it is ready.
+ * The level the running session still has to be told, or `undefined` when it
+ * already holds the saved one.
+ *
+ * The runtime only takes a level while it is up, so a value folded by the
+ * catalog during `starting` is delivered as soon as it is ready. A delivery
+ * only counts for the session it was made in: a switch can restore a session
+ * that runs a different level while the saved setting never moves, and that
+ * switch has to be reconciled instead of being skipped as "already delivered".
  */
-export function pendingThinkingLevel(status: RuntimeStatus, saved: ThinkingLevel, delivered: ThinkingLevel | undefined): ThinkingLevel | undefined {
+export function pendingThinkingLevel(status: RuntimeStatus, saved: ThinkingLevel, delivered?: ThinkingDelivery): ThinkingLevel | undefined {
   if (status.state !== "ready" && status.state !== "streaming") return undefined;
-  return saved === delivered ? undefined : saved;
+  // Prime reports the level the live session holds, which is authoritative even
+  // when this renderer never sent one.
+  if (status.thinking === saved) return undefined;
+  if (delivered && delivered.sessionId === status.sessionId && delivered.level === saved) return undefined;
+  return saved;
 }
 
 export { thinkingLevelLabel };

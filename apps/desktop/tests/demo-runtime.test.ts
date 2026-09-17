@@ -51,6 +51,20 @@ describe("demo runtime phases", () => {
     await running;
   });
 
+  // A switch can restore a session that runs another level than the setting, so
+  // the demo has to publish that level for the renderer to reconcile against.
+  it("reports the level the restored session runs after a switch", async () => {
+    const runtime = new DemoRuntime();
+    await runtime.start({ ...settings, thinking: "high" });
+    expect(runtime.status).toMatchObject({ sessionId: "desktop-e2e", thinking: "high" });
+
+    await runtime.switchSession("/workspace/.prime-sessions/demo.jsonl");
+    expect(runtime.status).toMatchObject({ sessionId: "demo-restored", thinking: "medium" });
+
+    await runtime.setThinking("high");
+    expect(runtime.status.thinking).toBe("high");
+  });
+
   it("keeps the provider clock still while only runtime status keeps arriving", async () => {
     const runtime = new DemoRuntime();
     await runtime.start(settings);

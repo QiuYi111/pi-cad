@@ -5,6 +5,14 @@ import { PrimeRuntimeState } from "./runtime-state.js";
 const wait = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
 /**
+ * The conversation the demo restores keeps the level it was last run at, which
+ * is not necessarily the saved setting. Switching to it therefore has to be
+ * reconciled, exactly like a real Prime `get_state()` answer would.
+ */
+const RESTORED_SESSION_ID = "demo-restored";
+const RESTORED_THINKING: ThinkingLevel = "medium";
+
+/**
  * Deterministic runtime used by the desktop E2E suite. It drives the same
  * runtime state machine as `PrimeRpc`, so statuses shown in tests (retrying,
  * stopping, aborted, terminal reasons) match the real runtime.
@@ -15,14 +23,16 @@ export class DemoRuntime extends EventEmitter {
   private messages: unknown[] = [];
   private failureTimer?: NodeJS.Timeout;
   private failureDeadline?: number;
+  private saved?: AppSettings;
 
   get status(): RuntimeStatus { return this.runtime.status; }
 
-  async start(_settings: AppSettings) {
+  async start(settings: AppSettings) {
+    this.saved = settings;
     this.runtime.base({ state: "starting", checks: [], message: "Starting Prime…" });
     this.publish();
     await wait(120);
-    this.runtime.sessionReady("desktop-e2e");
+    this.runtime.sessionReady("desktop-e2e", settings.thinking);
     this.publish();
     return this.status;
   }
@@ -41,13 +51,20 @@ export class DemoRuntime extends EventEmitter {
     this.runtime.beginTurn("steer");
     this.event({ type: "message_start", message: { role: "user", content: message } });
   }
-  async newSession() { this.messages = []; return []; }
+  async newSession() {
+    this.messages = [];
+    this.runtime.sessionReady("desktop-e2e", this.saved?.thinking);
+    this.publish();
+    return [];
+  }
   async setSessionName(_name: string) {}
   async switchSession(_path?: string) {
     this.messages = [
       { id: "demo-history-user", role: "user", content: "Design a folding stand" },
       { id: "demo-history-assistant", role: "assistant", content: "I checked the interfaces before building." },
     ];
+    this.runtime.sessionReady(RESTORED_SESSION_ID, RESTORED_THINKING);
+    this.publish();
     return this.messages;
   }
   async getMessages() { return this.messages; }
@@ -56,7 +73,10 @@ export class DemoRuntime extends EventEmitter {
     { provider: "openai-codex", id: "gpt-5.6-luna", name: "GPT-5.6 Luna", reasoning: true },
   ]; }
   async setModel(_provider: string, _model: string) {}
-  async setThinking(_level: ThinkingLevel) {}
+  async setThinking(level: ThinkingLevel) {
+    this.runtime.noteThinking(level);
+    this.publish();
+  }
   async respondToUi(_id: string, _response: Record<string, unknown>) {}
 
   async prompt(message: string) {

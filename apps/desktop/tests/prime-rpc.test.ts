@@ -46,6 +46,49 @@ describe("Prime runtime setup", () => {
     expect(messages).toHaveBeenCalledOnce();
     expect(request).not.toHaveBeenCalledWith("switch_session", expect.anything());
   });
+
+  it("adopts the thinking level the restored session reports", async () => {
+    const runtime = new PrimeRpc({} as never);
+    // `switchSession` only runs the RPC path while a sidecar is alive.
+    (runtime as unknown as { child: { killed: boolean } }).child = { killed: false };
+    vi.spyOn(runtime, "request").mockImplementation(async (type: string) => {
+      if (type === "get_state") return { sessionId: "session-b", thinkingLevel: "medium" };
+      if (type === "get_messages") return { messages: [] };
+      return undefined;
+    });
+
+    await runtime.switchSession("/workspace/.prime-sessions/b.jsonl");
+
+    // The restored session keeps its own level instead of the one this process
+    // last sent, which is what the renderer reconciles against.
+    expect(runtime.status).toMatchObject({ state: "ready", sessionId: "session-b", thinking: "medium" });
+  });
+
+  it("ignores a level Prime never defined", async () => {
+    const runtime = new PrimeRpc({} as never);
+    (runtime as unknown as { child: { killed: boolean } }).child = { killed: false };
+    vi.spyOn(runtime, "request").mockImplementation(async (type: string) => {
+      if (type === "get_state") return { sessionId: "session-b", thinkingLevel: "turbo" };
+      if (type === "get_messages") return { messages: [] };
+      return undefined;
+    });
+
+    await runtime.switchSession("/workspace/.prime-sessions/b.jsonl");
+
+    expect(runtime.status).toMatchObject({ sessionId: "session-b" });
+    expect(runtime.status.thinking).toBeUndefined();
+  });
+
+  it("records the level Prime accepted", async () => {
+    const runtime = new PrimeRpc({} as never);
+    const request = vi.spyOn(runtime, "request").mockResolvedValue(undefined);
+
+    await runtime.setThinking("high");
+
+    expect(request).toHaveBeenCalledWith("set_thinking_level", { level: "high" });
+    expect(runtime.status.thinking).toBe("high");
+  });
+
   it("uses an existing runtime without reinstalling", async () => {
     const bridge = { check: vi.fn().mockResolvedValue(ready), install: vi.fn() };
     await expect(ensureRuntimeReady(bridge as any, settings)).resolves.toEqual(ready);

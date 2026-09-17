@@ -3,7 +3,7 @@ import { normalizeThinkingLevel, pendingThinkingLevel, thinkingLevelLabel, think
 import type { ModelChoice, RuntimeState, RuntimeStatus } from "../src/shared/contracts";
 
 const model = (thinkingLevels?: ModelChoice["thinkingLevels"]): ModelChoice => ({ provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, thinkingLevels });
-const status = (state: RuntimeState): RuntimeStatus => ({ state, checks: [] });
+const status = (state: RuntimeState, extra: Partial<RuntimeStatus> = {}): RuntimeStatus => ({ state, checks: [], ...extra });
 
 describe("composer thinking selector", () => {
   it("offers only the levels the catalog reports for the model", () => {
@@ -50,15 +50,37 @@ describe("composer thinking level clamping", () => {
 
 describe("composer thinking level delivery", () => {
   it("waits for the runtime before sending a folded level", () => {
-    expect(pendingThinkingLevel(status("starting"), "high", undefined)).toBeUndefined();
-    expect(pendingThinkingLevel(status("installing"), "high", undefined)).toBeUndefined();
-    expect(pendingThinkingLevel(status("ready"), "high", undefined)).toBe("high");
+    expect(pendingThinkingLevel(status("starting"), "high")).toBeUndefined();
+    expect(pendingThinkingLevel(status("installing"), "high")).toBeUndefined();
+    expect(pendingThinkingLevel(status("ready"), "high")).toBe("high");
   });
 
-  it("sends a level once and again only when the saved level moves", () => {
-    expect(pendingThinkingLevel(status("ready"), "high", "high")).toBeUndefined();
-    expect(pendingThinkingLevel(status("streaming"), "high", "high")).toBeUndefined();
-    expect(pendingThinkingLevel(status("streaming"), "medium", "high")).toBe("medium");
-    expect(pendingThinkingLevel(status("idle"), "medium", "high")).toBeUndefined();
+  it("sends a level once per session and again only when the saved level moves", () => {
+    const sent = { sessionId: "session-a", level: "high" as const };
+    expect(pendingThinkingLevel(status("ready", { sessionId: "session-a" }), "high", sent)).toBeUndefined();
+    expect(pendingThinkingLevel(status("streaming", { sessionId: "session-a" }), "high", sent)).toBeUndefined();
+    expect(pendingThinkingLevel(status("streaming", { sessionId: "session-a" }), "medium", sent)).toBe("medium");
+    expect(pendingThinkingLevel(status("idle", { sessionId: "session-a" }), "medium", sent)).toBeUndefined();
+  });
+
+  // A switch can restore a session that runs another level while the saved
+  // setting never moves. The marker from the previous session must not be
+  // mistaken for "the running session already has this level".
+  it("reconciles a session that runs another level than the saved setting", () => {
+    const delivered = { sessionId: "session-a", level: "high" as const };
+    const switched = status("ready", { sessionId: "session-b", thinking: "medium" });
+    expect(pendingThinkingLevel(switched, "high", delivered)).toBe("high");
+    // Once that session has been told, the same level is not sent again.
+    expect(pendingThinkingLevel(switched, "high", { sessionId: "session-b", level: "high" })).toBeUndefined();
+    // The status the switch published is enough even without a marker.
+    expect(pendingThinkingLevel(switched, "high")).toBe("high");
+  });
+
+  // Prime reports the level the live session holds, so a session that already
+  // runs the saved level needs nothing, and one that runs another level does.
+  it("trusts the level Prime reports over the last one sent", () => {
+    expect(pendingThinkingLevel(status("ready", { sessionId: "session-b", thinking: "high" }), "high")).toBeUndefined();
+    expect(pendingThinkingLevel(status("ready", { sessionId: "session-b", thinking: "medium" }), "high")).toBe("high");
+    expect(pendingThinkingLevel(status("ready", { sessionId: "session-b" }), "high", { sessionId: "session-b", level: "high" })).toBeUndefined();
   });
 });

@@ -461,6 +461,37 @@ describe("runtime journal", () => {
   });
 });
 
+describe("runtime thinking level", () => {
+  it("replaces the level with the one the session reports", () => {
+    const runtime = state();
+    runtime.sessionReady("session-a", "high");
+    expect(runtime.status).toMatchObject({ state: "ready", sessionId: "session-a", thinking: "high" });
+
+    // The restored session runs its own level; the previous one must not linger.
+    runtime.sessionReady("session-b", "medium");
+    expect(runtime.status).toMatchObject({ state: "ready", sessionId: "session-b", thinking: "medium" });
+  });
+
+  it("drops a level the session did not report", () => {
+    const runtime = state();
+    runtime.sessionReady("session-a", "high");
+    runtime.sessionReady("session-b");
+    expect(runtime.status.sessionId).toBe("session-b");
+    expect(runtime.status.thinking).toBeUndefined();
+  });
+
+  it("records the level Prime accepted and clears it when the runtime goes idle", () => {
+    const runtime = state();
+    runtime.sessionReady("session-a", "medium");
+    runtime.noteThinking("high");
+    expect(runtime.status.thinking).toBe("high");
+    expect(runtime.drain().some((entry) => entry.event === "thinking_level" && entry.detail === "high")).toBe(true);
+
+    runtime.base({ state: "idle", checks: [] });
+    expect(runtime.status.thinking).toBeUndefined();
+  });
+});
+
 describe("provider failure classification", () => {
   it.each([
     ["Request timed out", "provider_timeout"],
