@@ -43,6 +43,38 @@ describe("Prime runtime phases", () => {
     expect(runtime.status).toMatchObject({ phase: "provider_wait", reason: "retry_attempt", retry: { attempt: 2 } });
   });
 
+  it("keeps the phase clock across same-phase stream deltas", () => {
+    let clock = 1_000;
+    const runtime = new PrimeRuntimeState({ state: "ready", checks: [] }, { now: () => clock });
+    runtime.beginTurn("prompt");
+
+    clock = 1_500;
+    runtime.applyEvent({ type: "agent_start" });
+    expect(runtime.status.turn).toMatchObject({ phase: "waiting_provider", phaseStartedAt: 1_500, lastEventAt: 1_500 });
+
+    clock = 1_800;
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "a" } });
+    expect(runtime.status.turn).toMatchObject({ phase: "thinking", phaseStartedAt: 1_800, lastEventAt: 1_800 });
+
+    // Two more thinking tokens must not restart the phase the user is watching.
+    clock = 2_400;
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "b" } });
+    clock = 3_000;
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "c" } });
+    expect(runtime.status.turn).toMatchObject({ phase: "thinking", phaseStartedAt: 1_800, lastEventAt: 3_000 });
+
+    // A real phase move still starts a new clock.
+    clock = 3_600;
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: "hi" } });
+    expect(runtime.status.turn).toMatchObject({ phase: "responding", phaseStartedAt: 3_600, lastEventAt: 3_600 });
+
+    clock = 4_200;
+    runtime.applyEvent({ type: "tool_execution_start", toolCallId: "t1", toolName: "ipython" });
+    clock = 4_800;
+    runtime.applyEvent({ type: "tool_execution_update", toolCallId: "t1", toolName: "ipython", stage: "progress" });
+    expect(runtime.status.turn).toMatchObject({ phase: "running_tool", phaseStartedAt: 4_200, lastEventAt: 4_800 });
+  });
+
   it("holds a provider error through the retry grace and keeps retrying visible", () => {
     const runtime = state(1_500);
     runtime.beginTurn("prompt");
@@ -122,6 +154,46 @@ describe("Prime runtime phases", () => {
     expect(named.status).toMatchObject({ terminalReason: "reasoning_limit", reason: "reasoning_budget" });
   });
 
+  it("recognises a reasoning_limit stop reason without flipping through completed", () => {
+    const runtime = state();
+    runtime.beginTurn("prompt");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "..." } });
+    runtime.applyEvent({
+      type: "message_end",
+      message: { role: "assistant", content: [{ type: "thinking", thinking: "cut" }], stopReason: "reasoning_limit" },
+    });
+    expect(runtime.status).toMatchObject({ phase: "reasoning_limit", reason: "reasoning_limit", terminalReason: undefined });
+    expect(runtime.failurePending).toBe(true);
+
+    // agent_end repeats the same message: it must stay a pending failure instead
+    // of being settled as a completed turn first.
+    runtime.applyEvent({
+      type: "agent_end",
+      messages: [{ role: "assistant", content: [{ type: "thinking", thinking: "cut" }], stopReason: "reasoning_limit" }],
+    });
+    expect(runtime.status.terminalReason).toBeUndefined();
+    expect(runtime.status.turn?.terminalReason).toBeUndefined();
+
+    runtime.settleFailure();
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "reasoning_limit", terminalReason: "reasoning_limit", reason: "reasoning_limit" });
+    expect(runtime.status.turn?.terminalReason).toBe("reasoning_limit");
+  });
+
+  it("takes a reasoning_limit streaming error from the event body", () => {
+    const runtime = state();
+    runtime.beginTurn("prompt");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.applyEvent({
+      type: "message_update",
+      message: { role: "assistant", content: [] },
+      assistantMessageEvent: { type: "error", reason: "error", error: { role: "assistant", content: [], stopReason: "reasoning_limit" } },
+    });
+    expect(runtime.status).toMatchObject({ phase: "reasoning_limit", reason: "reasoning_limit", terminalReason: undefined });
+    runtime.settleFailure();
+    expect(runtime.status).toMatchObject({ terminalReason: "reasoning_limit", reason: "reasoning_limit" });
+  });
+
   it("keeps exhausted retries terminal even when a late agent_end arrives", () => {
     const runtime = state();
     runtime.beginTurn("prompt");
@@ -152,6 +224,38 @@ describe("Prime runtime phases", () => {
     expect(runtime.status.reason).toBe("reasoning");
   });
 
+  it("keeps provider activity separate from ordinary runtime events", () => {
+    let clock = 1_000;
+    const runtime = new PrimeRuntimeState({ state: "ready", checks: [] }, { now: () => clock });
+    runtime.beginTurn("prompt");
+    runtime.applyEvent({ type: "agent_start" });
+    expect(runtime.lastProviderEventAt).toBe(1_000);
+
+    clock = 2_000;
+    runtime.applyEvent({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: ".." } });
+    expect(runtime.lastProviderEventAt).toBe(2_000);
+
+    // Runtime chatter keeps `lastEventAt` fresh but must not hide a silent model.
+    clock = 3_000;
+    runtime.applyEvent({ type: "agent_status", taskState: "running", summary: "still up" });
+    runtime.applyEvent({ type: "session_action_update", action: "queued" });
+    expect(runtime.status.lastEventAt).toBe(3_000);
+    expect(runtime.lastProviderEventAt).toBe(2_000);
+    expect(runtime.status.turn?.lastProviderEventAt).toBe(2_000);
+
+    clock = 3_500;
+    runtime.applyEvent({ type: "tool_execution_start", toolCallId: "t1", toolName: "ipython" });
+    clock = 4_000;
+    runtime.applyEvent({ type: "tool_execution_update", toolCallId: "t1", toolName: "ipython", stage: "progress" });
+    expect(runtime.lastProviderEventAt).toBe(2_000);
+
+    // The tool result opens a new provider request, so the clock restarts.
+    clock = 4_500;
+    runtime.applyEvent({ type: "tool_execution_end", toolCallId: "t1", toolName: "ipython" });
+    expect(runtime.status.phase).toBe("waiting_provider");
+    expect(runtime.lastProviderEventAt).toBe(4_500);
+  });
+
   it("keeps the last completed turn when the runtime stops normally", () => {
     const runtime = state();
     runtime.beginTurn("prompt");
@@ -168,7 +272,31 @@ describe("Prime runtime phases", () => {
     aborted.applyEvent({ type: "agent_start" });
     aborted.applyEvent({ type: "agent_abort" });
     aborted.processExited(0, null);
-    expect(aborted.status).toMatchObject({ phase: "aborted", terminalReason: "aborted" });
+    expect(aborted.status).toMatchObject({ state: "idle", phase: "aborted", terminalReason: "aborted" });
+    expect(aborted.status.turn?.terminalReason).toBe("aborted");
+  });
+
+  it("moves the process state for every settled turn without rewriting the turn", () => {
+    const limited = state();
+    limited.beginTurn("prompt");
+    limited.applyEvent({ type: "agent_start" });
+    limited.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "reasoning_limit" } });
+    limited.settleFailure();
+    expect(limited.status).toMatchObject({ state: "ready", terminalReason: "reasoning_limit" });
+
+    limited.processExited(0, null);
+    expect(limited.status).toMatchObject({ state: "idle", phase: "reasoning_limit", terminalReason: "reasoning_limit" });
+    expect(limited.status.turn?.terminalReason).toBe("reasoning_limit");
+
+    // A crash after a failure is a process error, not a new turn outcome.
+    const crashed = state();
+    crashed.beginTurn("prompt");
+    crashed.applyEvent({ type: "agent_start" });
+    crashed.applyEvent({ type: "agent_abort" });
+    crashed.processExited(9, null);
+    expect(crashed.status).toMatchObject({ state: "error", phase: "aborted", terminalReason: "aborted" });
+    expect(crashed.status.turn?.terminalReason).toBe("aborted");
+    expect(crashed.status.message).toBe("Prime exited (9)");
   });
 
   it("separates RPC timeouts from provider timeouts", () => {

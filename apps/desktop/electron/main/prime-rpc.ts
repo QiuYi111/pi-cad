@@ -314,10 +314,14 @@ export class PrimeRpc extends EventEmitter {
     }
     if (this.stallTimer) { clearTimeout(this.stallTimer); this.stallTimer = undefined; }
     if (turn && this.providerTimeoutMs > 0 && MODEL_WAIT_PHASES.includes(status.phase ?? "ready")) {
+      // Anchor on provider events only: `lastEventAt` also moves for
+      // `agent_status` and other chatter, which would hide a silent provider.
+      const silentFor = () => this.now() - (this.runtime.lastProviderEventAt ?? this.now());
+      const remaining = Math.max(0, this.providerTimeoutMs - silentFor());
       this.stallTimer = setTimeout(() => {
         this.stallTimer = undefined;
-        this.mutate(() => this.runtime.providerStall(this.now() - (this.status.lastEventAt ?? this.now())));
-      }, this.providerTimeoutMs);
+        this.mutate(() => this.runtime.providerStall(silentFor()));
+      }, remaining);
       this.stallTimer.unref?.();
     }
     if (this.failureTimer) { clearTimeout(this.failureTimer); this.failureTimer = undefined; }

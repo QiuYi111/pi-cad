@@ -100,6 +100,8 @@ export interface RuntimeTurn {
   startedAt: number;
   phaseStartedAt: number;
   lastEventAt: number;
+  /** Newest provider/model stream event; any runtime event moves `lastEventAt`. */
+  lastProviderEventAt?: number;
   retryAttempt: number;
   reason?: string;
   error?: string;
@@ -121,6 +123,8 @@ export interface RuntimeStatus {
   /** Active auto-retry attempt while `phase === "retrying"`. */
   retry?: RuntimeRetry;
   lastEventAt?: number;
+  /** Newest provider/model stream event; the stall watchdog anchors here. */
+  lastProviderEventAt?: number;
   checks: DependencyCheck[];
   message?: string;
   progress?: number;

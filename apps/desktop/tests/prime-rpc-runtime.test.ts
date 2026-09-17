@@ -78,6 +78,24 @@ describe("PrimeRpc runtime state", () => {
     expect(runtime.status).toMatchObject({ state: "ready", phase: "provider_timeout", terminalReason: "provider_timeout" });
   });
 
+  it("settles a reasoning_limit turn from the full Prime event sequence", async () => {
+    vi.useFakeTimers();
+    const { runtime, send } = harness({ failureGraceMs: 40 });
+    const limited = { role: "assistant", content: [{ type: "thinking", thinking: "cut" }], stopReason: "reasoning_limit" };
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    send({ type: "message_start", message: { role: "assistant" } });
+    send({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "..." } });
+    send({ type: "message_end", message: limited });
+    expect(runtime.status).toMatchObject({ phase: "reasoning_limit", terminalReason: undefined });
+
+    send({ type: "agent_end", messages: [limited] });
+    // The turn must not be settled as completed on the way through agent_end.
+    expect(runtime.status.terminalReason).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(60);
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "reasoning_limit", terminalReason: "reasoning_limit", reason: "reasoning_limit" });
+  });
+
   it("marks a silent provider as stalled instead of a terminal timeout", async () => {
     vi.useFakeTimers();
     const { runtime, send } = harness({ providerTimeoutMs: 200 });
@@ -89,6 +107,27 @@ describe("PrimeRpc runtime state", () => {
 
     send({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "back" } });
     expect(runtime.status).toMatchObject({ phase: "thinking", terminalReason: undefined });
+  });
+
+  it("keeps the stall watchdog on provider events, not on runtime chatter", async () => {
+    vi.useFakeTimers();
+    const { runtime, send } = harness({ providerTimeoutMs: 200 });
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+
+    // Prime keeps reporting agent_status while the model itself is silent; the
+    // renderer must still be told the provider stopped answering.
+    for (let index = 0; index < 4; index += 1) {
+      await vi.advanceTimersByTimeAsync(60);
+      send({ type: "agent_status", taskState: "running", summary: "still up" });
+    }
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "stalled", reason: "provider_silent", terminalReason: undefined });
+
+    // A real stream event resumes the turn and restarts the watchdog.
+    send({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "back" } });
+    expect(runtime.status.phase).toBe("thinking");
+    await vi.advanceTimersByTimeAsync(230);
+    expect(runtime.status).toMatchObject({ phase: "stalled", reason: "provider_silent" });
   });
 
   it("classifies a streaming error from the event body", async () => {

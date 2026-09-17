@@ -25,6 +25,31 @@ export const MODEL_WAIT_PHASES: readonly RuntimePhase[] = [
 ];
 
 /**
+ * Events that prove the provider request is still alive.
+ *
+ * `agent_status`, `session_action_update` and other runtime chatter keep
+ * arriving while the model is silent, so they must not feed the stall
+ * watchdog: only these stream/model events reset the provider clock.
+ */
+const PROVIDER_EVENT_TYPES = new Set([
+  "agent_start",
+  "turn_start",
+  "message_start",
+  "message_update",
+  "message_end",
+  "auto_retry_start",
+  "auto_retry_end",
+  "compaction_start",
+  "compaction_end",
+]);
+
+function isProviderEvent(event: any): boolean {
+  const type = event?.type;
+  if (type === "turn_start" || type === "message_start") return event?.message?.role !== "user";
+  return typeof type === "string" && PROVIDER_EVENT_TYPES.has(type);
+}
+
+/**
  * Terminal precedence. A failed turn may be escalated (abort while stopping,
  * sidecar death after an abort) but never downgraded: `aborted` must not turn
  * back into `provider_error`, and a late `completed` must not clear a failure.
@@ -149,6 +174,9 @@ export function classifyMessageEnd(message: any): ProviderFailure | undefined {
   const stopReason = message?.stopReason;
   if (stopReason === "aborted") return { terminalReason: "aborted", reason: "user_abort" };
   if (stopReason === "error") return classifyProviderFailure(message?.errorMessage);
+  // Newer Prime cores end the message with this stop reason directly instead of
+  // reporting `length` plus a hint, so it is its own terminal outcome.
+  if (stopReason === "reasoning_limit") return { terminalReason: "reasoning_limit", reason: "reasoning_limit" };
   if (stopReason === "length") {
     const evidence = reasoningLimitEvidence(message);
     return evidence ? { terminalReason: "reasoning_limit", reason: evidence } : undefined;
@@ -182,6 +210,7 @@ export class PrimeRuntimeState {
   private pending?: { terminalReason: RuntimeTerminalReason; reason: string; message?: string };
   private sequence = 0;
   private readonly entries: RuntimeTraceEntry[] = [];
+  private providerEventAt?: number;
 
   constructor(initial: RuntimeStatus = { state: "idle", checks: [] }, options: PrimeRuntimeStateOptions = {}) {
     this.status = initial;
@@ -199,6 +228,14 @@ export class PrimeRuntimeState {
     return turn && !turn.terminalReason ? turn : undefined;
   }
 
+  /**
+   * Newest provider/model stream event. The stall watchdog anchors here instead
+   * of `lastEventAt`, which every runtime event (including `agent_status`) moves.
+   */
+  get lastProviderEventAt(): number | undefined {
+    return this.providerEventAt;
+  }
+
   /** Take the journal lines recorded since the last call; the caller persists them. */
   drain(): RuntimeTraceEntry[] {
     return this.entries.splice(0, this.entries.length);
@@ -208,6 +245,7 @@ export class PrimeRuntimeState {
   base(patch: Partial<RuntimeStatus>): void {
     const next: RuntimeStatus = { ...this.status, ...patch };
     if (patch.state === "idle" && !this.activeTurn()) {
+      this.providerEventAt = undefined;
       this.status = {
         ...next,
         phase: undefined,
@@ -216,6 +254,7 @@ export class PrimeRuntimeState {
         turn: undefined,
         retry: undefined,
         lastEventAt: undefined,
+        lastProviderEventAt: undefined,
       };
       return;
     }
@@ -236,10 +275,12 @@ export class PrimeRuntimeState {
       startedAt: now,
       phaseStartedAt: now,
       lastEventAt: now,
+      lastProviderEventAt: now,
       retryAttempt: 0,
       phase: "starting_turn",
       reason: "prompt_sent",
     };
+    this.providerEventAt = now;
     this.pending = undefined;
     this.status = {
       ...this.status,
@@ -251,6 +292,7 @@ export class PrimeRuntimeState {
       retry: undefined,
       turn,
       lastEventAt: now,
+      lastProviderEventAt: now,
     };
     this.record("turn_started", `${kind} accepted`);
   }
@@ -264,6 +306,7 @@ export class PrimeRuntimeState {
       return;
     }
     if (!this.activeTurn() && !this.failurePending) return;
+    if (isProviderEvent(event)) this.markProviderEvent();
     switch (type) {
       case "turn_start":
       case "message_start":
@@ -443,6 +486,8 @@ export class PrimeRuntimeState {
    *
    * A process lifecycle event must never rewrite a turn that already settled:
    * stopping the runtime normally leaves the last completed turn completed.
+   * Only the coarse lifecycle state follows the process, and it follows for
+   * every settled outcome so a dead sidecar never looks like a live runtime.
    */
   processExited(code: number | null, signal: string | null, forced = false): void {
     const detail = `Prime exited (${signal || code || 0})`;
@@ -450,7 +495,7 @@ export class PrimeRuntimeState {
     this.record("process_exit", detail);
     const settled = this.status.turn?.terminalReason;
     if (settled) {
-      if (!forced && settled === "completed") {
+      if (!forced) {
         this.status = { ...this.status, state: code === 0 ? "idle" : "error", ...(code === 0 ? {} : { message: detail }) };
       }
       return;
@@ -469,6 +514,7 @@ export class PrimeRuntimeState {
   /** Prime answered `get_state` (start, session switch, new session). */
   sessionReady(sessionId?: string): void {
     this.pending = undefined;
+    this.providerEventAt = undefined;
     this.status = {
       ...this.status,
       state: "ready",
@@ -479,6 +525,7 @@ export class PrimeRuntimeState {
       retry: undefined,
       terminalReason: undefined,
       turn: undefined,
+      lastProviderEventAt: undefined,
     };
     this.record("session_ready", sessionId);
   }
@@ -496,10 +543,12 @@ export class PrimeRuntimeState {
       startedAt: now,
       phaseStartedAt: now,
       lastEventAt: now,
+      lastProviderEventAt: now,
       retryAttempt: 0,
       phase: "waiting_provider",
       reason: "provider_request",
     };
+    this.providerEventAt = now;
     this.pending = undefined;
     this.status = {
       ...this.status,
@@ -511,6 +560,7 @@ export class PrimeRuntimeState {
       retry: undefined,
       turn,
       lastEventAt: now,
+      lastProviderEventAt: now,
     };
     this.record("turn_started", "agent_start");
   }
@@ -523,16 +573,17 @@ export class PrimeRuntimeState {
       return;
     }
     const now = this.now();
+    const phase = TERMINAL_PHASE[failure.terminalReason];
     this.pending = { terminalReason: failure.terminalReason, reason: failure.reason, message: detail };
     const turn = this.activeTurn();
     if (turn) {
       this.status = {
         ...this.status,
         state: "streaming",
-        phase: TERMINAL_PHASE[failure.terminalReason],
+        phase,
         reason: failure.reason,
         message: detail,
-        turn: { ...turn, phase: TERMINAL_PHASE[failure.terminalReason], phaseStartedAt: now, lastEventAt: now, reason: failure.reason, error: detail },
+        turn: { ...turn, phase, phaseStartedAt: turn.phase === phase ? turn.phaseStartedAt : now, lastEventAt: now, reason: failure.reason, error: detail },
         lastEventAt: now,
       };
     }
@@ -544,6 +595,10 @@ export class PrimeRuntimeState {
     const now = this.now();
     const turn = this.activeTurn();
     if (!turn) return;
+    // Entering a model-wait phase from outside one means a new provider request
+    // is starting, so the stall watchdog restarts from this moment.
+    const providerAt = MODEL_WAIT_PHASES.includes(phase) && !MODEL_WAIT_PHASES.includes(turn.phase) ? now : this.providerEventAt;
+    this.providerEventAt = providerAt;
     // Stream deltas re-enter the same phase; only real phase moves get a journal line.
     const changed = turn.phase !== phase
       || (options.reason !== undefined && options.reason !== turn.reason)
@@ -551,8 +606,11 @@ export class PrimeRuntimeState {
     const nextTurn: RuntimeTurn = {
       ...turn,
       phase,
-      phaseStartedAt: now,
+      // Same-phase stream deltas keep the original clock: `phaseStartedAt` means
+      // "how long this phase has run", not "how long since the last delta".
+      phaseStartedAt: turn.phase === phase ? turn.phaseStartedAt : now,
       lastEventAt: now,
+      ...(providerAt !== undefined ? { lastProviderEventAt: providerAt } : {}),
       reason: options.reason ?? turn.reason,
       error: options.message ?? turn.error,
       retryAttempt: options.retryAttempt ?? turn.retryAttempt,
@@ -567,8 +625,20 @@ export class PrimeRuntimeState {
       retry: options.retry === undefined ? this.status.retry : options.retry ?? undefined,
       turn: nextTurn,
       lastEventAt: now,
+      ...(providerAt !== undefined ? { lastProviderEventAt: providerAt } : {}),
     };
     if (changed) this.record(`phase:${phase}`, traceDetail(options.message) ?? options.reason);
+  }
+
+  /** Remember the newest provider/model stream event. */
+  private markProviderEvent(now = this.now()): void {
+    this.providerEventAt = now;
+    const turn = this.status.turn;
+    this.status = {
+      ...this.status,
+      lastProviderEventAt: now,
+      turn: turn ? { ...turn, lastProviderEventAt: now } : turn,
+    };
   }
 
   private touch(reason?: string): void {
@@ -598,11 +668,12 @@ export class PrimeRuntimeState {
     const now = this.now();
     const turn = this.status.turn;
     if (turn?.terminalReason && TERMINAL_PRIORITY[turn.terminalReason] >= TERMINAL_PRIORITY[reason]) return;
+    const phase = TERMINAL_PHASE[reason];
     if (turn) {
       const finished: RuntimeTurn = {
         ...turn,
-        phase: TERMINAL_PHASE[reason],
-        phaseStartedAt: now,
+        phase,
+        phaseStartedAt: turn.phase === phase ? turn.phaseStartedAt : now,
         lastEventAt: now,
         finishedAt: now,
         terminalReason: reason,
@@ -612,7 +683,7 @@ export class PrimeRuntimeState {
       this.status = {
         ...this.status,
         state: options.state ?? "ready",
-        phase: TERMINAL_PHASE[reason],
+        phase,
         reason: options.reason ?? this.status.reason,
         message: options.message ?? this.status.message,
         terminalReason: reason,
@@ -624,7 +695,7 @@ export class PrimeRuntimeState {
       this.status = {
         ...this.status,
         state: options.state ?? this.status.state,
-        phase: TERMINAL_PHASE[reason],
+        phase,
         reason: options.reason ?? this.status.reason,
         message: options.message ?? this.status.message,
         terminalReason: reason,
