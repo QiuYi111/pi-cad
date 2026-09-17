@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
 import { runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
+import { MODEL_WAIT_PHASES, PrimeRuntimeState } from "./runtime-state.js";
 
 interface PendingRequest {
   accept: (value: any) => void;
@@ -9,25 +10,58 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
+export interface PrimeRpcOptions {
+  /** No provider-side event for this long marks `provider_timeout`. 0 disables it. */
+  providerTimeoutMs?: number;
+  /** How long the abort handshake waits for `message_end(aborted)` / `agent_end`. */
+  abortTimeoutMs?: number;
+  /** RPC response timeout for the abort command itself. */
+  abortRpcTimeoutMs?: number;
+  /** Provider errors are held this long in case Prime auto-retries. */
+  failureGraceMs?: number;
+  now?: () => number;
+}
+
 export class PrimeRpc extends EventEmitter {
   private child?: ChildProcessWithoutNullStreams;
   private buffer = "";
   private sequence = 0;
   private pending = new Map<string, PendingRequest>();
-  status: RuntimeStatus = { state: "idle", checks: [] };
+  private readonly runtime: PrimeRuntimeState;
+  private readonly providerTimeoutMs: number;
+  private readonly abortTimeoutMs: number;
+  private readonly abortRpcTimeoutMs: number;
+  private readonly now: () => number;
+  private retryTimer?: NodeJS.Timeout;
+  private stallTimer?: NodeJS.Timeout;
+  private failureTimer?: NodeJS.Timeout;
+  private turnWaiters = new Set<() => void>();
 
-  constructor(private readonly bridge: RuntimeBridge) { super(); }
+  constructor(private readonly bridge: RuntimeBridge, options: PrimeRpcOptions = {}) {
+    super();
+    this.runtime = new PrimeRuntimeState(
+      { state: "idle", checks: [] },
+      { now: options.now, failureGraceMs: options.failureGraceMs },
+    );
+    this.providerTimeoutMs = options.providerTimeoutMs ?? 600_000;
+    this.abortTimeoutMs = options.abortTimeoutMs ?? 8_000;
+    this.abortRpcTimeoutMs = options.abortRpcTimeoutMs ?? 5_000;
+    this.now = options.now ?? Date.now;
+  }
+
+  /** Authoritative runtime status, including turn phase and terminal reason. */
+  get status(): RuntimeStatus { return this.runtime.status; }
 
   async start(settings: AppSettings, resumePath?: string): Promise<RuntimeStatus> {
     if (this.child && !this.child.killed) return this.status;
-    await ensureRuntimeReady(this.bridge, settings, (status) => this.setStatus(status));
+    await ensureRuntimeReady(this.bridge, settings, (status) => this.merge(status));
     const paths = await this.bridge.resolveRuntimePaths(settings);
     if (!paths.projectPath) throw new Error("Choose a project folder before starting Prime.");
     try {
       await this.bridge.exec(["test", "-d", paths.projectPath]);
     } catch {
       const error = new Error("Project folder no longer exists. Choose another project.");
-      this.setStatus({ state: "error", checks: [], message: error.message });
+      this.merge({ state: "error", checks: [], message: error.message });
       throw error;
     }
     const home = await this.bridge.homeDirectory();
@@ -51,7 +85,7 @@ export class PrimeRpc extends EventEmitter {
       ...reviewer,
       ...(resumePath ? ["--resume", sandboxSessionPath(resumePath)] : []),
     ];
-    this.setStatus({ state: "starting", checks: [], message: "Starting Prime and the Reify engineering runtime…" });
+    this.merge({ state: "starting", checks: [], message: "Starting Prime and the Reify engineering runtime…" });
     this.child = this.bridge.spawn(args);
     this.child.stdout.on("data", (chunk: Buffer) => this.consume(chunk.toString("utf8")));
     this.child.stderr.on("data", (chunk: Buffer) => this.emit("diagnostic", chunk.toString("utf8")));
@@ -60,10 +94,10 @@ export class PrimeRpc extends EventEmitter {
       const error = new Error(`Prime exited (${signal || code || 0})`);
       this.failAll(error);
       this.child = undefined;
-      this.setStatus({ state: code === 0 ? "idle" : "error", checks: [], message: code === 0 ? undefined : error.message });
+      this.mutate(() => this.runtime.processExited(code, signal));
     });
     const state = await this.request("get_state", {}, 45_000);
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
     return this.status;
   }
 
@@ -88,8 +122,7 @@ export class PrimeRpc extends EventEmitter {
       }
       if (record.type === "extension_ui_request") this.emit("ui-request", record);
       else this.emit("event", record);
-      if (record.type === "agent_start") this.setStatus({ ...this.status, state: "streaming" });
-      if (record.type === "agent_end") this.setStatus({ ...this.status, state: "ready" });
+      this.mutate(() => this.runtime.applyEvent(record));
     }
   }
 
@@ -108,22 +141,33 @@ export class PrimeRpc extends EventEmitter {
 
   async prompt(message: string, images?: Array<{ data: string; mimeType: string }>) {
     const payload = { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) };
+    this.mutate(() => this.runtime.beginTurn("prompt"));
     try {
       await this.request("prompt", payload);
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes("queued session input is suspended")) throw error;
-      await this.request("steer", payload);
+      if (error instanceof Error && error.message.includes("queued session input is suspended")) {
+        await this.request("steer", payload);
+        return;
+      }
+      this.noteRpcFailure(error);
+      throw error;
     }
   }
 
   async steer(message: string, images?: Array<{ data: string; mimeType: string }>) {
-    await this.request("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
+    this.mutate(() => this.runtime.beginTurn("steer"));
+    try {
+      await this.request("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
+    } catch (error) {
+      this.noteRpcFailure(error);
+      throw error;
+    }
   }
 
   async newSession(): Promise<unknown[]> {
     await this.request("new_session");
     const state = await this.request("get_state");
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
     return (await this.request("get_messages"))?.messages || [];
   }
   async getMessages(): Promise<unknown[]> {
@@ -139,7 +183,7 @@ export class PrimeRpc extends EventEmitter {
     const result = await this.request("switch_session", { sessionPath: sandboxSessionPath(path) });
     if (result?.cancelled) throw new Error("Session switch was cancelled.");
     const [state, messages] = await Promise.all([this.request("get_state"), this.request("get_messages")]);
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
     return messages?.messages || [];
   }
 
@@ -161,7 +205,28 @@ export class PrimeRpc extends EventEmitter {
 
   async setModel(provider: string, model: string) { await this.request("set_model", { provider, modelId: model }); }
   async setThinking(level: ThinkingLevel) { await this.request("set_thinking_level", { level }); }
-  async abort() { await this.request("abort"); }
+
+  /**
+   * Stop the current turn and wait for Prime to confirm it.
+   *
+   * Sending `abort` only means the command was accepted. The turn is terminal
+   * once Prime reports `message_end(aborted)` / `auto_retry_end` / `agent_end`;
+   * if that does not happen inside the deadline the sidecar is killed so the
+   * runtime can never stay stuck in `streaming`.
+   */
+  async abort(): Promise<void> {
+    if (!this.child || !this.runtime.activeTurn()) return;
+    this.mutate(() => this.runtime.beginStopping());
+    const settled = this.waitForTurnEnd(this.abortTimeoutMs);
+    try {
+      await this.request("abort", {}, this.abortRpcTimeoutMs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.mutate(() => this.runtime.rpcFailure("rpc_timeout", `Prime abort failed: ${message}`));
+    }
+    if (await settled) return;
+    await this.forceStop();
+  }
 
   async respondToUi(requestId: string, response: Record<string, unknown>) {
     if (!this.child?.stdin.writable) throw new Error("Prime is not running");
@@ -177,7 +242,84 @@ export class PrimeRpc extends EventEmitter {
     });
   }
 
-  private setStatus(status: RuntimeStatus) { this.status = status; this.emit("status", status); }
+  /** Abort the sidecar after the stop handshake missed its deadline. */
+  private async forceStop() {
+    const child = this.child;
+    this.mutate(() => this.runtime.processExited(null, null, true));
+    if (!child) return;
+    await new Promise<void>((accept) => {
+      const timer = setTimeout(() => { child.kill("SIGKILL"); accept(); }, 1_500);
+      child.once("exit", () => { clearTimeout(timer); accept(); });
+      child.stdin.end();
+      child.kill();
+    });
+    this.child = undefined;
+  }
+
+  private waitForTurnEnd(timeoutMs: number): Promise<boolean> {
+    if (!this.runtime.activeTurn()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const waiter = () => { clearTimeout(timer); this.turnWaiters.delete(waiter); resolve(true); };
+      const timer = setTimeout(() => { this.turnWaiters.delete(waiter); resolve(false); }, timeoutMs);
+      timer.unref?.();
+      this.turnWaiters.add(waiter);
+    });
+  }
+
+  private noteRpcFailure(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    this.mutate(() => this.runtime.rpcFailure(/timed out/.test(message) ? "rpc_timeout" : "rpc_rejected", message));
+  }
+
+  /** Merge lifecycle fields from runtime setup/install/start into the status. */
+  private merge(patch: Partial<RuntimeStatus>) {
+    this.mutate(() => this.runtime.base(patch));
+  }
+
+  /** Run a state mutation, reschedule watchdogs, and publish real changes once. */
+  private mutate(action: () => void) {
+    const before = this.runtime.status;
+    try {
+      action();
+    } finally {
+      this.syncTimers();
+      if (this.runtime.status !== before) this.emit("status", this.runtime.status);
+      if (!this.runtime.activeTurn()) {
+        for (const waiter of [...this.turnWaiters]) waiter();
+      }
+    }
+  }
+
+  private syncTimers() {
+    const status = this.runtime.status;
+    const turn = this.runtime.activeTurn();
+    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = undefined; }
+    if (turn && status.phase === "retrying" && status.retry) {
+      const { attempt, delayMs } = status.retry;
+      this.retryTimer = setTimeout(() => {
+        this.retryTimer = undefined;
+        this.mutate(() => this.runtime.retryDelayElapsed(attempt));
+      }, Math.max(0, delayMs) + 25);
+      this.retryTimer.unref?.();
+    }
+    if (this.stallTimer) { clearTimeout(this.stallTimer); this.stallTimer = undefined; }
+    if (turn && this.providerTimeoutMs > 0 && MODEL_WAIT_PHASES.includes(status.phase ?? "ready")) {
+      this.stallTimer = setTimeout(() => {
+        this.stallTimer = undefined;
+        this.mutate(() => this.runtime.providerStall(this.now() - (this.status.lastEventAt ?? this.now())));
+      }, this.providerTimeoutMs);
+      this.stallTimer.unref?.();
+    }
+    if (this.failureTimer) { clearTimeout(this.failureTimer); this.failureTimer = undefined; }
+    if (this.runtime.failurePending) {
+      this.failureTimer = setTimeout(() => {
+        this.failureTimer = undefined;
+        this.mutate(() => this.runtime.settleFailure());
+      }, this.runtime.failureGraceMs);
+      this.failureTimer.unref?.();
+    }
+  }
+
   private failAll(error: Error) {
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear();

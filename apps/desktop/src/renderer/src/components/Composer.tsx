@@ -1,6 +1,6 @@
 import { ArrowUp, Box, Plus, ShieldCheck, Sparkles, Square } from "./icons";
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "@shared/contracts";
+import { runtimeTurnActive, type AppSettings, type ModelChoice, type RuntimeStatus, type ThinkingLevel } from "@shared/contracts";
 
 const efforts: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -21,7 +21,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const draining = useRef(false);
   const loadingQueue = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const streaming = status.state === "streaming";
+  const streaming = runtimeTurnActive(status);
   const starting = status.state === "starting";
   useEffect(() => {
     void window.piCad.auth.catalog().then((catalog) => {
