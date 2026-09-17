@@ -50,4 +50,17 @@ describe("demo runtime phases", () => {
     expect(runtime.status).toMatchObject({ state: "ready", phase: "aborted", terminalReason: "aborted" });
     await running;
   });
+
+  it("keeps the provider clock still while only runtime status keeps arriving", async () => {
+    const runtime = new DemoRuntime();
+    await runtime.start(settings);
+    const running = runtime.prompt("Provider silence please");
+    await new Promise((accept) => setTimeout(accept, 3_000));
+    const turn = runtime.status.turn!;
+    expect(runtime.status.phase).toBe("thinking");
+    // `lastEventAt` follows the agent_status chatter; the provider clock does not.
+    expect(turn.lastEventAt! - turn.lastProviderEventAt!).toBeGreaterThan(2_000);
+    await running;
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "ready", terminalReason: "completed" });
+  }, 20_000);
 });

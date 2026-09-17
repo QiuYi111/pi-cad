@@ -72,7 +72,14 @@ export function turnPhaseView(status: RuntimeStatus, now: number): TurnPhaseView
   // A completed turn ends in the answer text; only abnormal ends keep a row.
   if (terminal && reason === "completed") return undefined;
   const end = turn.finishedAt || now;
-  const silentMs = Math.max(0, end - turn.lastEventAt);
+  // `silent` asks how long the provider has been quiet, so it reads the
+  // provider clock. `lastEventAt` also moves for runtime chatter
+  // (`agent_status`, `session_action_update`), which would reset the reading
+  // while the model is still silent. Journals written before the runtime kept
+  // the two clocks apart have no `lastProviderEventAt`, so they fall back to
+  // the coarse timestamp.
+  const providerEventAt = turn.lastProviderEventAt ?? status.lastProviderEventAt ?? turn.lastEventAt;
+  const silentMs = Math.max(0, end - providerEventAt);
   return {
     phase,
     label: phaseLabel({ ...status, phase }),

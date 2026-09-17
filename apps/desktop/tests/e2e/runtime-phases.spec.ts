@@ -50,6 +50,18 @@ test("status bar reports retry, tool and stop phases", async () => {
     await page.waitForFunction(() => document.querySelector(".conversation-turn span")?.textContent === "Retrying 1/3", null, { timeout: 30_000, polling: 25 });
     await expect(page.getByText("Recovered from the reasoning limit.")).toBeAttached({ timeout: 30_000 });
 
+    // The model goes quiet while the runtime keeps sending agent_status events.
+    // `silent` must read the provider clock, so the reading keeps growing
+    // instead of resetting on every runtime event.
+    await composer.fill("Provider silence please");
+    await composer.press("Enter");
+    await page.waitForFunction(() => {
+      const reading = document.querySelector(".conversation-turn time[data-timer='silent']")?.textContent ?? "";
+      const seconds = Number(/^silent (\d+)s$/.exec(reading)?.[1] ?? 0);
+      return document.querySelector(".conversation-turn span")?.textContent === "Thinking" && seconds >= 5;
+    }, null, { timeout: 30_000, polling: 50 });
+    await expect(page.getByText("Back after the pause.")).toBeAttached({ timeout: 30_000 });
+
     await composer.fill("Long calculation");
     await composer.press("Enter");
     await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Running tool", null, { timeout: 30_000, polling: 25 });

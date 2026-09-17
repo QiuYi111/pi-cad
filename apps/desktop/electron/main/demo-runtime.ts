@@ -102,6 +102,20 @@ export class DemoRuntime extends EventEmitter {
       this.publish();
       return;
     }
+    if (/provider silence/i.test(message)) {
+      // The model goes quiet while the runtime keeps reporting its own status,
+      // so only the provider clock may move the `silent` reading.
+      for (let tick = 0; tick < 32; tick += 1) {
+        await wait(250);
+        if (generation !== this.generation) return;
+        this.event({ type: "agent_status", status: { summary: "Still waiting on the model" } });
+      }
+      this.event({ type: "message_update", message: { role: "assistant", id: "demo-silence" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Back after the pause." } });
+      this.event({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Back after the pause." }], id: "demo-silence", stopReason: "stop" } });
+      this.event({ type: "agent_end", messages: [] });
+      this.messages.push({ id: `demo-assistant-${generation}`, role: "assistant", content: "Back after the pause." });
+      return;
+    }
     if (/long calculation/i.test(message)) {
       this.event({ type: "tool_execution_start", toolCallId: "demo-long", toolName: "ipython", args: { code: "run_long_calculation()" } });
       await this.waitForTurn(5_000, generation);

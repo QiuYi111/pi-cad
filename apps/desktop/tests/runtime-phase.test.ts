@@ -35,6 +35,28 @@ describe("runtime turn projection", () => {
     expect(turnTimerParts(view).map((part) => part.key)).toEqual(["phase", "turn"]);
   });
 
+  it("measures the silent reading from the provider clock, not from runtime chatter", () => {
+    // The provider stopped streaming a while ago; `agent_status` keeps arriving,
+    // so `lastEventAt` is fresh while `lastProviderEventAt` is not.
+    const view = turnPhaseView(status({
+      phase: "thinking",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 30_000, phaseStartedAt: now - 20_000, lastEventAt: now - 1_000, lastProviderEventAt: now - 12_000, retryAttempt: 0, phase: "thinking" },
+    }), now)!;
+    expect(view).toMatchObject({ silentSeconds: 12, showSilent: true });
+    expect(turnTimerParts(view).map((part) => part.text)).toEqual(["phase 20s", "silent 12s", "turn 30s"]);
+  });
+
+  it("falls back to the coarse event clock when the turn has no provider clock", () => {
+    // Journals recorded before the runtime split provider silence from runtime
+    // chatter only carry `lastEventAt`.
+    const view = turnPhaseView(status({
+      phase: "thinking",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 12_000, phaseStartedAt: now - 6_000, lastEventAt: now - 6_000, retryAttempt: 0, phase: "thinking" },
+    }), now)!;
+    expect(view).toMatchObject({ silentSeconds: 6, showSilent: true });
+    expect(turnTimerParts(view).map((part) => part.text)).toEqual(["phase 6s", "silent 6s", "turn 12s"]);
+  });
+
   it("keeps an abnormal end visible and drops the live clocks", () => {
     const view = turnPhaseView(status({
       state: "ready",

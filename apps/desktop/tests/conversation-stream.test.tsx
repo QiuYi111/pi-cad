@@ -28,6 +28,16 @@ describe("conversation turn row", () => {
     expect(html).toContain("turn 12s");
   });
 
+  it("keeps the silent reading when only runtime chatter is still arriving", () => {
+    const html = renderToStaticMarkup(<Conversation messages={messages} status={status({
+      phase: "thinking",
+      turn: { id: "t1", kind: "prompt", startedAt: now - 30_000, phaseStartedAt: now - 20_000, lastEventAt: now - 1_000, lastProviderEventAt: now - 12_000, retryAttempt: 0, phase: "thinking" },
+    })} />);
+    expect(html).toContain("Thinking");
+    expect(html).toContain("silent 12s");
+    expect(html).toContain("turn 30s");
+  });
+
   it("keeps the row while a tool runs, when no assistant text exists yet", () => {
     const html = renderToStaticMarkup(<Conversation messages={[messages[0]!]} status={status({
       phase: "running_tool",
