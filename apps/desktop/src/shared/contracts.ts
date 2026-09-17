@@ -223,12 +223,18 @@ export interface ChatMessage {
   text: string;
   createdAt: number;
   activity?: CadActivity;
-  stream?: {
-    state: "waiting" | "thinking" | "responding" | "complete" | "aborted" | "error";
-    startedAt: number;
-    firstTokenAt?: number;
-    finishedAt?: number;
-  };
+  stream?: ChatStream;
+}
+
+/**
+ * Marks the assistant row that belongs to a Prime turn and when its text was
+ * received. It deliberately carries no phase: the runtime owns the phase, the
+ * renderer only displays it.
+ */
+export interface ChatStream {
+  startedAt: number;
+  firstTokenAt?: number;
+  finishedAt?: number;
 }
 
 export interface TraceSummary {

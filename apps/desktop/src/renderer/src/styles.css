@@ -80,7 +80,8 @@ button { cursor: pointer; }
 .stream-state { height: 22px; display: flex; align-items: center; gap: 7px; color: #9298a1; font-size: 12px; letter-spacing: .01em; }
 .stream-state i { width: 7px; height: 7px; border-radius: 50%; background: #7f8791; animation: stream-pulse 1.35s ease-in-out infinite; }
 .stream-state time { color: #656c75; font-variant-numeric: tabular-nums; }
-.stream-state.aborted i,.stream-state.error i { animation: none; background: #d08b72; }
+.stream-state.aborted i,.stream-state.failed i,.stream-state.reasoning_limit i,.stream-state.provider_timeout i,.stream-state.rpc_timeout i { animation: none; background: #d08b72; }
+.conversation-turn { padding-left: 29px; }
 .assistant-text { white-space: pre-wrap; }
 .stream-caret { display: inline-block; width: 2px; height: 1em; margin-left: 2px; vertical-align: -.12em; background: #d9dde2; animation: stream-blink .8s steps(1) infinite; }
 @keyframes stream-pulse { 50% { opacity: .35; transform: scale(.78); } }
@@ -321,6 +322,7 @@ body { background: radial-gradient(circle at 84% -20%, #344039 0, #171a17 20%, v
 .user-message { max-width:86%; padding:10px 14px; border:1px solid #3b3e38; border-radius:18px 18px 5px 18px; background:#272a26; color:#eeeae4; font-size:13px; }
 .stream-state { color:#9c958b; }
 .stream-state i { background:#c9b89f; box-shadow:0 0 12px #c9b89f77; }
+.conversation-turn { padding-left: 26px; }
 .composer { margin:0 15px 15px; min-height:132px; border-color:#41443e; border-radius:18px; background:#1a1c19f5; box-shadow:0 18px 55px #0006, inset 0 1px #ffffff08; }
 .composer textarea { min-height:68px; padding:16px 17px 7px; font-size:13px; }
 .composer-chip { height:30px; border-color:#383b35; border-radius:99px; background:#141613; color:#c7c6c0; }

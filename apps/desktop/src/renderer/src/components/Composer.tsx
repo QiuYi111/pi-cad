@@ -2,7 +2,11 @@ import { ArrowUp, Box, Plus, ShieldCheck, Sparkles, Square } from "./icons";
 import { useEffect, useRef, useState } from "react";
 import { runtimeTurnActive, type AppSettings, type ModelChoice, type RuntimeStatus, type ThinkingLevel } from "@shared/contracts";
 
-const efforts: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+/**
+ * Only used until the model catalog answers. Real levels come from the catalog,
+ * because a binary-thinking model supports `off` and one level, not six.
+ */
+const FALLBACK_THINKING_LEVELS: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
 type PendingRequest = { id: string; text: string };
 type RunningIntent = "queue" | "replace" | "note";
@@ -11,6 +15,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const [text, setText] = useState("");
   const [images, setImages] = useState<Array<{ name: string; data: string; mimeType: string }>>([]);
   const [availableModels, setAvailableModels] = useState<ModelChoice[]>([{ provider: settings.provider, id: settings.model, name: settings.model }]);
+  const [catalogModels, setCatalogModels] = useState<ModelChoice[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [stopping, setStopping] = useState(false);
   const [runningIntent, setRunningIntent] = useState<RunningIntent>("queue");
@@ -28,8 +33,12 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       const all = catalog.providers.flatMap((provider) => provider.models);
       const scoped = catalog.favorites.map((favorite) => all.find((model) => model.provider === favorite.provider && model.id === favorite.modelId)).filter((model): model is ModelChoice => Boolean(model));
       if (scoped.length) setAvailableModels(scoped);
+      setCatalogModels(all);
     }).catch(() => undefined);
   }, [status.state, settings.provider, settings.model]);
+  const currentModel = catalogModels.find((model) => model.provider === settings.provider && model.id === settings.model)
+    || availableModels.find((model) => model.id === settings.model);
+  const thinkingLevels = thinkingLevelOptions(currentModel, settings.thinking);
   const storageKey = `reify.pending.${queueKey || "unconfigured"}`;
   const draftKey = `reify.draft.${queueKey || "unconfigured"}`;
   useEffect(() => { imagesRef.current = images; }, [images]);
@@ -135,7 +144,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       {streaming && <label className="composer-chip">Send as<select aria-label="Running request action" value={runningIntent} onChange={(event) => setRunningIntent(event.target.value as RunningIntent)}><option value="queue">After current task</option><option value="replace">Stop and modify</option><option value="note">Note only</option></select></label>}
       <label className="composer-chip"><ShieldCheck size={14} /><select aria-label="Permission" value={settings.permission} onChange={(event) => void changePermission(event.target.value as AppSettings["permission"])}><option value="workspace">Workspace</option><option value="read-only">Read only</option></select></label>
       <label className="composer-chip"><Box size={14} /><select aria-label="Model" value={settings.model} onChange={(event) => void changeModel(event.target.value)}>{availableModels.map((model) => <option key={`${model.provider}/${model.id}`} value={model.id}>{shortModel(model.name)}</option>)}</select></label>
-      <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={settings.thinking} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{efforts.map((level) => <option key={level}>{level}</option>)}</select></label>
+      <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={settings.thinking} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{thinkingLevels.map((level) => <option key={level} value={level}>{thinkingLevelLabel(level)}</option>)}</select></label>
       <span className="composer-spacer" />
       <button className={`send-button ${starting || stopping || (streaming && !text.trim()) ? "busy" : ""}`} onClick={() => streaming && !text.trim() ? void abort() : void send()} aria-label={stopping ? "Stopping" : streaming && !text.trim() ? "Stop" : streaming ? runningIntent === "queue" ? "Queue request" : runningIntent === "replace" ? "Stop and modify" : "Save note" : "Send"} disabled={starting || stopping}>
         {streaming && !text.trim() ? <><Square size={13} fill="currentColor" />{stopping && <span>Stopping…</span>}</> : <ArrowUp size={18} />}
@@ -145,3 +154,17 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
 }
 
 function shortModel(model: string) { return model.replace(/^gpt-5\.6-/, "").replace(/^gpt-/, "GPT "); }
+function thinkingLevelLabel(level: ThinkingLevel) { return level === "off" ? "Off" : level; }
+
+/** Thinking levels the catalog reports for this model; a binary-thinking model reports two. */
+export function supportedThinkingLevels(model: ModelChoice | undefined): ThinkingLevel[] {
+  return model?.thinkingLevels?.length ? model.thinkingLevels : FALLBACK_THINKING_LEVELS;
+}
+
+/** Selector options, keeping the saved level visible if the catalog does not list it yet. */
+export function thinkingLevelOptions(model: ModelChoice | undefined, current: ThinkingLevel): ThinkingLevel[] {
+  const levels = supportedThinkingLevels(model);
+  return levels.includes(current) ? levels : [current, ...levels];
+}
+
+export { thinkingLevelLabel };

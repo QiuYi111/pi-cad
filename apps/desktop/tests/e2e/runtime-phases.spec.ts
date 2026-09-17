@@ -34,14 +34,21 @@ test("status bar reports retry, tool and stop phases", async () => {
     await composer.fill("Provider retry please");
     await composer.press("Enter");
     await page.waitForFunction(() => /^Retrying 1\/3$/.test(document.querySelector(".status-bar b")?.textContent ?? ""), null, { timeout: 30_000, polling: 25 });
+    await page.waitForFunction(() => document.querySelector(".conversation-turn span")?.textContent === "Retrying 1/3", null, { timeout: 30_000, polling: 25 });
     await expect(page.getByText("Recovered after one retry.")).toBeAttached({ timeout: 30_000 });
 
     await composer.fill("Long calculation");
     await composer.press("Enter");
     await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Running tool", null, { timeout: 30_000, polling: 25 });
+    // The conversation row reads the same runtime phase and labels its clocks,
+    // so the turn total can never pass as reasoning time.
+    await page.waitForFunction(() => document.querySelector(".stream-state span")?.textContent === "Running tool", null, { timeout: 30_000, polling: 25 });
+    await expect(page.locator(".stream-state time[data-timer='turn']")).toHaveCount(1);
+    await expect(page.locator(".stream-state time[data-timer='phase']")).toHaveCount(1);
     await page.getByRole("button", { name: "Stop" }).click();
     await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Stopped", null, { timeout: 30_000, polling: 25 });
     await expect(kernel).toHaveText("Stopped");
+    await expect(page.locator(".stream-state").last()).toContainText("Stopped");
   } finally {
     await application.close();
     await rm(root, { recursive: true, force: true });

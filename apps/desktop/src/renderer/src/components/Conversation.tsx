@@ -1,10 +1,11 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { Box } from "./icons";
-import type { ChatMessage } from "@shared/contracts";
+import { runtimeTurnActive, type ChatMessage, type RuntimeStatus } from "@shared/contracts";
 import { ActivityCard } from "./ActivityCard";
 import { MarkdownText } from "./MarkdownText";
+import { turnPhaseView, turnTimerParts } from "../lib/runtime-phase";
 
-export function Conversation({ messages, onReadingChange, onReference, onEdit }: { messages: ChatMessage[]; onReadingChange?: (reading: boolean) => void; onReference?: (text: string) => void; onEdit?: (text: string) => void }) {
+export function Conversation({ messages, status, onReadingChange, onReference, onEdit }: { messages: ChatMessage[]; status: RuntimeStatus; onReadingChange?: (reading: boolean) => void; onReference?: (text: string) => void; onEdit?: (text: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
   useEffect(() => { if (follow.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [messages]);
@@ -19,23 +20,35 @@ export function Conversation({ messages, onReadingChange, onReference, onEdit }:
       ? <ActivityCard key={message.id} activity={message.activity} onReference={onReference} />
       : message.role === "user"
         ? <UserMessage key={message.id} message={message} onEdit={onEdit} />
-        : <AssistantMessage key={message.id} message={message} />)}
+        : <AssistantMessage key={message.id} message={message} status={status} />)}
+    <TurnPhaseRow status={status} />
   </div>;
 }
 
-const AssistantMessage = memo(function AssistantMessage({ message }: { message: ChatMessage }) {
+/**
+ * The running turn as the runtime reports it. The row belongs to the runtime,
+ * not to a message, so a tool call or a retry cannot hide it.
+ */
+const TurnPhaseRow = memo(function TurnPhaseRow({ status }: { status: RuntimeStatus }) {
   const [, tick] = useState(0);
-  const active = Boolean(message.stream && !["complete", "aborted", "error"].includes(message.stream.state));
+  const view = turnPhaseView(status, Date.now());
+  const active = Boolean(view && !view.terminal);
   useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => tick((value) => value + 1), 1_000);
     return () => window.clearInterval(timer);
   }, [active]);
-  const seconds = message.stream ? Math.max(0, Math.floor(((message.stream.finishedAt || Date.now()) - message.stream.startedAt) / 1_000)) : 0;
-  const label = message.stream?.state === "waiting" ? "Waiting for model" : message.stream?.state === "thinking" ? "Thinking" : message.stream?.state === "responding" ? "Responding" : message.stream?.state === "aborted" ? "Stopped" : message.stream?.state === "error" ? "Failed" : "";
+  if (!view) return null;
+  return <div className={`conversation-turn stream-state ${view.phase}`} data-terminal-reason={view.terminal ? status.terminalReason : undefined}>
+    <i /><span>{view.label}</span>
+    {turnTimerParts(view).map((part) => <time key={part.key} data-timer={part.key}>{part.text}</time>)}
+  </div>;
+});
+
+const AssistantMessage = memo(function AssistantMessage({ message, status }: { message: ChatMessage; status: RuntimeStatus }) {
+  const active = Boolean(message.stream && !message.stream.finishedAt) && runtimeTurnActive(status);
   return <div className={`assistant-message ${active ? "streaming" : ""}`}><Box size={16} /><div>
-    {label && <div className={`stream-state ${message.stream?.state}`}><i /><span>{label}</span>{seconds > 0 && <time>{seconds}s</time>}</div>}
-    {message.text && <div className="assistant-text"><MarkdownText text={message.text} />{active && message.stream?.state === "responding" && <span className="stream-caret" />}</div>}
+    {message.text && <div className="assistant-text"><MarkdownText text={message.text} />{active && status.phase === "responding" && <span className="stream-caret" />}</div>}
   </div></div>;
 });
 
