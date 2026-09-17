@@ -130,6 +130,68 @@ describe("PrimeRpc runtime state", () => {
     expect(runtime.status).toMatchObject({ phase: "stalled", reason: "provider_silent" });
   });
 
+  it("restarts the stall deadline when agent_start arrives near the threshold", async () => {
+    vi.useFakeTimers();
+    const { runtime, send } = harness({ providerTimeoutMs: 200 });
+    await runtime.prompt("start");
+
+    // The prompt sat in `starting_turn` for almost the whole budget just as
+    // Prime picked it up: the deadline must move to the agent_start.
+    await vi.advanceTimersByTimeAsync(190);
+    send({ type: "agent_start" });
+    expect(runtime.status).toMatchObject({ phase: "waiting_provider", reason: "provider_request" });
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(runtime.status).toMatchObject({ phase: "waiting_provider", terminalReason: undefined });
+
+    await vi.advanceTimersByTimeAsync(130);
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "stalled", reason: "provider_silent" });
+  });
+
+  it("keeps a retry delay when status chatter keeps arriving", async () => {
+    vi.useFakeTimers();
+    const { runtime, send } = harness();
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    send({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 400, errorMessage: "overloaded_error" });
+    expect(runtime.status.phase).toBe("retrying");
+
+    // Prime keeps talking about unrelated things while the backoff runs; the
+    // retry must still land on the delay the provider asked for.
+    for (let index = 0; index < 6; index += 1) {
+      await vi.advanceTimersByTimeAsync(60);
+      send({ type: "agent_status", taskState: "running", summary: "still retrying" });
+      send({ type: "session_action_update", action: "queued" });
+    }
+    expect(runtime.status.phase).toBe("retrying");
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(runtime.status).toMatchObject({ phase: "provider_wait", reason: "retry_attempt" });
+  });
+
+  it("settles a held failure on its own grace despite chatter", async () => {
+    vi.useFakeTimers();
+    const { runtime, send } = harness({ failureGraceMs: 100 });
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    send({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Request timed out" } });
+    expect(runtime.status).toMatchObject({ phase: "provider_timeout", terminalReason: undefined });
+
+    for (let index = 0; index < 3; index += 1) {
+      await vi.advanceTimersByTimeAsync(25);
+      send({ type: "agent_status", taskState: "running", summary: "still up" });
+      send({ type: "session_action_update", action: "queued" });
+    }
+    expect(runtime.status.terminalReason).toBeUndefined();
+
+    for (let index = 0; index < 3; index += 1) {
+      await vi.advanceTimersByTimeAsync(25);
+      send({ type: "agent_status", taskState: "running", summary: "still up" });
+      send({ type: "session_action_update", action: "queued" });
+    }
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "provider_timeout", terminalReason: "provider_timeout" });
+  });
+
   it("classifies a streaming error from the event body", async () => {
     const { runtime, send } = harness();
     await runtime.prompt("start");

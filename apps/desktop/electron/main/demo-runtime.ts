@@ -14,6 +14,7 @@ export class DemoRuntime extends EventEmitter {
   private generation = 0;
   private messages: unknown[] = [];
   private failureTimer?: NodeJS.Timeout;
+  private failureDeadline?: number;
 
   get status(): RuntimeStatus { return this.runtime.status; }
 
@@ -144,14 +145,21 @@ export class DemoRuntime extends EventEmitter {
     this.publish();
   }
 
+  /** Same deadline rule as `PrimeRpc`: the grace belongs to the failure itself. */
   private syncFailureTimer() {
-    if (this.failureTimer) { clearTimeout(this.failureTimer); this.failureTimer = undefined; }
-    if (!this.runtime.failurePending) return;
+    const deadline = this.runtime.failureDeadline;
+    if (deadline === this.failureDeadline) return;
+    if (this.failureTimer) clearTimeout(this.failureTimer);
+    this.failureTimer = undefined;
+    this.failureDeadline = deadline;
+    if (deadline === undefined) return;
     this.failureTimer = setTimeout(() => {
       this.failureTimer = undefined;
+      this.failureDeadline = undefined;
       this.runtime.settleFailure();
       this.publish();
-    }, this.runtime.failureGraceMs);
+    }, Math.max(0, deadline - Date.now()));
+    this.failureTimer.unref?.();
   }
 
   private publish() {

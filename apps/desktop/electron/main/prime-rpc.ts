@@ -10,6 +10,12 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
+/** A watchdog timer together with the deadline it is anchored to. */
+interface TimerSlot {
+  timer?: NodeJS.Timeout;
+  deadline?: number;
+}
+
 export interface PrimeRpcOptions {
   /** No provider-side event for this long marks the turn `stalled`. 0 disables it. */
   providerTimeoutMs?: number;
@@ -32,9 +38,9 @@ export class PrimeRpc extends EventEmitter {
   private readonly abortTimeoutMs: number;
   private readonly abortRpcTimeoutMs: number;
   private readonly now: () => number;
-  private retryTimer?: NodeJS.Timeout;
-  private stallTimer?: NodeJS.Timeout;
-  private failureTimer?: NodeJS.Timeout;
+  private readonly retryClock: TimerSlot = {};
+  private readonly stallClock: TimerSlot = {};
+  private readonly failureClock: TimerSlot = {};
   private turnWaiters = new Set<() => void>();
   private journal?: (entries: RuntimeTraceEntry[]) => Promise<void>;
 
@@ -300,38 +306,55 @@ export class PrimeRpc extends EventEmitter {
     void this.journal(entries).catch(() => undefined);
   }
 
+  /**
+   * Keep one timer per deadline instead of re-arming on every mutation.
+   *
+   * `mutate()` runs after every Prime event, so restarting a timer from the
+   * full `delayMs` / `failureGraceMs` let `agent_status` / `session_action_update`
+   * chatter hold a retry — or a pending failure — open forever. Every deadline
+   * now comes from the state machine (or from the provider clock) and only a
+   * new deadline replaces the timer.
+   */
   private syncTimers() {
     const status = this.runtime.status;
     const turn = this.runtime.activeTurn();
-    if (this.retryTimer) { clearTimeout(this.retryTimer); this.retryTimer = undefined; }
-    if (turn && status.phase === "retrying" && status.retry) {
-      const { attempt, delayMs } = status.retry;
-      this.retryTimer = setTimeout(() => {
-        this.retryTimer = undefined;
-        this.mutate(() => this.runtime.retryDelayElapsed(attempt));
-      }, Math.max(0, delayMs) + 25);
-      this.retryTimer.unref?.();
-    }
-    if (this.stallTimer) { clearTimeout(this.stallTimer); this.stallTimer = undefined; }
-    if (turn && this.providerTimeoutMs > 0 && MODEL_WAIT_PHASES.includes(status.phase ?? "ready")) {
-      // Anchor on provider events only: `lastEventAt` also moves for
-      // `agent_status` and other chatter, which would hide a silent provider.
-      const silentFor = () => this.now() - (this.runtime.lastProviderEventAt ?? this.now());
-      const remaining = Math.max(0, this.providerTimeoutMs - silentFor());
-      this.stallTimer = setTimeout(() => {
-        this.stallTimer = undefined;
-        this.mutate(() => this.runtime.providerStall(silentFor()));
-      }, remaining);
-      this.stallTimer.unref?.();
-    }
-    if (this.failureTimer) { clearTimeout(this.failureTimer); this.failureTimer = undefined; }
-    if (this.runtime.failurePending) {
-      this.failureTimer = setTimeout(() => {
-        this.failureTimer = undefined;
-        this.mutate(() => this.runtime.settleFailure());
-      }, this.runtime.failureGraceMs);
-      this.failureTimer.unref?.();
-    }
+
+    this.syncTimer(this.retryClock, this.runtime.retryDeadline, () => {
+      const attempt = Number(this.runtime.status.retry?.attempt);
+      this.mutate(() => this.runtime.retryDelayElapsed(attempt));
+    }, 25);
+
+    // Anchor the stall watchdog on provider events only: `lastEventAt` also
+    // moves for `agent_status` and other chatter, which would hide a silent
+    // provider.
+    const silentFor = () => this.now() - (this.runtime.lastProviderEventAt ?? this.now());
+    const stallDeadline = turn && this.providerTimeoutMs > 0 && MODEL_WAIT_PHASES.includes(status.phase ?? "ready")
+      ? (this.runtime.lastProviderEventAt ?? this.now()) + this.providerTimeoutMs
+      : undefined;
+    this.syncTimer(this.stallClock, stallDeadline, () => {
+      const idle = silentFor();
+      this.mutate(() => this.runtime.providerStall(idle));
+    });
+
+    this.syncTimer(this.failureClock, this.runtime.failureDeadline, () => {
+      this.mutate(() => this.runtime.settleFailure());
+    });
+  }
+
+  /** Arm `slot` for `deadline`; an unchanged deadline keeps the running timer. */
+  private syncTimer(slot: TimerSlot, deadline: number | undefined, fire: () => void, slackMs = 0) {
+    if (slot.deadline === deadline) return;
+    if (slot.timer) clearTimeout(slot.timer);
+    slot.timer = undefined;
+    slot.deadline = deadline;
+    if (deadline === undefined) return;
+    const timer = setTimeout(() => {
+      slot.timer = undefined;
+      slot.deadline = undefined;
+      fire();
+    }, Math.max(0, deadline - this.now()) + slackMs);
+    timer.unref?.();
+    slot.timer = timer;
   }
 
   private failAll(error: Error) {

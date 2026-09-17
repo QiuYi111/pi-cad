@@ -256,6 +256,51 @@ describe("Prime runtime phases", () => {
     expect(runtime.lastProviderEventAt).toBe(4_500);
   });
 
+  it("restarts the provider clock when agent_start arrives", () => {
+    let clock = 1_000;
+    const runtime = new PrimeRuntimeState({ state: "ready", checks: [] }, { now: () => clock });
+    runtime.beginTurn("prompt");
+    expect(runtime.lastProviderEventAt).toBe(1_000);
+
+    // The prompt waited in `starting_turn` while Prime booted. `agent_start` is
+    // the provider picking the request up, so the stall clock restarts here
+    // instead of staying on the prompt.
+    clock = 1_900;
+    runtime.applyEvent({ type: "agent_start" });
+    expect(runtime.lastProviderEventAt).toBe(1_900);
+    expect(runtime.status.lastProviderEventAt).toBe(1_900);
+    expect(runtime.status.turn?.lastProviderEventAt).toBe(1_900);
+  });
+
+  it("records the retry and failure deadlines instead of restarting them", () => {
+    let clock = 1_000;
+    const runtime = new PrimeRuntimeState({ state: "ready", checks: [] }, { now: () => clock, failureGraceMs: 1_500 });
+    runtime.beginTurn("prompt");
+    runtime.applyEvent({ type: "agent_start" });
+    runtime.applyEvent({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2_000, errorMessage: "overloaded_error" });
+    expect(runtime.retryDeadline).toBe(3_000);
+
+    // Runtime chatter must not push the backoff back.
+    clock = 2_500;
+    runtime.applyEvent({ type: "agent_status", taskState: "running", summary: "still up" });
+    runtime.applyEvent({ type: "session_action_update", action: "queued" });
+    expect(runtime.retryDeadline).toBe(3_000);
+
+    runtime.retryDelayElapsed(1);
+    expect(runtime.retryDeadline).toBeUndefined();
+
+    // The same rule holds for the grace that precedes a terminal failure.
+    clock = 4_000;
+    runtime.applyEvent({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Request timed out" } });
+    expect(runtime.failureDeadline).toBe(5_500);
+    clock = 4_600;
+    runtime.applyEvent({ type: "agent_status", taskState: "running", summary: "still up" });
+    expect(runtime.failureDeadline).toBe(5_500);
+
+    runtime.settleFailure();
+    expect(runtime.failureDeadline).toBeUndefined();
+  });
+
   it("keeps the last completed turn when the runtime stops normally", () => {
     const runtime = state();
     runtime.beginTurn("prompt");

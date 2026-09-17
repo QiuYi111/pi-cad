@@ -207,10 +207,11 @@ export class PrimeRuntimeState {
   status: RuntimeStatus;
   readonly failureGraceMs: number;
   private readonly now: () => number;
-  private pending?: { terminalReason: RuntimeTerminalReason; reason: string; message?: string };
+  private pending?: { terminalReason: RuntimeTerminalReason; reason: string; message?: string; deadlineAt: number };
   private sequence = 0;
   private readonly entries: RuntimeTraceEntry[] = [];
   private providerEventAt?: number;
+  private retryEndsAt?: number;
 
   constructor(initial: RuntimeStatus = { state: "idle", checks: [] }, options: PrimeRuntimeStateOptions = {}) {
     this.status = initial;
@@ -221,6 +222,25 @@ export class PrimeRuntimeState {
   /** A provider failure that may still be superseded by an automatic retry. */
   get failurePending(): boolean {
     return this.pending !== undefined;
+  }
+
+  /**
+   * Wall clock when the held provider failure becomes terminal.
+   *
+   * The caller arms one timer for this instant; the grace is measured from the
+   * failure itself, so `agent_status` chatter cannot keep a dead turn alive.
+   */
+  get failureDeadline(): number | undefined {
+    return this.pending?.deadlineAt;
+  }
+
+  /**
+   * Wall clock when the running retry backoff ends. Chatter must not push this
+   * back either: the delay belongs to the `auto_retry_start` that started it.
+   */
+  get retryDeadline(): number | undefined {
+    if (!this.activeTurn() || this.status.phase !== "retrying") return undefined;
+    return this.retryEndsAt;
   }
 
   activeTurn(): RuntimeTurn | undefined {
@@ -350,14 +370,16 @@ export class PrimeRuntimeState {
         const failure = classifyProviderFailure(event.errorMessage);
         this.pending = undefined;
         const attempt = Number(event.attempt) || 1;
+        const delayMs = Number(event.delayMs) || 0;
         const retry: RuntimeRetry = {
           attempt,
           maxAttempts: Number(event.maxAttempts) || attempt,
-          delayMs: Number(event.delayMs) || 0,
+          delayMs,
           reason: failure.reason,
           message: event.errorMessage ? String(event.errorMessage) : undefined,
         };
         this.phase("retrying", { reason: failure.reason, retry, retryAttempt: attempt });
+        this.retryEndsAt = this.now() + Math.max(0, delayMs);
         break;
       }
       case "auto_retry_end":
@@ -530,13 +552,22 @@ export class PrimeRuntimeState {
     this.record("session_ready", sessionId);
   }
 
+  /**
+   * `agent_start` means Prime picked the request up.
+   *
+   * It is a provider event but returns before the generic provider-event branch
+   * of {@link applyEvent}, so it refreshes the provider clock here: a prompt
+   * that waited close to the stall threshold must not be reported `stalled`
+   * seconds after the provider actually answered.
+   */
   private startOrResumeTurn(): void {
+    const now = this.now();
+    this.markProviderEvent(now);
     const active = this.activeTurn();
     if (active) {
       this.phase("waiting_provider", { reason: "provider_request" });
       return;
     }
-    const now = this.now();
     const turn: RuntimeTurn = {
       id: `prime-${++this.sequence}`,
       kind: "prompt",
@@ -574,7 +605,12 @@ export class PrimeRuntimeState {
     }
     const now = this.now();
     const phase = TERMINAL_PHASE[failure.terminalReason];
-    this.pending = { terminalReason: failure.terminalReason, reason: failure.reason, message: detail };
+    this.pending = {
+      terminalReason: failure.terminalReason,
+      reason: failure.reason,
+      message: detail,
+      deadlineAt: now + this.failureGraceMs,
+    };
     const turn = this.activeTurn();
     if (turn) {
       this.status = {
