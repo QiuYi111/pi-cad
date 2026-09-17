@@ -1,6 +1,7 @@
 import { ArrowUp, Box, Plus, ShieldCheck, Sparkles, Square } from "./icons";
 import { useEffect, useRef, useState } from "react";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "@shared/contracts";
+import { runtimeIsActive, runtimeIsLive, runtimeIsStreaming } from "@shared/contracts";
 
 const efforts: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -21,8 +22,9 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const draining = useRef(false);
   const loadingQueue = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const streaming = status.state === "streaming";
+  const streaming = runtimeIsStreaming(status.state);
   const starting = status.state === "starting";
+  const settled = !runtimeIsActive(status.state);
   useEffect(() => {
     void window.piCad.auth.catalog().then((catalog) => {
       const all = catalog.providers.flatMap((provider) => provider.models);
@@ -61,14 +63,14 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
     localStorage.setItem(storageKey, JSON.stringify(pending));
   }, [storageKey, pending]);
   useEffect(() => {
-    if (status.state !== "ready" || !pending.length || draining.current) return;
+    if (!settled || !pending.length || draining.current) return;
     const request = pending[0]!;
     draining.current = true;
     void onSend(request.text).finally(() => {
       setPending((current) => current.filter((item) => item.id !== request.id));
       draining.current = false;
     });
-  }, [status.state, pending, onSend]);
+  }, [settled, pending, onSend]);
   const send = async () => {
     const value = text.trim();
     if (!value || starting) return;
@@ -103,14 +105,14 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
     const choice = availableModels.find((item) => item.id === model);
     const provider = choice?.provider || settings.provider;
     await onSettingsChange({ provider, model });
-    if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.setModel(provider, model);
+    if (runtimeIsLive(status.state)) await window.piCad.runtime.setModel(provider, model);
   };
   const changeThinking = async (thinking: ThinkingLevel) => {
     await onSettingsChange({ thinking });
-    if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.setThinking(thinking);
+    if (runtimeIsLive(status.state)) await window.piCad.runtime.setThinking(thinking);
   };
   const changePermission = async (permission: AppSettings["permission"]) => {
-    if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();
+    if (runtimeIsLive(status.state)) await window.piCad.runtime.stop();
     await onSettingsChange({ permission });
   };
   const abort = async () => {
@@ -137,8 +139,8 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       <label className="composer-chip"><Box size={14} /><select aria-label="Model" value={settings.model} onChange={(event) => void changeModel(event.target.value)}>{availableModels.map((model) => <option key={`${model.provider}/${model.id}`} value={model.id}>{shortModel(model.name)}</option>)}</select></label>
       <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={settings.thinking} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{efforts.map((level) => <option key={level}>{level}</option>)}</select></label>
       <span className="composer-spacer" />
-      <button className={`send-button ${starting || stopping || (streaming && !text.trim()) ? "busy" : ""}`} onClick={() => streaming && !text.trim() ? void abort() : void send()} aria-label={stopping ? "Stopping" : streaming && !text.trim() ? "Stop" : streaming ? runningIntent === "queue" ? "Queue request" : runningIntent === "replace" ? "Stop and modify" : "Save note" : "Send"} disabled={starting || stopping}>
-        {streaming && !text.trim() ? <><Square size={13} fill="currentColor" />{stopping && <span>Stopping…</span>}</> : <ArrowUp size={18} />}
+      <button className={`send-button ${starting || stopping || status.state === "stopping" || (streaming && !text.trim()) ? "busy" : ""}`} onClick={() => streaming && !text.trim() ? void abort() : void send()} aria-label={stopping ? "Stopping" : streaming && !text.trim() ? "Stop" : streaming ? runningIntent === "queue" ? "Queue request" : runningIntent === "replace" ? "Stop and modify" : "Save note" : "Send"} disabled={starting || stopping || status.state === "stopping"}>
+        {streaming && !text.trim() ? <><Square size={13} fill="currentColor" />{(stopping || status.state === "stopping") && <span>Stopping…</span>}</> : <ArrowUp size={18} />}
       </button>
     </div>
   </div>;

@@ -20,7 +20,10 @@ export class DemoRuntime extends EventEmitter {
   async abort() {
     this.generation += 1;
     this.emit("event", { type: "agent_abort" });
-    this.status = { ...this.status, state: "ready" };
+    this.status = { ...this.status, state: "stopping", message: "Stopping the current task…" };
+    this.emit("status", this.status);
+    await wait(40);
+    this.status = { ...this.status, state: "aborted", message: "Task stopped." };
     this.emit("status", this.status);
   }
   async steer(message: string) { this.emit("event", { type: "message_start", message: { role: "user", content: message } }); }
@@ -45,7 +48,7 @@ export class DemoRuntime extends EventEmitter {
   async prompt(message: string) {
     const generation = ++this.generation;
     this.messages.push({ id: `demo-user-${generation}`, role: "user", content: message });
-    this.status = { ...this.status, state: "streaming" };
+    this.status = { ...this.status, state: "running", message: undefined };
     this.emit("status", this.status);
     this.emit("event", { type: "message_start", message: { role: "user", content: message, id: "demo-user" } });
     this.emit("event", { type: "agent_start" });

@@ -1,4 +1,5 @@
-import type { CadActivity, ChatMessage, MediaAttachment } from "@shared/contracts";
+import type { CadActivity, ChatMessage, MediaAttachment, RuntimeRetryStatus, RuntimeTerminalReason } from "@shared/contracts";
+import { classifyTerminalReason, isBlankNeedsInput, runtimeTerminalMessage } from "@shared/contracts";
 
 function textOf(content: unknown): string {
   if (typeof content === "string") return content;
@@ -129,17 +130,58 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
   }
   if (event.type === "message_update") {
     const update = event.assistantMessageEvent;
-    if (!update || (update.type !== "thinking_delta" && update.type !== "text_delta")) return messages;
+    if (!update) return messages;
+    if (update.type === "error") {
+      return finishOpenAssistant(messages, update.reason === "aborted" ? "aborted" : "error", update.reason === "aborted" ? "aborted" : "provider_error");
+    }
+    const streaming = update.type === "thinking_delta" ? "thinking"
+      : update.type === "text_delta" || update.type === "toolcall_start" || update.type === "toolcall_delta" || update.type === "toolcall_end" ? "responding"
+        : undefined;
+    if (!streaming) return messages;
     const now = Date.now();
     const index = findOpenAssistant(messages);
     const target: ChatMessage = index >= 0 ? messages[index]! : { id: event.message?.id || `stream-${now}`, role: "assistant", text: "", createdAt: now, stream: { state: "waiting", startedAt: now } };
     const next: ChatMessage = {
       ...target,
       text: update.type === "text_delta" ? `${target.text}${update.delta || ""}` : target.text,
-      stream: { ...(target.stream!), state: update.type === "text_delta" ? "responding" : target.text ? "responding" : "thinking", firstTokenAt: target.stream?.firstTokenAt || now },
+      stream: { ...(target.stream!), state: streaming === "thinking" && target.text ? "responding" : streaming, firstTokenAt: target.stream?.firstTokenAt || now },
     };
     if (index < 0) return [...messages, next];
     return messages.map((message, current) => current === index ? next : message);
+  }
+  if (event.type === "auto_retry_start") {
+    const now = Date.now();
+    const reason = concise(String(event.errorMessage || event.message || "transient provider error"));
+    const retry: RuntimeRetryStatus = {
+      attempt: Number(event.attempt) || 1,
+      ...(event.maxAttempts === undefined ? {} : { maxAttempts: Number(event.maxAttempts) }),
+      ...(event.delayMs === undefined ? {} : { delayMs: Number(event.delayMs) }),
+      reason,
+      requestedAt: new Date(now).toISOString(),
+    };
+    const open = findOpenAssistant(messages);
+    if (open >= 0) {
+      return messages.map((message, index) => index === open
+        ? { ...message, stream: { ...message.stream!, state: "retrying", retry, terminalReason: undefined } }
+        : message);
+    }
+    return [...messages, {
+      id: `retry-${now}`, role: "assistant", text: "", createdAt: now,
+      stream: { state: "retrying", startedAt: now, retry },
+    }];
+  }
+  if (event.type === "auto_retry_end") {
+    const open = findLast(messages, (message) => message.stream?.state === "retrying");
+    if (open < 0) return messages;
+    if (event.success === false) {
+      const detail = concise(String(event.finalError || messages[open]!.stream?.retry?.reason || "the model provider keeps failing"));
+      return messages.map((message, index) => index === open
+        ? { ...message, text: message.text || detail, stream: { ...message.stream!, state: "error", terminalReason: "provider_error", finishedAt: messages[open]!.stream?.finishedAt || Date.now() } }
+        : message);
+    }
+    return messages.map((message, index) => index === open
+      ? { ...message, stream: { ...message.stream!, state: "waiting" } }
+      : message);
   }
   if (event.type === "tool_execution_start") {
     const code = event.args?.code || event.input?.code || JSON.stringify(event.args || event.input || {});
@@ -199,21 +241,22 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
     const message = event.message;
     if (message?.role === "assistant") {
       const text = textOf(message.content).trim();
-      const failed = message.stopReason === "error" || Boolean(message.errorMessage);
-      const aborted = message.stopReason === "aborted";
+      const terminalReason = classifyTerminalReason(message);
+      const aborted = terminalReason === "aborted";
+      const failed = !aborted && (message.stopReason === "error" || Boolean(message.errorMessage));
       const state = failed ? "error" : aborted ? "aborted" : "complete";
-      const fallback = String(message.errorMessage || (failed ? "Prime failed to respond." : aborted ? "Request was stopped." : ""));
+      const fallback = String(message.errorMessage || (state === "complete" ? "" : runtimeTerminalMessage(terminalReason ?? (failed ? "provider_error" : "aborted"))));
       const index = findOpenAssistant(messages);
       if (index >= 0) {
         const now = Date.now();
-        return messages.map((existing, current) => current === index ? { ...existing, id: message.id || existing.id, text: text || existing.text || fallback, stream: { ...existing.stream!, state, finishedAt: now } } : existing);
+        return messages.map((existing, current) => current === index ? { ...existing, id: message.id || existing.id, text: text || existing.text || fallback, stream: { ...existing.stream!, state, terminalReason, finishedAt: now } } : existing);
       }
       const visible = text || fallback;
       if (visible) {
         const previous = messages.at(-1);
         if (previous?.role === "assistant" && previous.text === visible && previous.stream?.state === state) return messages;
         const now = Date.now();
-        return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text: visible, createdAt: now, stream: { state, startedAt: now, finishedAt: now } }];
+        return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text: visible, createdAt: now, stream: { state, startedAt: now, finishedAt: now, terminalReason } }];
       }
     }
     if (message?.role === "custom" && message.customType === "pi-cad.review-completed") {
@@ -234,6 +277,15 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
       ? { ...message, activity: { ...message.activity, state: "denied", title: `${message.activity.kind === "simulation" ? "Simulation" : "Task"} stopped`, summary: "Stopped by user", finishedAt: now } }
       : message), "aborted");
   }
+  // Prime can publish an empty `needs_input` verdict after an abnormal end. It
+  // asks nothing, so it must not leave a blank waiting row behind: the open turn
+  // settles as failed with its real terminal reason instead.
+  if (event.type === "agent_status") {
+    if (!isBlankNeedsInput(event)) return messages;
+    const open = findOpenAssistant(messages);
+    if (open < 0 || messages[open]!.text.trim()) return messages;
+    return finishOpenAssistant(messages, "error", "provider_error");
+  }
   if (event.type === "agent_end") return finishOpenAssistant(messages, "complete");
   if (event.type === "agent_abort" || event.type === "abort") return finishOpenAssistant(messages, "aborted");
   if (event.type === "agent_error") return finishOpenAssistant(messages, "error");
@@ -249,11 +301,13 @@ function findLast(messages: ChatMessage[], predicate: (message: ChatMessage) => 
   return -1;
 }
 
-function finishOpenAssistant(messages: ChatMessage[], state: "complete" | "aborted" | "error"): ChatMessage[] {
+function finishOpenAssistant(messages: ChatMessage[], state: "complete" | "aborted" | "error", terminalReason?: RuntimeTerminalReason): ChatMessage[] {
   const index = findOpenAssistant(messages);
   if (index < 0) return messages;
   if (state === "complete" && !messages[index]!.text.trim()) return messages.filter((_, current) => current !== index);
-  return messages.map((message, current) => current === index ? { ...message, stream: { ...message.stream!, state, finishedAt: Date.now() } } : message);
+  return messages.map((message, current) => current === index
+    ? { ...message, stream: { ...message.stream!, state, finishedAt: Date.now(), ...(terminalReason ? { terminalReason } : {}) } }
+    : message);
 }
 
 function completedTitle(kind: CadActivity["kind"], failed: boolean, currentTitle: string): string {

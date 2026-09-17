@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
 import { runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
+import { ABORT_CONFIRM_TIMEOUT_MS, awaitAbortConfirmation, PrimeRuntimeState, type RuntimeTraceEntry } from "./runtime-state.js";
 
 interface PendingRequest {
   accept: (value: any) => void;
@@ -14,9 +15,15 @@ export class PrimeRpc extends EventEmitter {
   private buffer = "";
   private sequence = 0;
   private pending = new Map<string, PendingRequest>();
+  private readonly state = new PrimeRuntimeState();
+  private abortWaiters: Array<(confirmed: boolean) => void> = [];
+  private journal?: (entry: RuntimeTraceEntry) => Promise<void>;
   status: RuntimeStatus = { state: "idle", checks: [] };
 
-  constructor(private readonly bridge: RuntimeBridge) { super(); }
+  constructor(
+    private readonly bridge: RuntimeBridge,
+    private readonly options: { abortConfirmTimeoutMs?: number; processStopGraceMs?: number } = {},
+  ) { super(); }
 
   async start(settings: AppSettings, resumePath?: string): Promise<RuntimeStatus> {
     if (this.child && !this.child.killed) return this.status;
@@ -51,7 +58,9 @@ export class PrimeRpc extends EventEmitter {
       ...reviewer,
       ...(resumePath ? ["--resume", sandboxSessionPath(resumePath)] : []),
     ];
-    this.setStatus({ state: "starting", checks: [], message: "Starting Prime and the Reify engineering runtime…" });
+    this.journal = projectRuntimeJournal(this.bridge, paths.projectPath);
+    this.state.lifecycle("starting", "Starting Prime and the Reify engineering runtime…");
+    this.publish();
     this.child = this.bridge.spawn(args);
     this.child.stdout.on("data", (chunk: Buffer) => this.consume(chunk.toString("utf8")));
     this.child.stderr.on("data", (chunk: Buffer) => this.emit("diagnostic", chunk.toString("utf8")));
@@ -60,10 +69,14 @@ export class PrimeRpc extends EventEmitter {
       const error = new Error(`Prime exited (${signal || code || 0})`);
       this.failAll(error);
       this.child = undefined;
-      this.setStatus({ state: code === 0 ? "idle" : "error", checks: [], message: code === 0 ? undefined : error.message });
+      if (code === 0) this.state.lifecycle("idle");
+      else this.state.runtimeExit(error.message);
+      this.publish();
+      this.settleWaiters(true);
     });
     const state = await this.request("get_state", {}, 45_000);
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.state.lifecycle("ready");
+    this.setStatus({ ...this.status, state: this.state.state, message: undefined, sessionId: state?.sessionId });
     return this.status;
   }
 
@@ -86,10 +99,11 @@ export class PrimeRpc extends EventEmitter {
         else pending.reject(new Error(record.error || `${record.command} failed`));
         continue;
       }
-      if (record.type === "extension_ui_request") this.emit("ui-request", record);
-      else this.emit("event", record);
-      if (record.type === "agent_start") this.setStatus({ ...this.status, state: "streaming" });
-      if (record.type === "agent_end") this.setStatus({ ...this.status, state: "ready" });
+      if (record.type === "extension_ui_request") { this.emit("ui-request", record); continue; }
+      const publish = this.state.apply(record, Date.now());
+      this.emit("event", record);
+      this.flushTrace();
+      if (publish) this.publish();
     }
   }
 
@@ -108,22 +122,31 @@ export class PrimeRpc extends EventEmitter {
 
   async prompt(message: string, images?: Array<{ data: string; mimeType: string }>) {
     const payload = { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) };
+    this.state.expectTurn(Date.now(), "prompt");
+    this.publish();
     try {
       await this.request("prompt", payload);
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes("queued session input is suspended")) throw error;
+      if (!(error instanceof Error) || !error.message.includes("queued session input is suspended")) {
+        this.state.apply({ type: "agent_error", message: error instanceof Error ? error.message : String(error) }, Date.now());
+        this.publish();
+        throw error;
+      }
       await this.request("steer", payload);
     }
   }
 
   async steer(message: string, images?: Array<{ data: string; mimeType: string }>) {
+    this.state.expectTurn(Date.now(), "steer");
+    this.publish();
     await this.request("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
   }
 
   async newSession(): Promise<unknown[]> {
     await this.request("new_session");
     const state = await this.request("get_state");
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.state.lifecycle("ready");
+    this.setStatus({ ...this.status, state: this.state.state, message: undefined, sessionId: state?.sessionId });
     return (await this.request("get_messages"))?.messages || [];
   }
   async getMessages(): Promise<unknown[]> {
@@ -139,7 +162,8 @@ export class PrimeRpc extends EventEmitter {
     const result = await this.request("switch_session", { sessionPath: sandboxSessionPath(path) });
     if (result?.cancelled) throw new Error("Session switch was cancelled.");
     const [state, messages] = await Promise.all([this.request("get_state"), this.request("get_messages")]);
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.state.lifecycle("ready");
+    this.setStatus({ ...this.status, state: this.state.state, message: undefined, sessionId: state?.sessionId });
     return messages?.messages || [];
   }
 
@@ -161,7 +185,35 @@ export class PrimeRpc extends EventEmitter {
 
   async setModel(provider: string, model: string) { await this.request("set_model", { provider, modelId: model }); }
   async setThinking(level: ThinkingLevel) { await this.request("set_thinking_level", { level }); }
-  async abort() { await this.request("abort"); }
+
+  /**
+   * Stop is confirmed by the runtime, not by the RPC acknowledgement: the
+   * status stays `stopping` until Prime reports an aborted message / agent_end.
+   * A stop the runtime never confirms escalates to a process stop.
+   */
+  async abort() {
+    if (!this.child?.stdin.writable) return;
+    if (!this.state.busy) {
+      // Nothing is running, so a forwarded abort must not park the runtime in stopping.
+      await this.request("abort", {}, 10_000).catch((error) => this.emit("diagnostic", `abort request failed: ${error instanceof Error ? error.message : String(error)}\n`));
+      return;
+    }
+    this.state.requestAbort(Date.now());
+    this.publish();
+    this.flushTrace();
+    await awaitAbortConfirmation({
+      timeoutMs: this.options.abortConfirmTimeoutMs ?? ABORT_CONFIRM_TIMEOUT_MS,
+      requestAbort: async () => { await this.request("abort", {}, 10_000); },
+      waitForSettle: (timeoutMs) => this.waitForSettle(timeoutMs),
+      escalate: async () => {
+        this.emit("diagnostic", "Stop was not confirmed by the runtime; stopping the Prime process.\n");
+        this.state.confirmAbort(Date.now(), "process_stop");
+        this.flushTrace();
+        await this.stop();
+        this.publish();
+      },
+    });
+  }
 
   async respondToUi(requestId: string, response: Record<string, unknown>) {
     if (!this.child?.stdin.writable) throw new Error("Prime is not running");
@@ -171,10 +223,42 @@ export class PrimeRpc extends EventEmitter {
   async stop() {
     if (!this.child) return;
     this.child.stdin.end();
+    const grace = this.options.processStopGraceMs ?? 2_500;
     await new Promise<void>((accept) => {
-      const timer = setTimeout(() => { this.child?.kill(); accept(); }, 2_500);
+      const timer = setTimeout(() => { this.child?.kill(); accept(); }, grace);
       this.child!.once("exit", () => { clearTimeout(timer); accept(); });
     });
+    this.settleWaiters(true);
+  }
+
+  /** Write the runtime journal for every state-machine entry, best effort. */
+  private flushTrace() {
+    const entries = this.state.drain();
+    const journal = this.journal;
+    if (!journal || !entries.length) return;
+    for (const entry of entries) void journal(entry).catch(() => undefined);
+  }
+
+  private publish() {
+    const snapshot = this.state.status();
+    this.setStatus({ ...this.status, state: snapshot.state, message: snapshot.message, turn: snapshot.turn });
+    if (["ready", "failed", "aborted", "error"].includes(snapshot.state)) this.settleWaiters(true);
+  }
+
+  private waitForSettle(timeoutMs: number): Promise<boolean> {
+    return new Promise((accept) => {
+      const waiter = (confirmed: boolean) => { clearTimeout(timer); accept(confirmed); };
+      const timer = setTimeout(() => {
+        this.abortWaiters = this.abortWaiters.filter((item) => item !== waiter);
+        accept(false);
+      }, timeoutMs);
+      timer.unref?.();
+      this.abortWaiters.push(waiter);
+    });
+  }
+
+  private settleWaiters(confirmed: boolean) {
+    for (const waiter of this.abortWaiters.splice(0)) waiter(confirmed);
   }
 
   private setStatus(status: RuntimeStatus) { this.status = status; this.emit("status", status); }
@@ -188,6 +272,28 @@ export function sandboxSessionPath(path: string): string {
   const name = path.replaceAll("\\", "/").split("/").at(-1) || "";
   if (!/^[A-Za-z0-9._-]+\.jsonl$/.test(name)) throw new Error("Invalid session path.");
   return `/workspace/.prime-sessions/${name}`;
+}
+
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * The runtime journal is the replayable record of Prime turn states: it lives
+ * beside the project so a stalled or aborted run can be reconstructed later.
+ */
+export function projectRuntimeJournal(
+  bridge: Pick<RuntimeBridge, "pipe">,
+  projectPath: string,
+  relative = ".pi-cad/desktop-runtime.jsonl",
+): ((entry: RuntimeTraceEntry) => Promise<void>) | undefined {
+  if (!projectPath) return undefined;
+  const target = `${projectPath.replace(/\/+$/, "")}/${relative}`;
+  const directory = target.slice(0, target.lastIndexOf("/"));
+  const command = `mkdir -p ${shellQuote(directory)} && cat >> ${shellQuote(target)}`;
+  return async (entry) => {
+    await bridge.pipe(["sh", "-c", command], `${JSON.stringify(entry)}\n`, 10_000);
+  };
 }
 
 export async function ensureRuntimeReady(

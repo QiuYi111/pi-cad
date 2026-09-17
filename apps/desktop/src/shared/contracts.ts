@@ -49,15 +49,135 @@ export interface DependencyCheck {
   installable: boolean;
 }
 
+/**
+ * Runtime lifecycle plus Prime turn phases.
+ *
+ * `starting` / `ready` / `error` describe the Prime process; `waiting_provider`
+ * / `running` / `retrying` / `stopping` describe the active turn, and
+ * `failed` / `aborted` are the terminal states a turn settles to. `streaming`
+ * is the pre-0.9 alias for an active turn and is no longer produced.
+ */
+export type RuntimeState =
+  | "idle" | "checking" | "installing" | "action-required"
+  | "starting" | "waiting_provider" | "running" | "retrying" | "stopping"
+  | "streaming"
+  | "ready" | "failed" | "aborted" | "error";
+
+export type RuntimeTerminalReason =
+  | "completed"
+  | "aborted"
+  | "reasoning_limit"
+  | "provider_timeout"
+  | "provider_error"
+  | "runtime_exit";
+
+export interface RuntimeRetryStatus {
+  attempt: number;
+  maxAttempts?: number;
+  delayMs?: number;
+  reason: string;
+  requestedAt: string;
+}
+
+/** Turn-scoped evidence kept for logs and for the terminal-reason readout. */
+export interface RuntimeTurnStatus {
+  turnId: string;
+  startedAt: string;
+  firstProviderEventAt?: string;
+  lastProviderEventAt?: string;
+  retryAttempts: number;
+  retry?: RuntimeRetryStatus;
+  abortRequestedAt?: string;
+  abortConfirmedAt?: string;
+  terminalReason?: RuntimeTerminalReason;
+  endedAt?: string;
+}
+
 export interface RuntimeStatus {
-  state: "idle" | "checking" | "installing" | "action-required" | "starting" | "ready" | "streaming" | "error";
+  state: RuntimeState;
   checks: DependencyCheck[];
   message?: string;
   progress?: number;
   elapsedSeconds?: number;
   action?: "restart-windows" | "install-ubuntu" | "initialize-ubuntu" | "retry";
   sessionId?: string;
+  turn?: RuntimeTurnStatus;
 }
+
+/** True while a Prime turn is in flight, including stop that is not confirmed yet. */
+export function runtimeIsStreaming(state: RuntimeState): boolean {
+  return state === "streaming" || state === "waiting_provider" || state === "running" || state === "retrying" || state === "stopping";
+}
+
+/** True while Prime holds the current task, including start-up and stop. */
+export function runtimeIsActive(state: RuntimeState): boolean {
+  return state === "starting" || runtimeIsStreaming(state);
+}
+
+/** True while a Prime process is up, even if the last turn ended badly. */
+export function runtimeIsLive(state: RuntimeState): boolean {
+  return runtimeIsActive(state) || state === "ready" || state === "failed" || state === "aborted";
+}
+
+const REASONING_LIMIT_PATTERN = /(reasoning|thinking)[^a-z]{0,24}(limit|budget|exceed|cap|truncat)|(limit|budget)[^a-z]{0,24}(reasoning|thinking)/i;
+const PROVIDER_TIMEOUT_PATTERN = /timeout|timed out|deadline exceeded|etimedout/i;
+
+function shortened(value: unknown, limit = 200): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  return trimmed ? trimmed.slice(0, limit) : undefined;
+}
+
+/**
+ * Terminal reason of a finished assistant message. Prime reports kernel limits
+ * (reasoning budget, provider timeout) through the message text and
+ * diagnostics, so every field is scanned instead of trusting one of them.
+ */
+export function classifyTerminalReason(message: any): RuntimeTerminalReason | undefined {
+  const stopReason = typeof message?.stopReason === "string" ? message.stopReason : undefined;
+  if (stopReason === "aborted") return "aborted";
+  if (stopReason === "stop" || stopReason === "length" || stopReason === "toolUse") return "completed";
+  if (stopReason !== "error") return undefined;
+  const evidence: string[] = [shortened(message?.errorMessage, 400), shortened(message?.stopReasonRaw, 200)]
+    .filter((value): value is string => Boolean(value));
+  if (Array.isArray(message?.diagnostics)) {
+    for (const diagnostic of message.diagnostics) {
+      for (const value of [
+        shortened(diagnostic?.type, 160),
+        shortened(diagnostic?.error?.message, 400),
+        shortened(diagnostic?.error?.code, 120),
+        shortened(diagnostic?.details?.kind, 120),
+        shortened(diagnostic?.details?.reason, 120),
+      ]) if (value) evidence.push(value);
+    }
+  }
+  const haystack = evidence.join(" | ");
+  if (REASONING_LIMIT_PATTERN.test(haystack)) return "reasoning_limit";
+  if (PROVIDER_TIMEOUT_PATTERN.test(haystack)) return "provider_timeout";
+  return "provider_error";
+}
+
+/**
+ * Prime can publish an empty `needs_input` verdict after an abnormal end. It
+ * carries no question to show, so it must never replace a real terminal reason.
+ */
+export function isBlankNeedsInput(event: any): boolean {
+  const status = event?.status ?? event?.agentStatus ?? event;
+  if (status?.taskState !== "needs_input") return false;
+  return !shortened(status?.summary) && !shortened(event?.summary);
+}
+
+export function runtimeTerminalMessage(reason: RuntimeTerminalReason): string {
+  switch (reason) {
+    case "reasoning_limit": return "Stopped: the reasoning limit was reached.";
+    case "provider_timeout": return "Stopped: the model provider timed out.";
+    case "provider_error": return "Stopped: the model provider failed.";
+    case "aborted": return "Task stopped.";
+    case "runtime_exit": return "The Agent runtime exited before completion.";
+    case "completed": return "";
+  }
+}
+
 export interface InstallationInfo { version: string; platform: "windows" | "linux" | "macos"; arch: string; channel: "nsis" | "portable" | "deb" | "appimage" | "dmg" | "development"; packaged: boolean; userDataPath: string; projectPath: string; updateMode: "manual"; updateInstructions: string; signature: "runtime-verified" | "release-signature-required" }
 
 export interface AuthStatus {
@@ -140,10 +260,12 @@ export interface ChatMessage {
   createdAt: number;
   activity?: CadActivity;
   stream?: {
-    state: "waiting" | "thinking" | "responding" | "complete" | "aborted" | "error";
+    state: "waiting" | "thinking" | "responding" | "retrying" | "complete" | "aborted" | "error";
     startedAt: number;
     firstTokenAt?: number;
     finishedAt?: number;
+    terminalReason?: RuntimeTerminalReason;
+    retry?: RuntimeRetryStatus;
   };
 }
 

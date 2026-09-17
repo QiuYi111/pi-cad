@@ -78,7 +78,7 @@ test("complete desktop product path", async () => {
   await cancellationComposer.fill("Build a compact bracket");
   await page.getByRole("button", { name: "Stop and modify" }).click();
   await showWorkspaceMode(page, "conversation");
-  await expect(page.getByText("Stopped", { exact: true })).toBeVisible();
+  await expect(page.locator(".chat-pane .stream-state").filter({ hasText: "Stopped" }).first()).toBeVisible();
   await expect(page.getByText("Model built", { exact: true })).toHaveCount(4);
   await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
   await showWorkspaceMode(page, "conversation");

@@ -129,4 +129,51 @@ describe("Prime activity projection", () => {
     expect(messages[0]?.activity?.summary).toBe("Now in final review");
     expect(messages[0]?.activity?.summary).not.toContain("Commit");
   });
+
+  it("shows the thinking → retry → thinking → success order", () => {
+    const states: string[] = [];
+    const step = (state: any, event: any) => {
+      state = reducePrimeEvent(state, event);
+      states.push(state.at(-1)?.stream?.state ?? "");
+      return state;
+    };
+    let messages = reducePrimeEvent([], { type: "agent_start" });
+    messages = step(messages, { type: "message_update", message: { id: "a1", role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "weighing options" } });
+    messages = step(messages, { type: "message_end", message: { id: "a1", role: "assistant", content: [], stopReason: "error", errorMessage: "529 overloaded_error" } });
+    messages = step(messages, { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2_000, errorMessage: "529 overloaded_error" });
+    expect(messages.at(-1)?.stream?.retry).toMatchObject({ attempt: 1, maxAttempts: 3, delayMs: 2_000, reason: "529 overloaded_error" });
+    messages = step(messages, { type: "auto_retry_end", success: true, attempt: 2 });
+    messages = step(messages, { type: "message_update", message: { id: "a2", role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "trying again" } });
+    messages = step(messages, { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Ready" } });
+    messages = step(messages, { type: "message_end", message: { id: "a2", role: "assistant", content: [{ type: "text", text: "Ready" }], stopReason: "stop" } });
+
+    expect(states).toEqual(["thinking", "error", "retrying", "waiting", "thinking", "responding", "complete"]);
+    expect(messages.at(-1)).toMatchObject({ text: "Ready", stream: { state: "complete" } });
+  });
+
+  it("passes a reasoning limit through as the terminal reason", () => {
+    let messages = reducePrimeEvent([], { type: "agent_start" });
+    messages = reducePrimeEvent(messages, { type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "thinking very hard" } });
+    messages = reducePrimeEvent(messages, {
+      type: "message_end",
+      message: { id: "limit", role: "assistant", content: [], stopReason: "error", diagnostics: [{ type: "provider_stream_failure", details: { kind: "reasoning_limit" } }] },
+    });
+    expect(messages[0]?.stream).toMatchObject({ state: "error", terminalReason: "reasoning_limit" });
+    expect(messages[0]?.text).toBe("Stopped: the reasoning limit was reached.");
+  });
+
+  it("does not leave an empty needs_input row after an abnormal end", () => {
+    let messages = reducePrimeEvent([], { type: "agent_start" });
+    messages = reducePrimeEvent(messages, { type: "agent_status", status: { summary: " ", taskState: "needs_input" } });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.stream).toMatchObject({ state: "error", terminalReason: "provider_error" });
+    expect(["waiting", "thinking", "responding"]).not.toContain(messages[0]?.stream?.state);
+  });
+
+  it("leaves thinking as soon as the model emits output", () => {
+    let messages = reducePrimeEvent([], { type: "agent_start" });
+    messages = reducePrimeEvent(messages, { type: "message_update", assistantMessageEvent: { type: "thinking_delta", delta: "plan" } });
+    messages = reducePrimeEvent(messages, { type: "message_update", assistantMessageEvent: { type: "toolcall_start", contentIndex: 1 } });
+    expect(messages[0]?.stream?.state).toBe("responding");
+  });
 });

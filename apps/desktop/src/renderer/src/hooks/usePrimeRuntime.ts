@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { ChatMessage, RuntimeStatus } from "@shared/contracts";
+import { runtimeIsStreaming } from "@shared/contracts";
 import { reducePrimeEvent } from "../lib/activity";
 
 const seed: ChatMessage[] = [{
@@ -36,7 +37,7 @@ export function usePrimeRuntime() {
 
   const prompt = async (text: string, images?: Array<{ data: string; mimeType: string }>, prepare?: () => Promise<void>, sessionReady?: () => Promise<void>) => {
     dispatch({ type: "desktop_user_message", id: crypto.randomUUID(), text });
-    const steering = status.state === "streaming";
+    const steering = runtimeIsStreaming(status.state);
     if (!steering) dispatch({ type: "desktop_agent_pending" });
     try {
       await prepare?.();

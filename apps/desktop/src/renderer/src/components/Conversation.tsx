@@ -32,9 +32,20 @@ const AssistantMessage = memo(function AssistantMessage({ message }: { message: 
     return () => window.clearInterval(timer);
   }, [active]);
   const seconds = message.stream ? Math.max(0, Math.floor(((message.stream.finishedAt || Date.now()) - message.stream.startedAt) / 1_000)) : 0;
-  const label = message.stream?.state === "waiting" ? "Waiting for model" : message.stream?.state === "thinking" ? "Thinking" : message.stream?.state === "responding" ? "Responding" : message.stream?.state === "aborted" ? "Stopped" : message.stream?.state === "error" ? "Failed" : "";
+  const stream = message.stream;
+  const retry = stream?.retry;
+  const label = stream?.state === "waiting" ? "Waiting for model"
+    : stream?.state === "thinking" ? "Thinking"
+      : stream?.state === "responding" ? "Responding"
+        : stream?.state === "retrying" ? retry ? `Retrying (attempt ${retry.attempt}${retry.maxAttempts ? ` of ${retry.maxAttempts}` : ""})` : "Retrying"
+          : stream?.state === "aborted" ? "Stopped"
+            : stream?.state === "error" ? stream.terminalReason === "reasoning_limit" ? "Reasoning limit reached"
+              : stream.terminalReason === "provider_timeout" ? "Provider timed out"
+                : stream.terminalReason === "provider_error" ? "Provider failed"
+                  : "Failed"
+              : "";
   return <div className={`assistant-message ${active ? "streaming" : ""}`}><Box size={16} /><div>
-    {label && <div className={`stream-state ${message.stream?.state}`}><i /><span>{label}</span>{seconds > 0 && <time>{seconds}s</time>}</div>}
+    {label && <div className={`stream-state ${stream?.state}`} data-terminal-reason={stream?.terminalReason}><i /><span>{label}</span>{seconds > 0 && <time>{seconds}s</time>}</div>}
     {message.text && <div className="assistant-text"><MarkdownText text={message.text} />{active && message.stream?.state === "responding" && <span className="stream-caret" />}</div>}
   </div></div>;
 });
