@@ -154,7 +154,10 @@ export class PrimeRpc extends EventEmitter {
       await this.request("prompt", payload);
     } catch (error) {
       if (error instanceof Error && error.message.includes("queued session input is suspended")) {
-        await this.request("steer", payload);
+        // A suspended queue is a normal Prime condition, but the steering
+        // fallback is still an RPC request: if it fails the active turn must
+        // settle as rpc_timeout / rpc_rejected instead of hanging.
+        await this.turnRequest("steer", payload);
         return;
       }
       this.noteRpcFailure(error);
@@ -164,12 +167,7 @@ export class PrimeRpc extends EventEmitter {
 
   async steer(message: string, images?: Array<{ data: string; mimeType: string }>) {
     this.mutate(() => this.runtime.beginTurn("steer"));
-    try {
-      await this.request("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
-    } catch (error) {
-      this.noteRpcFailure(error);
-      throw error;
-    }
+    await this.turnRequest("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
   }
 
   async newSession(): Promise<unknown[]> {
@@ -272,6 +270,21 @@ export class PrimeRpc extends EventEmitter {
       timer.unref?.();
       this.turnWaiters.add(waiter);
     });
+  }
+
+  /**
+   * Run one turn RPC (`prompt` / `steer`) and settle the active turn when the
+   * transport fails. Every path into a turn request has to end here so a
+   * rejected or timed-out request can never leave the turn stuck in
+   * `starting_turn` waiting for a watchdog.
+   */
+  private async turnRequest(type: "prompt" | "steer", payload: Record<string, unknown>): Promise<void> {
+    try {
+      await this.request(type, payload);
+    } catch (error) {
+      this.noteRpcFailure(error);
+      throw error;
+    }
   }
 
   private noteRpcFailure(error: unknown) {

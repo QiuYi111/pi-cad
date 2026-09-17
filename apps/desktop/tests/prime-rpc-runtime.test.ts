@@ -236,6 +236,32 @@ describe("PrimeRpc runtime state", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("settles a rejected suspended-prompt fallback as rpc_rejected", async () => {
+    const { runtime, request } = harness();
+    request
+      .mockRejectedValueOnce(new Error("Cannot admit a session action while queued session input is suspended."))
+      .mockRejectedValueOnce(new Error("Prime RPC steer rejected"));
+    await expect(runtime.prompt("continue")).rejects.toThrow("Prime RPC steer rejected");
+    expect(request.mock.calls.map(([type]) => type)).toEqual(["prompt", "steer"]);
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "failed", reason: "request_rejected", terminalReason: "rpc_rejected" });
+    // The turn is terminal, so it can no longer be the active turn.
+    expect(runtime.status.turn).toMatchObject({ phase: "failed", terminalReason: "rpc_rejected" });
+    expect(runtime.status.turn?.finishedAt).toBeTypeOf("number");
+  });
+
+  it("settles a timed-out suspended-prompt fallback as rpc_timeout", async () => {
+    const { runtime, request } = harness();
+    request
+      .mockRejectedValueOnce(new Error("Cannot admit a session action while queued session input is suspended."))
+      .mockRejectedValueOnce(new Error("Prime RPC steer timed out"));
+    await expect(runtime.prompt("continue")).rejects.toThrow("timed out");
+    expect(request.mock.calls.map(([type]) => type)).toEqual(["prompt", "steer"]);
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "rpc_timeout", reason: "rpc_timeout", terminalReason: "rpc_timeout" });
+    // A timed-out fallback must not leave the turn parked in `starting_turn`.
+    expect(runtime.status.turn).toMatchObject({ phase: "rpc_timeout", terminalReason: "rpc_timeout" });
+    expect(runtime.status.turn?.finishedAt).toBeTypeOf("number");
+  });
+
   it("writes the runtime journal while a turn moves", async () => {
     const { runtime, send } = harness();
     const lines: RuntimeTraceEntry[] = [];
