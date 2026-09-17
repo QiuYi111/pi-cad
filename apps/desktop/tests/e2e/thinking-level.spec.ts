@@ -325,3 +325,59 @@ test("a sync error clears when the setting moves onto the level the session runs
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * A split belongs to a session that can still be told something. Stopping the
+ * task takes the session away, and with it the only reason the warning is on
+ * screen: the retry behind it has nothing left to ask for. Leaving the warning
+ * up would advertise a sync that nobody is running, and starting again has to
+ * reconcile afresh so a session that still disagrees is told the saved level.
+ */
+test("a sync error clears when the runtime stops accepting levels", async () => {
+  const { application, page, root, settingsPath } = await launchReify(
+    "reify-sync-stopped-",
+    { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high", onboardingComplete: true },
+    ["--pi-cad-e2e-open-step=/workspace/demo/imported.step", "--pi-cad-e2e-reject-thinking=99"],
+  );
+  try {
+    await page.getByPlaceholder("Ask anything about the design").waitFor({ timeout: 20_000 });
+    await recordRuntime(page);
+
+    await page.evaluate(() => window.piCad.runtime.start());
+    await expect.poll(() => sessionLevels(page, "desktop-e2e"), { timeout: 30_000 }).toContain("high");
+
+    const shell = page.locator(".workbench-page");
+    if (!(await shell.getAttribute("class"))?.includes("mode-conversation")) await page.keyboard.press("Control+Backslash");
+    await expect(shell).toHaveClass(/mode-conversation/);
+    await page.getByText("Folding stand", { exact: true }).click();
+
+    // The restored session runs `medium` and every `high` attempt is rejected,
+    // so the split is visible and a retry is waiting behind it.
+    await expect(page.getByTestId("thinking-sync-error")).toBeVisible({ timeout: 30_000 });
+    await expect.poll(() => thinkingAttempts(page), { timeout: 30_000 }).not.toHaveLength(0);
+    const beforeStop = await thinkingAttempts(page);
+
+    // The task stops: the session the warning was about is gone, so the warning
+    // goes with it. The composer stays on screen, so it was cleared rather than
+    // replaced by another view.
+    await page.evaluate(() => window.piCad.runtime.stop());
+    await expect(page.getByTestId("thinking-sync-error")).toHaveCount(0, { timeout: 30_000 });
+    await expect(page.getByTestId("composer")).toBeVisible();
+
+    // The retry that was scheduled for the split is dropped with the session:
+    // nothing else is sent while the runtime cannot take a level.
+    await page.waitForTimeout(2_500);
+    expect(await thinkingAttempts(page)).toEqual(beforeStop);
+
+    // Starting again reconciles from the fresh reading: the restored session
+    // still runs `medium` while `high` is saved, so the split comes back.
+    await page.evaluate(() => window.piCad.runtime.start());
+    await expect.poll(() => sessionLevels(page, "desktop-e2e"), { timeout: 30_000 }).toContain("high");
+    await page.getByText("Folding stand", { exact: true }).click();
+    await expect(page.getByTestId("thinking-sync-error")).toBeVisible({ timeout: 30_000 });
+    expect(JSON.parse(await readFile(settingsPath, "utf8")).thinking).toBe("high");
+  } finally {
+    await application.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

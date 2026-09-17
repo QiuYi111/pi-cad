@@ -69,6 +69,8 @@ export interface ThinkingSyncEvents {
   retry(delayMs: number): void;
   /** The runtime is up and already runs the saved level, so nothing is pending. */
   consistent(): void;
+  /** The runtime cannot take a level right now, so nothing is pending either. */
+  unavailable(): void;
 }
 
 export interface ThinkingReconcilerOptions {
@@ -107,6 +109,11 @@ export interface ThinkingReconcilerOptions {
  * publishes a level before the next one is handed over, so a reading the
  * renderer already held when the delivery landed belongs to the session as it
  * was before that level and cannot be a report that Prime changed its mind.
+ *
+ * A runtime that is down is neither a split nor a delivery. The session a
+ * rejection described is gone once the runtime stops taking levels, so the
+ * component is told to drop that warning and the retry behind it instead of
+ * waiting for an `accepted` that can no longer come.
  */
 export class ThinkingReconciler {
   private inFlight?: string;
@@ -114,6 +121,7 @@ export class ThinkingReconciler {
   private target?: string;
   private delivered?: ThinkingDelivery;
   private readings = new WeakMap<RuntimeStatus, number>();
+  private latest?: RuntimeStatus;
   private readingCount = 0;
   private latestReading = 0;
   private deliveredReading = 0;
@@ -139,6 +147,7 @@ export class ThinkingReconciler {
     this.readingCount += 1;
     this.readings.set(status, this.readingCount);
     this.latestReading = this.readingCount;
+    this.latest = status;
     return this.readingCount;
   }
 
@@ -146,10 +155,25 @@ export class ThinkingReconciler {
    * Reconcile the saved level against the level the live session reports. Does
    * nothing while the session already runs the saved level, while the level was
    * already delivered for a reading the renderer still holds, or while the
-   * runtime is not up.
+   * runtime is not up — the last one is reported, because a runtime that cannot
+   * take a level has nothing left to reconcile and must not keep a warning
+   * about a split that no longer exists.
    */
   sync(status: RuntimeStatus, saved: ThinkingLevel): void {
-    if (!runtimeAcceptsThinking(status)) return;
+    // Every reading is ordered where the renderer commits it, including the
+    // ones that cannot be reconciled: a request that settles after the runtime
+    // stopped taking levels has to know that its outcome belongs to a session
+    // that is gone.
+    this.order(status);
+    if (!runtimeAcceptsThinking(status)) {
+      // The runtime cannot take a level right now: the session was stopped, the
+      // sidecar went away, or it is still starting. No delivery can land and no
+      // retry can fix anything, so the split an earlier rejection reported is
+      // over — and so is the retry that was waiting on it. Leaving the warning
+      // up would show a sync that nobody is running any more.
+      this.options.events.unavailable();
+      return;
+    }
     // Nothing is pending once the runtime runs the saved level — either because
     // Prime says so, or because that level was delivered for a reading the
     // renderer still holds, which is too old to say the session moved since.
@@ -218,6 +242,15 @@ export class ThinkingReconciler {
     this.inFlight = undefined;
     const queued = this.queued;
     this.queued = undefined;
+    if (!this.takesLevels()) {
+      // The runtime stopped taking levels while this request was on the wire, so
+      // whatever the request reports describes a session that is gone. A
+      // rejection would put a warning back on screen with no split behind it and
+      // schedule a retry that nothing can satisfy; a queued target would ask a
+      // runtime that cannot take it. Both are dropped: the next reading that can
+      // take a level reconciles from scratch.
+      return;
+    }
     if (queued) {
       // The target moved while this request was pending: this request is stale,
       // so its result is not published and the newest target goes out now.
@@ -237,5 +270,10 @@ export class ThinkingReconciler {
     this.failures += 1;
     this.options.events.rejected(thinkingSyncMessage(error));
     this.options.events.retry(thinkingRetryDelayMs(this.failures));
+  }
+
+  /** True while the newest reading the renderer committed can take a level. */
+  private takesLevels(): boolean {
+    return this.latest === undefined || runtimeAcceptsThinking(this.latest);
   }
 }

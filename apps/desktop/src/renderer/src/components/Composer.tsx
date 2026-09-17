@@ -36,6 +36,13 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const [thinkingAttempt, setThinkingAttempt] = useState(0);
   const thinkingRetry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const thinkingReconciler = useRef<ThinkingReconciler | undefined>(undefined);
+  // A retry only makes sense while the runtime can still take a level: a stop,
+  // a crash or a restart drops it together with the session it was for.
+  const clearThinkingRetry = () => {
+    if (thinkingRetry.current === undefined) return;
+    clearTimeout(thinkingRetry.current);
+    thinkingRetry.current = undefined;
+  };
   if (!thinkingReconciler.current) {
     thinkingReconciler.current = new ThinkingReconciler({
       send: (level) => window.piCad.runtime.setThinking(level),
@@ -47,6 +54,10 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
         // session was switched to one that matches: the split is gone, so the
         // warning has to go with it instead of waiting for a new delivery.
         consistent: () => { setThinkingSyncError(undefined); },
+        // The runtime cannot take a level any more — the session was stopped or
+        // the sidecar went away. Nothing is pending then, so the warning goes
+        // too, along with the retry it had scheduled.
+        unavailable: () => { clearThinkingRetry(); setThinkingSyncError(undefined); },
       },
     });
   }
@@ -174,11 +185,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   // request that replaced it.
   useEffect(() => {
     thinkingReconciler.current?.sync(status, settings.thinking);
-    return () => {
-      if (thinkingRetry.current === undefined) return;
-      clearTimeout(thinkingRetry.current);
-      thinkingRetry.current = undefined;
-    };
+    return clearThinkingRetry;
   }, [settings.thinking, status.state, status.sessionId, status.thinking, thinkingAttempt]);
   const changePermission = async (permission: AppSettings["permission"]) => {
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();

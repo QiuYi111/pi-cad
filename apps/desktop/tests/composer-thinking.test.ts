@@ -167,16 +167,19 @@ function recordingEvents() {
   const rejected: string[] = [];
   const retries: number[] = [];
   const consistent: string[] = [];
+  const unavailable: string[] = [];
   return {
     accepted,
     rejected,
     retries,
     consistent,
+    unavailable,
     events: {
       accepted: (delivery: ThinkingDelivery) => { accepted.push(delivery); },
       rejected: (message: string) => { rejected.push(message); },
       retry: (delayMs: number) => { retries.push(delayMs); },
       consistent: () => { consistent.push("consistent"); },
+      unavailable: () => { unavailable.push("unavailable"); },
     },
   };
 }
@@ -374,5 +377,89 @@ describe("composer thinking reconciliation consistency", () => {
     reconciler.sync(later, "high");
     expect(runtime.sent).toEqual(["high", "high"]);
     expect(recorded.rejected).toEqual([]);
+  });
+});
+
+/**
+ * A runtime that cannot take a level is not a split waiting to be resolved. The
+ * warning a rejection published names a session that has to exist for the level
+ * to still matter, and the retry behind it asks the same runtime again. Once
+ * the runtime is down both are pointless: the component has to be told, or the
+ * composer keeps showing a retry that was already dropped.
+ */
+describe("composer thinking reconciliation availability", () => {
+  it("clears the split and stops reconciling when the runtime stops taking levels", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    // The session runs `medium` while `high` is saved, and that reconcile is
+    // rejected: the split is on screen with a retry scheduled for it.
+    const running = status("ready", { sessionId: "session-a", thinking: "medium" });
+    reconciler.sync(running, "high");
+    runtime.calls[0]!.decline(new Error("Prime rejected set_thinking_level"));
+    await flush();
+    expect(recorded.rejected).toHaveLength(1);
+    expect(recorded.retries).toEqual([thinkingRetryDelayMs(1)]);
+
+    // The session is stopped. There is nothing left to sync, so the split is
+    // reported as gone and the warning can follow it off the screen.
+    const stopped = status("idle", { sessionId: "session-a" });
+    reconciler.sync(stopped, "high");
+    expect(recorded.unavailable).toHaveLength(1);
+
+    // What the retry timer does if it still fires while the runtime is down:
+    // nothing goes on the wire, and no second retry is scheduled.
+    reconciler.sync(stopped, "high");
+    expect(recorded.unavailable).toHaveLength(2);
+    expect(runtime.sent).toEqual(["high"]);
+    expect(recorded.retries).toHaveLength(1);
+
+    // Starting again reads the session afresh. It still runs `medium`, so the
+    // reconciliation starts over and the saved level goes back out.
+    const restarted = status("ready", { sessionId: "session-a", thinking: "medium" });
+    reconciler.sync(restarted, "high");
+    expect(runtime.sent).toEqual(["high", "high"]);
+    runtime.calls[1]!.accept();
+    await flush();
+    expect(recorded.accepted).toEqual([{ sessionId: "session-a", level: "high" }]);
+  });
+
+  it("drops a request that settles after the runtime stopped taking levels", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    reconciler.sync(status("ready", { sessionId: "session-a", thinking: "medium" }), "high");
+    // The sidecar goes away while the `high` request is still on the wire.
+    reconciler.sync(status("error", { sessionId: "session-a", message: "The worker exited unexpectedly." }), "high");
+    expect(recorded.unavailable).toHaveLength(1);
+
+    runtime.calls[0]!.decline(new Error("the session is gone"));
+    await flush();
+
+    // The failure belongs to a session that cannot be told anything any more:
+    // no warning, and no retry asking a runtime that is down.
+    expect(recorded.rejected).toEqual([]);
+    expect(recorded.retries).toEqual([]);
+  });
+
+  it("drops a target that was queued when the runtime stopped taking levels", async () => {
+    const runtime = recordingRuntime();
+    const recorded = recordingEvents();
+    const reconciler = new ThinkingReconciler({ send: runtime.send, events: recorded.events });
+
+    reconciler.sync(status("ready", { sessionId: "session-a", thinking: "medium" }), "high");
+    // The user picks `low` while `high` is still pending, so `low` waits for it.
+    reconciler.sync(status("ready", { sessionId: "session-a", thinking: "medium" }), "low");
+    // Then the session stops before the pending request settles.
+    reconciler.sync(status("idle", { sessionId: "session-a" }), "low");
+
+    runtime.calls[0]!.accept();
+    await flush();
+
+    expect(runtime.sent).toEqual(["high"]);
+    expect(recorded.accepted).toEqual([]);
+    expect(recorded.unavailable).toEqual(["unavailable"]);
   });
 });
