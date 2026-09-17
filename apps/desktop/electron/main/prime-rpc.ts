@@ -149,25 +149,29 @@ export class PrimeRpc extends EventEmitter {
 
   async prompt(message: string, images?: Array<{ data: string; mimeType: string }>) {
     const payload = { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) };
-    this.mutate(() => this.runtime.beginTurn("prompt"));
+    const ownsTurn = this.mutate(() => this.runtime.beginTurn("prompt"));
     try {
       await this.request("prompt", payload);
     } catch (error) {
       if (error instanceof Error && error.message.includes("queued session input is suspended")) {
         // A suspended queue is a normal Prime condition, but the steering
-        // fallback is still an RPC request: if it fails the active turn must
-        // settle as rpc_timeout / rpc_rejected instead of hanging.
-        await this.turnRequest("steer", payload);
+        // fallback still belongs to the turn `prompt()` just started: if it
+        // fails that turn must settle as rpc_timeout / rpc_rejected instead of
+        // hanging in `starting_turn`.
+        await this.turnRequest("steer", payload, ownsTurn);
         return;
       }
-      this.noteRpcFailure(error);
+      this.noteRpcFailure("prompt", ownsTurn, error);
       throw error;
     }
   }
 
   async steer(message: string, images?: Array<{ data: string; mimeType: string }>) {
-    this.mutate(() => this.runtime.beginTurn("steer"));
-    await this.turnRequest("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
+    const payload = { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) };
+    // `beginTurn` returns false when a turn is already running: this steer then
+    // only adds input to that turn and must not own its terminal outcome.
+    const ownsTurn = this.mutate(() => this.runtime.beginTurn("steer"));
+    await this.turnRequest("steer", payload, ownsTurn);
   }
 
   async newSession(): Promise<unknown[]> {
@@ -273,23 +277,34 @@ export class PrimeRpc extends EventEmitter {
   }
 
   /**
-   * Run one turn RPC (`prompt` / `steer`) and settle the active turn when the
-   * transport fails. Every path into a turn request has to end here so a
-   * rejected or timed-out request can never leave the turn stuck in
-   * `starting_turn` waiting for a watchdog.
+   * Run one turn RPC (`prompt` / `steer`) and settle it when the transport
+   * fails.
+   *
+   * Only the request that created the turn may settle it: a `prompt`, a
+   * suspended-prompt fallback steer, or a steer that started a turn here ends in
+   * `rpc_timeout` / `rpc_rejected`. A steer into an already running turn owns
+   * nothing, so its failure must leave that turn's phase and terminal reason
+   * alone while the provider request behind it keeps streaming.
    */
-  private async turnRequest(type: "prompt" | "steer", payload: Record<string, unknown>): Promise<void> {
+  private async turnRequest(type: "prompt" | "steer", payload: Record<string, unknown>, ownsTurn: boolean): Promise<void> {
     try {
       await this.request(type, payload);
     } catch (error) {
-      this.noteRpcFailure(error);
+      this.noteRpcFailure(type, ownsTurn, error);
       throw error;
     }
   }
 
-  private noteRpcFailure(error: unknown) {
+  /** Settle the turn this RPC owns, or only journal a failed extra command. */
+  private noteRpcFailure(command: "prompt" | "steer", ownsTurn: boolean, error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    this.mutate(() => this.runtime.rpcFailure(/timed out/.test(message) ? "rpc_timeout" : "rpc_rejected", message));
+    this.mutate(() => {
+      if (!ownsTurn) {
+        this.runtime.commandFailed(command, message);
+        return;
+      }
+      this.runtime.rpcFailure(/timed out/.test(message) ? "rpc_timeout" : "rpc_rejected", message);
+    });
   }
 
   /** Merge lifecycle fields from runtime setup/install/start into the status. */
@@ -298,10 +313,11 @@ export class PrimeRpc extends EventEmitter {
   }
 
   /** Run a state mutation, reschedule watchdogs, and publish real changes once. */
-  private mutate(action: () => void) {
+  private mutate<T>(action: () => T): T {
     const before = this.runtime.status;
+    let result: T;
     try {
-      action();
+      result = action();
     } finally {
       this.syncTimers();
       this.flushTrace();
@@ -310,6 +326,7 @@ export class PrimeRpc extends EventEmitter {
         for (const waiter of [...this.turnWaiters]) waiter();
       }
     }
+    return result;
   }
 
   /** Append the journal lines the state machine produced since the last flush. */

@@ -262,6 +262,70 @@ describe("PrimeRpc runtime state", () => {
     expect(runtime.status.turn?.finishedAt).toBeTypeOf("number");
   });
 
+  it("keeps the running turn alive when a mid-turn steer is rejected", async () => {
+    const { runtime, request, send } = harness();
+    const lines: RuntimeTraceEntry[] = [];
+    (runtime as any).journal = async (entries: RuntimeTraceEntry[]) => { lines.push(...entries); };
+
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    send({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "reasoning" } });
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "thinking" });
+    const turnId = runtime.status.turn?.id;
+
+    // The renderer steers into a turn that is already running: this request owns
+    // nothing, so its rejection must not kill the provider request behind it.
+    request.mockRejectedValueOnce(new Error("Prime RPC steer rejected"));
+    await expect(runtime.steer("extra input")).rejects.toThrow("Prime RPC steer rejected");
+
+    expect(request.mock.calls.map(([type]) => type)).toEqual(["prompt", "steer"]);
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "thinking", terminalReason: undefined });
+    expect(runtime.status.turn?.id).toBe(turnId);
+    expect(runtime.status.turn?.terminalReason).toBeUndefined();
+    expect(runtime.status.turn?.finishedAt).toBeUndefined();
+    expect(lines.map((line) => line.event)).toContain("command_failed:steer");
+    expect(lines.every((line) => line.turnId === turnId)).toBe(true);
+
+    // The owning turn still completes normally after the failed extra command.
+    send({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: "done" } });
+    send({ type: "agent_end", messages: [] });
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "ready", terminalReason: "completed" });
+    expect(runtime.status.turn?.id).toBe(turnId);
+  });
+
+  it("keeps the running turn alive when a mid-turn steer times out", async () => {
+    const { runtime, request, send } = harness();
+    await runtime.prompt("start");
+    send({ type: "agent_start" });
+    send({ type: "message_update", message: { role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "reasoning" } });
+    const turnId = runtime.status.turn?.id;
+
+    request.mockRejectedValueOnce(new Error("Prime RPC steer timed out"));
+    await expect(runtime.steer("extra input")).rejects.toThrow("timed out");
+
+    // A transport timeout on the extra command is not a terminal RPC timeout
+    // for the turn the provider is still running.
+    expect(runtime.status).toMatchObject({ state: "streaming", phase: "thinking", terminalReason: undefined });
+    expect(runtime.status.turn?.id).toBe(turnId);
+    expect(runtime.status.turn?.terminalReason).toBeUndefined();
+
+    send({ type: "agent_end", messages: [] });
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "ready", terminalReason: "completed" });
+    expect(runtime.status.turn?.id).toBe(turnId);
+  });
+
+  it("settles a steer that started its own turn when the request is rejected", async () => {
+    const { runtime, request } = harness();
+    request.mockRejectedValueOnce(new Error("Prime RPC steer rejected"));
+
+    await expect(runtime.steer("first input")).rejects.toThrow("Prime RPC steer rejected");
+
+    // No turn was running, so this steer created the turn and owns its outcome.
+    expect(request.mock.calls.map(([type]) => type)).toEqual(["steer"]);
+    expect(runtime.status).toMatchObject({ state: "ready", phase: "failed", reason: "request_rejected", terminalReason: "rpc_rejected" });
+    expect(runtime.status.turn?.finishedAt).toBeTypeOf("number");
+  });
+
   it("writes the runtime journal while a turn moves", async () => {
     const { runtime, send } = harness();
     const lines: RuntimeTraceEntry[] = [];

@@ -286,9 +286,15 @@ export class PrimeRuntimeState {
     this.status = next;
   }
 
-  /** A prompt or steer request was accepted by the desktop and sent to Prime. */
-  beginTurn(kind: "prompt" | "steer", id?: string): void {
-    if (this.activeTurn()) return;
+  /**
+   * A prompt or steer request was accepted by the desktop and sent to Prime.
+   *
+   * Returns whether this call created the turn. A `steer` that lands while
+   * another turn is already running only adds input to that turn: it does not
+   * own its outcome.
+   */
+  beginTurn(kind: "prompt" | "steer", id?: string): boolean {
+    if (this.activeTurn()) return false;
     const now = this.now();
     const turn: RuntimeTurn = {
       id: id ?? `turn-${++this.sequence}`,
@@ -316,6 +322,7 @@ export class PrimeRuntimeState {
       lastProviderEventAt: now,
     };
     this.record("turn_started", `${kind} accepted`);
+    return true;
   }
 
   /** Apply one raw Prime RPC event. All events are JSON records from stdout. */
@@ -487,6 +494,18 @@ export class PrimeRuntimeState {
     // Prime may still be working; record the transport timeout without
     // pretending the turn ended.
     this.phase("rpc_timeout", { reason: "rpc_timeout", message });
+  }
+
+  /**
+   * A command that does not own the active turn failed.
+   *
+   * An extra `steer` while the provider is already streaming is only additional
+   * input to a turn someone else started, so the turn keeps its phase, id and
+   * terminal reason: the provider request that owns it is still running. The
+   * failure is journalled, and the rejected promise tells the renderer.
+   */
+  commandFailed(command: string, message: string): void {
+    this.record(`command_failed:${command}`, traceDetail(message));
   }
 
   /** Stop was requested: Prime is asked to abort and the handshake is running. */
