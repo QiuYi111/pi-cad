@@ -6,7 +6,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AppSettings, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
+import type { AppSettings, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, ThinkingLevel, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
@@ -48,6 +48,20 @@ const trustedReleases = new Map<string, ReleaseResult>();
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
 const desktopE2EOpenStep = process.env.PI_CAD_DESKTOP_E2E_OPEN_STEP
   || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-open-step="))?.slice("--pi-cad-e2e-open-step=".length);
+const desktopE2ERejectThinking = Number(
+  process.env.PI_CAD_DESKTOP_E2E_REJECT_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-reject-thinking="))?.slice("--pi-cad-e2e-reject-thinking=".length)
+  || 0,
+);
+const desktopE2ESlowThinking = Number(
+  process.env.PI_CAD_DESKTOP_E2E_SLOW_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-slow-thinking="))?.slice("--pi-cad-e2e-slow-thinking=".length)
+  || 0,
+);
+const desktopE2ERevertThinking = (
+  process.env.PI_CAD_DESKTOP_E2E_REVERT_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-revert-thinking="))?.slice("--pi-cad-e2e-revert-thinking=".length)
+) as ThinkingLevel | undefined;
 const testOpenSteps = process.argv
   .filter((argument) => argument.startsWith("--pi-cad-test-open-step="))
   .map((argument) => argument.slice("--pi-cad-test-open-step=".length));
@@ -156,7 +170,13 @@ async function bridge(): Promise<RuntimeBridge> {
 
 async function ensureRuntime() {
   if (runtime) return runtime;
-  runtime = desktopE2E ? new DemoRuntime() : new PrimeRpc(await bridge());
+  runtime = desktopE2E
+    ? new DemoRuntime({
+      rejectThinkingAttempts: Number.isFinite(desktopE2ERejectThinking) ? desktopE2ERejectThinking : 0,
+      slowThinkingMs: Number.isFinite(desktopE2ESlowThinking) ? desktopE2ESlowThinking : 0,
+      revertThinkingLevel: desktopE2ERevertThinking,
+    })
+    : new PrimeRpc(await bridge());
   runtime.on("event", (event) => send(IPC.runtimeEvent, event));
   runtime.on("status", (status) => send(IPC.runtimeStatus, status));
   runtime.on("ui-request", (request) => send(IPC.runtimeUiRequest, request));

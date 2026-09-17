@@ -34,14 +34,47 @@ test("status bar reports retry, tool and stop phases", async () => {
     await composer.fill("Provider retry please");
     await composer.press("Enter");
     await page.waitForFunction(() => /^Retrying 1\/3$/.test(document.querySelector(".status-bar b")?.textContent ?? ""), null, { timeout: 30_000, polling: 25 });
+    await page.waitForFunction(() => document.querySelector(".conversation-turn span")?.textContent === "Retrying 1/3", null, { timeout: 30_000, polling: 25 });
     await expect(page.getByText("Recovered after one retry.")).toBeAttached({ timeout: 30_000 });
+
+    // A reasoning limit is a live phase of the turn, not a terminal: the row
+    // keeps its clocks and reports no terminal reason until the retry arrives.
+    await composer.fill("Reasoning limit please");
+    await composer.press("Enter");
+    await page.waitForFunction(() => {
+      const row = document.querySelector(".conversation-turn");
+      return row?.querySelector("span")?.textContent === "Reasoning limit"
+        && Boolean(row.querySelector("time[data-timer='turn']"))
+        && !row.hasAttribute("data-terminal-reason");
+    }, null, { timeout: 30_000, polling: 25 });
+    await page.waitForFunction(() => document.querySelector(".conversation-turn span")?.textContent === "Retrying 1/3", null, { timeout: 30_000, polling: 25 });
+    await expect(page.getByText("Recovered from the reasoning limit.")).toBeAttached({ timeout: 30_000 });
+
+    // The model goes quiet while the runtime keeps sending agent_status events.
+    // `silent` must read the provider clock, so the reading keeps growing
+    // instead of resetting on every runtime event.
+    await composer.fill("Provider silence please");
+    await composer.press("Enter");
+    await page.waitForFunction(() => {
+      const reading = document.querySelector(".conversation-turn time[data-timer='silent']")?.textContent ?? "";
+      const seconds = Number(/^silent (\d+)s$/.exec(reading)?.[1] ?? 0);
+      return document.querySelector(".conversation-turn span")?.textContent === "Thinking" && seconds >= 5;
+    }, null, { timeout: 30_000, polling: 50 });
+    await expect(page.getByText("Back after the pause.")).toBeAttached({ timeout: 30_000 });
 
     await composer.fill("Long calculation");
     await composer.press("Enter");
     await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Running tool", null, { timeout: 30_000, polling: 25 });
+    // The conversation row reads the same runtime phase and labels its clocks,
+    // so the turn total can never pass as reasoning time.
+    await page.waitForFunction(() => document.querySelector(".stream-state span")?.textContent === "Running tool", null, { timeout: 30_000, polling: 25 });
+    await expect(page.locator(".stream-state time[data-timer='turn']")).toHaveCount(1);
+    await expect(page.locator(".stream-state time[data-timer='phase']")).toHaveCount(1);
     await page.getByRole("button", { name: "Stop" }).click();
     await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Stopped", null, { timeout: 30_000, polling: 25 });
     await expect(kernel).toHaveText("Stopped");
+    await expect(page.locator(".stream-state").last()).toContainText("Stopped");
+    await expect(page.locator(".stream-state").last().locator("time")).toHaveCount(0);
   } finally {
     await application.close();
     await rm(root, { recursive: true, force: true });

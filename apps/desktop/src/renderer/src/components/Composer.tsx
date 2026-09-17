@@ -1,8 +1,19 @@
 import { ArrowUp, Box, Plus, ShieldCheck, Sparkles, Square } from "./icons";
 import { useEffect, useRef, useState } from "react";
 import { runtimeTurnActive, type AppSettings, type ModelChoice, type RuntimeStatus, type ThinkingLevel } from "@shared/contracts";
+import { ThinkingReconciler } from "./thinking-sync";
 
-const efforts: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+/**
+ * Only used until the model catalog answers. Real levels come from the catalog,
+ * because a binary-thinking model supports `off` and one level, not six.
+ */
+const FALLBACK_THINKING_LEVELS: ThinkingLevel[] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * Prime's own level order (`packages/ai/src/models.ts`). Clamping walks this
+ * order, never the order a catalog happens to list a model's levels in.
+ */
+const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 type PendingRequest = { id: string; text: string };
 type RunningIntent = "queue" | "replace" | "note";
@@ -11,6 +22,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const [text, setText] = useState("");
   const [images, setImages] = useState<Array<{ name: string; data: string; mimeType: string }>>([]);
   const [availableModels, setAvailableModels] = useState<ModelChoice[]>([{ provider: settings.provider, id: settings.model, name: settings.model }]);
+  const [catalogModels, setCatalogModels] = useState<ModelChoice[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [stopping, setStopping] = useState(false);
   const [runningIntent, setRunningIntent] = useState<RunningIntent>("queue");
@@ -20,6 +32,39 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const imagesRef = useRef(images);
   const draining = useRef(false);
   const loadingQueue = useRef(false);
+  const [thinkingSyncError, setThinkingSyncError] = useState<string | undefined>(undefined);
+  const [thinkingAttempt, setThinkingAttempt] = useState(0);
+  const thinkingRetry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const thinkingReconciler = useRef<ThinkingReconciler | undefined>(undefined);
+  // A retry only makes sense while the runtime can still take a level: a stop,
+  // a crash or a restart drops it together with the session it was for.
+  const clearThinkingRetry = () => {
+    if (thinkingRetry.current === undefined) return;
+    clearTimeout(thinkingRetry.current);
+    thinkingRetry.current = undefined;
+  };
+  if (!thinkingReconciler.current) {
+    thinkingReconciler.current = new ThinkingReconciler({
+      send: (level) => window.piCad.runtime.setThinking(level),
+      events: {
+        accepted: () => { setThinkingSyncError(undefined); },
+        rejected: (message) => setThinkingSyncError(message),
+        retry: (delayMs) => { thinkingRetry.current = setTimeout(() => setThinkingAttempt((attempt) => attempt + 1), delayMs); },
+        // The setting moved back onto the level the session already runs, or the
+        // session was switched to one that matches: the split is gone, so the
+        // warning has to go with it instead of waiting for a new delivery.
+        consistent: () => { setThinkingSyncError(undefined); },
+        // The runtime cannot take a level any more — the session was stopped or
+        // the sidecar went away. Nothing is pending then, so the warning goes
+        // too, along with the retry it had scheduled.
+        unavailable: () => { clearThinkingRetry(); setThinkingSyncError(undefined); },
+      },
+    });
+  }
+  // Statuses are ordered where the renderer commits them, so the reconciliation
+  // can tell a split Prime reported after a delivery from a render that was
+  // already on screen when the delivery landed.
+  thinkingReconciler.current.noteReading(status);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = runtimeTurnActive(status);
   const starting = status.state === "starting";
@@ -28,8 +73,14 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       const all = catalog.providers.flatMap((provider) => provider.models);
       const scoped = catalog.favorites.map((favorite) => all.find((model) => model.provider === favorite.provider && model.id === favorite.modelId)).filter((model): model is ModelChoice => Boolean(model));
       if (scoped.length) setAvailableModels(scoped);
+      setCatalogModels(all);
     }).catch(() => undefined);
   }, [status.state, settings.provider, settings.model]);
+  const currentModel = catalogModels.find((model) => model.provider === settings.provider && model.id === settings.model)
+    || availableModels.find((model) => model.id === settings.model);
+  const thinkingLevels = thinkingLevelOptions(currentModel, settings.thinking);
+  const normalizedThinking = normalizeThinkingLevel(currentModel, settings.thinking);
+  const thinkingValue = normalizedThinking;
   const storageKey = `reify.pending.${queueKey || "unconfigured"}`;
   const draftKey = `reify.draft.${queueKey || "unconfigured"}`;
   useEffect(() => { imagesRef.current = images; }, [images]);
@@ -107,8 +158,35 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   };
   const changeThinking = async (thinking: ThinkingLevel) => {
     await onSettingsChange({ thinking });
-    if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.setThinking(thinking);
   };
+  // A saved level the model does not list is folded into a real one as soon as
+  // the catalog answers; the runtime would reject the stale value anyway.
+  useEffect(() => {
+    if (normalizedThinking === settings.thinking) return;
+    void changeThinking(normalizedThinking);
+  }, [normalizedThinking, settings.thinking]);
+  // A start reads the saved level before the catalog may have folded it, and a
+  // restored session keeps the level it was saved with. So the saved level is
+  // reconciled against the running session as soon as the runtime can take one:
+  // once per session, and again whenever it moves. Without this a fold during
+  // `starting` — or a switch to a session that runs another level — would leave
+  // the setting and the running sidecar on two different levels.
+  //
+  // A level counts as delivered only once the runtime accepted it. Marking it
+  // before the RPC answers would remember a rejected level as "this session
+  // already runs it", and a ref that is cleared on failure re-renders nothing,
+  // so the effect would never run again. The failure path therefore publishes
+  // state: it shows the split and retries the reconciliation on its own.
+  //
+  // The reconciler serializes the RPCs: a target that moves while a request is
+  // still on the wire waits for it instead of racing it. Two requests in flight
+  // would otherwise let the older one land last and push the sidecar back to a
+  // level nobody asks for, and its late callback would clear the marker of the
+  // request that replaced it.
+  useEffect(() => {
+    thinkingReconciler.current?.sync(status, settings.thinking);
+    return clearThinkingRetry;
+  }, [settings.thinking, status.state, status.sessionId, status.thinking, thinkingAttempt]);
   const changePermission = async (permission: AppSettings["permission"]) => {
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();
     await onSettingsChange({ permission });
@@ -125,6 +203,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   };
   return <div className="composer" data-testid="composer">
     {attachmentError && <div className="composer-error" role="alert">{attachmentError}</div>}
+    {thinkingSyncError && <div className="composer-error" role="alert" data-testid="thinking-sync-error">{thinkingSyncError}</div>}
     {images.length > 0 && <div className="composer-attachments">{images.map((image, index) => <button key={`${image.name}-${index}`} onClick={() => setImages((current) => current.filter((_, item) => item !== index))} title="Remove image"><img src={`data:${image.mimeType};base64,${image.data}`} alt={image.name} /><span>{image.name}</span></button>)}</div>}
     {pending.length > 0 && <div className="pending-requests" role="region" aria-label="Pending requests"><strong>After current task</strong>{pending.map((request) => <div key={request.id}><input aria-label={`Queued request ${request.id}`} value={request.text} onChange={(event) => setPending((current) => current.map((item) => item.id === request.id ? { ...item, text: event.target.value } : item))} /><button aria-label={`Cancel queued request ${request.id}`} onClick={() => setPending((current) => current.filter((item) => item.id !== request.id))}>Cancel</button></div>)}</div>}
     <textarea ref={textareaRef} value={text} onChange={(event) => { setText(event.target.value); localStorage.setItem(draftKey, event.target.value); onDraftChange?.(Boolean(event.target.value)); }} onKeyDown={(event) => {
@@ -135,7 +214,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       {streaming && <label className="composer-chip">Send as<select aria-label="Running request action" value={runningIntent} onChange={(event) => setRunningIntent(event.target.value as RunningIntent)}><option value="queue">After current task</option><option value="replace">Stop and modify</option><option value="note">Note only</option></select></label>}
       <label className="composer-chip"><ShieldCheck size={14} /><select aria-label="Permission" value={settings.permission} onChange={(event) => void changePermission(event.target.value as AppSettings["permission"])}><option value="workspace">Workspace</option><option value="read-only">Read only</option></select></label>
       <label className="composer-chip"><Box size={14} /><select aria-label="Model" value={settings.model} onChange={(event) => void changeModel(event.target.value)}>{availableModels.map((model) => <option key={`${model.provider}/${model.id}`} value={model.id}>{shortModel(model.name)}</option>)}</select></label>
-      <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={settings.thinking} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{efforts.map((level) => <option key={level}>{level}</option>)}</select></label>
+      <label className="composer-chip"><Sparkles size={14} /><select aria-label="Effort" value={thinkingValue} onChange={(event) => void changeThinking(event.target.value as ThinkingLevel)}>{thinkingLevels.map((level) => <option key={level} value={level}>{thinkingLevelLabel(level)}</option>)}</select></label>
       <span className="composer-spacer" />
       <button className={`send-button ${starting || stopping || (streaming && !text.trim()) ? "busy" : ""}`} onClick={() => streaming && !text.trim() ? void abort() : void send()} aria-label={stopping ? "Stopping" : streaming && !text.trim() ? "Stop" : streaming ? runningIntent === "queue" ? "Queue request" : runningIntent === "replace" ? "Stop and modify" : "Save note" : "Send"} disabled={starting || stopping}>
         {streaming && !text.trim() ? <><Square size={13} fill="currentColor" />{stopping && <span>Stopping…</span>}</> : <ArrowUp size={18} />}
@@ -145,3 +224,53 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
 }
 
 function shortModel(model: string) { return model.replace(/^gpt-5\.6-/, "").replace(/^gpt-/, "GPT "); }
+function thinkingLevelLabel(level: ThinkingLevel) { return level === "off" ? "Off" : level; }
+
+/** Thinking levels the catalog reports for this model; a binary-thinking model reports two. */
+export function supportedThinkingLevels(model: ModelChoice | undefined): ThinkingLevel[] {
+  return model?.thinkingLevels?.length ? model.thinkingLevels : FALLBACK_THINKING_LEVELS;
+}
+
+/**
+ * Selector options. Once the catalog answers, the options are exactly the
+ * levels that model can run, so a saved level the model does not support is
+ * dropped instead of staying selectable. Before the catalog answers the saved
+ * level is kept visible, otherwise the selector would have nothing to show.
+ */
+export function thinkingLevelOptions(model: ModelChoice | undefined, current: ThinkingLevel): ThinkingLevel[] {
+  const levels = supportedThinkingLevels(model);
+  if (model?.thinkingLevels?.length) return levels;
+  return levels.includes(current) ? levels : [current, ...levels];
+}
+
+/**
+ * The level the model can actually run: the saved one when the catalog lists
+ * it, otherwise the closest level the model does support. Unknown catalogs keep
+ * the saved value, because nothing better is known yet.
+ *
+ * This mirrors Prime's `clampThinkingLevel()`: search upwards from the requested
+ * level, then downwards. A model that only lists `[off, high]` must answer
+ * `high` for `medium`, and `xhigh` on `[off, minimal, low, medium, high]` must
+ * not collapse to `off` just because `off` comes first in the model's list.
+ */
+export function normalizeThinkingLevel(model: ModelChoice | undefined, current: ThinkingLevel): ThinkingLevel {
+  const levels = model?.thinkingLevels;
+  if (!levels?.length) return current;
+  if (levels.includes(current)) return current;
+  const requested = THINKING_LEVEL_ORDER.indexOf(current);
+  if (requested < 0) return levels[0]!;
+  for (let index = requested; index < THINKING_LEVEL_ORDER.length; index += 1) {
+    const candidate = THINKING_LEVEL_ORDER[index]!;
+    if (levels.includes(candidate)) return candidate;
+  }
+  for (let index = requested - 1; index >= 0; index -= 1) {
+    const candidate = THINKING_LEVEL_ORDER[index]!;
+    if (levels.includes(candidate)) return candidate;
+  }
+  return levels[0]!;
+}
+
+export { thinkingLevelLabel };
+// The reconciliation bookkeeping lives in its own module so the ordering rules
+// can be exercised without a renderer; re-exported here for existing callers.
+export { pendingThinkingLevel, thinkingRequestKey, thinkingRetryDelayMs, thinkingSyncMessage, type ThinkingDelivery } from "./thinking-sync";

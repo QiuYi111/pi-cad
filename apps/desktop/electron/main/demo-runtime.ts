@@ -5,24 +5,61 @@ import { PrimeRuntimeState } from "./runtime-state.js";
 const wait = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
 /**
+ * The conversation the demo restores keeps the level it was last run at, which
+ * is not necessarily the saved setting. Switching to it therefore has to be
+ * reconciled, exactly like a real Prime `get_state()` answer would.
+ */
+const RESTORED_SESSION_ID = "demo-restored";
+const RESTORED_THINKING: ThinkingLevel = "medium";
+
+export interface DemoRuntimeOptions {
+  /**
+   * Reject this many `set_thinking_level` calls before accepting any. Used by
+   * the E2E suite to prove a rejected reconciliation is retried instead of
+   * being remembered as delivered.
+   */
+  rejectThinkingAttempts?: number;
+  /**
+   * Hold the first `set_thinking_level` call open for this long. Used by the
+   * E2E suite to move the target while one reconcile is still on the wire, so
+   * the ordering between two overlapping reconciles is observable.
+   */
+  slowThinkingMs?: number;
+  /**
+   * Report this level once, a moment after a `set_thinking_level` was accepted.
+   * Used by the E2E suite to play a sidecar that ends up on another level than
+   * the one it was just told, so the renderer has to reconcile it again.
+   */
+  revertThinkingLevel?: ThinkingLevel;
+}
+
+/**
  * Deterministic runtime used by the desktop E2E suite. It drives the same
  * runtime state machine as `PrimeRpc`, so statuses shown in tests (retrying,
  * stopping, aborted, terminal reasons) match the real runtime.
  */
 export class DemoRuntime extends EventEmitter {
   private readonly runtime = new PrimeRuntimeState({ state: "idle", checks: [] });
+  private thinkingAttempts = 0;
   private generation = 0;
   private messages: unknown[] = [];
   private failureTimer?: NodeJS.Timeout;
   private failureDeadline?: number;
+  private saved?: AppSettings;
+  private revertedThinking = false;
+
+  constructor(private readonly options: DemoRuntimeOptions = {}) {
+    super();
+  }
 
   get status(): RuntimeStatus { return this.runtime.status; }
 
-  async start(_settings: AppSettings) {
+  async start(settings: AppSettings) {
+    this.saved = settings;
     this.runtime.base({ state: "starting", checks: [], message: "Starting Prime…" });
     this.publish();
     await wait(120);
-    this.runtime.sessionReady("desktop-e2e");
+    this.runtime.sessionReady("desktop-e2e", settings.thinking);
     this.publish();
     return this.status;
   }
@@ -41,13 +78,20 @@ export class DemoRuntime extends EventEmitter {
     this.runtime.beginTurn("steer");
     this.event({ type: "message_start", message: { role: "user", content: message } });
   }
-  async newSession() { this.messages = []; return []; }
+  async newSession() {
+    this.messages = [];
+    this.runtime.sessionReady("desktop-e2e", this.saved?.thinking);
+    this.publish();
+    return [];
+  }
   async setSessionName(_name: string) {}
   async switchSession(_path?: string) {
     this.messages = [
       { id: "demo-history-user", role: "user", content: "Design a folding stand" },
       { id: "demo-history-assistant", role: "assistant", content: "I checked the interfaces before building." },
     ];
+    this.runtime.sessionReady(RESTORED_SESSION_ID, RESTORED_THINKING);
+    this.publish();
     return this.messages;
   }
   async getMessages() { return this.messages; }
@@ -56,7 +100,30 @@ export class DemoRuntime extends EventEmitter {
     { provider: "openai-codex", id: "gpt-5.6-luna", name: "GPT-5.6 Luna", reasoning: true },
   ]; }
   async setModel(_provider: string, _model: string) {}
-  async setThinking(_level: ThinkingLevel) {}
+  async setThinking(level: ThinkingLevel) {
+    this.thinkingAttempts += 1;
+    if (this.options.rejectThinkingAttempts || this.options.slowThinkingMs || this.options.revertThinkingLevel) {
+      // The renderer counts these to tell "retried" from "gave up"; a rejection
+      // must not publish the level, exactly like a failed Prime RPC.
+      this.event({ type: "runtime_diagnostic", message: `set_thinking_level ${level} attempt ${this.thinkingAttempts}` });
+    }
+    if (this.thinkingAttempts <= (this.options.rejectThinkingAttempts ?? 0)) {
+      throw new Error("Prime rejected set_thinking_level");
+    }
+    if (this.thinkingAttempts === 1 && this.options.slowThinkingMs) await wait(this.options.slowThinkingMs);
+    this.runtime.noteThinking(level);
+    this.publish();
+    // Answer the call first: the level is delivered, and only then does the
+    // sidecar report that it ended up somewhere else.
+    if (this.options.revertThinkingLevel && !this.revertedThinking) {
+      this.revertedThinking = true;
+      const reverted = this.options.revertThinkingLevel;
+      setTimeout(() => {
+        this.runtime.sessionReady(this.status.sessionId, reverted);
+        this.publish();
+      }, 200);
+    }
+  }
   async respondToUi(_id: string, _response: Record<string, unknown>) {}
 
   async prompt(message: string) {
@@ -80,10 +147,40 @@ export class DemoRuntime extends EventEmitter {
       this.messages.push({ id: `demo-assistant-${generation}`, role: "assistant", content: "Recovered after one retry." });
       return;
     }
+    if (/reasoning limit/i.test(message)) {
+      // A reasoning limit is not the end of the turn: the runtime holds the
+      // phase through the retry grace, so clients can see it as a live state.
+      this.event({ type: "message_end", message: { role: "assistant", content: [{ type: "thinking", thinking: "Still working" }], stopReason: "error", errorMessage: "Reasoning budget exhausted for this turn", id: "demo-limit" } });
+      await this.waitForTurn(900, generation);
+      if (generation !== this.generation) return;
+      this.event({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 600, errorMessage: "Reasoning budget exhausted for this turn" });
+      await this.waitForTurn(650, generation);
+      if (generation !== this.generation) return;
+      this.event({ type: "auto_retry_end", success: true, attempt: 1 });
+      this.event({ type: "message_update", message: { role: "assistant", id: "demo-limit" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Recovered from the reasoning limit." } });
+      this.event({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Recovered from the reasoning limit." }], id: "demo-limit", stopReason: "stop" } });
+      this.event({ type: "agent_end", messages: [] });
+      this.messages.push({ id: `demo-assistant-${generation}`, role: "assistant", content: "Recovered from the reasoning limit." });
+      return;
+    }
     if (/simulate interruption/i.test(message)) {
       this.event({ type: "agent_abort" });
       this.runtime.base({ state: "error", message: "The demo worker exited unexpectedly." });
       this.publish();
+      return;
+    }
+    if (/provider silence/i.test(message)) {
+      // The model goes quiet while the runtime keeps reporting its own status,
+      // so only the provider clock may move the `silent` reading.
+      for (let tick = 0; tick < 32; tick += 1) {
+        await wait(250);
+        if (generation !== this.generation) return;
+        this.event({ type: "agent_status", status: { summary: "Still waiting on the model" } });
+      }
+      this.event({ type: "message_update", message: { role: "assistant", id: "demo-silence" }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Back after the pause." } });
+      this.event({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Back after the pause." }], id: "demo-silence", stopReason: "stop" } });
+      this.event({ type: "agent_end", messages: [] });
+      this.messages.push({ id: `demo-assistant-${generation}`, role: "assistant", content: "Back after the pause." });
       return;
     }
     if (/long calculation/i.test(message)) {

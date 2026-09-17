@@ -1,29 +1,9 @@
 import { useEffect, useState } from "react";
 import { Box, Braces, GitBranch, ShieldCheck } from "./icons";
 import type { AppSettings, RuntimeStatus } from "@shared/contracts";
+import { phaseLabel } from "../lib/runtime-phase";
 
-/** Runtime phase text; the runtime already decided it, so no guessing here. */
-export function phaseLabel(status: RuntimeStatus): string {
-  switch (status.phase) {
-    case "starting_turn": return "Starting turn";
-    case "waiting_provider": return "Waiting for model";
-    case "thinking": return "Thinking";
-    case "responding": return "Responding";
-    case "running_tool": return "Running tool";
-    case "compacting": return "Compacting";
-    case "retrying": return status.retry ? `Retrying ${status.retry.attempt}/${status.retry.maxAttempts}` : "Retrying";
-    case "provider_wait": return "Waiting for provider";
-    case "stalled": return "No provider response";
-    case "stopping": return "Stopping";
-    case "aborted": return "Stopped";
-    case "reasoning_limit": return "Reasoning limit";
-    case "provider_timeout": return "Provider timeout";
-    case "rpc_timeout": return "Runtime RPC timeout";
-    case "failed": return "Failed";
-    case "ready": return status.state === "streaming" ? "Working" : "Ready";
-    default: return status.state === "ready" || status.state === "streaming" ? "Ready" : status.state;
-  }
-}
+export { phaseLabel };
 
 export function StatusBar({ settings, status }: { settings: AppSettings; status: RuntimeStatus }) {
   const [phase, setPhase] = useState("Not started");

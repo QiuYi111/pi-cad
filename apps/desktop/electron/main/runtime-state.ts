@@ -4,6 +4,7 @@ import type {
   RuntimeStatus,
   RuntimeTerminalReason,
   RuntimeTurn,
+  ThinkingLevel,
 } from "../../src/shared/contracts.js";
 
 /**
@@ -276,6 +277,7 @@ export class PrimeRuntimeState {
         retry: undefined,
         lastEventAt: undefined,
         lastProviderEventAt: undefined,
+        thinking: undefined,
       };
       return;
     }
@@ -553,8 +555,14 @@ export class PrimeRuntimeState {
     });
   }
 
-  /** Prime answered `get_state` (start, session switch, new session). */
-  sessionReady(sessionId?: string): void {
+  /**
+   * Prime answered `get_state` (start, session switch, new session).
+   *
+   * `get_state` reports the level the session itself runs, which is not
+   * necessarily the saved setting: a restored session can hold its own. The
+   * level is therefore replaced, never carried over from the previous session.
+   */
+  sessionReady(sessionId?: string, thinking?: ThinkingLevel): void {
     this.pending = undefined;
     this.providerEventAt = undefined;
     this.status = {
@@ -563,6 +571,7 @@ export class PrimeRuntimeState {
       phase: "ready",
       reason: undefined,
       sessionId: sessionId ?? this.status.sessionId,
+      thinking,
       message: undefined,
       retry: undefined,
       terminalReason: undefined,
@@ -570,6 +579,13 @@ export class PrimeRuntimeState {
       lastProviderEventAt: undefined,
     };
     this.record("session_ready", sessionId);
+  }
+
+  /** Prime accepted `set_thinking_level`, so the live session now runs that level. */
+  noteThinking(level: ThinkingLevel): void {
+    if (this.status.thinking === level) return;
+    this.status = { ...this.status, thinking: level };
+    this.record("thinking_level", level);
   }
 
   /**
