@@ -49,14 +49,98 @@ export interface DependencyCheck {
   installable: boolean;
 }
 
+export type RuntimeState = "idle" | "checking" | "installing" | "action-required" | "starting" | "ready" | "streaming" | "stopping" | "error";
+
+/**
+ * Fine-grained phase of the Prime turn. `state` stays the coarse lifecycle
+ * (starting/ready/streaming/stopping/error); `phase` says what the turn is
+ * actually doing, including terminal outcomes, so the renderer never has to
+ * infer it from Prime events.
+ */
+export type RuntimePhase =
+  | "ready"
+  | "starting_turn"
+  | "waiting_provider"
+  | "thinking"
+  | "responding"
+  | "running_tool"
+  | "compacting"
+  | "retrying"
+  | "provider_wait"
+  | "stalled"
+  | "stopping"
+  | "aborted"
+  | "reasoning_limit"
+  | "provider_timeout"
+  | "rpc_timeout"
+  | "failed";
+
+export type RuntimeTerminalReason =
+  | "completed"
+  | "aborted"
+  | "reasoning_limit"
+  | "provider_timeout"
+  | "provider_error"
+  | "rpc_timeout"
+  | "rpc_rejected"
+  | "process_exit"
+  | "forced_stop";
+
+export interface RuntimeRetry {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason?: string;
+  message?: string;
+}
+
+export interface RuntimeTurn {
+  id: string;
+  kind: "prompt" | "steer";
+  startedAt: number;
+  phaseStartedAt: number;
+  lastEventAt: number;
+  /** Newest provider/model stream event; any runtime event moves `lastEventAt`. */
+  lastProviderEventAt?: number;
+  retryAttempt: number;
+  reason?: string;
+  error?: string;
+  phase: RuntimePhase;
+  terminalReason?: RuntimeTerminalReason;
+  finishedAt?: number;
+}
+
 export interface RuntimeStatus {
-  state: "idle" | "checking" | "installing" | "action-required" | "starting" | "ready" | "streaming" | "error";
+  state: RuntimeState;
+  /** Current or last turn phase. */
+  phase?: RuntimePhase;
+  /** Short machine-readable detail for `phase`, e.g. `rate_limit`, `compacting`. */
+  reason?: string;
+  /** Set once the last turn reached a terminal outcome. */
+  terminalReason?: RuntimeTerminalReason;
+  /** Current turn record; kept after the turn ends until the next turn starts. */
+  turn?: RuntimeTurn;
+  /** Active auto-retry attempt while `phase === "retrying"`. */
+  retry?: RuntimeRetry;
+  lastEventAt?: number;
+  /** Newest provider/model stream event; the stall watchdog anchors here. */
+  lastProviderEventAt?: number;
   checks: DependencyCheck[];
   message?: string;
   progress?: number;
   elapsedSeconds?: number;
   action?: "restart-windows" | "install-ubuntu" | "initialize-ubuntu" | "retry";
   sessionId?: string;
+}
+
+/** True while a turn is running, including the stop handshake. */
+export function runtimeTurnActive(status: Pick<RuntimeStatus, "state">): boolean {
+  return status.state === "streaming" || status.state === "stopping";
+}
+
+/** True once Prime has been started and has not exited. */
+export function runtimeStarted(status: Pick<RuntimeStatus, "state">): boolean {
+  return status.state === "starting" || runtimeTurnActive(status) || status.state === "ready";
 }
 export interface InstallationInfo { version: string; platform: "windows" | "linux" | "macos"; arch: string; channel: "nsis" | "portable" | "deb" | "appimage" | "dmg" | "development"; packaged: boolean; userDataPath: string; projectPath: string; updateMode: "manual"; updateInstructions: string; signature: "runtime-verified" | "release-signature-required" }
 

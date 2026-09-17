@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Check, ChevronDown, FolderOpen, Play, Plus, Search, ShieldCheck } from "../components/icons";
-import type { AppSettings, MeshDocument, TraceSummary } from "@shared/contracts";
+import { runtimeStarted, runtimeTurnActive, type AppSettings, type MeshDocument, type TraceSummary } from "@shared/contracts";
 import type { PrimeRuntimeController } from "../hooks/usePrimeRuntime";
 import { Conversation } from "../components/Conversation";
 import { Composer } from "../components/Composer";
@@ -111,7 +111,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
   };
   const send = async (text: string, images?: Array<{ data: string; mimeType: string }>) => {
     const automaticTitle = !prime.messages.some((message) => message.role === "user") ? automaticConversationTitle(text) : "";
-    const needsStart = prime.status.state !== "ready" && prime.status.state !== "streaming";
+    const needsStart = !runtimeStarted(prime.status);
     await prime.prompt(text, images, async () => {
       if (needsStart) await start();
     }, async () => {
@@ -138,7 +138,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     });
   }, [settings.projectPath]);
   const activateProject = async (path: string) => {
-    if (prime.status.state === "streaming" || prime.status.state === "starting") {
+    if (runtimeTurnActive(prime.status) || prime.status.state === "starting") {
       setProjectError("One Agent task can run at a time. Stop the current task before switching projects.");
       return;
     }
@@ -245,7 +245,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     return () => { sessionRequest.current += 1; };
   }, [settings.projectPath, prime.status.sessionId]);
   const newSession = async () => {
-    if (prime.status.state === "streaming" || prime.status.state === "starting") throw new Error("Stop the current response before starting another conversation.");
+    if (runtimeTurnActive(prime.status) || prime.status.state === "starting") throw new Error("Stop the current response before starting another conversation.");
     setConversationStorageKey(crypto.randomUUID());
     setOpenedMesh(null);
     setUploadedConcepts([]);
@@ -254,7 +254,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     await refreshSessions();
   };
   const switchSession = async (path: string) => {
-    if (prime.status.state === "streaming" || prime.status.state === "starting") throw new Error("Stop the current response before switching sessions.");
+    if (runtimeTurnActive(prime.status) || prime.status.state === "starting") throw new Error("Stop the current response before switching sessions.");
     const selected = sessions.find((session) => session.path === path);
     if (selected?.id === prime.status.sessionId) return;
     setRestoringSession(path);
@@ -441,7 +441,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
         <div className={latestFailure ? "attention" : ""}><span>Attention</span><strong>{latestFailure ? "Action needed" : "No blocker"}</strong><small>{latestFailure?.activity?.title || "Ready to continue"}</small></div>
         <div><span>Review authority</span><strong>{reviewPassed ? "Machine review passed" : currentArtifact ? "Candidate ready" : "Not ready"}</strong><small>{reviewPassed ? <><ShieldCheck size={11} /> Bound to this candidate</> : currentArtifact ? <><ShieldCheck size={11} /> Machine review pending</> : <><Check size={11} /> Build first</>}</small></div>
       </section>}
-      <div className={`canvas-layer artifact-layer ${canvasContent === "artifact" ? "active" : ""}`}><EngineeringViewer key={`${settings.projectPath}:${prime.status.sessionId || "none"}:${openedMesh?.source || "catalog"}`} projectPath={settings.projectPath} latestArtifact={currentArtifact} openedMesh={openedMesh} mediaArtifacts={toolMedia} revision={viewerRevision} agentRunning={prime.status.state === "streaming" || prime.status.state === "starting"} onStopAgent={() => void prime.abort()} onAskAgent={(request) => { setMode("conversation"); void send(request); }} /></div>
+      <div className={`canvas-layer artifact-layer ${canvasContent === "artifact" ? "active" : ""}`}><EngineeringViewer key={`${settings.projectPath}:${prime.status.sessionId || "none"}:${openedMesh?.source || "catalog"}`} projectPath={settings.projectPath} latestArtifact={currentArtifact} openedMesh={openedMesh} mediaArtifacts={toolMedia} revision={viewerRevision} agentRunning={runtimeTurnActive(prime.status) || prime.status.state === "starting"} onStopAgent={() => void prime.abort()} onAskAgent={(request) => { setMode("conversation"); void send(request); }} /></div>
       {!!conceptImages.length && <div className={`canvas-layer concept-layer ${canvasContent === "concept" ? "active" : ""}`}><ConceptBoard images={conceptImages} onContinue={continueFromConcept} /></div>}
     </section>
     <div className="floating-composer" ref={composerRef}>

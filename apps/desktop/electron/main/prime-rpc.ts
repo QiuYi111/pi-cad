@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
 import { runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
+import { MODEL_WAIT_PHASES, PrimeRuntimeState, type RuntimeTraceEntry } from "./runtime-state.js";
 
 interface PendingRequest {
   accept: (value: any) => void;
@@ -9,25 +10,66 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
+/** A watchdog timer together with the deadline it is anchored to. */
+interface TimerSlot {
+  timer?: NodeJS.Timeout;
+  deadline?: number;
+}
+
+export interface PrimeRpcOptions {
+  /** No provider-side event for this long marks the turn `stalled`. 0 disables it. */
+  providerTimeoutMs?: number;
+  /** How long the abort handshake waits for `message_end(aborted)` / `agent_end`. */
+  abortTimeoutMs?: number;
+  /** RPC response timeout for the abort command itself. */
+  abortRpcTimeoutMs?: number;
+  /** Provider errors are held this long in case Prime auto-retries. */
+  failureGraceMs?: number;
+  now?: () => number;
+}
+
 export class PrimeRpc extends EventEmitter {
   private child?: ChildProcessWithoutNullStreams;
   private buffer = "";
   private sequence = 0;
   private pending = new Map<string, PendingRequest>();
-  status: RuntimeStatus = { state: "idle", checks: [] };
+  private readonly runtime: PrimeRuntimeState;
+  private readonly providerTimeoutMs: number;
+  private readonly abortTimeoutMs: number;
+  private readonly abortRpcTimeoutMs: number;
+  private readonly now: () => number;
+  private readonly retryClock: TimerSlot = {};
+  private readonly stallClock: TimerSlot = {};
+  private readonly failureClock: TimerSlot = {};
+  private turnWaiters = new Set<() => void>();
+  private journal?: (entries: RuntimeTraceEntry[]) => Promise<void>;
 
-  constructor(private readonly bridge: RuntimeBridge) { super(); }
+  constructor(private readonly bridge: RuntimeBridge, options: PrimeRpcOptions = {}) {
+    super();
+    this.runtime = new PrimeRuntimeState(
+      { state: "idle", checks: [] },
+      { now: options.now, failureGraceMs: options.failureGraceMs },
+    );
+    this.providerTimeoutMs = options.providerTimeoutMs ?? 600_000;
+    this.abortTimeoutMs = options.abortTimeoutMs ?? 8_000;
+    this.abortRpcTimeoutMs = options.abortRpcTimeoutMs ?? 5_000;
+    this.now = options.now ?? Date.now;
+  }
+
+  /** Authoritative runtime status, including turn phase and terminal reason. */
+  get status(): RuntimeStatus { return this.runtime.status; }
 
   async start(settings: AppSettings, resumePath?: string): Promise<RuntimeStatus> {
     if (this.child && !this.child.killed) return this.status;
-    await ensureRuntimeReady(this.bridge, settings, (status) => this.setStatus(status));
+    await ensureRuntimeReady(this.bridge, settings, (status) => this.merge(status));
     const paths = await this.bridge.resolveRuntimePaths(settings);
     if (!paths.projectPath) throw new Error("Choose a project folder before starting Prime.");
+    this.journal = projectRuntimeJournal(this.bridge, paths.projectPath);
     try {
       await this.bridge.exec(["test", "-d", paths.projectPath]);
     } catch {
       const error = new Error("Project folder no longer exists. Choose another project.");
-      this.setStatus({ state: "error", checks: [], message: error.message });
+      this.merge({ state: "error", checks: [], message: error.message });
       throw error;
     }
     const home = await this.bridge.homeDirectory();
@@ -51,7 +93,7 @@ export class PrimeRpc extends EventEmitter {
       ...reviewer,
       ...(resumePath ? ["--resume", sandboxSessionPath(resumePath)] : []),
     ];
-    this.setStatus({ state: "starting", checks: [], message: "Starting Prime and the Reify engineering runtime…" });
+    this.merge({ state: "starting", checks: [], message: "Starting Prime and the Reify engineering runtime…" });
     this.child = this.bridge.spawn(args);
     this.child.stdout.on("data", (chunk: Buffer) => this.consume(chunk.toString("utf8")));
     this.child.stderr.on("data", (chunk: Buffer) => this.emit("diagnostic", chunk.toString("utf8")));
@@ -60,10 +102,10 @@ export class PrimeRpc extends EventEmitter {
       const error = new Error(`Prime exited (${signal || code || 0})`);
       this.failAll(error);
       this.child = undefined;
-      this.setStatus({ state: code === 0 ? "idle" : "error", checks: [], message: code === 0 ? undefined : error.message });
+      this.mutate(() => this.runtime.processExited(code, signal));
     });
     const state = await this.request("get_state", {}, 45_000);
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
     return this.status;
   }
 
@@ -88,8 +130,7 @@ export class PrimeRpc extends EventEmitter {
       }
       if (record.type === "extension_ui_request") this.emit("ui-request", record);
       else this.emit("event", record);
-      if (record.type === "agent_start") this.setStatus({ ...this.status, state: "streaming" });
-      if (record.type === "agent_end") this.setStatus({ ...this.status, state: "ready" });
+      this.mutate(() => this.runtime.applyEvent(record));
     }
   }
 
@@ -108,22 +149,35 @@ export class PrimeRpc extends EventEmitter {
 
   async prompt(message: string, images?: Array<{ data: string; mimeType: string }>) {
     const payload = { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) };
+    const ownsTurn = this.mutate(() => this.runtime.beginTurn("prompt"));
     try {
       await this.request("prompt", payload);
     } catch (error) {
-      if (!(error instanceof Error) || !error.message.includes("queued session input is suspended")) throw error;
-      await this.request("steer", payload);
+      if (error instanceof Error && error.message.includes("queued session input is suspended")) {
+        // A suspended queue is a normal Prime condition, but the steering
+        // fallback still belongs to the turn `prompt()` just started: if it
+        // fails that turn must settle as rpc_timeout / rpc_rejected instead of
+        // hanging in `starting_turn`.
+        await this.turnRequest("steer", payload, ownsTurn);
+        return;
+      }
+      this.noteRpcFailure("prompt", ownsTurn, error);
+      throw error;
     }
   }
 
   async steer(message: string, images?: Array<{ data: string; mimeType: string }>) {
-    await this.request("steer", { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) });
+    const payload = { message, ...(images?.length ? { images: images.map((image) => ({ type: "image", ...image })) } : {}) };
+    // `beginTurn` returns false when a turn is already running: this steer then
+    // only adds input to that turn and must not own its terminal outcome.
+    const ownsTurn = this.mutate(() => this.runtime.beginTurn("steer"));
+    await this.turnRequest("steer", payload, ownsTurn);
   }
 
   async newSession(): Promise<unknown[]> {
     await this.request("new_session");
     const state = await this.request("get_state");
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
     return (await this.request("get_messages"))?.messages || [];
   }
   async getMessages(): Promise<unknown[]> {
@@ -139,7 +193,7 @@ export class PrimeRpc extends EventEmitter {
     const result = await this.request("switch_session", { sessionPath: sandboxSessionPath(path) });
     if (result?.cancelled) throw new Error("Session switch was cancelled.");
     const [state, messages] = await Promise.all([this.request("get_state"), this.request("get_messages")]);
-    this.setStatus({ state: "ready", checks: [], sessionId: state?.sessionId });
+    this.mutate(() => this.runtime.sessionReady(state?.sessionId));
     return messages?.messages || [];
   }
 
@@ -161,7 +215,28 @@ export class PrimeRpc extends EventEmitter {
 
   async setModel(provider: string, model: string) { await this.request("set_model", { provider, modelId: model }); }
   async setThinking(level: ThinkingLevel) { await this.request("set_thinking_level", { level }); }
-  async abort() { await this.request("abort"); }
+
+  /**
+   * Stop the current turn and wait for Prime to confirm it.
+   *
+   * Sending `abort` only means the command was accepted. The turn is terminal
+   * once Prime reports `message_end(aborted)` / `auto_retry_end` / `agent_end`;
+   * if that does not happen inside the deadline the sidecar is killed so the
+   * runtime can never stay stuck in `streaming`.
+   */
+  async abort(): Promise<void> {
+    if (!this.child || !this.runtime.activeTurn()) return;
+    this.mutate(() => this.runtime.beginStopping());
+    const settled = this.waitForTurnEnd(this.abortTimeoutMs);
+    try {
+      await this.request("abort", {}, this.abortRpcTimeoutMs);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.mutate(() => this.runtime.rpcFailure("rpc_timeout", `Prime abort failed: ${message}`));
+    }
+    if (await settled) return;
+    await this.forceStop();
+  }
 
   async respondToUi(requestId: string, response: Record<string, unknown>) {
     if (!this.child?.stdin.writable) throw new Error("Prime is not running");
@@ -177,7 +252,141 @@ export class PrimeRpc extends EventEmitter {
     });
   }
 
-  private setStatus(status: RuntimeStatus) { this.status = status; this.emit("status", status); }
+  /** Abort the sidecar after the stop handshake missed its deadline. */
+  private async forceStop() {
+    const child = this.child;
+    this.mutate(() => this.runtime.processExited(null, null, true));
+    if (!child) return;
+    await new Promise<void>((accept) => {
+      const timer = setTimeout(() => { child.kill("SIGKILL"); accept(); }, 1_500);
+      child.once("exit", () => { clearTimeout(timer); accept(); });
+      child.stdin.end();
+      child.kill();
+    });
+    this.child = undefined;
+  }
+
+  private waitForTurnEnd(timeoutMs: number): Promise<boolean> {
+    if (!this.runtime.activeTurn()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const waiter = () => { clearTimeout(timer); this.turnWaiters.delete(waiter); resolve(true); };
+      const timer = setTimeout(() => { this.turnWaiters.delete(waiter); resolve(false); }, timeoutMs);
+      timer.unref?.();
+      this.turnWaiters.add(waiter);
+    });
+  }
+
+  /**
+   * Run one turn RPC (`prompt` / `steer`) and settle it when the transport
+   * fails.
+   *
+   * Only the request that created the turn may settle it: a `prompt`, a
+   * suspended-prompt fallback steer, or a steer that started a turn here ends in
+   * `rpc_timeout` / `rpc_rejected`. A steer into an already running turn owns
+   * nothing, so its failure must leave that turn's phase and terminal reason
+   * alone while the provider request behind it keeps streaming.
+   */
+  private async turnRequest(type: "prompt" | "steer", payload: Record<string, unknown>, ownsTurn: boolean): Promise<void> {
+    try {
+      await this.request(type, payload);
+    } catch (error) {
+      this.noteRpcFailure(type, ownsTurn, error);
+      throw error;
+    }
+  }
+
+  /** Settle the turn this RPC owns, or only journal a failed extra command. */
+  private noteRpcFailure(command: "prompt" | "steer", ownsTurn: boolean, error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    this.mutate(() => {
+      if (!ownsTurn) {
+        this.runtime.commandFailed(command, message);
+        return;
+      }
+      this.runtime.rpcFailure(/timed out/.test(message) ? "rpc_timeout" : "rpc_rejected", message);
+    });
+  }
+
+  /** Merge lifecycle fields from runtime setup/install/start into the status. */
+  private merge(patch: Partial<RuntimeStatus>) {
+    this.mutate(() => this.runtime.base(patch));
+  }
+
+  /** Run a state mutation, reschedule watchdogs, and publish real changes once. */
+  private mutate<T>(action: () => T): T {
+    const before = this.runtime.status;
+    let result: T;
+    try {
+      result = action();
+    } finally {
+      this.syncTimers();
+      this.flushTrace();
+      if (this.runtime.status !== before) this.emit("status", this.runtime.status);
+      if (!this.runtime.activeTurn()) {
+        for (const waiter of [...this.turnWaiters]) waiter();
+      }
+    }
+    return result;
+  }
+
+  /** Append the journal lines the state machine produced since the last flush. */
+  private flushTrace() {
+    const entries = this.runtime.drain();
+    if (!this.journal || !entries.length) return;
+    void this.journal(entries).catch(() => undefined);
+  }
+
+  /**
+   * Keep one timer per deadline instead of re-arming on every mutation.
+   *
+   * `mutate()` runs after every Prime event, so restarting a timer from the
+   * full `delayMs` / `failureGraceMs` let `agent_status` / `session_action_update`
+   * chatter hold a retry — or a pending failure — open forever. Every deadline
+   * now comes from the state machine (or from the provider clock) and only a
+   * new deadline replaces the timer.
+   */
+  private syncTimers() {
+    const status = this.runtime.status;
+    const turn = this.runtime.activeTurn();
+
+    this.syncTimer(this.retryClock, this.runtime.retryDeadline, () => {
+      const attempt = Number(this.runtime.status.retry?.attempt);
+      this.mutate(() => this.runtime.retryDelayElapsed(attempt));
+    }, 25);
+
+    // Anchor the stall watchdog on provider events only: `lastEventAt` also
+    // moves for `agent_status` and other chatter, which would hide a silent
+    // provider.
+    const silentFor = () => this.now() - (this.runtime.lastProviderEventAt ?? this.now());
+    const stallDeadline = turn && this.providerTimeoutMs > 0 && MODEL_WAIT_PHASES.includes(status.phase ?? "ready")
+      ? (this.runtime.lastProviderEventAt ?? this.now()) + this.providerTimeoutMs
+      : undefined;
+    this.syncTimer(this.stallClock, stallDeadline, () => {
+      const idle = silentFor();
+      this.mutate(() => this.runtime.providerStall(idle));
+    });
+
+    this.syncTimer(this.failureClock, this.runtime.failureDeadline, () => {
+      this.mutate(() => this.runtime.settleFailure());
+    });
+  }
+
+  /** Arm `slot` for `deadline`; an unchanged deadline keeps the running timer. */
+  private syncTimer(slot: TimerSlot, deadline: number | undefined, fire: () => void, slackMs = 0) {
+    if (slot.deadline === deadline) return;
+    if (slot.timer) clearTimeout(slot.timer);
+    slot.timer = undefined;
+    slot.deadline = deadline;
+    if (deadline === undefined) return;
+    const timer = setTimeout(() => {
+      slot.timer = undefined;
+      slot.deadline = undefined;
+      fire();
+    }, Math.max(0, deadline - this.now()) + slackMs);
+    timer.unref?.();
+    slot.timer = timer;
+  }
+
   private failAll(error: Error) {
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(error); }
     this.pending.clear();
@@ -188,6 +397,31 @@ export function sandboxSessionPath(path: string): string {
   const name = path.replaceAll("\\", "/").split("/").at(-1) || "";
   if (!/^[A-Za-z0-9._-]+\.jsonl$/.test(name)) throw new Error("Invalid session path.");
   return `/workspace/.prime-sessions/${name}`;
+}
+
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * The runtime journal is the replayable record of Prime turn states: it lives
+ * beside the project so a stalled, retried or aborted run can be reconstructed
+ * later instead of only being visible in the moment.
+ */
+export function projectRuntimeJournal(
+  bridge: Pick<RuntimeBridge, "pipe">,
+  projectPath: string,
+  relative = ".pi-cad/desktop-runtime.jsonl",
+): ((entries: RuntimeTraceEntry[]) => Promise<void>) | undefined {
+  if (!projectPath) return undefined;
+  const target = `${projectPath.replace(/\/+$/, "")}/${relative}`;
+  const directory = target.slice(0, target.lastIndexOf("/"));
+  const command = `mkdir -p ${shellQuote(directory)} && cat >> ${shellQuote(target)}`;
+  return async (entries) => {
+    if (!entries.length) return;
+    const lines = `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+    await bridge.pipe(["sh", "-c", command], lines, 10_000);
+  };
 }
 
 export async function ensureRuntimeReady(
