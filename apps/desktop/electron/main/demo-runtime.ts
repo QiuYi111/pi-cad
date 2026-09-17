@@ -12,6 +12,15 @@ const wait = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 const RESTORED_SESSION_ID = "demo-restored";
 const RESTORED_THINKING: ThinkingLevel = "medium";
 
+export interface DemoRuntimeOptions {
+  /**
+   * Reject this many `set_thinking_level` calls before accepting any. Used by
+   * the E2E suite to prove a rejected reconciliation is retried instead of
+   * being remembered as delivered.
+   */
+  rejectThinkingAttempts?: number;
+}
+
 /**
  * Deterministic runtime used by the desktop E2E suite. It drives the same
  * runtime state machine as `PrimeRpc`, so statuses shown in tests (retrying,
@@ -19,11 +28,16 @@ const RESTORED_THINKING: ThinkingLevel = "medium";
  */
 export class DemoRuntime extends EventEmitter {
   private readonly runtime = new PrimeRuntimeState({ state: "idle", checks: [] });
+  private thinkingAttempts = 0;
   private generation = 0;
   private messages: unknown[] = [];
   private failureTimer?: NodeJS.Timeout;
   private failureDeadline?: number;
   private saved?: AppSettings;
+
+  constructor(private readonly options: DemoRuntimeOptions = {}) {
+    super();
+  }
 
   get status(): RuntimeStatus { return this.runtime.status; }
 
@@ -74,6 +88,15 @@ export class DemoRuntime extends EventEmitter {
   ]; }
   async setModel(_provider: string, _model: string) {}
   async setThinking(level: ThinkingLevel) {
+    this.thinkingAttempts += 1;
+    if (this.options.rejectThinkingAttempts) {
+      // The renderer counts these to tell "retried" from "gave up"; a rejection
+      // must not publish the level, exactly like a failed Prime RPC.
+      this.event({ type: "runtime_diagnostic", message: `set_thinking_level ${level} attempt ${this.thinkingAttempts}` });
+    }
+    if (this.thinkingAttempts <= (this.options.rejectThinkingAttempts ?? 0)) {
+      throw new Error("Prime rejected set_thinking_level");
+    }
     this.runtime.noteThinking(level);
     this.publish();
   }

@@ -48,6 +48,11 @@ const trustedReleases = new Map<string, ReleaseResult>();
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
 const desktopE2EOpenStep = process.env.PI_CAD_DESKTOP_E2E_OPEN_STEP
   || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-open-step="))?.slice("--pi-cad-e2e-open-step=".length);
+const desktopE2ERejectThinking = Number(
+  process.env.PI_CAD_DESKTOP_E2E_REJECT_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-reject-thinking="))?.slice("--pi-cad-e2e-reject-thinking=".length)
+  || 0,
+);
 const testOpenSteps = process.argv
   .filter((argument) => argument.startsWith("--pi-cad-test-open-step="))
   .map((argument) => argument.slice("--pi-cad-test-open-step=".length));
@@ -156,7 +161,9 @@ async function bridge(): Promise<RuntimeBridge> {
 
 async function ensureRuntime() {
   if (runtime) return runtime;
-  runtime = desktopE2E ? new DemoRuntime() : new PrimeRpc(await bridge());
+  runtime = desktopE2E
+    ? new DemoRuntime({ rejectThinkingAttempts: Number.isFinite(desktopE2ERejectThinking) ? desktopE2ERejectThinking : 0 })
+    : new PrimeRpc(await bridge());
   runtime.on("event", (event) => send(IPC.runtimeEvent, event));
   runtime.on("status", (status) => send(IPC.runtimeStatus, status));
   runtime.on("ui-request", (request) => send(IPC.runtimeUiRequest, request));

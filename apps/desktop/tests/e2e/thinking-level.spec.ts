@@ -39,6 +39,28 @@ function sessionLevels(page: Page, sessionId: string) {
   }, sessionId);
 }
 
+/** Every `set_thinking_level` the main process was asked for, in order. */
+function thinkingAttempts(page: Page) {
+  return page.evaluate(() => {
+    const seen = (window as unknown as { __reifyThinkingAttempts?: string[] }).__reifyThinkingAttempts || [];
+    return [...seen];
+  });
+}
+
+/** Records both the published statuses and every thinking RPC attempt. */
+function recordRuntime(page: Page) {
+  return page.evaluate(() => {
+    const attempts: string[] = [];
+    (window as unknown as { __reifyThinkingAttempts: typeof attempts }).__reifyThinkingAttempts = attempts;
+    window.piCad.runtime.onEvent((event: { type?: string; message?: string }) => {
+      if (event.type === "runtime_diagnostic" && event.message?.startsWith("set_thinking_level")) attempts.push(event.message);
+    });
+    const seen: Array<{ sessionId?: string; thinking?: string }> = [];
+    (window as unknown as { __reifyThinking: typeof seen }).__reifyThinking = seen;
+    window.piCad.runtime.onStatus((status: RuntimeStatus) => seen.push({ sessionId: status.sessionId, thinking: status.thinking }));
+  });
+}
+
 /**
  * A stored level the model cannot run has to be folded the way Prime clamps it.
  * The demo catalog lists `zai/glm-5.3` as `off, minimal, low, medium, high`, so
@@ -83,11 +105,7 @@ test("a session switch reconciles the level the restored session runs", async ()
     await page.getByPlaceholder("Ask anything about the design").waitFor({ timeout: 20_000 });
 
     // Watch every status the main process publishes from here on.
-    await page.evaluate(() => {
-      const seen: Array<{ sessionId?: string; thinking?: string }> = [];
-      (window as unknown as { __reifyThinking: typeof seen }).__reifyThinking = seen;
-      window.piCad.runtime.onStatus((status: RuntimeStatus) => seen.push({ sessionId: status.sessionId, thinking: status.thinking }));
-    });
+    await recordRuntime(page);
 
     // Prime reports the level the live session holds.
     await page.evaluate(() => window.piCad.runtime.start());
@@ -103,6 +121,57 @@ test("a session switch reconciles the level the restored session runs", async ()
     await expect.poll(() => sessionLevels(page, "demo-restored"), { timeout: 30_000 }).toContain("medium");
     await expect.poll(async () => (await sessionLevels(page, "demo-restored")).at(-1), { timeout: 30_000 }).toBe("high");
     // Reconciling the sidecar does not rewrite the saved setting.
+    expect(JSON.parse(await readFile(settingsPath, "utf8")).thinking).toBe("high");
+  } finally {
+    await application.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+/**
+ * The last way the setting and the sidecar drift apart is a rejected reconcile:
+ * the saved level never moves, the session state stays `ready`, and the only
+ * thing that failed was the RPC. Counting the level as delivered before the RPC
+ * answers — and clearing a ref on failure — would hide that split forever,
+ * because nothing else would retrigger the effect. The split has to stay
+ * visible and the reconciliation has to run again on its own.
+ */
+test("a rejected thinking reconcile is retried instead of being marked delivered", async () => {
+  const { application, page, root, settingsPath } = await launchReify(
+    "reify-rejected-thinking-",
+    { provider: "openai-codex", model: "gpt-5.6-sol", thinking: "high", onboardingComplete: true },
+    ["--pi-cad-e2e-open-step=/workspace/demo/imported.step", "--pi-cad-e2e-reject-thinking=1"],
+  );
+  try {
+    await page.getByPlaceholder("Ask anything about the design").waitFor({ timeout: 20_000 });
+    await recordRuntime(page);
+
+    await page.evaluate(() => window.piCad.runtime.start());
+    await expect.poll(() => sessionLevels(page, "desktop-e2e"), { timeout: 30_000 }).toContain("high");
+
+    const shell = page.locator(".workbench-page");
+    if (!(await shell.getAttribute("class"))?.includes("mode-conversation")) await page.keyboard.press("Control+Backslash");
+    await expect(shell).toHaveClass(/mode-conversation/);
+    await page.getByText("Folding stand", { exact: true }).click();
+
+    // The restored session runs `medium` while the saved level is `high`, so the
+    // renderer pushes `high` once — and that first attempt is rejected.
+    await expect.poll(() => sessionLevels(page, "demo-restored"), { timeout: 30_000 }).toContain("medium");
+    // The split the user has to know about is visible while it lasts...
+    await expect(page.getByTestId("thinking-sync-error")).toBeVisible({ timeout: 30_000 });
+    // ...and the reconciliation runs again on its own: no other status change is
+    // injected to push the effect along.
+    await expect.poll(async () => (await sessionLevels(page, "demo-restored")).at(-1), { timeout: 30_000 }).toBe("high");
+    await expect(page.getByTestId("thinking-sync-error")).toHaveCount(0, { timeout: 30_000 });
+
+    // One rejected attempt plus the accepted one, and the accepted one is not
+    // sent again for the same session and level.
+    await expect.poll(() => thinkingAttempts(page), { timeout: 30_000 }).toEqual([
+      "set_thinking_level high attempt 1",
+      "set_thinking_level high attempt 2",
+    ]);
+    await page.waitForTimeout(2_000);
+    expect(await thinkingAttempts(page)).toHaveLength(2);
     expect(JSON.parse(await readFile(settingsPath, "utf8")).thinking).toBe("high");
   } finally {
     await application.close();

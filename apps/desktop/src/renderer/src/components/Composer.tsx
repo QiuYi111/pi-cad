@@ -14,6 +14,10 @@ const FALLBACK_THINKING_LEVELS: ThinkingLevel[] = ["minimal", "low", "medium", "
  */
 const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+/** First retry delay for a rejected reconciliation, doubling up to the cap. */
+const THINKING_SYNC_RETRY_MS = 1_200;
+const THINKING_SYNC_RETRY_MAX_MS = 15_000;
+
 type PendingRequest = { id: string; text: string };
 type RunningIntent = "queue" | "replace" | "note";
 
@@ -31,7 +35,13 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   const imagesRef = useRef(images);
   const draining = useRef(false);
   const loadingQueue = useRef(false);
-  const deliveredThinking = useRef<ThinkingDelivery | undefined>(undefined);
+  const [deliveredThinking, setDeliveredThinking] = useState<ThinkingDelivery | undefined>(undefined);
+  const [thinkingSyncError, setThinkingSyncError] = useState<string | undefined>(undefined);
+  const [thinkingAttempt, setThinkingAttempt] = useState(0);
+  const thinkingInFlight = useRef<string | undefined>(undefined);
+  const thinkingTarget = useRef<string | undefined>(undefined);
+  const thinkingFailures = useRef(0);
+  const thinkingRetry = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streaming = runtimeTurnActive(status);
   const starting = status.state === "starting";
@@ -138,12 +148,39 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   // once per session, and again whenever it moves. Without this a fold during
   // `starting` — or a switch to a session that runs another level — would leave
   // the setting and the running sidecar on two different levels.
+  //
+  // A level counts as delivered only once the runtime accepted it. Marking it
+  // before the RPC answers would remember a rejected level as "this session
+  // already runs it", and a ref that is cleared on failure re-renders nothing,
+  // so the effect would never run again. The failure path therefore publishes
+  // state: it shows the split and retries the reconciliation on its own.
   useEffect(() => {
-    const level = pendingThinkingLevel(status, settings.thinking, deliveredThinking.current);
+    const level = pendingThinkingLevel(status, settings.thinking, deliveredThinking);
     if (!level) return;
-    deliveredThinking.current = { sessionId: status.sessionId, level };
-    void window.piCad.runtime.setThinking(level).catch(() => { deliveredThinking.current = undefined; });
-  }, [settings.thinking, status.state, status.sessionId, status.thinking]);
+    const request = thinkingRequestKey(status.sessionId, level);
+    if (thinkingInFlight.current === request) return;
+    thinkingInFlight.current = request;
+    if (thinkingTarget.current !== request) {
+      thinkingTarget.current = request;
+      thinkingFailures.current = 0;
+    }
+    void window.piCad.runtime.setThinking(level).then(() => {
+      thinkingInFlight.current = undefined;
+      thinkingFailures.current = 0;
+      setThinkingSyncError(undefined);
+      setDeliveredThinking({ sessionId: status.sessionId, level });
+    }).catch((error) => {
+      thinkingInFlight.current = undefined;
+      const failures = (thinkingFailures.current += 1);
+      setThinkingSyncError(thinkingSyncMessage(error));
+      thinkingRetry.current = setTimeout(() => setThinkingAttempt((attempt) => attempt + 1), thinkingRetryDelayMs(failures));
+    });
+    return () => {
+      if (thinkingRetry.current === undefined) return;
+      clearTimeout(thinkingRetry.current);
+      thinkingRetry.current = undefined;
+    };
+  }, [settings.thinking, status.state, status.sessionId, status.thinking, deliveredThinking, thinkingAttempt]);
   const changePermission = async (permission: AppSettings["permission"]) => {
     if (status.state === "ready" || status.state === "streaming") await window.piCad.runtime.stop();
     await onSettingsChange({ permission });
@@ -160,6 +197,7 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
   };
   return <div className="composer" data-testid="composer">
     {attachmentError && <div className="composer-error" role="alert">{attachmentError}</div>}
+    {thinkingSyncError && <div className="composer-error" role="alert" data-testid="thinking-sync-error">{thinkingSyncError}</div>}
     {images.length > 0 && <div className="composer-attachments">{images.map((image, index) => <button key={`${image.name}-${index}`} onClick={() => setImages((current) => current.filter((_, item) => item !== index))} title="Remove image"><img src={`data:${image.mimeType};base64,${image.data}`} alt={image.name} /><span>{image.name}</span></button>)}</div>}
     {pending.length > 0 && <div className="pending-requests" role="region" aria-label="Pending requests"><strong>After current task</strong>{pending.map((request) => <div key={request.id}><input aria-label={`Queued request ${request.id}`} value={request.text} onChange={(event) => setPending((current) => current.map((item) => item.id === request.id ? { ...item, text: event.target.value } : item))} /><button aria-label={`Cancel queued request ${request.id}`} onClick={() => setPending((current) => current.filter((item) => item.id !== request.id))}>Cancel</button></div>)}</div>}
     <textarea ref={textareaRef} value={text} onChange={(event) => { setText(event.target.value); localStorage.setItem(draftKey, event.target.value); onDraftChange?.(Boolean(event.target.value)); }} onKeyDown={(event) => {
@@ -228,6 +266,27 @@ export function normalizeThinkingLevel(model: ModelChoice | undefined, current: 
 
 /** A level already handed to the runtime, and the session it was handed to. */
 export interface ThinkingDelivery { sessionId?: string; level: ThinkingLevel }
+
+/** Identifies one reconciliation: the level one session still has to be told. */
+export function thinkingRequestKey(sessionId: string | undefined, level: ThinkingLevel): string {
+  return `${sessionId ?? ""}:${level}`;
+}
+
+/**
+ * Backoff for a runtime that keeps rejecting `set_thinking_level`. The first
+ * retry follows the first failure closely; later ones wait longer so a runtime
+ * that stays down is not hammered, while the split stays visible.
+ */
+export function thinkingRetryDelayMs(failures: number): number {
+  const steps = Math.min(Math.max(failures, 1) - 1, 6);
+  return Math.min(THINKING_SYNC_RETRY_MS * 2 ** steps, THINKING_SYNC_RETRY_MAX_MS);
+}
+
+/** Shown while the saved level and the running session sit on different levels. */
+export function thinkingSyncMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message : String(error);
+  return `Effort is not synced with the running session: ${detail}. Retrying…`;
+}
 
 /**
  * The level the running session still has to be told, or `undefined` when it

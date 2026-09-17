@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { normalizeThinkingLevel, pendingThinkingLevel, thinkingLevelLabel, thinkingLevelOptions } from "../src/renderer/src/components/Composer";
+import {
+  normalizeThinkingLevel,
+  pendingThinkingLevel,
+  thinkingLevelLabel,
+  thinkingLevelOptions,
+  thinkingRequestKey,
+  thinkingRetryDelayMs,
+  thinkingSyncMessage,
+} from "../src/renderer/src/components/Composer";
 import type { ModelChoice, RuntimeState, RuntimeStatus } from "../src/shared/contracts";
 
 const model = (thinkingLevels?: ModelChoice["thinkingLevels"]): ModelChoice => ({ provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, thinkingLevels });
@@ -82,5 +90,37 @@ describe("composer thinking level delivery", () => {
     expect(pendingThinkingLevel(status("ready", { sessionId: "session-b", thinking: "high" }), "high")).toBeUndefined();
     expect(pendingThinkingLevel(status("ready", { sessionId: "session-b", thinking: "medium" }), "high")).toBe("high");
     expect(pendingThinkingLevel(status("ready", { sessionId: "session-b" }), "high", { sessionId: "session-b", level: "high" })).toBeUndefined();
+  });
+
+  // A rejected RPC must leave the marker empty, otherwise the next
+  // reconciliation is skipped as "already delivered" even though the runtime
+  // still runs the old level.
+  it("keeps asking while the runtime has not accepted the level", () => {
+    const switched = status("ready", { sessionId: "session-b", thinking: "medium" });
+    expect(pendingThinkingLevel(switched, "high")).toBe("high");
+    expect(pendingThinkingLevel(switched, "high", undefined)).toBe("high");
+    expect(pendingThinkingLevel(switched, "high", { sessionId: "session-b", level: "medium" })).toBe("high");
+  });
+});
+
+describe("composer thinking sync retry", () => {
+  it("keys a reconciliation by session and level", () => {
+    expect(thinkingRequestKey("session-b", "high")).not.toBe(thinkingRequestKey("session-a", "high"));
+    expect(thinkingRequestKey("session-b", "high")).not.toBe(thinkingRequestKey("session-b", "medium"));
+    expect(thinkingRequestKey(undefined, "high")).toBe(":high");
+  });
+
+  it("backs off a rejected runtime instead of hammering it", () => {
+    const delays = [1, 2, 3, 4, 5, 6, 7, 8].map((failures) => thinkingRetryDelayMs(failures));
+    expect(delays[0]).toBeGreaterThan(0);
+    for (let index = 1; index < delays.length; index += 1) expect(delays[index]!).toBeGreaterThanOrEqual(delays[index - 1]!);
+    expect(delays.at(-1)!).toBeLessThanOrEqual(30_000);
+    expect(thinkingRetryDelayMs(0)).toBe(delays[0]);
+  });
+
+  it("names the failed RPC in the visible split", () => {
+    const message = thinkingSyncMessage(new Error("Prime rejected set_thinking_level"));
+    expect(message).toContain("Prime rejected set_thinking_level");
+    expect(thinkingSyncMessage("offline")).toContain("offline");
   });
 });
