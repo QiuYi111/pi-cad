@@ -89,3 +89,22 @@ test("registries reject duplicates, freeze mutation, and accept only explicitly 
   });
   assert.deepEqual(verifyRegistryContract(pinned, live), []);
 });
+
+test("programmable probe grant accepts contracts pinned before disposable experiments", () => {
+  const pinned = buildRegistryContract(mechanicalRegistries);
+  pinned.grants.observe_programmable = contractEntry({
+    id: "observe_programmable",
+    contract: {
+      version: "1.0.0",
+      schema: { tools: ["cad_probe"], maxWriteScopes: ["run:observation"] },
+      semantics: {
+        meaning: "Run fenced read-only B-Rep calculations.",
+        tools: ["cad_probe"],
+        writeBoundary: "run-owned-observation-storage",
+        safetyCap: "no-project-source-write",
+      },
+    },
+  });
+  pinned.hash = registryContractHash(pinned);
+  assert.deepEqual(verifyRegistryContract(pinned, mechanicalRegistries), []);
+});

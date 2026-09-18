@@ -311,6 +311,7 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
     nodeRoot: "/runtime/node",
     primeAgentDir: "/host/agent",
     primeKernelVenv: "/host/kernel",
+    cadPythonRoot: "/runtime/cad-python",
     kernelPythonRoot: "/runtime/python",
     kernelPythonExecutable: "python3.11",
     kernelSitePackages: "lib/python3.11/site-packages",
@@ -332,6 +333,7 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/python\n\/opt\/pi-cad\/python/);
+  assert.match(joined, /--ro-bind\n\/runtime\/cad-python\n\/runtime\/cad-python/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/scripts\n\/opt\/pi-cad\/scripts/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/python/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/prime\/packages\/coding-agent\/dist\/skills\/attach-image\/src/);
@@ -379,7 +381,7 @@ test("Prime one-shot mode uses the canonical sidecar completion gate", () => {
 test("reviewer bwrap is subject-scoped and cannot see the author workspace or endpoint", () => {
   const paths: LaunchPaths = {
     repository: "/repo/pi-cad", project: "/author-project", primeRoot: "/repo/prime", nodeRoot: "/runtime/node",
-    primeAgentDir: "/host/agent", primeKernelVenv: "/host/kernel", kernelPythonRoot: "/runtime/python",
+    primeAgentDir: "/host/agent", primeKernelVenv: "/host/kernel", cadPythonRoot: "/runtime/cad-python", kernelPythonRoot: "/runtime/python",
     kernelPythonExecutable: "python3.11", kernelSitePackages: "lib/python3.11/site-packages", runtimeDirectory: "/run/private",
     ephemeralAgentDir: "/run/private/prime-agent", authorSocketDirectory: "/run/private/author",
   };
