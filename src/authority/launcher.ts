@@ -132,6 +132,7 @@ export interface LaunchPaths {
   nodeRoot: string;
   primeAgentDir: string;
   primeKernelVenv: string;
+  cadPythonRoot: string;
   kernelPythonRoot: string;
   kernelPythonExecutable: string;
   kernelSitePackages: string;
@@ -180,6 +181,7 @@ export function resolvePrimeRepository(repository: string, primeAgentDir: string
 export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string; modelArgs?: string[] }): string[] {
   const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/home/prime", "--dir", "/home/prime/.prime", "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad"];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  bindAtOriginalPath(args, paths.cadPythonRoot);
   args.push(
     "--bind", input.reviewerWorkspace, "/workspace",
     "--dir", "/opt/node-bin", "--symlink", `/opt/node/${paths.nodeExecutableRelative ?? "bin/node"}`, "/opt/node-bin/node",
@@ -222,6 +224,13 @@ function systemBind(args: string[], path: string): void {
   if (existsSync(path)) args.push("--ro-bind", path, path);
 }
 
+function bindAtOriginalPath(args: string[], path: string): void {
+  const parents: string[] = [];
+  for (let parent = dirname(path); parent !== "/"; parent = dirname(parent)) parents.push(parent);
+  for (const parent of parents.reverse()) args.push("--dir", parent);
+  args.push("--ro-bind", path, path);
+}
+
 function passEnvironment(args: string[], name: string, value: string | undefined): void {
   if (value !== undefined) args.push("--setenv", name, value);
 }
@@ -234,6 +243,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad",
   ];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  bindAtOriginalPath(args, paths.cadPythonRoot);
   const blenderRuntime = join(paths.repository, ".runtime", "blender");
   if (existsSync(blenderRuntime)) args.push("--ro-bind", blenderRuntime, "/opt/pi-cad/blender-runtime");
   else args.push("--dir", "/opt/pi-cad/blender-runtime");
@@ -602,6 +612,8 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const primeRoot = resolvePrimeRepository(repository, primeAgentDir);
   process.env.PRIME_AGENT_REPO = primeRoot;
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
+  const cadPython = realpathSync(join(repository, "python", ".venv", "bin", "python"));
+  const cadPythonRoot = dirname(dirname(cadPython));
   const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
   const kernelPythonRoot = dirname(dirname(kernelPython));
   const kernelPythonExecutable = basename(kernelPython);
@@ -652,7 +664,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   });
   const paths: LaunchPaths = {
     repository, project, primeRoot, nodeRoot, primeAgentDir, primeKernelVenv, runtimeDirectory,
-    kernelPythonRoot, kernelPythonExecutable, kernelSitePackages,
+    cadPythonRoot, kernelPythonRoot, kernelPythonExecutable, kernelSitePackages,
     ephemeralAgentDir, authorSocketDirectory: resolve(sidecar.authorSocket, ".."), nodeExecutableRelative,
   };
   launchPaths = paths;
