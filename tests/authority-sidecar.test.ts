@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, resolvePrimeRepository, resolveReviewerLaunchOptions, reviewerModelArgs, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
+import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, resolvePrimeRepository, resolveReviewerLaunchOptions, resolveVenvPythonRoot, reviewerModelArgs, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
 import { completionGate, dispatchSidecarRequest, SIDECAR_REQUEST_TIMEOUT_MS, startAuthoritySidecar } from "../src/authority/sidecar.ts";
 import { DEFAULT_CADCTL_TIMEOUT_MS, FULL_GEOMETRY_VALIDATION_TIMEOUT_MS } from "../src/shared/capability.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
@@ -32,6 +32,22 @@ test("Prime repository resolution persists custom setup paths and fails with an 
     assert.equal(resolvePrimeRepository(repository, agentDirectory, primeRepository), primeRepository);
     await writeFile(join(agentDirectory, "prime-cad.json"), `${JSON.stringify({ primeAgentRepo: join(root, "missing") })}\n`);
     assert.throws(() => resolvePrimeRepository(repository, agentDirectory, undefined), /Run npm run prime:setup with PRIME_AGENT_REPO=/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("CAD venv mounting preserves the absolute uv alias used by its Python symlink", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-cad-venv-link-"));
+  const alias = join(root, "uv", "python", "cpython-3.12-linux-x86_64-gnu");
+  const actual = join(root, "uv", "python", "cpython-3.12.14-linux-x86_64-gnu");
+  const venvBin = join(root, "venv", "bin");
+  try {
+    await mkdir(join(actual, "bin"), { recursive: true });
+    await mkdir(venvBin, { recursive: true });
+    await symlink(actual, alias);
+    await symlink(join(alias, "bin", "python3.12"), join(venvBin, "python"));
+    assert.equal(resolveVenvPythonRoot(join(venvBin, "python")), alias);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

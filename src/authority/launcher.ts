@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmod, copyFile, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createConnection, createServer } from "node:net";
@@ -176,6 +176,11 @@ export function resolvePrimeRepository(repository: string, primeAgentDir: string
     throw new Error(`Prime Agent repository is missing prime-agent.sh: ${primeRoot}`);
   }
   return primeRoot;
+}
+
+export function resolveVenvPythonRoot(venvPython: string): string {
+  const linkTarget = readlinkSync(venvPython);
+  return dirname(dirname(resolve(dirname(venvPython), linkTarget)));
 }
 
 export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string; modelArgs?: string[] }): string[] {
@@ -612,8 +617,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const primeRoot = resolvePrimeRepository(repository, primeAgentDir);
   process.env.PRIME_AGENT_REPO = primeRoot;
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
-  const cadPython = realpathSync(join(repository, "python", ".venv", "bin", "python"));
-  const cadPythonRoot = dirname(dirname(cadPython));
+  const cadPythonRoot = resolveVenvPythonRoot(join(repository, "python", ".venv", "bin", "python"));
   const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
   const kernelPythonRoot = dirname(dirname(kernelPython));
   const kernelPythonExecutable = basename(kernelPython);
