@@ -142,6 +142,11 @@ function workflow(page: import("@playwright/test").Page) {
   return page.evaluate(async () => await window.piCad.workflow.current());
 }
 
+/** The artifact catalog of the conversation the window shows. */
+function catalog(page: import("@playwright/test").Page) {
+  return page.evaluate(async () => await window.piCad.viewer.catalog());
+}
+
 /** Open a conversation from the sidebar. The suite's reads spawn real
  * processes, so the click waits through a cold or busy authority. */
 async function openConversation(page: import("@playwright/test").Page, title: string) {
@@ -161,6 +166,10 @@ test("each Desktop conversation keeps its own workflow across new, switch and re
   const fixture = await createFixture();
   let application: Awaited<ReturnType<typeof launch>>["application"] | undefined;
   try {
+    // A headless caller (the CLI, a benchmark) selects the project-global run.
+    // That pointer is what the Desktop used to read whenever its window named
+    // no conversation, so it must never appear in an unbound window.
+    const projectRun = agentApi(fixture, { op: "workflow-start", id: WORKFLOW_ID, interactionMode: "headless" }) as { runId: string };
     // Conversation A reaches its terminal phase; conversation B starts its own
     // run and stays in the non-terminal first phase.
     const runA = agentApi(fixture, { op: "workflow-start", id: WORKFLOW_ID, sessionId: "conv-a" }) as { runId: string };
@@ -175,11 +184,21 @@ test("each Desktop conversation keeps its own workflow across new, switch and re
 
     // No conversation is selected yet, so there is no workflow to show.
     await expect(rail).toContainText("No active workflow");
+    // The viewer of that window shows no run either: not the headless project
+    // run, not a conversation's run, and no artifact of either.
+    const windowCatalog = await catalog(page);
+    expect(windowCatalog.currentRun).toBeNull();
+    expect(windowCatalog.commits).toEqual([]);
+    // The project pointer really is on that headless run: only a caller that
+    // names no conversation at all reads it that way.
+    expect(agentApi(fixture, { op: "viewer-catalog" }).currentRun.id).toBe(projectRun.runId);
 
     // Conversation A shows its own finished run, never B's.
     await openConversation(page, "Conversation A");
     await expect.poll(async () => (await workflow(page))?.runId, { timeout: 60_000 }).toBe(runA.runId);
     expect((await workflow(page))?.status).toBe("done");
+    await expect.poll(async () => (await catalog(page)).currentRun?.id, { timeout: 60_000 }).toBe(runA.runId);
+    expect((await catalog(page)).currentRun?.status).toBe("done");
     await expect(rail).toContainText("Inspect", { timeout: 60_000 });
     await expect(rail.locator(".rail-step.complete")).toHaveCount(2);
 
@@ -188,24 +207,30 @@ test("each Desktop conversation keeps its own workflow across new, switch and re
     await page.getByRole("button", { name: "新对话" }).click();
     await expect(rail).toContainText("No active workflow", { timeout: 60_000 });
     await expect.poll(async () => (await workflow(page))?.runId, { timeout: 60_000 }).toBeUndefined();
+    await expect.poll(async () => (await catalog(page)).currentRun, { timeout: 60_000 }).toBeNull();
     await page.getByPlaceholder("Ask anything about the design").fill("Provider retry please");
     await page.getByPlaceholder("Ask anything about the design").press("Enter");
     await expect(page.getByText("Recovered after one retry.")).toBeAttached({ timeout: 30_000 });
     await expect(rail).toContainText("No active workflow", { timeout: 60_000 });
     expect((await workflow(page))?.runId).toBeUndefined();
+    expect((await catalog(page)).currentRun).toBeNull();
 
     // Conversation B restores its own non-terminal run.
     await openConversation(page, "Conversation B");
     await expect.poll(async () => (await workflow(page))?.runId, { timeout: 60_000 }).toBe(runB.runId);
     expect((await workflow(page))?.status).toBe("active");
+    await expect.poll(async () => (await catalog(page)).currentRun?.id, { timeout: 60_000 }).toBe(runB.runId);
+    expect((await catalog(page)).currentRun?.status).toBe("active");
     await expect(rail.locator(".rail-step.active")).toHaveText(/Inspect/, { timeout: 60_000 });
 
     // Back and forth: neither conversation adopts the other's run.
     await openConversation(page, "Conversation A");
     await expect.poll(async () => (await workflow(page))?.runId, { timeout: 60_000 }).toBe(runA.runId);
+    await expect.poll(async () => (await catalog(page)).currentRun?.id, { timeout: 60_000 }).toBe(runA.runId);
     await expect(rail.locator(".rail-step.complete")).toHaveCount(2);
     await openConversation(page, "Conversation B");
     await expect.poll(async () => (await workflow(page))?.runId, { timeout: 60_000 }).toBe(runB.runId);
+    await expect.poll(async () => (await catalog(page)).currentRun?.id, { timeout: 60_000 }).toBe(runB.runId);
     await expect(rail.locator(".rail-step.active")).toHaveText(/Inspect/, { timeout: 60_000 });
 
     // Restart the Desktop: both conversations still restore their own run.
@@ -216,9 +241,11 @@ test("each Desktop conversation keeps its own workflow across new, switch and re
     const restartedRail = page.getByTestId("workflow-rail");
     await openConversation(page, "Conversation A");
     await expect.poll(async () => (await workflow(page))?.runId, { timeout: 60_000 }).toBe(runA.runId);
+    await expect.poll(async () => (await catalog(page)).currentRun?.id, { timeout: 60_000 }).toBe(runA.runId);
     await expect(restartedRail.locator(".rail-step.complete")).toHaveCount(2, { timeout: 60_000 });
     await openConversation(page, "Conversation B");
     await expect.poll(async () => (await workflow(page))?.runId, { timeout: 60_000 }).toBe(runB.runId);
+    await expect.poll(async () => (await catalog(page)).currentRun?.id, { timeout: 60_000 }).toBe(runB.runId);
     await expect(restartedRail.locator(".rail-step.active")).toHaveText(/Inspect/, { timeout: 60_000 });
     expect((await workflow(page))?.status).toBe("active");
   } finally {

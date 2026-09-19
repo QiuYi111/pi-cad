@@ -71,8 +71,10 @@ export class WorkflowStore {
    * conversation the phase, run and final state of another. The run is asked
    * for by session instead: the authority answers for exactly that
    * conversation, and an unbound conversation is answered with nothing.
+   * `null` is a Desktop window whose conversation has no Prime session yet; it
+   * is unbound like a named conversation the authority never bound.
    */
-  async current(settings: AppSettings, sessionId?: string): Promise<WorkflowCurrent> {
+  async current(settings: AppSettings, sessionId?: string | null): Promise<WorkflowCurrent> {
     if (!settings.projectPath || !sessionId) return unboundWorkflow();
     // A failed read is reported as unavailable rather than as an unbound
     // conversation: "no run" and "no answer" must not look the same.

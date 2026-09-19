@@ -7,6 +7,21 @@ const emptyCatalog = {
   projectId: "", projectHead: { updatedAt: "", artifacts: [] }, currentRun: null, commits: [], simulationRuns: [], parameterManifests: [],
 };
 
+/** A bridge that records every Agent API body and answers with one result. */
+function agentApiBridge(requests: Array<Record<string, unknown>>, result: unknown) {
+  return {
+    resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
+    toRuntimePath: async (path: string) => path,
+    homeDirectory: async () => "/home/tester",
+    commandPath: async () => "/usr/bin/node",
+    exec: async () => ({ stdout: "/projects/bracket\n", stderr: "" }),
+    pipe: async (_args: string[], input: string) => {
+      requests.push(JSON.parse(input) as Record<string, unknown>);
+      return { stdout: `${JSON.stringify({ schema: 1, ok: true, result })}\n`, stderr: "" };
+    },
+  };
+}
+
 describe("desktop viewer bridge", () => {
   it("projects canonical artifacts and simulation observations without inventing identities", () => {
     const sources = sourcesFromCatalog({
@@ -112,6 +127,39 @@ describe("desktop viewer bridge", () => {
 
   it("reads the artifact catalog of the conversation the window shows", async () => {
     const requests: Array<Record<string, unknown>> = [];
+    const bridge = agentApiBridge(requests, emptyCatalog);
+
+    await new ViewerBackend(bridge as never, () => "session-a").catalog({ projectPath: "/projects/bracket" } as never);
+    // An explicit conversation wins over the window's own.
+    await new ViewerBackend(bridge as never, () => "session-a").catalog({ projectPath: "/projects/bracket" } as never, "session-b");
+    // The window of a conversation Prime has not opened yet is unbound, and
+    // says so: it must not read the project-global run by naming nobody.
+    await new ViewerBackend(bridge as never, () => null).catalog({ projectPath: "/projects/bracket" } as never);
+    // Only a caller with no window at all (headless, packaged smoke) names no
+    // conversation and keeps the legacy project-global pointer.
+    await new ViewerBackend(bridge as never).catalog({ projectPath: "/projects/bracket" } as never);
+
+    expect(requests).toEqual([
+      { schema: 1, op: "viewer-catalog", sessionId: "session-a" },
+      { schema: 1, op: "viewer-catalog", sessionId: "session-b" },
+      { schema: 1, op: "viewer-catalog", sessionId: null },
+      { schema: 1, op: "viewer-catalog" },
+    ]);
+  });
+
+  it("scopes every run-authority call of a parameter change to the window's conversation", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const catalog = {
+      ...emptyCatalog,
+      parameterManifests: [{
+        path: "build/part.step.parameters.json",
+        sha256: "manifest",
+        manifest: {
+          schema: 1, modelId: "part", source: { path: "part.py", sha256: "source" }, output: { path: "build/part.step", sha256: "step" },
+          parameters: [{ id: "width", type: "number", default: 40, value: 40, min: 20, max: 80, step: 1, unit: "mm" }],
+        },
+      }],
+    };
     const bridge = {
       resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
       toRuntimePath: async (path: string) => path,
@@ -119,21 +167,34 @@ describe("desktop viewer bridge", () => {
       commandPath: async () => "/usr/bin/node",
       exec: async () => ({ stdout: "/projects/bracket\n", stderr: "" }),
       pipe: async (_args: string[], input: string) => {
-        requests.push(JSON.parse(input) as Record<string, unknown>);
-        return { stdout: `${JSON.stringify({ schema: 1, ok: true, result: emptyCatalog })}\n`, stderr: "" };
+        const request = JSON.parse(input) as Record<string, unknown>;
+        requests.push(request);
+        const result = request.op === "viewer-catalog"
+          ? catalog
+          : request.op === "workflow-current"
+            ? { runId: "run-b", workflowId: "mechanical.naked", workflowVersion: "1.0.0", workflowHash: "hash", phase: "work", status: "active", operations: [{ capability: "cad_build_step" }] }
+            : {};
+        return { stdout: `${JSON.stringify({ schema: 1, ok: true, result })}\n`, stderr: "" };
       },
     };
 
-    await new ViewerBackend(bridge as never, () => "session-a").catalog({ projectPath: "/projects/bracket" } as never);
-    // An explicit conversation wins over the window's own.
-    await new ViewerBackend(bridge as never, () => "session-a").catalog({ projectPath: "/projects/bracket" } as never, "session-b");
-    // A hidden desktop E2E window with a stub runtime names no conversation.
-    await new ViewerBackend(bridge as never).catalog({ projectPath: "/projects/bracket" } as never);
+    await new ViewerBackend(bridge as never, () => "session-b").applyParameters(
+      { projectPath: "/projects/bracket" } as never,
+      "build/part.step.parameters.json",
+      { width: 68 },
+    );
 
-    expect(requests).toEqual([
-      { schema: 1, op: "viewer-catalog", sessionId: "session-a" },
-      { schema: 1, op: "viewer-catalog", sessionId: "session-b" },
-      { schema: 1, op: "viewer-catalog" },
-    ]);
+    expect(requests.map((request) => request.op)).toEqual(["viewer-catalog", "workflow-current", "model-build"]);
+    for (const request of requests) expect(request.sessionId).toBe("session-b");
+    expect(requests.at(-1)).toMatchObject({ op: "model-build", source: "part.py", output: "build/part.step", force: true });
+  });
+
+  it("refuses a parameter change in a window that has no Prime session yet", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const viewer = new ViewerBackend(agentApiBridge(requests, emptyCatalog) as never, () => null);
+    await expect(viewer.applyParameters({ projectPath: "/projects/bracket" } as never, "build/part.step.parameters.json", { width: 68 }))
+      .rejects.toThrow(/no workflow yet/);
+    // Refusing must not touch anyone: no project run, no other conversation.
+    expect(requests).toEqual([]);
   });
 });

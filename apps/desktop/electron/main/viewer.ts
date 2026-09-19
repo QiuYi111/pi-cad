@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { parameterDefinitionsWithValues, validateParameterValues } from "../../src/shared/model-parameters.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
 import { DesktopCadctlRpc } from "./cadctl-rpc.js";
-import { AgentApiClient, conversationFields } from "./agent-api-client.js";
+import { AgentApiClient, conversationFields, type ConversationScope } from "./agent-api-client.js";
 
 interface CadctlEnvelope {
   ok: boolean;
@@ -45,13 +45,21 @@ export class ViewerBackend {
   private warmTask: Promise<void> | null = null;
 
   /**
-   * `conversation` is the Prime conversation every Desktop read belongs to.
+   * `conversation` is the Prime conversation every Desktop call belongs to.
    * Run work is stored per run, so a version, artifact or approval belongs to
    * the conversation that owns the run — not to whatever run the project
-   * pointer happens to hold.
+   * pointer happens to hold. The Desktop window always answers with its own
+   * scope: a session id, or `null` while its conversation has no session yet.
+   * Only a caller constructed without a scope (headless, packaged smoke) names
+   * no conversation and keeps the legacy project-global pointer.
    */
-  constructor(private readonly bridge: RuntimeBridge, private readonly conversation: () => string | undefined = () => undefined) {
+  constructor(private readonly bridge: RuntimeBridge, private readonly conversation: () => ConversationScope = () => undefined) {
     this.cadctl = new DesktopCadctlRpc(bridge);
+  }
+
+  /** The conversation this window shows, or the scope an explicit caller named. */
+  private scope(explicit?: string): ConversationScope {
+    return explicit ?? this.conversation();
   }
 
   stop(): void {
@@ -84,7 +92,7 @@ export class ViewerBackend {
   async catalog(settings: AppSettings, sessionId?: string): Promise<ViewerCatalog> {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) return { projectId: "", projectHead: { updatedAt: "", artifacts: [] }, currentRun: null, commits: [], simulationRuns: [], parameterManifests: [] };
-    const result = await new AgentApiClient(this.bridge).request<ViewerCatalog>(settings, { op: "viewer-catalog", ...conversationFields(sessionId ?? this.conversation()) });
+    const result = await new AgentApiClient(this.bridge).request<ViewerCatalog>(settings, { op: "viewer-catalog", ...conversationFields(this.scope(sessionId)) });
     const catalog = { ...result, parameterManifests: result.parameterManifests ?? [] };
     if (result.parameterManifests.length) void this.prewarm(settings).catch(() => {});
     return catalog;
@@ -123,18 +131,24 @@ export class ViewerBackend {
   ): Promise<void> {
     const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) throw new Error("Choose a project before applying parameters.");
+    const scope = this.conversation();
+    // A window with no Prime session cannot own a run, so it may not start one:
+    // the mutation is refused instead of falling back to the project's run.
+    if (scope === null) throw new Error("This conversation has no workflow yet. Start one in this conversation before changing model parameters.");
     const stored = await this.findManifest(settings, manifestPath);
     const definitions = parameterDefinitionsWithValues(stored.manifest.parameters, updates);
     const client = new AgentApiClient(this.bridge);
     const request = async <T>(body: Record<string, unknown>, timeout = 60_000): Promise<T> => client.request<T>(settings, body, timeout);
+    const fields = conversationFields(scope);
 
-    let current = await request<WorkflowView | null>({ op: "workflow-current" });
+    let current = await request<WorkflowView | null>({ op: "workflow-current", ...fields });
     const replaceable = !current || !["active", "ready"].includes(current.status);
     if (replaceable) {
       current = await request<WorkflowView>({
         op: "workflow-start",
         id: "mechanical.naked",
         interactionMode: "headless",
+        ...fields,
       });
     }
     if (!current?.operations?.some((operation) => operation.capability === "cad_build_step")) {
@@ -147,6 +161,7 @@ export class ViewerBackend {
       output: stored.manifest.output.path,
       force: true,
       parameters: definitions,
+      ...fields,
     }, 180_000);
   }
 
@@ -217,7 +232,7 @@ export class ViewerBackend {
   async readEvidence(settings: AppSettings, path: string): Promise<unknown> {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) throw new Error("Choose a project before opening evidence.");
-    return new AgentApiClient(this.bridge).request<unknown>(settings, { op: "evidence-read", path });
+    return new AgentApiClient(this.bridge).request<unknown>(settings, { op: "evidence-read", path, ...conversationFields(this.conversation()) });
   }
 
   async releaseCommit(settings: AppSettings, commitId: string, approval: HumanApproval, destination: string, validateApproval: () => Promise<boolean>): Promise<ReleaseResult> {

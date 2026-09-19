@@ -25,7 +25,7 @@ import { HumanApprovalStore } from "./approvals.js";
 import { importStepIntoProject } from "./step-import.js";
 import {
   NO_CONVERSATION,
-  projectedSessionId,
+  projectedConversationScope,
   selectNewConversation,
   type ConversationSelection,
 } from "./conversation-selection.js";
@@ -114,14 +114,18 @@ function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
 }
 
-/** Conversation whose workflow and artifact state the renderer shows. */
-function projectedConversation(): string | undefined {
-  return projectedSessionId(conversation, runtime?.status.sessionId);
+/**
+ * Conversation whose workflow and artifact state the renderer shows. The
+ * Desktop window always has a scope: `null` while its conversation has no
+ * Prime session yet, which the authority answers as unbound.
+ */
+function projectedConversation(): string | null {
+  return projectedConversationScope(conversation, runtime?.status.sessionId);
 }
 
 /** Announce the selected conversation so every projection is read again. */
 function publishConversation() {
-  send(IPC.runtimeConversation, { sessionId: projectedConversation() ?? null });
+  send(IPC.runtimeConversation, { sessionId: projectedConversation() });
 }
 
 /** Follow Prime's live session once it is not the conversation being replaced. */

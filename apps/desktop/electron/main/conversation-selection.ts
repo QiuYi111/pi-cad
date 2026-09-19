@@ -26,9 +26,13 @@ export function selectNewConversation(replacedSessionId?: string): ConversationS
 }
 
 /**
- * The conversation whose workflow state the Desktop projects. `undefined`
- * means unbound: the UI shows no run instead of the previous one.
+ * The conversation whose workflow state the Desktop projects, as a request
+ * scope. `null` means the Desktop window has no Prime session yet — between
+ * the click on a new conversation and its first prompt, or before Prime has
+ * started anything. A Desktop window is always conversation-scoped, so `null`
+ * is unbound: the UI shows no run instead of the previous one. Only a caller
+ * that has no window at all (headless, packaged smoke) names no conversation.
  */
-export function projectedSessionId(selection: ConversationSelection, liveSessionId?: string): string | undefined {
-  return selection.pendingNew ? undefined : liveSessionId;
+export function projectedConversationScope(selection: ConversationSelection, liveSessionId?: string): string | null {
+  return selection.pendingNew || !liveSessionId ? null : liveSessionId;
 }

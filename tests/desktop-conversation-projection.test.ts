@@ -28,7 +28,7 @@ workflow:
   phases:
     inspect:
       purpose: Acknowledge inspection.
-      actions: [transition]
+      actions: [transition, cad_commit]
       grants: [file_read, transition]
       writeScopes: []
       recordObligations: []
@@ -73,6 +73,16 @@ async function withWorkflowPackage<T>(body: () => Promise<T>): Promise<T> {
  */
 async function desktopRequest(cwd: string, sessionId: string, op: string, extra: Record<string, unknown> = {}) {
   return await handleAgentApi(cwd, { schema: 1, op, sessionId, ...extra } as never);
+}
+
+/**
+ * The Desktop window Prime has not opened a session for yet: the click on "new
+ * conversation" before its first prompt. It is a conversation window with no
+ * session, so the authority answers it as unbound — which is not the same as
+ * the stateless caller that names no conversation at all.
+ */
+async function desktopWindowRequest(cwd: string, op: string, extra: Record<string, unknown> = {}) {
+  return await handleAgentApi(cwd, { schema: 1, op, sessionId: null, ...extra } as never);
 }
 
 async function startConversationRun(cwd: string, sessionId: string) {
@@ -165,6 +175,99 @@ test("a Desktop conversation never inherits a promoted or project-level run", as
       // name no conversation at all.
       const projectScoped = await handleAgentApi(cwd, { schema: 1, op: "viewer-catalog" }) as { currentRun: { id: string } | null };
       assert.equal(projectScoped.currentRun?.id ?? null, null);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("a Desktop window with no Prime session reads no run, commit or artifact", async () => {
+  await withWorkflowPackage(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-cad-desktop-unbound-window-"));
+    try {
+      // A headless caller (the CLI, a benchmark) leaves the project-global
+      // pointer on its own run. That pointer is what the Desktop used to read
+      // whenever it named no conversation.
+      const projectRun = await handleAgentApi(cwd, {
+        schema: 1, op: "workflow-start", id: WORKFLOW_ID, interactionMode: "headless",
+      }) as { runId: string };
+      // Conversation A owns a run with a recorded artifact and reaches final.
+      const runA = await startConversationRun(cwd, SESSION_A);
+      await desktopRequest(cwd, SESSION_A, "commit", { name: "design-freeze" });
+      await desktopRequest(cwd, SESSION_A, "workflow-advance", { event: "checked" });
+
+      // The window right after "new conversation": conversation-scoped, no
+      // session, so neither A's run nor the project's run is on screen.
+      const unbound = await desktopWindowRequest(cwd, "viewer-catalog") as {
+        projectId: string;
+        currentRun: unknown;
+        commits: unknown[];
+        parameterManifests: unknown[];
+      };
+      assert.equal(unbound.currentRun, null);
+      assert.deepEqual(unbound.commits, []);
+      assert.deepEqual(unbound.parameterManifests, []);
+      assert.ok(unbound.projectId, "project HEAD stays visible to every conversation");
+      assert.equal(await desktopWindowRequest(cwd, "workflow-current"), null);
+
+      // A conversation still reads its own run, commit and artifact.
+      const finalA = await desktopCurrent(cwd, SESSION_A);
+      assert.equal(finalA?.runId, runA.runId);
+      assert.equal(finalA?.status, "done");
+      const catalogA = await desktopRequest(cwd, SESSION_A, "viewer-catalog") as { currentRun: { id: string }; commits: unknown[] };
+      assert.equal(catalogA.currentRun.id, runA.runId);
+      assert.equal(catalogA.commits.length, 1);
+
+      // Naming no conversation at all keeps its legacy meaning: only a
+      // headless caller reads the project-global run that way.
+      const legacy = await handleAgentApi(cwd, { schema: 1, op: "viewer-catalog" }) as { currentRun: { id: string } | null };
+      assert.equal(legacy.currentRun?.id, projectRun.runId);
+
+      // A window with no session cannot start a run nothing would own, and the
+      // refusal leaves the project run exactly where it was.
+      await assert.rejects(desktopWindowRequest(cwd, "workflow-start", { id: WORKFLOW_ID }), /conversation/);
+      const projectCurrent = await handleAgentApi(cwd, { schema: 1, op: "workflow-current" }) as { runId: string };
+      assert.equal(projectCurrent.runId, projectRun.runId);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
+});
+
+test("a parameter run in one conversation neither reads nor changes another conversation's run", async () => {
+  await withWorkflowPackage(async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "pi-cad-desktop-parameter-scope-"));
+    try {
+      // Conversation A owns a finished run with a recorded artifact.
+      const runA = await startConversationRun(cwd, SESSION_A);
+      await desktopRequest(cwd, SESSION_A, "commit", { name: "release-candidate" });
+      await desktopRequest(cwd, SESSION_A, "workflow-advance", { event: "checked" });
+
+      // A conversation B parameter change asks for B's own run first. B has
+      // none, so it starts B's own run: never the project pointer, never A.
+      assert.equal(await desktopCurrent(cwd, SESSION_B), null);
+      const runB = await startConversationRun(cwd, SESSION_B);
+      assert.notEqual(runB.runId, runA.runId);
+
+      // A is untouched, including its commit and its final phase history.
+      const finalA = await desktopCurrent(cwd, SESSION_A);
+      assert.equal(finalA?.runId, runA.runId);
+      assert.equal(finalA?.status, "done");
+      assert.deepEqual(finalA?.phaseHistory, ["inspect", "done"]);
+      const catalogA = await desktopRequest(cwd, SESSION_A, "viewer-catalog") as { currentRun: { id: string; status: string }; commits: unknown[] };
+      assert.equal(catalogA.currentRun.id, runA.runId);
+      assert.equal(catalogA.currentRun.status, "done");
+      assert.equal(catalogA.commits.length, 1);
+
+      // B's run is B's own: its own catalog, none of A's commits, and the
+      // conversation registry binds it to B without touching the project.
+      const catalogB = await desktopRequest(cwd, SESSION_B, "viewer-catalog") as { currentRun: { id: string; status: string }; commits: unknown[] };
+      assert.equal(catalogB.currentRun.id, runB.runId);
+      assert.equal(catalogB.currentRun.status, "active");
+      assert.deepEqual(catalogB.commits, []);
+      const project = new HarnessProjectStoreV7(cwd);
+      assert.equal((await project.conversationBinding(SESSION_B))?.runId, runB.runId);
+      assert.equal((await project.load()).state.currentRunId, null, "a conversation run never touches the project pointer");
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }

@@ -17,8 +17,21 @@ interface AgentApiEnvelope<T> {
  * Desktop never falls back to the project current/promoted run and never
  * shows another conversation's workflow state.
  */
-export function conversationFields(sessionId?: string): Record<string, string> {
-  return sessionId ? { sessionId } : {};
+export type ConversationScope = string | null | undefined;
+
+/**
+ * The conversation one Desktop request belongs to.
+ *
+ * - a session id names the Prime conversation the window shows;
+ * - `null` is a Desktop window whose conversation has no Prime session yet
+ *   (the click on "new conversation" before its first prompt): the window is
+ *   still conversation-scoped, so the authority answers it as unbound and it
+ *   never inherits the project's current run;
+ * - `undefined` names no conversation at all, which only a headless or
+ *   packaged-smoke caller may do, and keeps the legacy project-global pointer.
+ */
+export function conversationFields(scope: ConversationScope): Record<string, string | null> {
+  return scope === undefined ? {} : { sessionId: scope };
 }
 
 export class AgentApiClient {

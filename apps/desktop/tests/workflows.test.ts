@@ -61,6 +61,10 @@ describe("desktop workflow projection", () => {
     await expect(store.current({ projectPath: "/project", distro: "Ubuntu" } as never)).resolves.toMatchObject({
       authoritative: false, phases: [], phaseHistory: [],
     });
+    // A window whose new conversation has no Prime session yet is unbound too.
+    await expect(store.current({ projectPath: "/project", distro: "Ubuntu" } as never, null)).resolves.toMatchObject({
+      authoritative: false, phases: [], phaseHistory: [],
+    });
     expect(requests).toEqual([]);
   });
 

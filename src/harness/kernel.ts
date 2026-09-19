@@ -45,6 +45,9 @@ export async function cadStartSnapshot(input: {
   if (scope) {
     // Conversation-scoped start: replace only this conversation's own run and
     // never touch the project-global run pointer.
+    // A scope that names neither a conversation nor a run cannot own the new
+    // run: binding it to nothing would leave an orphan no conversation sees.
+    if (!scope.sessionId && !scope.runId) throw new Error("a Prime conversation is required to start a run: this window has no session");
     const existing = await resolveActiveRun(input.cwd, input.registries);
     if (existing && !TERMINAL_RUN_STATUSES.includes(existing.state.status)) {
       throw new Error(`cad_start cannot replace active v7 run ${existing.state.runId} bound to this Prime conversation`);

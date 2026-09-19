@@ -21,7 +21,13 @@ export interface AgentArtifactSubject {
  * the project-global pointer.
  */
 export interface AgentApiConversationV1 {
-  sessionId?: string;
+  /**
+   * The Prime conversation this request belongs to. Naming no session at all
+   * (`undefined`) is a stateless caller that keeps the legacy project-global
+   * pointer; an explicit `null` is a conversation window which has no Prime
+   * session yet, so it stays unbound instead of inheriting that pointer.
+   */
+  sessionId?: string | null;
   runId?: string;
   binding?: { schema: 1; sessionId: string; runId: string; workflowHash: string; boundAt: string } | null;
   bindingReadAt?: string;
