@@ -97,11 +97,31 @@ class CadctlBackendTests(unittest.TestCase):
         self.assertTrue(inspected["payload"]["validity"]["ok"], inspected)
         self.assertEqual(inspected["payload"]["solidCount"], 1)
 
+        # A lone open surface has no closed shell at all.
         open_faces = self.cwd / "open-faces.step"
         bd.export_step(bd.Rectangle(10, 20), str(open_faces))
-        rejected = run_cadctl("build", "--source", str(open_faces), "--output", str(self.build / "open-solid.step"), "--solidify", cwd=self.cwd)
+        open_output = self.build / "open-solid.step"
+        rejected = run_cadctl("build", "--source", str(open_faces), "--output", str(open_output), "--solidify", cwd=self.cwd)
         self.assertFalse(rejected["ok"])
-        self.assertFalse((self.build / "open-solid.step").exists())
+        self.assertFalse(open_output.exists())
+
+        # Closed box plus a free surface: sewing keeps the closed shell but the free
+        # face is not covered, so the whole file must be refused instead of filtering.
+        free_face = bd.Face.make_rect(10, 10).moved(bd.Location((100, 100, 100)))
+        mixed = self.cwd / "closed-plus-free.step"
+        bd.export_step(bd.Compound(children=[*bd.Box(10, 20, 30).faces(), free_face]), str(mixed))
+        mixed_output = self.build / "mixed-solid.step"
+        mixed_output.write_text("previous build output", encoding="utf-8")
+        mixed_result = run_cadctl("build", "--source", str(mixed), "--output", str(mixed_output), "--solidify", cwd=self.cwd)
+        self.assertFalse(mixed_result["ok"], mixed_result)
+        self.assertIn("no closed shell covers", mixed_result["payload"]["error"])
+        self.assertEqual(mixed_output.read_text(encoding="utf-8"), "previous build output")
+
+        # A failed conversion must not touch an output that already exists.
+        output.write_text("previous build output", encoding="utf-8")
+        failed = run_cadctl("build", "--source", str(open_faces), "--output", str(output), "--solidify", cwd=self.cwd)
+        self.assertFalse(failed["ok"])
+        self.assertEqual(output.read_text(encoding="utf-8"), "previous build output")
 
     def test_parameterized_build_calls_explicit_entrypoint(self) -> None:
         source = self.cwd / "parameterized.py"
