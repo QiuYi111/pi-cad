@@ -22,6 +22,7 @@ import { PrimeConfigService } from "./prime-config.js";
 import { ParaViewBackend } from "./paraview.js";
 import { BlenderBackend } from "./blender.js";
 import { HumanApprovalStore } from "./approvals.js";
+import { importStepIntoProject } from "./step-import.js";
 
 // Keep existing settings and sign-in state across the public rename, while honoring
 // Electron's explicit profile override for managed deployments and isolated tests.
@@ -392,15 +393,7 @@ function registerIpc() {
     if (!projectPath) throw new Error("Choose a project before importing STEP.");
     const source = await runtime.toRuntimePath(result.filePaths[0]);
     const name = result.filePaths[0].split(/[\\/]/).at(-1) || "model.step";
-    if (!/^[^\\/]+\.(step|stp)$/i.test(name)) throw new Error("Select a .step or .stp file.");
-    const hash = (await runtime.exec(["sha256sum", "--", source])).stdout.split(/\s/)[0];
-    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error("Could not verify the selected STEP file.");
-    const relative = `imports/${hash.slice(0, 16)}-${name}`;
-    const destination = `${projectPath}/${relative}`;
-    if (source === destination) return relative;
-    await runtime.exec(["mkdir", "-p", "--", `${projectPath}/imports`]);
-    await runtime.exec(["cp", "-n", "--", source, destination], { timeout: 120_000 });
-    return relative;
+    return importStepIntoProject(runtime, { source, fileName: name, projectPath });
   });
   ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? demoMesh(path) : (await ensureViewer()).loadStep(await settingsStore.get(), path));
   ipcMain.handle(IPC.viewerExportStep, async (_event, source: string) => {
