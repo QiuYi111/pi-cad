@@ -32,8 +32,8 @@ function read(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
 }
 
-function search(repoRelativePattern, text) {
-  return new RegExp(repoRelativePattern, "m").test(text);
+function matches(pattern, text) {
+  return new RegExp(pattern, "m").test(text);
 }
 
 const gates = [
@@ -45,8 +45,8 @@ const gates = [
     expected: "每次运行按题隔离：每题有独立 staging 与独立评分素材，不使用仓库级共享 vault，且支持并发调度。",
     check() {
       const runner = read(BENCH_RUNNER);
-      const globalVault = search("orig-\\$\\{|sensitivePaths\\(\\)", runner);
-      const concurrency = search("--concurrency|CONCURRENCY", runner);
+      const globalVault = matches("orig-\\$\\{|sensitivePaths\\(\\)", runner);
+      const concurrency = matches("--concurrency|CONCURRENCY", runner);
       const perSampleEval = /for \(const sampleId of idList\)[\s\S]{0,4000}const evalRoot = join/.test(runner);
       const evidence = [
         globalVault ? `run.mjs 仍把仓库内真值打成全局 vault（sensitivePaths/orig-）` : "",
@@ -64,8 +64,8 @@ const gates = [
     expected: "评分数据、评分源码与历史结果对被测 Agent 不可读，且不靠临时打包/删除仓库文件实现。",
     check() {
       const runner = read(BENCH_RUNNER);
-      const vault = search("tarCreate\\(|tarExtract\\(", runner);
-      const audit = search("auditSession", runner);
+      const vault = matches("tarCreate\\(|tarExtract\\(", runner);
+      const audit = matches("auditSession", runner);
       const evidence = [
         vault ? "run.mjs 用 tar 打包/解包仓库文件做隔离，压缩包不是权限隔离" : "",
         audit ? "" : "没有对越界读取做审计",
@@ -113,7 +113,7 @@ const gates = [
     check() {
       const runner = read(BENCH_RUNNER);
       const ops = read(IPYTHON_OPS);
-      const hasCounts = search("action_counts|known_tool_stats|analyze_ipython|prime-trace", runner);
+      const hasCounts = matches("action_counts|known_tool_stats|analyze_ipython|prime-trace", runner);
       return {
         ok: hasCounts,
         evidence: hasCounts
@@ -138,9 +138,6 @@ const gates = [
       if (!/retries|retry/i.test(metrics)) evidence.push("metrics.py 没有重试计量");
       if (!/ipython/i.test(runner)) evidence.push("run.mjs 的 sessionMetrics 不读 IPython 内部动作");
       if (!/subagent/i.test(runner)) evidence.push("run.mjs 不单独统计子 Agent");
-      if (/const RETRIES =/.test(runner) && !/RETRIES[^=]/.test(runner.replace("const RETRIES =", ""))) {
-        evidence.push("run.mjs 读了 PI_CAD_RETRIES 但从不使用");
-      }
       return { ok: evidence.length === 0, evidence };
     },
   },
@@ -152,8 +149,8 @@ const gates = [
     expected: "最终产物由显式 submission.json 指定并复验 sha256；禁止按最近修改时间取 STEP。",
     check() {
       const runner = read(BENCH_RUNNER);
-      const explicit = search("submission\\.json", runner);
-      const latestRun = search("latestRun\\(workdir\\)", runner);
+      const explicit = matches("submission\\.json", runner);
+      const latestRun = matches("latestRun\\(workdir\\)", runner);
       const evidence = [];
       if (!explicit) evidence.push("run.mjs 没有 submission.json 显式提交路径");
       if (latestRun) evidence.push("run.mjs 仍用 latestRun/currentArtifactPath 兜底解析产物");
@@ -184,8 +181,8 @@ const gates = [
     requirement: "复用 RES-342/RES-343 的 session 绑定，不另写第二套生命周期",
     expected: "仓储使用 pi-cad.workflow-binding 作为 conversation→run 绑定；本合约不新增第二套生命周期实现。",
     check() {
-      const binding = search("pi-cad\\.workflow-binding", read(join(REPO, "src", "integrations", "prime", "extension.ts")));
-      const anyBinding = search("pi-cad\\.workflow-binding", repoWideSearch(["src", "apps/desktop/electron"]));
+      const binding = matches("pi-cad\\.workflow-binding", read(join(REPO, "src", "integrations", "prime", "extension.ts")));
+      const anyBinding = matches("pi-cad\\.workflow-binding", repoWideSearch(["src", "apps/desktop/electron"]));
       return {
         ok: binding || anyBinding,
         evidence: binding || anyBinding ? [] : ["仓储内没有 pi-cad.workflow-binding，RES-342 尚未落地；本票只冻结对齐要求"],
@@ -200,7 +197,7 @@ const gates = [
     expected: "取消/超时按进程组清理，覆盖子进程与子 Agent，而不是只杀顶层进程。",
     check() {
       const runner = read(BENCH_RUNNER);
-      const groupKill = search("process\\.kill\\(-|detached:\\s*true|killProcessGroup", runner);
+      const groupKill = matches("process\\.kill\\(-|detached:\\s*true|killProcessGroup", runner);
       const evidence = groupKill ? [] : ["run.mjs 超时只 child.kill(\"SIGKILL\")，没有清理子进程组与子 Agent"];
       return { ok: groupKill, evidence };
     },

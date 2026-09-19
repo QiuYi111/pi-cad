@@ -105,6 +105,10 @@ test("防护门报告结构完整，失败门带证据", () => {
     assert.ok(gate.expected.length > 0, `${gate.id} 缺少预期行为`);
     assert.ok(gate.repro.length > 0, `${gate.id} 缺少复现命令`);
     assert.match(gate.repro, /^(rg|node|npm|bash) /, `${gate.id} 复现命令要能直接跑`);
+    assert.ok(
+      !gate.evidence.some((line) => line.startsWith("检查执行失败")),
+      `${gate.id} 的检查本身报错，说明 check.mjs 有 bug`,
+    );
     if (gate.status === "fail") assert.ok(gate.evidence.length > 0, `${gate.id} 失败但没有证据`);
   }
   const red = contract.protection_tests.red;
