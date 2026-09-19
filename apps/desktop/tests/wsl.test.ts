@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, initializeWslUserScript, isNonRootWslUid, missingDistroStatus, nodeInstallScript, runtimeChecksReady, wslDefaultUserName, wslElevatedInstallScript, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
-import { engineeringKnowledgeProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
+import { engineeringKnowledgeProbe, managedPythonProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
 import { setupErrorMessage } from "../src/renderer/src/pages/FirstRun";
 
@@ -69,7 +69,7 @@ describe("WSL runtime environment", () => {
     vi.spyOn(bridge, "resolveRuntimePaths").mockResolvedValue({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent", projectPath: "/workspace" });
     vi.spyOn(bridge, "exec").mockResolvedValue({ stdout: "Ubuntu\n", stderr: "" });
     const pipe = vi.spyOn(bridge, "pipe").mockResolvedValue({
-      stdout: "node=22.23.2\nuv=/home/tester/.local/bin/uv\nbwrap=/usr/bin/bwrap\nparaview=\nprime=ready\npicad=ready\nknowledge=4\nbundle=ready\npython=/usr/bin/python3\n",
+      stdout: "node=22.23.2\nuv=/home/tester/.local/bin/uv\nbwrap=/usr/bin/bwrap\nparaview=\nprime=ready\npicad=ready\nknowledge=4\ncadpython=ready\nbundle=ready\npython=/usr/bin/python3\n",
       stderr: "",
     });
 
@@ -79,6 +79,28 @@ describe("WSL runtime environment", () => {
     })).resolves.toMatchObject({ state: "idle" });
 
     expect(pipe).toHaveBeenCalledWith(["bash", "-s"], expect.stringContaining("printf 'node='"), 120_000);
+  });
+
+  it("does not report ready when the managed CAD interpreter is broken", async () => {
+    const bridge = new WslBridge("Ubuntu");
+    vi.spyOn(bridge, "homeDirectory").mockResolvedValue("/home/tester");
+    vi.spyOn(bridge, "resolveRuntimePaths").mockResolvedValue({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent", projectPath: "/workspace" });
+    vi.spyOn(bridge, "exec").mockResolvedValue({ stdout: "Ubuntu\n", stderr: "" });
+    vi.spyOn(bridge, "pipe").mockResolvedValue({
+      stdout: "node=22.23.2\nuv=/home/tester/.local/bin/uv\nbwrap=/usr/bin/bwrap\nparaview=\nprime=ready\npicad=ready\nknowledge=4\ncadpython=missing\nbundle=ready\npython=/usr/bin/python3\n",
+      stderr: "",
+    });
+
+    const status = await bridge.check({
+      distro: "Ubuntu", projectPath: "/workspace", piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent",
+      provider: "openai-codex", model: "gpt-5.6-sol", thinking: "minimal", permission: "workspace", reviewer: { mode: "inherit" },
+    });
+
+    expect(status.state).toBe("error");
+    expect(status.checks.find((check) => check.id === "picad")).toMatchObject({
+      status: "missing",
+      detail: "Managed CAD Python needs repair",
+    });
   });
 
   it("installs the optional torch-fem component as WSL root and verifies it", async () => {
@@ -127,6 +149,15 @@ describe("bundled engineering knowledge", () => {
     expect(probe.command).toContain("mechanical-design/references/design-reasoning.md");
     expect(probe.command).toContain("assembly-design/references/interfaces.md");
     expect(probe.command).toContain("design-for-manufacturing/references/geometry-rules.md");
+  });
+});
+
+describe("managed CAD Python", () => {
+  it("checks the actual managed interpreter and required imports", () => {
+    const probe = managedPythonProbe("/runtime/pi-cad");
+    expect(probe).toContain("/runtime/pi-cad/python/.venv/bin/python");
+    expect(probe).toContain("import build123d, cadctl");
+    expect(probe).toContain("cadpython=missing");
   });
 });
 
@@ -240,6 +271,7 @@ describe("WSL first-install status", () => {
     await expect(bridge.install(settings)).resolves.toMatchObject({ state: "idle" });
     expect(exec).toHaveBeenCalled();
     expect(pipe.mock.calls.some(([, input]) => input.includes("setup:python"))).toBe(true);
+    expect(pipe.mock.calls.some(([, input]) => input.includes("! test -x python/.venv/bin/python") && input.includes("rm -rf python/.venv"))).toBe(true);
   });
 
   it("streams shell programs over stdin instead of placing them on the Windows command line", async () => {

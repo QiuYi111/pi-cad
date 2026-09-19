@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
-import { engineeringKnowledgeProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
+import { engineeringKnowledgeProbe, managedPythonProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
 
 export { runtimeChecksReady } from "./runtime-bridge.js";
 
@@ -297,6 +297,7 @@ export class WslBridge implements RuntimeBridge {
       `test -f ${JSON.stringify(paths.primeAgentRepo)}/prime-agent.sh && printf 'prime=ready\\n' || printf 'prime=missing\\n'`,
       `test -f ${JSON.stringify(paths.piCadRepo)}/package.json && printf 'picad=ready\\n' || printf 'picad=missing\\n'`,
       knowledge.command,
+      managedPythonProbe(paths.piCadRepo),
       usesBundledRuntime
         ? `cmp -s ${JSON.stringify(bundledSource)}/manifest.json ${JSON.stringify(installedRoot)}/manifest.json && printf 'bundle=ready\\n' || printf 'bundle=missing\\n'`
         : "printf 'bundle=ready\\n'",
@@ -313,8 +314,9 @@ export class WslBridge implements RuntimeBridge {
     const bundleReady = values.bundle === "ready";
     add("prime", "Prime Agent", values.prime === "ready" && bundleReady, bundleReady ? paths.primeAgentRepo : "Bundled runtime update available");
     const knowledgeReady = values.knowledge === String(knowledge.count);
-    add("picad", "Reify runtime", values.picad === "ready" && knowledgeReady && bundleReady,
-      !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
+    const managedPythonReady = values.cadpython === "ready";
+    add("picad", "Reify runtime", values.picad === "ready" && knowledgeReady && managedPythonReady && bundleReady,
+      !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : !managedPythonReady ? "Managed CAD Python needs repair" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
     const ready = runtimeChecksReady(checks);
     return { state: ready ? "idle" : "error", checks, message: ready ? undefined : "Install the missing runtime dependencies." };
   }
@@ -411,7 +413,7 @@ export class WslBridge implements RuntimeBridge {
       throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Reify or select development checkouts in Settings.`);
     }
     await runStep("Installing the core CAD packages…", 0.78,
-      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000));
+      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif test -d python/.venv && ! test -x python/.venv/bin/python; then rm -rf python/.venv; fi\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000));
     await runStep("Preparing Blender system libraries…", 0.84, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "DEBIAN_FRONTEND=noninteractive apt-get install -y libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
       encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
     }).then(() => undefined));
