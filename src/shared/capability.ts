@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
 
 import type {
   BuildPayload,
@@ -313,10 +313,10 @@ export async function scanSections(
 }
 
 /**
- * Programmable read-only B-Rep probe. The code is written to a
- * harness-owned temporary file (the probe CLI takes no inline code), the
- * subject artifact path is already resolved by the caller from run state —
- * never from agent input — and the temporary file is removed afterwards.
+ * Programmable disposable B-Rep experiment. Copy the bound STEP and code to
+ * an OS temporary directory before invoking cadctl. The CLI makes its own
+ * analysis copy; neither process receives the official project path as its
+ * working directory or subject argument. No candidate is promoted here.
  * Envelope inputHashes bind both the artifact and the script.
  */
 export async function probePython(
@@ -325,17 +325,18 @@ export async function probePython(
   code: string,
   timeoutMs = 30_000,
 ): Promise<CadEventEnvelope> {
-  const tmpDir = join(harnessStorageRoot(cwd), "tmp");
-  mkdirSync(tmpDir, { recursive: true });
-  const codeFile = join(tmpDir, `probe-${randomUUID().slice(0, 8)}.py`);
-  writeFileSync(codeFile, code, "utf-8");
+  const tmpDir = mkdtempSync(join(tmpdir(), "pi-cad-probe-"));
+  const subject = join(tmpDir, "subject.step");
+  const codeFile = join(tmpDir, "probe.py");
   try {
+    copyFileSync(resolve(cwd, artifact), subject);
+    writeFileSync(codeFile, code, "utf-8");
     return await runCadctl(
-      ["probe", "--artifact", resolve(cwd, artifact), "--code-file", codeFile],
-      { cwd, timeoutMs },
+      ["probe", "--artifact", subject, "--code-file", codeFile],
+      { cwd: tmpDir, timeoutMs },
     );
   } finally {
-    rmSync(codeFile, { force: true });
+    rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 

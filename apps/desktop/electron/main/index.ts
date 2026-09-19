@@ -3,9 +3,10 @@ import { electronApp, is, optimizer } from "@electron-toolkit/utils";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AppSettings, ModelParameterValue, ReleaseResult, RuntimeStatus, WorkflowDocument } from "../../src/shared/contracts.js";
+import type { AppSettings, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, ThinkingLevel, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
@@ -17,6 +18,7 @@ import { ViewerBackend } from "./viewer.js";
 import { TraceStore } from "./traces.js";
 import { DemoRuntime } from "./demo-runtime.js";
 import { AuthController } from "./auth.js";
+import { PrimeConfigService } from "./prime-config.js";
 import { ParaViewBackend } from "./paraview.js";
 import { BlenderBackend } from "./blender.js";
 import { HumanApprovalStore } from "./approvals.js";
@@ -31,6 +33,8 @@ const settingsStore = new SettingsStore();
 const approvalStore = new HumanApprovalStore(join(app.getPath("userData"), "human-approvals"));
 let runtime: PrimeRpc | DemoRuntime | null = null;
 let authController: AuthController | null = null;
+let primeConfig: PrimeConfigService | null = null;
+let primeConfigBridge: RuntimeBridge | null = null;
 let runtimeBridge: RuntimeBridge | null = null;
 let runtimeBridgeKey = "";
 let paraView: ParaViewBackend | null = null;
@@ -39,10 +43,25 @@ let viewer: ViewerBackend | null = null;
 let viewerBridge: RuntimeBridge | null = null;
 let blender: BlenderBackend | null = null;
 let blenderBridge: RuntimeBridge | null = null;
+let managedRuntimeBootstrap: Promise<void> = Promise.resolve();
 const trustedReleases = new Map<string, ReleaseResult>();
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
 const desktopE2EOpenStep = process.env.PI_CAD_DESKTOP_E2E_OPEN_STEP
   || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-open-step="))?.slice("--pi-cad-e2e-open-step=".length);
+const desktopE2ERejectThinking = Number(
+  process.env.PI_CAD_DESKTOP_E2E_REJECT_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-reject-thinking="))?.slice("--pi-cad-e2e-reject-thinking=".length)
+  || 0,
+);
+const desktopE2ESlowThinking = Number(
+  process.env.PI_CAD_DESKTOP_E2E_SLOW_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-slow-thinking="))?.slice("--pi-cad-e2e-slow-thinking=".length)
+  || 0,
+);
+const desktopE2ERevertThinking = (
+  process.env.PI_CAD_DESKTOP_E2E_REVERT_THINKING
+  || process.argv.find((argument) => argument.startsWith("--pi-cad-e2e-revert-thinking="))?.slice("--pi-cad-e2e-revert-thinking=".length)
+) as ThinkingLevel | undefined;
 const testOpenSteps = process.argv
   .filter((argument) => argument.startsWith("--pi-cad-test-open-step="))
   .map((argument) => argument.slice("--pi-cad-test-open-step=".length));
@@ -54,8 +73,48 @@ const demoRuntimeStatus: RuntimeStatus = { state: "idle", checks: [
   ["uv", "uv"], ["bwrap", "Bubblewrap"], ["paraview", "ParaView"], ["prime", "Prime Agent"], ["picad", "Reify runtime"],
 ].map(([id, label]) => ({ id: id as RuntimeStatus["checks"][number]["id"], label, status: "ready", detail: "Bundled", installable: false })) };
 
+function execFilePromise(file: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => execFile(file, args, { windowsHide: true }, (error) => error ? reject(error) : resolve()));
+}
+
+async function registerSetupResume() {
+  if (!app.isPackaged || process.platform !== "win32") return;
+  const command = `\"${process.execPath}\" --resume-setup`;
+  await execFilePromise("reg.exe", ["ADD", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", "/v", "ReifySetupResume", "/t", "REG_SZ", "/d", command, "/f"]);
+}
+
+async function setupResumeRegistered(): Promise<boolean> {
+  if (!app.isPackaged || process.platform !== "win32") return false;
+  return execFilePromise("reg.exe", ["QUERY", "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\RunOnce", "/v", "ReifySetupResume"])
+    .then(() => true, () => false);
+}
+
 function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
+}
+
+async function syncManagedRuntime() {
+  if (desktopE2E) return;
+  const settings = await settingsStore.get();
+  const currentBridge = await bridge();
+  const status = await currentBridge.check(settings);
+  const wslReady = status.checks.find((item) => item.id === "wsl")?.status === "ready";
+  const managedRuntimeStale = status.checks.some((item) => (item.id === "prime" || item.id === "picad") && item.status !== "ready");
+  if (wslReady && managedRuntimeStale && currentBridge.bundledRuntimePath) {
+    await new Promise<void>((resolve, reject) => {
+      let filesReady = false;
+      void currentBridge.install(settings, (value) => {
+        send(IPC.runtimeStatus, value);
+        if (!filesReady && (value.progress ?? 0) >= 0.78) {
+          filesReady = true;
+          resolve();
+        }
+      }).then(() => resolve(), (error) => {
+        if (filesReady) send(IPC.runtimeEvent, { type: "runtime_diagnostic", message: `Managed dependency update failed: ${String(error)}` });
+        else reject(error);
+      });
+    });
+  }
 }
 
 function createWindow() {
@@ -111,7 +170,13 @@ async function bridge(): Promise<RuntimeBridge> {
 
 async function ensureRuntime() {
   if (runtime) return runtime;
-  runtime = desktopE2E ? new DemoRuntime() : new PrimeRpc(await bridge());
+  runtime = desktopE2E
+    ? new DemoRuntime({
+      rejectThinkingAttempts: Number.isFinite(desktopE2ERejectThinking) ? desktopE2ERejectThinking : 0,
+      slowThinkingMs: Number.isFinite(desktopE2ESlowThinking) ? desktopE2ESlowThinking : 0,
+      revertThinkingLevel: desktopE2ERevertThinking,
+    })
+    : new PrimeRpc(await bridge());
   runtime.on("event", (event) => send(IPC.runtimeEvent, event));
   runtime.on("status", (status) => send(IPC.runtimeStatus, status));
   runtime.on("ui-request", (request) => send(IPC.runtimeUiRequest, request));
@@ -128,6 +193,15 @@ async function ensureAuth() {
   });
   authController.on("status", (status) => send(IPC.authStatus, status));
   return authController;
+}
+
+async function ensurePrimeConfig() {
+  const current = await bridge();
+  if (!primeConfig || primeConfigBridge !== current) {
+    primeConfig = new PrimeConfigService(current);
+    primeConfigBridge = current;
+  }
+  return primeConfig;
 }
 
 async function ensureParaView() {
@@ -189,7 +263,8 @@ function registerIpc() {
   const demo = desktopE2E;
   const demoParameterValues: Record<string, ModelParameterValue> = { width: 40, depth: 24, height: 12 };
   let demoEvaluation: { quality: number; difficulty: number; feedback?: string } | undefined;
-  const demoWorkflow: WorkflowDocument = { id: "mechanical.design", version: "1.0.0", description: "Design a reviewed mechanical product", phases: ["grilling", "concept", "modify", "final_review", "done"].map((id, index) => ({ id, title: id.replaceAll("_", " "), purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: index === 1 ? ["image.generate", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.design\nversion: 1.0.0\nworkflow:\n  phases:\n    grilling: {}\n", sourcePath: "/runtime/workflow-packages/mechanical/design.yaml" };
+  const demoWorkflow: WorkflowDocument = { id: "mechanical.default", version: "2.0.0", description: "Plan, build, and review an engineering result", editable: true, phases: ["plan", "cook", "final", "done"].map((id, index) => ({ id, title: id, purpose: `Complete ${id}`, status: index < 1 ? "complete" : index === 1 ? "active" : "pending", transitions: [], capabilities: id === "plan" ? ["codex_generate_image", "workspace.commit"] : [], obligations: [] })), raw: "id: mechanical.default\nversion: 2.0.0\nworkflow:\n  phases:\n    plan: {}\n", sourcePath: "/home/demo/.pi-cad/workflows/mechanical-default.yaml" };
+  const demoNakedWorkflow: WorkflowDocument = { id: "mechanical.naked", version: "1.0.0", description: "Full tools with no prescribed workflow", phases: [{ id: "work", title: "work", purpose: "Complete the engineering task", status: "active", transitions: [], capabilities: ["cad_build_step", "cad_commit", "cad_simulate", "codex_generate_image"], obligations: [] }], raw: "", sourcePath: "/runtime/workflow-packages/mechanical/naked.yaml" };
   ipcMain.handle(IPC.settingsGet, () => settingsStore.get());
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
   ipcMain.handle(IPC.settingsChooseProject, async () => {
@@ -209,11 +284,25 @@ function registerIpc() {
   });
   ipcMain.handle(IPC.runtimeCheck, async () => {
     if (desktopE2E) return demoRuntimeStatus;
+    if (await setupResumeRegistered()) return {
+      state: "action-required", checks: [], action: "restart-windows", progress: 0.25,
+      message: "Windows 已准备好 WSL。重启后 Reify 会自动继续安装。",
+    } satisfies RuntimeStatus;
     return (await bridge()).check(await settingsStore.get());
   });
   ipcMain.handle(IPC.runtimeInstallWsl, async () => {
     if (desktopE2E) return demoRuntimeStatus;
-    return (await bridge()).installWsl((status) => send(IPC.runtimeStatus, status));
+    const status = await (await bridge()).installWsl((value) => send(IPC.runtimeStatus, value));
+    if (status.action === "restart-windows") {
+      await registerSetupResume();
+      mainWindow?.webContents.reload();
+    }
+    return status;
+  });
+  ipcMain.handle(IPC.runtimeRestartWindows, async () => {
+    if (desktopE2E) return;
+    await registerSetupResume();
+    await execFilePromise("shutdown.exe", ["/r", "/t", "3", "/c", "Reify 将在重启后继续准备工程环境。"]);
   });
   ipcMain.handle(IPC.runtimeInstall, async () => {
     const current = await settingsStore.get();
@@ -233,7 +322,8 @@ function registerIpc() {
   ipcMain.handle(IPC.runtimePrompt, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).prompt(message, images));
   ipcMain.handle(IPC.runtimeSteer, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).steer(message, images));
   ipcMain.handle(IPC.runtimeNewSession, async () => (await ensureRuntime()).newSession());
-  ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => (await ensureRuntime()).switchSession(path));
+  ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => (await ensureRuntime()).switchSession(path, await settingsStore.get()));
+  ipcMain.handle(IPC.runtimeSetSessionName, async (_event, name: string) => (await ensureRuntime()).setSessionName(name));
   ipcMain.handle(IPC.runtimeAbort, async () => (await ensureRuntime()).abort());
   ipcMain.handle(IPC.runtimeModels, async () => (await ensureRuntime()).getModels());
   ipcMain.handle(IPC.runtimeSetModel, async (_event, provider: string, model: string) => (await ensureRuntime()).setModel(provider, model));
@@ -254,12 +344,35 @@ function registerIpc() {
     }));
   });
   ipcMain.handle(IPC.runtimeUiResponse, async (_event, id: string, response: Record<string, unknown>) => (await ensureRuntime()).respondToUi(id, response));
-  ipcMain.handle(IPC.authStatusGet, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).status(await settingsStore.get()));
-  ipcMain.handle(IPC.authLogin, async () => authE2E ? { provider: "openai-codex", state: "signed-in", message: "ChatGPT connected" } : (await ensureAuth()).login(await settingsStore.get()));
+  const demoCatalog = () => ({ providers: [
+    { id: "openai-codex", name: "OpenAI Codex", oauth: true, auth: { provider: "openai-codex", state: "signed-in", configured: true, source: "stored", message: "ChatGPT connected" }, models: [
+      { provider: "openai-codex", id: "gpt-5.6-sol", name: "GPT-5.6 Sol", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh", "max"], input: ["text", "image"], available: true },
+      { provider: "openai-codex", id: "gpt-5.6-luna", name: "GPT-5.6 Luna", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high", "xhigh", "max"], input: ["text", "image"], available: true },
+    ] },
+    { id: "zai", name: "ZAI", oauth: false, auth: { provider: "zai", state: "signed-out", configured: false, message: "Not configured" }, models: [
+      { provider: "zai", id: "glm-5.3", name: "GLM-5.3", reasoning: true, thinkingLevels: ["off", "minimal", "low", "medium", "high"], input: ["text"], available: false },
+    ] },
+  ], favorites: [{ provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" }, { provider: "openai-codex", modelId: "gpt-5.6-luna", thinkingLevel: "low" }], defaults: { provider: "openai-codex", modelId: "gpt-5.6-sol", thinkingLevel: "minimal" } });
+  ipcMain.handle(IPC.authCatalog, async () => {
+    if (authE2E) return demoCatalog();
+    await managedRuntimeBootstrap;
+    return (await ensurePrimeConfig()).catalog(await settingsStore.get());
+  });
+  ipcMain.handle(IPC.authStatusGet, async (_event, provider: string) => authE2E ? demoCatalog().providers.find((item) => item.id === provider)?.auth : (await ensurePrimeConfig()).status(await settingsStore.get(), provider));
+  ipcMain.handle(IPC.authSetApiKey, async (_event, provider: string, key: string) => authE2E ? { provider, state: "signed-in", configured: true, source: "stored", message: "Connected" } : (await ensurePrimeConfig()).setApiKey(await settingsStore.get(), provider, key));
+  ipcMain.handle(IPC.authLogin, async (_event, provider: string) => authE2E ? { provider, state: "signed-in", configured: true, source: "stored", message: "Connected" } : (await ensureAuth()).login(await settingsStore.get(), provider));
   ipcMain.handle(IPC.authManualCode, async (_event, value: string) => (await ensureAuth()).submitManualCode(value));
   ipcMain.handle(IPC.authCancel, async () => (await ensureAuth()).cancel());
-  ipcMain.handle(IPC.authSignOut, async () => (await ensureAuth()).signOut(await settingsStore.get()));
-  ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
+  ipcMain.handle(IPC.authSignOut, async (_event, provider: string) => authE2E ? { provider, state: "signed-out", configured: false, message: "Not configured" } : (await ensurePrimeConfig()).logout(await settingsStore.get(), provider));
+  ipcMain.handle(IPC.authSaveFavorites, async (_event, models: ModelFavorite[]) => authE2E ? { favorites: models } : (await ensurePrimeConfig()).saveFavorites(await settingsStore.get(), models));
+  ipcMain.handle(IPC.authSaveDefault, async (_event, value: ModelSelection) => {
+    if (!authE2E) await (await ensurePrimeConfig()).saveDefault(await settingsStore.get(), value);
+    await settingsStore.update({ provider: value.provider, model: value.modelId, thinking: value.thinkingLevel });
+    return value;
+  });
+  ipcMain.handle(IPC.authReadModelsConfig, async () => authE2E ? { text: "{\n  \"providers\": {}\n}\n" } : (await ensurePrimeConfig()).readModelsConfig(await settingsStore.get()));
+  ipcMain.handle(IPC.authWriteModelsConfig, async (_event, text: string) => authE2E ? { text } : (await ensurePrimeConfig()).writeModelsConfig(await settingsStore.get(), text));
+  ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow, demoNakedWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.workflowCurrent, async () => demo ? {
     workflowId: demoWorkflow.id, workflowVersion: demoWorkflow.version, workflowHash: "demo", runId: "e2e", phase: "concept", status: "active",
     phaseHistory: ["grilling", "spec", "concept"], phases: demoWorkflow.phases, authoritative: false,
@@ -392,6 +505,9 @@ app.whenReady().then(() => {
   protocol.registerFileProtocol("pi-cad", (_request, callback) => callback({ error: -6 }));
   registerIpc();
   createWindow();
+  managedRuntimeBootstrap = syncManagedRuntime().catch((error) => {
+    send(IPC.runtimeEvent, { type: "runtime_diagnostic", message: `Managed runtime update failed: ${String(error)}` });
+  });
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 

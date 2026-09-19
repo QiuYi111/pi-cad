@@ -96,7 +96,7 @@ const pi = {
 
     // read_only blocks ALL raw bash — pattern-based detection is incomplete
     // (python -c "open(...,'w')" matches no redirect rule), so the fence is
-    // absolute; read-only computation goes through cad_probe preset=python.
+    // absolute; disposable analysis goes through cad_probe preset=python.
     const readOnlyBenignBashBlocked = (await toolCall(
       { toolName: "bash", input: { command: "python3 -c \"print('hi')\"" } },
       { cwd },

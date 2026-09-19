@@ -114,7 +114,7 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
   const referenceQuickCheck = (agent = false) => {
     if (!quickCheck || !quickSummary) return;
     const target = targetScope === "current" || targetScope === "head" ? "current model" : `historical ${targetScope} artifact`;
-    onReferencePart?.(`${agent ? "Run workflow mechanical.quick-check and verify this read-only result" : "Reference this measured result"}: ${quickSummary}. Target the ${target} at ${quickCheck.source} with SHA-256 ${quickCheck.sha256}. Do not modify the artifact; verify its hash is unchanged.`);
+    onReferencePart?.(`${agent ? "Inspect and verify this read-only result in the current engineering task" : "Reference this measured result"}: ${quickSummary}. Target the ${target} at ${quickCheck.source} with SHA-256 ${quickCheck.sha256}. Do not modify the artifact; verify its hash is unchanged.`);
   };
 
   return <section className="cad-viewer" data-testid="cad-viewer">

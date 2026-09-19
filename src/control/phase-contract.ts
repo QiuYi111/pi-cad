@@ -19,7 +19,7 @@ export type Capability =
   // observation family
   | "observe" // unified cad_probe + historical observation recall
   | "observe_interference" // pairwise solid interference facts
-  | "observe_programmable" // read-only programmable B-Rep computation
+  | "observe_programmable" // disposable programmable B-Rep experiment
   // model family
   | "model_build" // execute geometry source
   | "deliverable" // export / drawing / render artifacts

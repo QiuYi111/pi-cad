@@ -64,7 +64,7 @@ if (Boolean(REVIEWER_PROVIDER) !== Boolean(REVIEWER_MODEL)) {
 const HEADLESS_AFTER_GRILLING = process.env.PI_CAD_HEADLESS_AFTER_GRILLING ?? "build";
 if (!["build", "exit"].includes(HEADLESS_AFTER_GRILLING)) throw new Error("PI_CAD_HEADLESS_AFTER_GRILLING must be build or exit");
 const WORKFLOW = process.env.PI_CAD_WORKFLOW
-  ?? (HEADLESS_AFTER_GRILLING === "exit" ? "mechanical.benchmark-triage" : "mechanical.benchmark");
+  ?? "mechanical.default";
 const NORMALIZE_PHYSICAL_UNITS = process.env.PI_CAD_NORMALIZE_PHYSICAL_UNITS !== "0";
 const TIMEOUT_MS = Number(process.env.PI_CAD_TIMEOUT_MS ?? 1_800_000);
 const RETRIES = Number(process.env.PI_CAD_RETRIES ?? 1);

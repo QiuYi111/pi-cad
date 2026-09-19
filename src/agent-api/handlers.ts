@@ -369,6 +369,8 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
       return jsonValue({
         preset,
         value,
+        ...(preset === "python" && typeof details?.envelope?.payload?.stdout === "string" && details.envelope.payload.stdout
+          ? { stdout: details.envelope.payload.stdout } : {}),
         ...(images.length ? { images } : {}),
         artifactHash: details.artifactHash ?? details.envelope?.inputHashes?.artifact,
         scriptHash: details.envelope?.inputHashes?.script,

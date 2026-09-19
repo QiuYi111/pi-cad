@@ -44,3 +44,24 @@ test("handwritten prompts, routers, and READMEs do not duplicate exact public to
   const paths = [join(root, "README.md"), join(root, "README.zh-CN.md"), ...files(join(root, "src", "prompts")), ...files(skills).filter((path) => path.endsWith("SKILL.md"))];
   for (const path of paths) assert.doesNotMatch(readFileSync(path, "utf-8"), /\bcad_[a-z][a-z_]*/g, `exact tool catalog leaked into handwritten router: ${path}`);
 });
+
+test("CAD skill routes simulation to managed backends before Python discovery", () => {
+  for (const path of [join(skills, "cad", "SKILL.md"), join(skills, "pi-cad", "SKILL.md")]) {
+    const text = readFileSync(path, "utf-8");
+    for (const backend of ["OpenFOAM 14", "SU2 8.5.0", "torch-fem 0.9"]) assert.match(text, new RegExp(backend.replace(".", "\\.")));
+    assert.match(text, /cad\.workflow\.current\(\)/);
+    assert.match(text, /Python (?:packages|imports).*(?:not|never).*solver (?:catalog|availability)/i);
+  }
+});
+
+test("Blender product rendering uses official MCP and requires visual preview review", () => {
+  const skill = readFileSync(join(skills, "blender-product-rendering", "SKILL.md"), "utf-8");
+  assert.match(skill, /mcp\.list_tools\("blender"\)/);
+  assert.match(skill, /mcp\.call_tool\("blender"/);
+  assert.match(skill, /blender-bridge/);
+  assert.match(skill, /PI_CAD_PYTHON/);
+  assert.match(skill, /managed Blender 5\.1 runtime/i);
+  assert.match(skill, /low-resolution preview/i);
+  assert.match(skill, /Animation requires user intent/i);
+  assert.doesNotMatch(skill, /subprocess\.(?:run|Popen)\(\[?["']blender["']/);
+});

@@ -1,10 +1,40 @@
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
+/** Prime's level order, lowest first. */
+export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Prime reports state over JSON, so a level has to be checked before it is trusted. */
+export function asThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  return typeof value === "string" && (THINKING_LEVELS as readonly string[]).includes(value)
+    ? value as ThinkingLevel
+    : undefined;
+}
+
 export interface ModelChoice {
   provider: string;
   id: string;
   name: string;
   reasoning?: boolean;
+  thinkingLevels?: ThinkingLevel[];
+  input?: string[];
+  contextWindow?: number;
+  maxTokens?: number;
+  available?: boolean;
+}
+
+export interface ModelFavorite { provider: string; modelId: string; thinkingLevel?: ThinkingLevel; pattern?: string }
+export interface ModelSelection { provider: string; modelId: string; thinkingLevel: ThinkingLevel }
+export interface ProviderChoice {
+  id: string;
+  name: string;
+  oauth: boolean;
+  auth: AuthStatus;
+  models: ModelChoice[];
+}
+export interface ModelCatalog {
+  providers: ProviderChoice[];
+  favorites: ModelFavorite[];
+  defaults: Partial<ModelSelection>;
 }
 
 export interface AppSettings {
@@ -29,22 +59,116 @@ export interface DependencyCheck {
   installable: boolean;
 }
 
+export type RuntimeState = "idle" | "checking" | "installing" | "action-required" | "starting" | "ready" | "streaming" | "stopping" | "error";
+
+/**
+ * Fine-grained phase of the Prime turn. `state` stays the coarse lifecycle
+ * (starting/ready/streaming/stopping/error); `phase` says what the turn is
+ * actually doing, including terminal outcomes, so the renderer never has to
+ * infer it from Prime events.
+ */
+export type RuntimePhase =
+  | "ready"
+  | "starting_turn"
+  | "waiting_provider"
+  | "thinking"
+  | "responding"
+  | "running_tool"
+  | "compacting"
+  | "retrying"
+  | "provider_wait"
+  | "stalled"
+  | "stopping"
+  | "aborted"
+  | "reasoning_limit"
+  | "provider_timeout"
+  | "rpc_timeout"
+  | "failed";
+
+export type RuntimeTerminalReason =
+  | "completed"
+  | "aborted"
+  | "reasoning_limit"
+  | "provider_timeout"
+  | "provider_error"
+  | "rpc_timeout"
+  | "rpc_rejected"
+  | "process_exit"
+  | "forced_stop";
+
+export interface RuntimeRetry {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason?: string;
+  message?: string;
+}
+
+export interface RuntimeTurn {
+  id: string;
+  kind: "prompt" | "steer";
+  startedAt: number;
+  phaseStartedAt: number;
+  lastEventAt: number;
+  /** Newest provider/model stream event; any runtime event moves `lastEventAt`. */
+  lastProviderEventAt?: number;
+  retryAttempt: number;
+  reason?: string;
+  error?: string;
+  phase: RuntimePhase;
+  terminalReason?: RuntimeTerminalReason;
+  finishedAt?: number;
+}
+
 export interface RuntimeStatus {
-  state: "idle" | "checking" | "installing" | "action-required" | "starting" | "ready" | "streaming" | "error";
+  state: RuntimeState;
+  /** Current or last turn phase. */
+  phase?: RuntimePhase;
+  /** Short machine-readable detail for `phase`, e.g. `rate_limit`, `compacting`. */
+  reason?: string;
+  /** Set once the last turn reached a terminal outcome. */
+  terminalReason?: RuntimeTerminalReason;
+  /** Current turn record; kept after the turn ends until the next turn starts. */
+  turn?: RuntimeTurn;
+  /** Active auto-retry attempt while `phase === "retrying"`. */
+  retry?: RuntimeRetry;
+  lastEventAt?: number;
+  /** Newest provider/model stream event; the stall watchdog anchors here. */
+  lastProviderEventAt?: number;
   checks: DependencyCheck[];
   message?: string;
   progress?: number;
   elapsedSeconds?: number;
-  action?: "restart-windows" | "initialize-ubuntu" | "retry";
+  action?: "restart-windows" | "install-ubuntu" | "initialize-ubuntu" | "retry";
   sessionId?: string;
+  /**
+   * Level the live Prime session holds, as Prime itself reported it.
+   *
+   * A session switch can restore a session that runs a different level than the
+   * saved setting, so the renderer reconciles against this instead of assuming
+   * the level it last sent is still in force.
+   */
+  thinking?: ThinkingLevel;
+}
+
+/** True while a turn is running, including the stop handshake. */
+export function runtimeTurnActive(status: Pick<RuntimeStatus, "state">): boolean {
+  return status.state === "streaming" || status.state === "stopping";
+}
+
+/** True once Prime has been started and has not exited. */
+export function runtimeStarted(status: Pick<RuntimeStatus, "state">): boolean {
+  return status.state === "starting" || runtimeTurnActive(status) || status.state === "ready";
 }
 export interface InstallationInfo { version: string; platform: "windows" | "linux" | "macos"; arch: string; channel: "nsis" | "portable" | "deb" | "appimage" | "dmg" | "development"; packaged: boolean; userDataPath: string; projectPath: string; updateMode: "manual"; updateInstructions: string; signature: "runtime-verified" | "release-signature-required" }
 
 export interface AuthStatus {
-  provider: "openai-codex";
+  provider: string;
   state: "checking" | "signed-out" | "waiting" | "signed-in" | "error";
   message?: string;
   expiresAt?: number;
+  configured?: boolean;
+  source?: "stored" | "runtime" | "environment" | "prime_cli" | "fallback" | "models_json_key" | "models_json_command" | "stale";
   input?: { kind: "text"; placeholder?: string } | { kind: "select"; options: Array<{ id: string; label: string }> };
 }
 
@@ -117,12 +241,18 @@ export interface ChatMessage {
   text: string;
   createdAt: number;
   activity?: CadActivity;
-  stream?: {
-    state: "waiting" | "thinking" | "responding" | "complete" | "aborted" | "error";
-    startedAt: number;
-    firstTokenAt?: number;
-    finishedAt?: number;
-  };
+  stream?: ChatStream;
+}
+
+/**
+ * Marks the assistant row that belongs to a Prime turn and when its text was
+ * received. It deliberately carries no phase: the runtime owns the phase, the
+ * renderer only displays it.
+ */
+export interface ChatStream {
+  startedAt: number;
+  firstTokenAt?: number;
+  finishedAt?: number;
 }
 
 export interface TraceSummary {
@@ -325,6 +455,7 @@ export interface DesktopApi {
   runtime: {
     check(): Promise<RuntimeStatus>;
     installWsl(): Promise<RuntimeStatus>;
+    restartWindows(): Promise<void>;
     install(): Promise<RuntimeStatus>;
     checkSimulationComponent(): Promise<SimulationComponentStatus>;
     installSimulationComponent(): Promise<SimulationComponentStatus>;
@@ -335,6 +466,7 @@ export interface DesktopApi {
     steer(message: string, images?: Array<{ data: string; mimeType: string }>): Promise<void>;
     newSession(): Promise<unknown[]>;
     switchSession(path: string): Promise<unknown[]>;
+    setSessionName(name: string): Promise<void>;
     abort(): Promise<void>;
     getModels(): Promise<ModelChoice[]>;
     setModel(provider: string, model: string): Promise<void>;
@@ -346,11 +478,17 @@ export interface DesktopApi {
     onUiRequest(listener: (request: ExtensionUiRequest) => void): () => void;
   };
   auth: {
-    status(): Promise<AuthStatus>;
-    login(): Promise<AuthStatus>;
+    catalog(): Promise<ModelCatalog>;
+    status(provider: string): Promise<AuthStatus>;
+    setApiKey(provider: string, key: string): Promise<AuthStatus>;
+    login(provider: string): Promise<AuthStatus>;
     submitManualCode(value: string): Promise<void>;
     cancel(): Promise<AuthStatus>;
-    signOut(): Promise<AuthStatus>;
+    signOut(provider: string): Promise<AuthStatus>;
+    saveFavorites(models: ModelFavorite[]): Promise<{ favorites: ModelFavorite[] }>;
+    saveDefault(value: ModelSelection): Promise<ModelSelection>;
+    readModelsConfig(): Promise<{ text: string }>;
+    writeModelsConfig(text: string): Promise<{ text: string }>;
     onStatus(listener: (status: AuthStatus) => void): () => void;
   };
   workflow: {
@@ -403,6 +541,7 @@ export const IPC = {
   settingsCreateProject: "settings:create-project",
   runtimeCheck: "runtime:check",
   runtimeInstallWsl: "runtime:install-wsl",
+  runtimeRestartWindows: "runtime:restart-windows",
   runtimeInstall: "runtime:install",
   runtimeCheckSimulation: "runtime:check-simulation",
   runtimeInstallSimulation: "runtime:install-simulation",
@@ -413,6 +552,7 @@ export const IPC = {
   runtimeSteer: "runtime:steer",
   runtimeNewSession: "runtime:new-session",
   runtimeSwitchSession: "runtime:switch-session",
+  runtimeSetSessionName: "runtime:set-session-name",
   runtimeAbort: "runtime:abort",
   runtimeModels: "runtime:models",
   runtimeSetModel: "runtime:set-model",
@@ -423,10 +563,16 @@ export const IPC = {
   runtimeStatus: "runtime:status",
   runtimeUiRequest: "runtime:ui-request",
   authStatusGet: "auth:status-get",
+  authCatalog: "auth:catalog",
+  authSetApiKey: "auth:set-api-key",
   authLogin: "auth:login",
   authManualCode: "auth:manual-code",
   authCancel: "auth:cancel",
   authSignOut: "auth:sign-out",
+  authSaveFavorites: "auth:save-favorites",
+  authSaveDefault: "auth:save-default",
+  authReadModelsConfig: "auth:read-models-config",
+  authWriteModelsConfig: "auth:write-models-config",
   authStatus: "auth:status",
   workflowList: "workflow:list",
   workflowCurrent: "workflow:current",

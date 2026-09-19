@@ -1,6 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
-import { makeEphemeralPhaseCardMessage, PHASE_CARD_CUSTOM_TYPE } from "./phase-card-message.ts";
+import { makePhaseContractMessage, PHASE_CARD_CUSTOM_TYPE } from "./phase-card-message.ts";
 import { requestAuthority } from "./sidecar-client.ts";
 import { registerExperienceTools } from "./experience-tools.ts";
 
@@ -14,6 +16,7 @@ interface SidecarPhaseCard {
 }
 
 const REVIEW_COMPLETED_CUSTOM_TYPE = "pi-cad.review-completed";
+const CONCEPT_GROUNDED_CUSTOM_TYPE = "pi-cad.concept-grounded";
 
 interface ReviewResult {
   verdict: string;
@@ -27,6 +30,18 @@ interface ReviewHandle {
   subjectCommit: string;
   status: string;
   result?: ReviewResult;
+}
+
+interface CompletionGate {
+  complete: boolean;
+  reason: string;
+  runId?: string;
+}
+
+/** Keep execution and learning separate while an engineering run is active. */
+export function refineGateDecision(gate: CompletionGate | null): { skip: true } | undefined {
+  if (!gate?.runId || gate.complete) return undefined;
+  return { skip: true };
 }
 
 /** A late watcher must not wake the author for a superseded review. */
@@ -65,18 +80,33 @@ export function persistedReviewNotificationIds(messages: any[]): string[] {
   return [...ids];
 }
 
+function transcriptMessages(ctx: any): any[] {
+  try {
+    return (ctx.sessionManager?.getBranch?.() ?? []).map((entry: any) => entry?.message ?? entry);
+  } catch {
+    return [];
+  }
+}
+
 function originalUserRequest(messages: any[]): string | null {
   const message = messages.find((item) => item?.role === "user");
   if (!message) return null;
   if (typeof message.content === "string") return message.content.trim() || null;
   if (!Array.isArray(message.content)) return null;
-  const text = message.content.filter((item: any) => item?.type === "text" && typeof item.text === "string").map((item: any) => item.text).join("\n").trim();
-  return text || null;
+  return message.content
+    .filter((item: any) => item?.type === "text" && typeof item.text === "string")
+    .map((item: any) => item.text)
+    .join("\n")
+    .trim() || null;
 }
 
-/** The entire Prime integration: inject one current, non-persisted card per call. */
+/** Append immutable phase contracts to the durable transcript; never rewrite provider history. */
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
   registerExperienceTools(pi);
+  pi.on("session_before_refine", async () => {
+    const gate = await requestAuthority<CompletionGate>({ op: "completion-gate" }).catch(() => null);
+    return refineGateDecision(gate);
+  });
   let reviewWatch: Promise<void> | null = null;
   const notifiedReviews = new Set<string>();
   // Some compatible-model providers will finish a turn after an IPython error
@@ -84,8 +114,11 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   // bounded, explicit recovery turn so a failed CAD action cannot silently
   // become the end of the user's engineering task.
   const recoveredToolCalls = new Set<string>();
+  const groundedConceptPaths = new Set<string>();
   let recoveryTurns = 0;
   let phaseCardFailureCount = 0;
+  let activeContractKey: string | null = null;
+  let pendingMission: string | null = null;
   const MAX_RECOVERY_TURNS = 3;
   const reviewCompletionMessage = (review: ReviewHandle) => {
     const result = review.result;
@@ -113,6 +146,47 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
       timestamp: Date.now(),
     };
   };
+  const contractKey = (card: Pick<SidecarPhaseCard, "digest" | "workflowHash" | "phase">) =>
+    `${card.workflowHash}:${card.phase}:${card.digest}`;
+  const restoreContractKey = (messages: any[]) => {
+    const latest = messages.filter((message) =>
+      message?.role === "custom" && message.customType === PHASE_CARD_CUSTOM_TYPE && message.details?.digest
+    ).at(-1);
+    if (latest) activeContractKey = contractKey(latest.details);
+  };
+  const capturePendingMission = async () => {
+    if (!pendingMission) return;
+    await requestAuthority({ op: "mission-capture", mission: pendingMission });
+    pendingMission = null;
+  };
+  const fallbackContractMessage = (warning: string) => ({
+    customType: PHASE_CARD_CUSTOM_TYPE,
+    display: false,
+    content: [
+      "WHERE", "- live Phase Contract request failed transiently after bounded retries", "",
+      "GOAL", "- recover live canonical workflow context without guessing authority", "",
+      "SOP", "- call `await cad.workflow.current()` exactly once; if it succeeds, its returned live card supersedes this fallback; if it fails, report the concrete infrastructure error", "",
+      "MUST", "- re-read canonical workflow authority", "",
+      "CAN", "- read only: `await cad.workflow.current()`", "",
+      "NEXT", "- follow only the live card returned by `cad.workflow.current()`", "",
+      "STATE", "- no stale Phase Contract was reused; workspace projections still have no authority", "",
+      "WARNINGS", `- transient Phase Contract request failure: ${warning}`,
+    ].join("\n"),
+    details: { warning: true },
+  });
+  const loadContract = async () => requestAuthority<SidecarPhaseCard | null>(
+    { op: "phase-contract" },
+    { retries: 3, retryDelayMs: 25 },
+  );
+  const appendChangedContract = async (deliverAs: "steer" | "followUp" = "steer") => {
+    await capturePendingMission().catch(() => undefined);
+    const card = await loadContract();
+    if (!card) return;
+    const key = contractKey(card);
+    if (key === activeContractKey) return;
+    activeContractKey = key;
+    pi.sendMessage(makePhaseContractMessage(card), { deliverAs });
+  };
   const notifyReview = async (review: ReviewHandle) => {
     if (review.status === "running" || notifiedReviews.has(review.reviewId)) return;
     let latest: ReviewHandle | null;
@@ -125,6 +199,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
       notifiedReviews.add(review.reviewId);
       return;
     }
+    await appendChangedContract("followUp").catch(() => undefined);
     const message = reviewCompletionMessage(review);
     pi.sendMessage(message, { triggerTurn: true, deliverAs: "followUp" });
     notifiedReviews.add(review.reviewId);
@@ -150,9 +225,32 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
         ? event.message.content.filter((item: any) => item?.type === "text").map((item: any) => item.text || "").join("\n")
         : String(event.message.content || "");
       const path = text.match(/saved it to\s+(.+?\.png)(?:\.|\s|$)/i)?.[1];
-      if (path) await requestAuthority({ op: "image-generated", path }).catch((error) => {
-        process.stderr.write(`[pi-cad] generated image evidence was not recorded: ${error instanceof Error ? error.message : String(error)}\n`);
-      });
+      if (path) {
+        try {
+          const recorded = await requestAuthority<{ recorded: boolean; path: string }>({ op: "image-generated", path });
+          if (recorded.recorded && !groundedConceptPaths.has(recorded.path)) {
+            const project = process.env.PI_CAD_PROJECT_CWD ?? ctx.cwd;
+            const bytes = await readFile(resolve(project, recorded.path));
+            groundedConceptPaths.add(recorded.path);
+            pi.sendMessage({
+              role: "custom",
+              customType: CONCEPT_GROUNDED_CUSTOM_TYPE,
+              display: false,
+              content: [
+                { type: "text", text: [
+                  "The generated concept image is now attached as direct visual context. Inspect the image itself before CAD.",
+                  "Translate it into a geometry plan covering canonical-view silhouettes, dominant forms, continuous and separate regions, support topology, transitions and curvature, part relationships, interfaces, and visual features that must survive CAD.",
+                  "The image is form and layout intent, but not dimensional authority. Do not replace its intended form with placeholder primitives.",
+                ].join("\n") },
+                { type: "image", data: bytes.toString("base64"), mimeType: "image/png" },
+              ],
+              details: { path: recorded.path },
+            }, { deliverAs: "steer" });
+          }
+        } catch (error) {
+          process.stderr.write(`[pi-cad] generated image evidence was not grounded: ${error instanceof Error ? error.message : String(error)}\n`);
+        }
+      }
     }
     if (
       event.message.role === "toolResult" &&
@@ -175,10 +273,43 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
       }, { triggerTurn: true, deliverAs: "followUp" });
       return undefined;
     }
+    if (event.message.role === "toolResult") {
+      await appendChangedContract("steer").catch((error) => {
+        process.stderr.write(`[pi-cad] Phase Contract append failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      });
+      return undefined;
+    }
     if (event.message.role !== "assistant") return undefined;
     const current = await requestAuthority<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
     if (current?.status === "running") await watchReview();
     return undefined;
+  });
+  pi.on("before_agent_start", async (event, ctx) => {
+    try {
+      const transcript = transcriptMessages(ctx);
+      restoreContractKey(transcript);
+      pendingMission ??= originalUserRequest(transcript) ?? (event.prompt.trim() || null);
+      const model = ctx.model;
+      if (model) {
+        await requestAuthority({
+          op: "author-model", provider: model.provider, model: model.id, thinking: pi.getThinkingLevel(),
+        }, { retries: 1, retryDelayMs: 20 }).catch(() => undefined);
+      }
+      await capturePendingMission().catch(() => undefined);
+      const card = await loadContract();
+      phaseCardFailureCount = 0;
+      if (!card) return undefined;
+      const key = contractKey(card);
+      if (key === activeContractKey) return undefined;
+      activeContractKey = key;
+      return { message: makePhaseContractMessage(card) };
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      const warning = reason.length > 240 ? `${reason.slice(0, 237)}...` : reason;
+      phaseCardFailureCount++;
+      process.stderr.write(`[pi-cad] Phase Contract preparation failed after retries (#${phaseCardFailureCount}): ${warning}\n`);
+      return { message: fallbackContractMessage(warning) };
+    }
   });
   pi.on("tool_call", async (event, ctx) => {
     if (event.toolName !== "codex_generate_image") return undefined;
@@ -199,30 +330,12 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     // user prompt with a duplicate triggerTurn follow-up and can leave Prime's
     // session-action scheduler permanently "streaming" before provider I/O.
     for (const reviewId of persistedReviewNotificationIds(event.messages)) notifiedReviews.add(reviewId);
-    const messages = event.messages.filter((message) => !(message.role === "custom" && message.customType === PHASE_CARD_CUSTOM_TYPE));
+    restoreContractKey(event.messages);
+    pendingMission ??= originalUserRequest(event.messages);
     try {
-      const model = ctx.model;
-      if (model) {
-        await requestAuthority({
-          op: "author-model",
-          provider: model.provider,
-          model: model.id,
-          thinking: pi.getThinkingLevel(),
-        }, { retries: 1, retryDelayMs: 20 }).catch((error) => {
-          // Reviewer inheritance metadata is useful, but a transient failure
-          // to report it must never suppress an otherwise valid Phase Card.
-          process.stderr.write(`[pi-cad] author-model report unavailable: ${error instanceof Error ? error.message : String(error)}\n`);
-        });
-      }
-      const mission = originalUserRequest(messages);
-      if (mission) await requestAuthority({ op: "mission-capture", mission }).catch(() => undefined);
-      const card = await requestAuthority<SidecarPhaseCard | null>(
-        { op: "phase-card" },
-        { retries: 3, retryDelayMs: 25 },
-      );
+      const card = await loadContract();
       phaseCardFailureCount = 0;
-      if (!card) return messages.length === event.messages.length ? undefined : { messages };
-      let resumedReviewMessage: ReturnType<typeof reviewCompletionMessage> | undefined;
+      if (!card) return undefined;
       if (card.effectiveCapabilities?.includes("cad_submit_for_review")) {
         const current = await requestAuthority<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
         if (current?.status === "running") {
@@ -231,40 +344,20 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
           // A review may have completed while Prime was offline. Feed that
           // result into the already-admitted user turn instead of creating a
           // competing triggerTurn action during resume.
-          resumedReviewMessage = reviewCompletionMessage(current);
+          pi.sendMessage(reviewCompletionMessage(current), { deliverAs: "steer" });
           notifiedReviews.add(current.reviewId);
         }
       }
-      return {
-        messages: [
-          ...messages,
-          ...(resumedReviewMessage ? [resumedReviewMessage] : []),
-          makeEphemeralPhaseCardMessage(card),
-        ],
-      };
+      return undefined;
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       const warning = reason.length > 240 ? `${reason.slice(0, 237)}...` : reason;
       phaseCardFailureCount++;
       // Context messages are ephemeral by design, so preserve the concrete
       // failure in stderr for headless benchmark and launcher diagnostics.
-      process.stderr.write(`[pi-cad] phase-card injection failed after retries (#${phaseCardFailureCount}): ${warning}\n`);
-      return {
-        messages: [...messages, {
-          role: "custom", customType: PHASE_CARD_CUSTOM_TYPE, display: false,
-          content: [
-            "WHERE", "- live Phase Card request failed transiently after bounded retries", "",
-            "GOAL", "- recover live canonical workflow context without guessing authority", "",
-            "SOP", "- call `await cad.workflow.current()` exactly once; if it succeeds, its returned live card supersedes this fallback; if it fails, report the concrete infrastructure error", "",
-            "MUST", "- re-read canonical workflow authority", "",
-            "CAN", "- read only: `await cad.workflow.current()`", "",
-            "NEXT", "- follow only the live card returned by `cad.workflow.current()`", "",
-            "STATE", "- no stale Phase Card was reused; workspace projections still have no authority", "",
-            "WARNINGS", `- transient Phase Card injection failure: ${warning}`,
-          ].join("\n"),
-          details: { warning: true }, timestamp: Date.now(),
-        }],
-      };
+      process.stderr.write(`[pi-cad] Phase Contract observation failed after retries (#${phaseCardFailureCount}): ${warning}\n`);
+      return undefined;
     }
   });
 }
+

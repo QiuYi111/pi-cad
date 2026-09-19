@@ -227,7 +227,7 @@ class CadPackageTests(unittest.TestCase):
                 artifact = asyncio.run(cad.model.build("part.py", "build/part.step"))
             self.assertEqual(artifact.sha256, "b" * 64)
             self.assertEqual(artifact.path, Path("build/part.step"))
-            attach.assert_awaited_once_with(response["images"])
+            attach.assert_awaited_once_with(response["images"], artifact)
 
     def test_model_build_forwards_parameter_definitions(self) -> None:
         model_module = importlib.import_module("cad.model")
@@ -270,14 +270,20 @@ class CadPackageTests(unittest.TestCase):
             {"data": base64.b64encode(b"second").decode(), "mimeType": "image/png"},
         ]
         with patch("IPython.display.display", attach):
-            asyncio.run(model_module._attach_images(images))
+            artifact = cad.ArtifactRef(Path("build/part.step"), "a" * 64, "candidate")
+            asyncio.run(model_module._attach_images(images, artifact))
         self.assertEqual(attach.call_count, 2)
         for call, expected in zip(attach.call_args_list, images, strict=True):
             self.assertTrue(call.kwargs["raw"])
             self.assertEqual(call.args[0]["application/vnd.prime-agent.attachment+json"], {
                 "mime_type": "image/png", "data": expected["data"],
             })
-            self.assertEqual(call.args[0]["text/plain"], "Pi-CAD mandatory build observation")
+        first_label = attach.call_args_list[0].args[0]["text/plain"]
+        self.assertIn("Built ArtifactRef", first_label)
+        self.assertIn("primary observation", first_label)
+        self.assertIn("Reason about what the geometry actually does", first_label)
+        self.assertNotIn("bbox", first_label)
+        self.assertEqual(attach.call_args_list[1].args[0]["text/plain"], "[VIEW]")
 
     def test_review_inspect_attaches_canonical_images_without_returning_base64(self) -> None:
         review_module = importlib.import_module("cad.review")
@@ -444,6 +450,29 @@ class CadPackageTests(unittest.TestCase):
         self.assertEqual(mocked.await_args_list[0].args, ("review-submit",))
         self.assertEqual(mocked.await_args_list[0].kwargs["subjectCommit"], commit_id)
         self.assertEqual(mocked.await_args_list[1].kwargs["reviewId"], handle["reviewId"])
+
+    def test_living_plan_resolves_latest_version_and_updates_in_place(self) -> None:
+        plan_module = importlib.import_module("cad.plan")
+        first = cad.Commit("commit-" + "a" * 32, "plan", None, "w", "plan", {}, (), "1")
+        other = cad.Commit("commit-" + "b" * 32, "candidate", first.id, "w", "cook", {}, (), "2")
+        latest = cad.Commit("commit-" + "c" * 32, "plan", other.id, "w", "cook", {}, (), "3")
+        loaded = cad.Commit(latest.id, latest.name, latest.parent, latest.workflow_hash, latest.phase, {"requirements": ["current"]}, (), latest.created_at)
+        with patch.object(cad, "history", AsyncMock(return_value=[first, other, latest])), patch.object(cad, "load", AsyncMock(return_value=loaded)):
+            self.assertEqual(asyncio.run(cad.plan.current()), loaded)
+        with patch.object(cad, "commit", AsyncMock(return_value=latest)) as commit:
+            self.assertEqual(asyncio.run(cad.plan.update(variables={"requirements": ["current"]})), latest)
+            commit.assert_awaited_once_with("plan", variables={"requirements": ["current"]}, artifacts=None)
+
+    def test_advisory_review_brief_uses_latest_plan_without_a_verdict(self) -> None:
+        review_module = importlib.import_module("cad.review")
+        candidate = cad.Commit("commit-" + "d" * 32, "candidate", None, "w", "cook", {}, (), "1")
+        current_plan = cad.Commit("commit-" + "e" * 32, "plan", None, "w", "cook", {}, (), "2")
+        with patch.object(cad.plan, "current", AsyncMock(return_value=current_plan)):
+            brief = asyncio.run(cad.review.prepare(candidate))
+        self.assertEqual(brief["candidateCommitId"], candidate.id)
+        self.assertEqual(brief["currentPlanCommitId"], current_plan.id)
+        self.assertIn("plan_stale", brief["instructions"])
+        self.assertNotIn("verdict", brief)
 
     def test_review_resolve_submits_authoritative_verdicts_and_rejects_runtime_unresolved(self) -> None:
         review_module = importlib.import_module("cad.review")

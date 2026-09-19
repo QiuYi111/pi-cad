@@ -1,7 +1,7 @@
 """Release presentation interpreter (0.8 M4b, whitepaper section 11).
 
-Blender is a pinned optional runtime, exactly like SU2: PATH first, then
-the manifest-installed runtime under .runtime/blender/<version>/, and a
+Blender is a pinned optional runtime, exactly like SU2: the manifest-installed
+runtime under .runtime/blender/<version>/ first, then PATH fallback, and a
 fail-soft "unavailable" status when neither exists. The interpreter is a
 compiler target — it consumes a canonical PresentationSpec and the
 Assembly Definition (from the assembly_design record) and produces:
@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -248,40 +249,50 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
     return paths
 
 
+def _blender_manifest_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "scripts" / "blender-manifest.json"
+
+
+def _blender_platform_key() -> str | None:
+    machine = platform.machine().lower()
+    arch = "arm64" if machine in {"arm64", "aarch64"} else "x64" if machine in {"x86_64", "amd64"} else None
+    os_name = "linux" if sys.platform.startswith("linux") else "darwin" if sys.platform == "darwin" else "win32" if sys.platform == "win32" else None
+    return f"{os_name}-{arch}" if os_name and arch else None
+
+
 def blender_binary() -> tuple[str | None, str]:
-    """Resolve the pinned Blender runtime: env override, PATH, then the
-    manifest-installed runtime directory. Returns (path, version-label)."""
+    """Resolve Blender: env override, pinned runtime, then PATH fallback."""
     override = os.environ.get("PI_CAD_BLENDER_BIN")
     if override:
         return (override, "pinned-override") if Path(override).exists() else (None, "override-missing")
+    # Resolve against the Pi-CAD installation, not the caller's workspace.
+    runtime_root = Path(os.environ.get(
+        "PI_CAD_BLENDER_RUNTIME",
+        str(Path(__file__).resolve().parents[2] / ".runtime" / "blender"),
+    ))
+    try:
+        manifest = json.loads(_blender_manifest_path().read_text(encoding="utf-8"))
+        version = str(manifest["version"])
+        platform_key = _blender_platform_key()
+        entry = manifest.get("platforms", {}).get(platform_key) if platform_key else None
+        if entry and entry.get("binary"):
+            candidate = runtime_root / version / platform_key / ("blender.exe" if platform_key.startswith("win32-") else "blender")
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve()), f"{version}/{platform_key}"
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+
     on_path = shutil.which("blender")
     if on_path:
-        # A PATH blender must actually run: distro stubs and broken
-        # entries fall through to the managed runtime instead of failing.
         try:
-            lib_dir = Path(on_path).parent / "lib"
-            env = {**os.environ, "OMP_NUM_THREADS": "1"}
-            if lib_dir.exists():
-                env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
             probe = subprocess.run(
                 [on_path, "--version"], capture_output=True, text=True, timeout=90,
-                env=env,
+                env={**os.environ, "OMP_NUM_THREADS": "1"},
             )
             if probe.returncode == 0 and re.search(r"Blender \d", probe.stdout or ""):
-                return on_path, "path"
+                return on_path, "path-fallback"
         except Exception:
             pass
-    # The runtime tree mirrors the SU2 layout: <root>/<version>/<platform>/.
-    # Search platform dirs first (they may contain non-binary entries at
-    # other levels), newest version first.
-    runtime_root = Path(os.environ.get("PI_CAD_BLENDER_RUNTIME", ".runtime/blender"))
-    if not runtime_root.exists():
-        return None, "missing"
-    for version_dir in sorted(runtime_root.glob("*/"), reverse=True):
-        for candidate_dir in sorted(version_dir.glob("*/"), reverse=True):
-            candidate = candidate_dir / "blender"
-            if candidate.is_file() and os.access(candidate, os.X_OK):
-                return str(candidate.resolve()), f"{version_dir.name}/{candidate_dir.name}"
     return None, "missing"
 
 
@@ -369,7 +380,7 @@ def run_presentation(
             "spec": str(spec_path),
             "artifact": str(artifact_path),
             "subjectArtifactHash": subject_hash,
-            "renderer": "blender+cycles-cpu" if binary else "unavailable",
+            "renderer": "blender+cycles-auto" if binary else "unavailable",
             "blender": {"binary": binary, "source": source},
             "semantic": {
                 "directions": spec.get("directions", []),
@@ -544,7 +555,8 @@ def run_presentation(
         "blenderVersion": _blender_version(binary),
         "renderer": "CYCLES",
         "rendererSettings": {
-            "device": "CPU",
+            "device": report.get("renderer", {}).get("device", "CPU"),
+            "backend": report.get("renderer", {}).get("backend", "CPU"),
             "seed": 0,
             "samples": preset["samples"],
             "resolution": resolution,

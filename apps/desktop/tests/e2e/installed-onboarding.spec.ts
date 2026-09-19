@@ -28,7 +28,7 @@ test("installed desktop completes real WSL onboarding and applies a live model p
   const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
   process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
   try {
-    await handleAgentApi(project, { schema: 1, op: "workflow-start", id: "mechanical.benchmark-build", interactionMode: "headless" });
+    await handleAgentApi(project, { schema: 1, op: "workflow-start", id: "mechanical.default", interactionMode: "headless" });
     await handleAgentApi(project, {
       schema: 1,
       op: "model-build",

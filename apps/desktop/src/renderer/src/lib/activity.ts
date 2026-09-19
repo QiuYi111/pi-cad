@@ -116,27 +116,29 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
   }
   if (input?.type === "desktop_agent_pending") return reducePrimeEvent(messages, { type: "agent_start" });
   if (input?.type === "desktop_agent_error") {
-    const next = finishOpenAssistant(messages, "error");
-    const index = findLast(next, (message) => message.stream?.state === "error");
-    return next.map((message, current) => current === index ? { ...message, text: message.text || input.message || "Prime failed to respond." } : message);
+    const index = findOpenAssistant(messages);
+    if (index < 0) return messages;
+    return messages.map((message, current) => current === index ? { ...message, text: message.text || input.message || "Prime failed to respond.", stream: finishStream(message.stream) } : message);
   }
   const event = input?.type === "session_event" ? input.event : input;
   if (!event || typeof event !== "object") return messages;
   if (event.type === "agent_start") {
     if (findOpenAssistant(messages) >= 0) return messages;
     const now = Date.now();
-    return [...messages, { id: `stream-${now}`, role: "assistant", text: "", createdAt: now, stream: { state: "waiting", startedAt: now } }];
+    return [...messages, { id: `stream-${now}`, role: "assistant", text: "", createdAt: now, stream: { startedAt: now } }];
   }
   if (event.type === "message_update") {
     const update = event.assistantMessageEvent;
     if (!update || (update.type !== "thinking_delta" && update.type !== "text_delta")) return messages;
     const now = Date.now();
     const index = findOpenAssistant(messages);
-    const target: ChatMessage = index >= 0 ? messages[index]! : { id: event.message?.id || `stream-${now}`, role: "assistant", text: "", createdAt: now, stream: { state: "waiting", startedAt: now } };
+    const target: ChatMessage = index >= 0 ? messages[index]! : { id: event.message?.id || `stream-${now}`, role: "assistant", text: "", createdAt: now, stream: { startedAt: now } };
+    // The delta only carries text. Which phase the turn is in comes from the
+    // runtime status, never from the event type.
     const next: ChatMessage = {
       ...target,
       text: update.type === "text_delta" ? `${target.text}${update.delta || ""}` : target.text,
-      stream: { ...(target.stream!), state: update.type === "text_delta" ? "responding" : target.text ? "responding" : "thinking", firstTokenAt: target.stream?.firstTokenAt || now },
+      stream: { ...(target.stream!), firstTokenAt: target.stream?.firstTokenAt || now },
     };
     if (index < 0) return [...messages, next];
     return messages.map((message, current) => current === index ? next : message);
@@ -157,7 +159,7 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
       progress: 0.35,
     };
     const occurrence = messages.filter((message) => message.activity?.id === activity.id).length;
-    return [...finishOpenAssistant(messages, "complete"), { id: `activity-${activity.id}${occurrence ? `-${occurrence + 1}` : ""}`, role: "system", text: "", createdAt: Date.now(), activity }];
+    return [...finishOpenAssistant(messages, { dropEmpty: true }), { id: `activity-${activity.id}${occurrence ? `-${occurrence + 1}` : ""}`, role: "system", text: "", createdAt: Date.now(), activity }];
   }
   if (event.type === "tool_execution_update") {
     return messages.map((message): ChatMessage => {
@@ -201,19 +203,17 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
       const text = textOf(message.content).trim();
       const failed = message.stopReason === "error" || Boolean(message.errorMessage);
       const aborted = message.stopReason === "aborted";
-      const state = failed ? "error" : aborted ? "aborted" : "complete";
       const fallback = String(message.errorMessage || (failed ? "Prime failed to respond." : aborted ? "Request was stopped." : ""));
       const index = findOpenAssistant(messages);
       if (index >= 0) {
-        const now = Date.now();
-        return messages.map((existing, current) => current === index ? { ...existing, id: message.id || existing.id, text: text || existing.text || fallback, stream: { ...existing.stream!, state, finishedAt: now } } : existing);
+        return messages.map((existing, current) => current === index ? { ...existing, id: message.id || existing.id, text: text || existing.text || fallback, stream: finishStream(existing.stream) } : existing);
       }
       const visible = text || fallback;
       if (visible) {
         const previous = messages.at(-1);
-        if (previous?.role === "assistant" && previous.text === visible && previous.stream?.state === state) return messages;
+        if (previous?.role === "assistant" && previous.text === visible && previous.stream?.finishedAt) return messages;
         const now = Date.now();
-        return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text: visible, createdAt: now, stream: { state, startedAt: now, finishedAt: now } }];
+        return [...messages, { id: message.id || crypto.randomUUID(), role: "assistant", text: visible, createdAt: now, stream: { startedAt: now, finishedAt: now } }];
       }
     }
     if (message?.role === "custom" && message.customType === "pi-cad.review-completed") {
@@ -232,16 +232,16 @@ export function reducePrimeEvent(messages: ChatMessage[], input: any): ChatMessa
     const now = Date.now();
     return finishOpenAssistant(messages.map((message) => message.activity && (message.activity.state === "running" || message.activity.state === "queued")
       ? { ...message, activity: { ...message.activity, state: "denied", title: `${message.activity.kind === "simulation" ? "Simulation" : "Task"} stopped`, summary: "Stopped by user", finishedAt: now } }
-      : message), "aborted");
+      : message));
   }
-  if (event.type === "agent_end") return finishOpenAssistant(messages, "complete");
-  if (event.type === "agent_abort" || event.type === "abort") return finishOpenAssistant(messages, "aborted");
-  if (event.type === "agent_error") return finishOpenAssistant(messages, "error");
+  if (event.type === "agent_end") return finishOpenAssistant(messages, { dropEmpty: true });
+  if (event.type === "agent_abort" || event.type === "abort") return finishOpenAssistant(messages);
+  if (event.type === "agent_error") return finishOpenAssistant(messages);
   return messages;
 }
 
 function findOpenAssistant(messages: ChatMessage[]): number {
-  return findLast(messages, (message) => message.role === "assistant" && Boolean(message.stream) && !["complete", "aborted", "error"].includes(message.stream!.state));
+  return findLast(messages, (message) => message.role === "assistant" && Boolean(message.stream) && !message.stream!.finishedAt);
 }
 
 function findLast(messages: ChatMessage[], predicate: (message: ChatMessage) => boolean): number {
@@ -249,11 +249,19 @@ function findLast(messages: ChatMessage[], predicate: (message: ChatMessage) => 
   return -1;
 }
 
-function finishOpenAssistant(messages: ChatMessage[], state: "complete" | "aborted" | "error"): ChatMessage[] {
+function finishStream(stream: ChatMessage["stream"]): ChatMessage["stream"] {
+  return { startedAt: stream?.startedAt ?? Date.now(), ...(stream?.firstTokenAt ? { firstTokenAt: stream.firstTokenAt } : {}), finishedAt: Date.now() };
+}
+
+/**
+ * The turn is over. The outcome (stopped, failed, reasoning limit) belongs to
+ * the runtime status, so the message only records that its text is final.
+ */
+function finishOpenAssistant(messages: ChatMessage[], options: { dropEmpty?: boolean } = {}): ChatMessage[] {
   const index = findOpenAssistant(messages);
   if (index < 0) return messages;
-  if (state === "complete" && !messages[index]!.text.trim()) return messages.filter((_, current) => current !== index);
-  return messages.map((message, current) => current === index ? { ...message, stream: { ...message.stream!, state, finishedAt: Date.now() } } : message);
+  if (options.dropEmpty && !messages[index]!.text.trim()) return messages.filter((_, current) => current !== index);
+  return messages.map((message, current) => current === index ? { ...message, stream: finishStream(message.stream) } : message);
 }
 
 function completedTitle(kind: CadActivity["kind"], failed: boolean, currentTitle: string): string {
