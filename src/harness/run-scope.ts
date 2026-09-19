@@ -74,23 +74,54 @@ export interface RunScopeRequestV1 {
   sessionId?: unknown;
   runId?: unknown;
   binding?: unknown;
+  /**
+   * When the caller last read its own transcript for a binding. Only the Prime
+   * extension can read a transcript, and only when its transcript holds no
+   * binding is this field meaningful; see `resolveRequestScope`.
+   */
+  bindingReadAt?: unknown;
+}
+
+function isReadTimestamp(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
 }
 
 /**
  * Resolve the scope of one sidecar/Agent API request.
  *
- * The transcript binding is the durable authority. The project conversation
- * registry only resolves stateless clients (the Python kernel socket) that
- * can name their Prime session but cannot read the transcript. A binding
- * written by a newer `workflow.start()` always wins over an older assertion.
+ * A caller states what its own transcript holds. The `binding` field is that
+ * statement, and its presence is what separates the two request shapes:
+ *
+ * - a valid binding names the conversation's run;
+ * - an unusable binding (explicit `null`) means the caller read its transcript
+ *   and found nothing, so the conversation is unbound and must never adopt
+ *   whatever run the project registry remembers;
+ * - no `binding` field at all is a stateless client (the Python kernel socket)
+ *   that cannot read the transcript, so the project conversation registry is
+ *   its only way to name the run of the session it belongs to.
+ *
+ * A conversation-scoped run is started by its own Python kernel, and only the
+ * kernel's registry write can carry it back to the conversation. The extension
+ * therefore also reports when it read its transcript: a registry binding newer
+ * than that read is the run this conversation started afterwards, which the
+ * extension then persists into the transcript. Anything older is history and
+ * stays invisible.
  */
 export async function resolveRequestScope(cwd: string, request: RunScopeRequestV1): Promise<RunScopeV1 | undefined> {
   const sessionId = isSessionId(request.sessionId) ? request.sessionId : null;
   if (!sessionId) return isRunId(request.runId) ? { sessionId: null, runId: request.runId } : undefined;
 
-  const asserted = parseConversationBinding(request.binding, sessionId)
+  const declared = request.binding !== undefined;
+  const asserted = (declared ? parseConversationBinding(request.binding, sessionId) : null)
     ?? (isRunId(request.runId) ? { schema: 1 as const, sessionId, runId: request.runId, workflowHash: "", boundAt: "" } : null);
   const project = new HarnessProjectStoreV7(cwd);
+  if (declared && !asserted) {
+    const readAt = isReadTimestamp(request.bindingReadAt) ? request.bindingReadAt : null;
+    const started = readAt ? await project.conversationBinding(sessionId) : null;
+    if (!readAt || !started || started.boundAt < readAt) return { sessionId, runId: null };
+    const run = await new HarnessRunStoreV7(cwd, started.runId).load();
+    return run ? { sessionId, runId: run.state.runId } : { sessionId, runId: null };
+  }
   const stored = await project.conversationBinding(sessionId);
   if (stored && (!asserted || stored.boundAt > asserted.boundAt)) return { sessionId, runId: stored.runId };
   if (!asserted) return { sessionId, runId: null };

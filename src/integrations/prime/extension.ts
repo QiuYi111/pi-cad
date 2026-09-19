@@ -20,6 +20,8 @@ interface SidecarPhaseCard {
 interface ConversationScope {
   sessionId: string;
   binding: ConversationBindingV1 | null;
+  /** When this process last read the conversation's transcript for a binding. */
+  readAt: string;
 }
 
 /**
@@ -155,7 +157,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     }
     if (!conversationScope || conversationScope.sessionId !== sessionId) {
       const entries = typeof sessionManager?.getEntries === "function" ? sessionManager.getEntries() : [];
-      conversationScope = { sessionId, binding: bindingFromTranscriptEntries(entries, sessionId) };
+      conversationScope = { sessionId, binding: bindingFromTranscriptEntries(entries, sessionId), readAt: new Date().toISOString() };
       // The IPython kernel inherits this process environment, and the cad
       // Python client names its conversation with it. A kernel is created per
       // session, so it never inherits another conversation's identity.
@@ -164,11 +166,26 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     return conversationScope;
   };
 
-  /** Every authority request names the conversation it belongs to. */
+  /**
+   * Every authority request names the conversation it belongs to, and states
+   * what that conversation's transcript holds. `binding: null` is a real
+   * declaration — the transcript was read and has no binding — so the sidecar
+   * keeps the conversation unbound instead of reviving an older run from the
+   * project registry. `bindingReadAt` lets the sidecar hand back only a run
+   * this conversation started after that read, which is how a run started by
+   * the cad Python kernel reaches the transcript.
+   */
   const authorityRequest = <T>(request: Record<string, unknown>, options?: AuthorityRequestOptions): Promise<T> => {
     const scope = conversationScope;
     return requestAuthority<T>(
-      scope ? { ...request, sessionId: scope.sessionId, ...(scope.binding ? { binding: scope.binding } : {}) } : request,
+      scope
+        ? {
+            ...request,
+            sessionId: scope.sessionId,
+            binding: scope.binding,
+            ...(scope.binding ? {} : { bindingReadAt: scope.readAt }),
+          }
+        : request,
       options,
     );
   };

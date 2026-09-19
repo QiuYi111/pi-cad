@@ -11,14 +11,20 @@ export interface AgentArtifactSubject {
 
 /**
  * Prime conversation identity. `binding` is the durable transcript binding
- * the extension restores; `runId` is kept for callers that assert only the
- * run. An unbound conversation has no run — it never inherits the
- * project-global pointer.
+ * the extension restores, and its presence is authoritative: an explicit
+ * `null` declares a read transcript with no binding, so the conversation
+ * stays unbound instead of inheriting a registry entry from history.
+ * `bindingReadAt` is the read time the sidecar compares against the project
+ * conversation registry, which is how a run started by this conversation's
+ * cad Python kernel reaches the transcript. `runId` is kept for callers that
+ * assert only the run. An unbound conversation has no run — it never inherits
+ * the project-global pointer.
  */
 export interface AgentApiConversationV1 {
   sessionId?: string;
   runId?: string;
-  binding?: { schema: 1; sessionId: string; runId: string; workflowHash: string; boundAt: string };
+  binding?: { schema: 1; sessionId: string; runId: string; workflowHash: string; boundAt: string } | null;
+  bindingReadAt?: string;
 }
 
 export type AgentApiRequest = AgentApiConversationV1 & (

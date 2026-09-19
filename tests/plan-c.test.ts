@@ -562,16 +562,12 @@ test("Python cad.commit crosses the real bridge with float snapshots and project
 });
 
 test("thin Prime extension durably appends Phase Contracts and is silent without a run", async () => {
-  // Prime conversations own their workflow binding, so this fixture binds the
-  // run to the session the mock context reports and leaves the project pointer
-  // empty.
+  // Prime conversations own their workflow binding. The fixture session starts
+  // unbound, then starts a run the way the cad Python kernel does — through the
+  // project conversation registry — and the extension makes that run durable in
+  // its own transcript. The project pointer stays empty.
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-prime-"));
   const sessionId = "prime-plan-c-session";
-  const bound = await new HarnessProjectStoreV7(cwd).startConversationRun({
-    sessionId,
-    workflow: workflow(),
-    registryContract: buildRegistryContract(mechanicalRegistries),
-  });
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-test-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
   const previousSessionId = process.env.PI_CAD_SESSION_ID;
@@ -603,8 +599,25 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
     sessionManager: { getSessionId: () => sessionId, getEntries: () => [], getBranch: () => [] },
   };
   const original = [{ role: "user", content: "hello", timestamp: 1 }];
-  const prepared = await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, transcriptContext);
-  const first = { messages: [...original, { role: "custom", ...prepared.message, timestamp: 2 }] };
+  // The conversation's transcript is read first: it holds no binding, so the
+  // extension declares itself unbound and appends nothing.
+  assert.equal(
+    await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, transcriptContext),
+    undefined,
+    "an unbound conversation has no Phase Contract to append",
+  );
+  assert.deepEqual(sentMessages, []);
+  // The cad Python kernel then starts this conversation's run. Only the project
+  // conversation registry carries it back to the conversation.
+  const bound = await new HarnessProjectStoreV7(cwd).startConversationRun({
+    sessionId,
+    workflow: workflow(),
+    registryContract: buildRegistryContract(mechanicalRegistries),
+  });
+  await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "start", isError: false } }, transcriptContext);
+  assert.equal(sentMessages.length, 1, "the run this conversation started must append its Phase Contract");
+  assert.equal(sentMessages[0]!.options.deliverAs, "steer");
+  const first = { messages: [...original, { role: "custom", ...sentMessages[0]!.message, timestamp: 2 }] };
   await context({ messages: first.messages }, transcriptContext);
   assert.deepEqual(reportedModel, { provider: "dashscope", model: "qwen3.8-max", thinking: "low" });
   assert.equal(first.messages.length, 2);
@@ -622,7 +635,7 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   const continued = [...original, { role: "assistant", content: "working", timestamp: 2 }, { role: "toolResult", content: "ok", timestamp: 3 }];
   assert.equal(await context({ messages: continued }, transcriptContext), undefined);
   await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "same", isError: false } }, transcriptContext);
-  assert.deepEqual(sentMessages, [], "same phase must not append a duplicate contract");
+  assert.equal(sentMessages.length, 1, "same phase must not append a duplicate contract");
   assert.equal(
     await beforeAgentStart({ prompt: "continue", images: undefined, systemPrompt: "system" }, transcriptContext),
     undefined,
@@ -633,9 +646,9 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   await handleAgentApi(cwd, { schema: 1, op: "commit", name: "system-design", sessionId });
   await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "integrated", sessionId });
   await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "transition", isError: false } }, transcriptContext);
-  assert.equal(sentMessages.length, 1);
-  assert.equal(sentMessages[0].options.deliverAs, "steer");
-  const reviewContract = sentMessages[0].message;
+  assert.equal(sentMessages.length, 2);
+  assert.equal(sentMessages[1].options.deliverAs, "steer");
+  const reviewContract = sentMessages[1].message;
   assert.match(reviewContract.content[0].text, /phase review/);
   assert.doesNotMatch(reviewContract.content[0].text, /phase design/);
   const priorProviderInput = [...first.messages, { role: "assistant", content: "working", timestamp: 3 }, { role: "toolResult", content: "advanced", timestamp: 4 }];
