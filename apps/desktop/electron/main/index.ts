@@ -16,13 +16,19 @@ import { PrimeRpc } from "./prime-rpc.js";
 import { WorkflowStore } from "./workflows.js";
 import { ViewerBackend } from "./viewer.js";
 import { TraceStore } from "./traces.js";
-import { DemoRuntime } from "./demo-runtime.js";
+import { DEMO_TRACE_ID, DEMO_TRACE_PATH, DemoRuntime } from "./demo-runtime.js";
 import { AuthController } from "./auth.js";
 import { PrimeConfigService } from "./prime-config.js";
 import { ParaViewBackend } from "./paraview.js";
 import { BlenderBackend } from "./blender.js";
 import { HumanApprovalStore } from "./approvals.js";
 import { importStepIntoProject } from "./step-import.js";
+import {
+  NO_CONVERSATION,
+  projectedConversationScope,
+  selectNewConversation,
+  type ConversationSelection,
+} from "./conversation-selection.js";
 
 // Keep existing settings and sign-in state across the public rename, while honoring
 // Electron's explicit profile override for managed deployments and isolated tests.
@@ -33,6 +39,12 @@ let mainWindow: BrowserWindow | null = null;
 const settingsStore = new SettingsStore();
 const approvalStore = new HumanApprovalStore(join(app.getPath("userData"), "human-approvals"));
 let runtime: PrimeRpc | DemoRuntime | null = null;
+/**
+ * The Prime conversation the Desktop projects workflow and artifact state for.
+ * It follows Prime's live session, except while a new conversation is selected
+ * and Prime has not opened it yet — that selection is unbound on purpose.
+ */
+let conversation: ConversationSelection = NO_CONVERSATION;
 let authController: AuthController | null = null;
 let primeConfig: PrimeConfigService | null = null;
 let primeConfigBridge: RuntimeBridge | null = null;
@@ -68,6 +80,14 @@ const testOpenSteps = process.argv
   .map((argument) => argument.slice("--pi-cad-test-open-step=".length));
 const testExportStep = process.argv.find((argument) => argument.startsWith("--pi-cad-test-export-step="))?.slice("--pi-cad-test-export-step=".length);
 const realTraceE2E = desktopE2E && process.env.PI_CAD_DESKTOP_E2E_REAL_TRACES === "1";
+/**
+ * The desktop E2E suite drives fake Prime turns. Workflow and artifact state
+ * still comes from the real authority unless the suite asks for the stub, so
+ * the conversation-scoped projection is exercised end to end.
+ */
+const e2eWorkflowAuthority = process.env.PI_CAD_DESKTOP_E2E_WORKFLOW_AUTHORITY === "1"
+  || process.argv.includes("--pi-cad-e2e-workflow-authority");
+const stubWorkflowProjection = desktopE2E && !e2eWorkflowAuthority;
 const authE2E = desktopE2E || process.env.PI_CAD_DESKTOP_E2E_AUTH === "1" || process.argv.includes("--pi-cad-e2e-auth");
 const demoRuntimeStatus: RuntimeStatus = { state: "idle", checks: [
   ["wsl", "Windows Subsystem for Linux"], ["node", "Node.js 22+"], ["python", "Python"],
@@ -92,6 +112,28 @@ async function setupResumeRegistered(): Promise<boolean> {
 
 function send(channel: string, value: unknown) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value);
+}
+
+/**
+ * Conversation whose workflow and artifact state the renderer shows. The
+ * Desktop window always has a scope: `null` while its conversation has no
+ * Prime session yet, which the authority answers as unbound.
+ */
+function projectedConversation(): string | null {
+  return projectedConversationScope(conversation, runtime?.status.sessionId);
+}
+
+/** Announce the selected conversation so every projection is read again. */
+function publishConversation() {
+  send(IPC.runtimeConversation, { sessionId: projectedConversation() });
+}
+
+/** Follow Prime's live session once it is not the conversation being replaced. */
+function followLiveSession(status: RuntimeStatus) {
+  if (conversation.pendingNew && status.sessionId && status.sessionId !== conversation.replacedSessionId) {
+    conversation = NO_CONVERSATION;
+    publishConversation();
+  }
 }
 
 async function syncManagedRuntime() {
@@ -179,7 +221,7 @@ async function ensureRuntime() {
     })
     : new PrimeRpc(await bridge());
   runtime.on("event", (event) => send(IPC.runtimeEvent, event));
-  runtime.on("status", (status) => send(IPC.runtimeStatus, status));
+  runtime.on("status", (status: RuntimeStatus) => { followLiveSession(status); send(IPC.runtimeStatus, status); });
   runtime.on("ui-request", (request) => send(IPC.runtimeUiRequest, request));
   runtime.on("diagnostic", (message) => send(IPC.runtimeEvent, { type: "runtime_diagnostic", message }));
   return runtime;
@@ -219,7 +261,7 @@ async function ensureViewer() {
   const current = await bridge();
   if (!viewer || viewerBridge !== current) {
     viewer?.stop();
-    viewer = new ViewerBackend(current);
+    viewer = new ViewerBackend(current, projectedConversation);
     viewerBridge = current;
   }
   return viewer;
@@ -315,15 +357,39 @@ function registerIpc() {
   ipcMain.handle(IPC.runtimeInstallSimulation, async () => desktopE2E
     ? { state: "ready", component: "torch-fem-0.9", detail: "CUDA managed runtime qualified", estimatedSize: "about 6 GB" }
     : (await bridge()).installSimulationComponent(await settingsStore.get()));
-  ipcMain.handle(IPC.runtimeStart, async () => (await ensureRuntime()).start(await settingsStore.get()));
+  ipcMain.handle(IPC.runtimeStart, async () => {
+    const started = await (await ensureRuntime()).start(await settingsStore.get());
+    publishConversation();
+    return started;
+  });
   ipcMain.handle(IPC.runtimeRestore, async () => runtime
     ? { status: runtime.status, messages: await runtime.getMessages() }
     : { status: { state: "idle", checks: [] }, messages: [] });
-  ipcMain.handle(IPC.runtimeStop, async () => { await runtime?.stop(); runtime = null; });
+  ipcMain.handle(IPC.runtimeStop, async () => { await runtime?.stop(); runtime = null; conversation = NO_CONVERSATION; publishConversation(); });
   ipcMain.handle(IPC.runtimePrompt, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).prompt(message, images));
   ipcMain.handle(IPC.runtimeSteer, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).steer(message, images));
-  ipcMain.handle(IPC.runtimeNewSession, async () => (await ensureRuntime()).newSession());
-  ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => (await ensureRuntime()).switchSession(path, await settingsStore.get()));
+  ipcMain.handle(IPC.runtimeNewConversation, async () => {
+    // Selecting a new conversation is a selection, not a Prime session: the
+    // projection drops to unbound immediately and Prime opens the session when
+    // the conversation gets its first prompt.
+    conversation = selectNewConversation(runtime?.status.sessionId);
+    publishConversation();
+    return [];
+  });
+  ipcMain.handle(IPC.runtimeNewSession, async () => {
+    // The new conversation's own Prime session. Its run binding starts empty,
+    // so the workflow projection is unbound until that conversation starts one.
+    const messages = await (await ensureRuntime()).newSession();
+    conversation = NO_CONVERSATION;
+    publishConversation();
+    return messages;
+  });
+  ipcMain.handle(IPC.runtimeSwitchSession, async (_event, path: string) => {
+    const messages = await (await ensureRuntime()).switchSession(path, await settingsStore.get());
+    conversation = NO_CONVERSATION;
+    publishConversation();
+    return messages;
+  });
   ipcMain.handle(IPC.runtimeSetSessionName, async (_event, name: string) => (await ensureRuntime()).setSessionName(name));
   ipcMain.handle(IPC.runtimeAbort, async () => (await ensureRuntime()).abort());
   ipcMain.handle(IPC.runtimeModels, async () => (await ensureRuntime()).getModels());
@@ -374,10 +440,10 @@ function registerIpc() {
   ipcMain.handle(IPC.authReadModelsConfig, async () => authE2E ? { text: "{\n  \"providers\": {}\n}\n" } : (await ensurePrimeConfig()).readModelsConfig(await settingsStore.get()));
   ipcMain.handle(IPC.authWriteModelsConfig, async (_event, text: string) => authE2E ? { text } : (await ensurePrimeConfig()).writeModelsConfig(await settingsStore.get(), text));
   ipcMain.handle(IPC.workflowList, async () => demo ? [demoWorkflow, demoNakedWorkflow] : new WorkflowStore(await bridge()).list(await settingsStore.get()));
-  ipcMain.handle(IPC.workflowCurrent, async () => demo ? {
+  ipcMain.handle(IPC.workflowCurrent, async () => stubWorkflowProjection ? {
     workflowId: demoWorkflow.id, workflowVersion: demoWorkflow.version, workflowHash: "demo", runId: "e2e", phase: "concept", status: "active",
     phaseHistory: ["grilling", "spec", "concept"], phases: demoWorkflow.phases, authoritative: false,
-  } : new WorkflowStore(await bridge()).current(await settingsStore.get()));
+  } : new WorkflowStore(await bridge()).current(await settingsStore.get(), projectedConversation()));
   ipcMain.handle(IPC.workflowSave, async (_event, document: WorkflowDocument) => demo ? document : new WorkflowStore(await bridge()).save(await settingsStore.get(), document));
   ipcMain.handle(IPC.workflowDelete, async (_event, document: WorkflowDocument) => demo ? undefined : new WorkflowStore(await bridge()).delete(await settingsStore.get(), document));
   ipcMain.handle(IPC.workflowAdoptionPolicy, async () => new WorkflowStore(await bridge()).adoptionPolicy(await settingsStore.get()));
@@ -412,7 +478,7 @@ function registerIpc() {
     if (!demo) await (await ensureViewer()).exportStep(settings, source, result.filePath);
     return result.filePath;
   });
-  ipcMain.handle(IPC.viewerCatalog, async () => demo ? {
+  ipcMain.handle(IPC.viewerCatalog, async () => stubWorkflowProjection ? {
     projectId: "desktop-e2e",
     projectHead: { updatedAt: new Date().toISOString(), artifacts: [] },
     currentRun: { id: "e2e", phase: "concept", status: "active", updatedAt: new Date().toISOString(), artifacts: [{ id: "candidate:authoritative", path: "build/part.step", sha256: "demo-step", role: "authoritative-candidate-design" }] },
@@ -485,7 +551,7 @@ function registerIpc() {
     if (!release) throw new Error("Create or verify the local formal package before publishing its tag.");
     return (await ensureViewer()).publishRemoteRelease(await settingsStore.get(), release, remote, tag);
   });
-  ipcMain.handle(IPC.tracesList, async () => demo && !realTraceE2E ? [{ id: "demo-trace", path: "/workspace/.prime-sessions/demo.jsonl", title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420, ...(demoEvaluation ? { evaluation: demoEvaluation } : {}) }] : new TraceStore(await bridge()).list(await settingsStore.get()));
+  ipcMain.handle(IPC.tracesList, async () => demo && !realTraceE2E ? [{ id: DEMO_TRACE_ID, path: DEMO_TRACE_PATH, title: "Folding stand", updatedAt: Date.now(), model: "openai-codex/gpt-5.6-sol", turns: 12, toolCalls: 4, tokens: 8420, ...(demoEvaluation ? { evaluation: demoEvaluation } : {}) }] : new TraceStore(await bridge()).list(await settingsStore.get()));
   ipcMain.handle(IPC.tracesRead, async (_event, path: string) => demo && !realTraceE2E ? [{ message: { role: "user", content: "Design a folding stand" } }, { message: { role: "assistant", content: [{ type: "text", text: "I checked the interfaces before building." }] } }, { message: { role: "toolResult", toolName: "ipython", content: "Model built" } }] : new TraceStore(await bridge()).read(await settingsStore.get(), path));
   ipcMain.handle(IPC.tracesRate, async (_event, paths: string[], evaluation: { quality: number; difficulty: number; feedback?: string }) => demo && !realTraceE2E
     ? (demoEvaluation = { ...evaluation }, { rated: paths.length, triggered: false, pendingTokens: 8_420, thresholdTokens: 250_000, message: "Rating saved." })

@@ -16,6 +16,7 @@ import { requireCurrentAuthorization } from "./authorization.ts";
 import type { Operation, OperationAuthority } from "../harness/permissions.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
 import { workflowCurrentView } from "../harness/card.ts";
+import { workflowRunStateView } from "../harness/workflow/phase-view.ts";
 import { resolveActiveRun, resolveRequestScope, runWithRunScope, type RunScopeRequestV1 } from "../harness/run-scope.ts";
 import { sha256File } from "../shared/store.ts";
 import { currentGitRevision, executeWorkflowGitActions, phaseGitActions, prepareWorkflowGit, type WorkflowGitResult } from "../authority/workflow-git.ts";
@@ -42,7 +43,11 @@ export const AGENT_API_MUTATION_OPERATIONS = {
 async function current(cwd: string) {
   const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!loaded) return null;
-  return workflowCurrentView(loaded, mechanicalRegistries);
+  const view = workflowCurrentView(loaded, mechanicalRegistries);
+  // A conversation-scoped caller is answered for its own run only. The phase
+  // picture travels with the view so a client (the Desktop workflow rail) can
+  // render every phase without deriving statuses itself.
+  return jsonValue({ ...view, ...workflowRunStateView(loaded, view) });
 }
 
 async function recordGitResults(store: HarnessRunStoreV7, results: WorkflowGitResult[], moment: string): Promise<void> {
@@ -59,6 +64,9 @@ async function viewerCatalog(cwd: string) {
     project.load(),
     resolveActiveRun(cwd, mechanicalRegistries),
   ]);
+  // Commit history lives in the run that recorded it, so it follows the
+  // caller's conversation like the run does. Project HEAD stays visible to
+  // every conversation because it is the shared project artifact.
   const commits = active ? await workspaceHistory(cwd, mechanicalRegistries) : [];
   const simulationRuns: JsonValue[] = [];
   const parameterManifests: StoredModelParameterManifest[] = [];

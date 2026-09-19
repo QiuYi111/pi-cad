@@ -71,6 +71,11 @@ export async function requireActiveRun(cwd: string, registries?: RegistrySet): P
 
 /** Request fields that carry a conversation identity over the sidecar wire. */
 export interface RunScopeRequestV1 {
+  /**
+   * `null` declares a conversation window that has not opened a Prime session
+   * yet: it is conversation-scoped and unbound. A missing field is a caller
+   * with no conversation concept at all, which keeps the project-global run.
+   */
   sessionId?: unknown;
   runId?: unknown;
   binding?: unknown;
@@ -96,9 +101,12 @@ function isReadTimestamp(value: unknown): value is string {
  * - an unusable binding (explicit `null`) means the caller read its transcript
  *   and found nothing, so the conversation is unbound and must never adopt
  *   whatever run the project registry remembers;
- * - no `binding` field at all is a stateless client (the Python kernel socket)
- *   that cannot read the transcript, so the project conversation registry is
- *   its only way to name the run of the session it belongs to.
+ * - no `binding` field at all is either a conversation-scoped client that
+ *   cannot read a transcript (the Desktop window, the Python kernel socket) or
+ *   a stateless one. A named session is resolved through the project
+ *   conversation registry; an explicit `null` session is a conversation
+ *   window with no session yet and stays unbound; naming neither keeps the
+ *   project-global pointer.
  *
  * A conversation-scoped run is started by its own Python kernel, and only the
  * kernel's registry write can carry it back to the conversation. The extension
@@ -108,6 +116,10 @@ function isReadTimestamp(value: unknown): value is string {
  * stays invisible.
  */
 export async function resolveRequestScope(cwd: string, request: RunScopeRequestV1): Promise<RunScopeV1 | undefined> {
+  // The Desktop has a conversation window before Prime opens its session. That
+  // window is conversation-scoped, so an explicit `null` session stays unbound
+  // instead of reading the run the project pointer happens to hold.
+  if (request.sessionId === null) return { sessionId: null, runId: isRunId(request.runId) ? request.runId : null };
   const sessionId = isSessionId(request.sessionId) ? request.sessionId : null;
   if (!sessionId) return isRunId(request.runId) ? { sessionId: null, runId: request.runId } : undefined;
 

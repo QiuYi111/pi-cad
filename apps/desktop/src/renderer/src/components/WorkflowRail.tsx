@@ -19,11 +19,27 @@ export function WorkflowRail() {
   }, []);
   useEffect(() => {
     let alive = true;
+    let session = "";
     const update = (event?: unknown) => { if (alive && (!event || shouldRefreshWorkflow(event))) void refresh(); };
     void refresh();
     const unsubscribe = window.piCad.runtime.onEvent(update);
+    // A conversation change swaps which run the rail describes, so the answer
+    // has to be read again even when no Prime turn ended.
+    const unsubscribeConversation = window.piCad.runtime.onConversation(() => update());
+    const unsubscribeStatus = window.piCad.runtime.onStatus((status) => {
+      const next = status.sessionId ?? "";
+      if (next === session) return;
+      session = next;
+      update();
+    });
     window.addEventListener("focus", update);
-    return () => { alive = false; unsubscribe(); window.removeEventListener("focus", update); };
+    return () => {
+      alive = false;
+      unsubscribe();
+      unsubscribeConversation();
+      unsubscribeStatus();
+      window.removeEventListener("focus", update);
+    };
   }, [refresh]);
   const phases = current?.phases ?? [];
   if (unavailable) return <div className="workflow-rail unavailable" data-testid="workflow-rail"><span>Workflow unavailable</span></div>;

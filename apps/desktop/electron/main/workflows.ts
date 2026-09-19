@@ -1,11 +1,28 @@
 import YAML from "yaml";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { userInfo } from "node:os";
 import type { AppSettings, WorkflowAdoptionPolicy, WorkflowCurrent, WorkflowDocument, WorkflowPhase } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
+import { AgentApiClient, conversationFields } from "./agent-api-client.js";
 
 function quote(value: string): string { return `'${value.replaceAll("'", `'\\''`)}'`; }
+
+/** The authority's answer for one conversation's bound run. */
+interface WorkflowRunView {
+  runId: string;
+  workflowId: string;
+  workflowVersion: string;
+  workflowHash: string;
+  phase: string;
+  status: string;
+  updatedAt: string;
+  phaseHistory: string[];
+  phases: WorkflowPhase[];
+}
+
+/** A conversation with nothing bound has no workflow state to project. */
+export function unboundWorkflow(): WorkflowCurrent {
+  return { authoritative: false, phaseHistory: [], phases: [] };
+}
 
 export class WorkflowStore {
   constructor(private readonly bridge: RuntimeBridge, private readonly identity = userInfo().username) {}
@@ -46,20 +63,36 @@ export class WorkflowStore {
     return next;
   }
 
-  async current(settings: AppSettings): Promise<WorkflowCurrent> {
-    const projectPath = settings.projectPath;
-    if (!projectPath) return { authoritative: false, phaseHistory: [], phases: [] };
-    try {
-      const nativePath = await this.bridge.revealPath(projectPath);
-      const state = JSON.parse(await readFile(join(nativePath, ".pi-cad", "status.json"), "utf8")) as any;
-      const run = state.run || {};
-      return {
-        workflowId: run.workflowId, workflowVersion: run.workflowVersion, workflowHash: run.workflowHash, runId: run.id,
-        phase: run.phase, status: run.status, updatedAt: run.updatedAt,
-        phaseHistory: Array.isArray(run.phaseHistory) ? run.phaseHistory : [],
-        phases: Array.isArray(run.phases) ? run.phases : [], authoritative: false,
-      };
-    } catch { return { authoritative: false, phaseHistory: [], phases: [] }; }
+  /**
+   * The workflow state of the selected Prime conversation.
+   *
+   * The workspace `.pi-cad/status.json` projection is written by whichever
+   * conversation last talked to the authority, so reading it here showed one
+   * conversation the phase, run and final state of another. The run is asked
+   * for by session instead: the authority answers for exactly that
+   * conversation, and an unbound conversation is answered with nothing.
+   * `null` is a Desktop window whose conversation has no Prime session yet; it
+   * is unbound like a named conversation the authority never bound.
+   */
+  async current(settings: AppSettings, sessionId?: string | null): Promise<WorkflowCurrent> {
+    if (!settings.projectPath || !sessionId) return unboundWorkflow();
+    // A failed read is reported as unavailable rather than as an unbound
+    // conversation: "no run" and "no answer" must not look the same.
+    const client = new AgentApiClient(this.bridge);
+    const run = await client.request<WorkflowRunView | null>(settings, { op: "workflow-current", ...conversationFields(sessionId) });
+    if (!run?.runId) return unboundWorkflow();
+    return {
+      workflowId: run.workflowId,
+      workflowVersion: run.workflowVersion,
+      workflowHash: run.workflowHash,
+      runId: run.runId,
+      phase: run.phase,
+      status: run.status,
+      ...(run.updatedAt ? { updatedAt: run.updatedAt } : {}),
+      phaseHistory: Array.isArray(run.phaseHistory) ? run.phaseHistory : [],
+      phases: Array.isArray(run.phases) ? run.phases : [],
+      authoritative: false,
+    };
   }
 
   private async read(path: string, editable = false): Promise<WorkflowDocument> {

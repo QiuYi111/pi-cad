@@ -300,7 +300,13 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     };
     void refresh();
     const unsubscribe = window.piCad.runtime.onEvent((event) => { void refresh(event); });
-    return () => { alive = false; unsubscribe(); };
+    // Switching conversations restarts the rating reading: state from the
+    // conversation the user just left must not trigger anything here.
+    const unsubscribeConversation = window.piCad.runtime.onConversation(() => {
+      workflowState.current = { initialized: false, terminal: false };
+      void refresh();
+    });
+    return () => { alive = false; unsubscribe(); unsubscribeConversation(); };
   }, [settings.projectPath, prime.status.sessionId]);
   useEffect(() => {
     const presentationKey = builtArtifact ? `${builtArtifact}:${buildRevision}` : "";
