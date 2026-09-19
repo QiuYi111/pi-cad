@@ -4,13 +4,24 @@ import { PrimeRuntimeState } from "./runtime-state.js";
 
 const wait = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
+/** Transcript of the conversation the demo restores. Prime names a session
+ * after its transcript file, so the demo reports the file name as its id. */
+export const DEMO_TRACE_ID = "demo-restored";
+export const DEMO_TRACE_PATH = `/workspace/.prime-sessions/${DEMO_TRACE_ID}.jsonl`;
+/** Session id of the conversation Prime starts for a fresh demo run. */
+const DEMO_START_SESSION_ID = "desktop-e2e";
 /**
  * The conversation the demo restores keeps the level it was last run at, which
  * is not necessarily the saved setting. Switching to it therefore has to be
  * reconciled, exactly like a real Prime `get_state()` answer would.
  */
-const RESTORED_SESSION_ID = "demo-restored";
 const RESTORED_THINKING: ThinkingLevel = "medium";
+
+/** Prime's session identity for a resumed conversation is its transcript name. */
+export function sessionIdFromTranscript(path?: string): string {
+  const name = (path ?? "").replaceAll("\\", "/").split("/").at(-1) ?? "";
+  return /^[A-Za-z0-9._-]+\.jsonl$/.test(name) ? name.slice(0, -".jsonl".length) : DEMO_TRACE_ID;
+}
 
 export interface DemoRuntimeOptions {
   /**
@@ -47,6 +58,7 @@ export class DemoRuntime extends EventEmitter {
   private failureDeadline?: number;
   private saved?: AppSettings;
   private revertedThinking = false;
+  private openedSessions = 0;
 
   constructor(private readonly options: DemoRuntimeOptions = {}) {
     super();
@@ -59,7 +71,7 @@ export class DemoRuntime extends EventEmitter {
     this.runtime.base({ state: "starting", checks: [], message: "Starting Prime…" });
     this.publish();
     await wait(120);
-    this.runtime.sessionReady("desktop-e2e", settings.thinking);
+    this.runtime.sessionReady(DEMO_START_SESSION_ID, settings.thinking);
     this.publish();
     return this.status;
   }
@@ -80,17 +92,19 @@ export class DemoRuntime extends EventEmitter {
   }
   async newSession() {
     this.messages = [];
-    this.runtime.sessionReady("desktop-e2e", this.saved?.thinking);
+    // A new conversation is a new Prime session, exactly like the real
+    // runtime: reusing the previous id would silently adopt its run binding.
+    this.runtime.sessionReady(`demo-new-${++this.openedSessions}`, this.saved?.thinking);
     this.publish();
     return [];
   }
   async setSessionName(_name: string) {}
-  async switchSession(_path?: string) {
+  async switchSession(path?: string) {
     this.messages = [
       { id: "demo-history-user", role: "user", content: "Design a folding stand" },
       { id: "demo-history-assistant", role: "assistant", content: "I checked the interfaces before building." },
     ];
-    this.runtime.sessionReady(RESTORED_SESSION_ID, RESTORED_THINKING);
+    this.runtime.sessionReady(sessionIdFromTranscript(path), RESTORED_THINKING);
     this.publish();
     return this.messages;
   }

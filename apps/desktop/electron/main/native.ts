@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
@@ -7,6 +8,7 @@ import { engineeringKnowledgeProbe, type RuntimeBridge, type RuntimePaths } from
 
 export class NativeBridge implements RuntimeBridge {
   readonly kind = "native" as const;
+  private nodePath?: Promise<string>;
   constructor(readonly bundledRuntimePath?: string, private readonly electronExecutable = process.execPath) {}
 
   async exec(args: string[], options: { input?: string; timeout?: number; user?: string } = {}) {
@@ -81,17 +83,37 @@ export class NativeBridge implements RuntimeBridge {
 
   async commandPath(name: "node" | "uv"): Promise<string> {
     if (name === "node") {
-      const directory = `${homedir()}/.local/share/pi-cad-desktop/bin`;
-      const wrapper = `${directory}/node`;
-      await mkdir(directory, { recursive: true });
-      await writeFile(wrapper, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${JSON.stringify(this.electronExecutable)} "$@"\n`, { encoding: "utf8", mode: 0o755 });
-      await chmod(wrapper, 0o755);
-      return wrapper;
+      // Several Desktop reads share this wrapper (the conversation list, the
+      // workflow projection, the viewer catalog) and ask for it at the same
+      // moment, so one promise prepares it for the whole process.
+      this.nodePath ??= this.ensureNodeWrapper();
+      return this.nodePath;
     }
     const { stdout } = await this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; command -v ${name}`]);
     const value = stdout.trim();
     if (!value.startsWith("/")) throw new Error(`${name} is not available.`);
     return value;
+  }
+
+  /**
+   * Prepare the Node wrapper the managed runtime is invoked through.
+   *
+   * Rewriting the file in place makes a wrapper that is being executed fail
+   * with ETXTBSY, and two writers to one temporary path can race. An unchanged
+   * wrapper is left alone and a changed one is renamed into place.
+   */
+  private async ensureNodeWrapper(): Promise<string> {
+    const directory = `${homedir()}/.local/share/pi-cad-desktop/bin`;
+    const wrapper = `${directory}/node`;
+    const body = `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${JSON.stringify(this.electronExecutable)} "$@"\n`;
+    await mkdir(directory, { recursive: true });
+    if (await readFile(wrapper, "utf8").catch(() => "") !== body) {
+      const temporary = `${wrapper}.${process.pid}.${randomUUID()}.tmp`;
+      await writeFile(temporary, body, { encoding: "utf8", mode: 0o755 });
+      await chmod(temporary, 0o755);
+      await rename(temporary, wrapper);
+    }
+    return wrapper;
   }
 
   async resolveRuntimePaths(settings: AppSettings): Promise<RuntimePaths> {

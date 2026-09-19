@@ -444,6 +444,13 @@ export type ExtensionUiRequest =
   | { type: "extension_ui_request"; id: string; method: "input" | "editor"; title: string; placeholder?: string; prefill?: string }
   | { type: "extension_ui_request"; id: string; method: "notify" | "setStatus" | "setTitle" | "setWidget" | "set_editor_text"; [key: string]: unknown };
 
+/**
+ * The Prime conversation the Desktop projects workflow and artifact state for.
+ * `null` means no conversation is selected, which is also the state of a new
+ * conversation Prime has not opened yet: both are unbound.
+ */
+export interface ConversationChange { sessionId: string | null }
+
 export interface DesktopApi {
   system: { installationInfo(): Promise<InstallationInfo> };
   settings: {
@@ -465,6 +472,12 @@ export interface DesktopApi {
     prompt(message: string, images?: Array<{ data: string; mimeType: string }>): Promise<void>;
     steer(message: string, images?: Array<{ data: string; mimeType: string }>): Promise<void>;
     newSession(): Promise<unknown[]>;
+    /**
+     * Select a new conversation without opening a Prime session. Nothing is
+     * created until the first prompt, so browsing conversations never leaves
+     * empty transcripts behind; the projection is unbound in the meantime.
+     */
+    newConversation(): Promise<unknown[]>;
     switchSession(path: string): Promise<unknown[]>;
     setSessionName(name: string): Promise<void>;
     abort(): Promise<void>;
@@ -476,6 +489,7 @@ export interface DesktopApi {
     onEvent(listener: (event: unknown) => void): () => void;
     onStatus(listener: (status: RuntimeStatus) => void): () => void;
     onUiRequest(listener: (request: ExtensionUiRequest) => void): () => void;
+    onConversation(listener: (change: ConversationChange) => void): () => void;
   };
   auth: {
     catalog(): Promise<ModelCatalog>;
@@ -551,6 +565,7 @@ export const IPC = {
   runtimePrompt: "runtime:prompt",
   runtimeSteer: "runtime:steer",
   runtimeNewSession: "runtime:new-session",
+  runtimeNewConversation: "runtime:new-conversation",
   runtimeSwitchSession: "runtime:switch-session",
   runtimeSetSessionName: "runtime:set-session-name",
   runtimeAbort: "runtime:abort",
@@ -562,6 +577,7 @@ export const IPC = {
   runtimeEvent: "runtime:event",
   runtimeStatus: "runtime:status",
   runtimeUiRequest: "runtime:ui-request",
+  runtimeConversation: "runtime:conversation",
   authStatusGet: "auth:status-get",
   authCatalog: "auth:catalog",
   authSetApiKey: "auth:set-api-key",

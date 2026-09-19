@@ -6,26 +6,66 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 describe("desktop workflow projection", () => {
-  it("uses the pinned run snapshot projected by the sidecar", async () => {
-    const projected = {
-      run: {
-        id: "run-1", workflowId: "custom.branching", workflowHash: "abc", phase: "verify", status: "active",
-        updatedAt: "now", phaseHistory: ["intake", "verify"],
-        phases: [{ id: "verify", title: "Verify", purpose: "Check", status: "active", transitions: [{ event: "retry", target: "intake" }], capabilities: ["probe.run"], obligations: ["evidence"] }],
+  /** A bridge that answers one Agent API request and records its body. */
+  function agentApiBridge(result: unknown, requests: Array<Record<string, unknown>> = []) {
+    return {
+      exec: async () => ({ stdout: "/project\n", stderr: "" }),
+      homeDirectory: async () => "/home/tester",
+      commandPath: async () => "/usr/bin/node",
+      toRuntimePath: async (path: string) => path,
+      resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent", projectPath: "/project" }),
+      pipe: async (_args: string[], input: string) => {
+        requests.push(JSON.parse(input) as Record<string, unknown>);
+        return { stdout: `${JSON.stringify({ schema: 1, ok: true, result })}\n`, stderr: "" };
       },
     };
-    const projectPath = await mkdtemp(join(tmpdir(), "pi-cad-workflow-"));
-    await mkdir(join(projectPath, ".pi-cad"));
-    await writeFile(join(projectPath, ".pi-cad", "status.json"), JSON.stringify(projected));
-    const current = await new WorkflowStore({ revealPath: async (path: string) => path } as never).current({ projectPath, distro: "Ubuntu" } as never);
+  }
+
+  it("reads the workflow of the selected conversation from the authority", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const projected = {
+      runId: "run-1", workflowId: "custom.branching", workflowVersion: "1.0.0", workflowHash: "abc",
+      phase: "verify", status: "active", updatedAt: "now", phaseHistory: ["intake", "verify"],
+      phases: [{ id: "verify", title: "Verify", purpose: "Check", status: "active", transitions: [{ event: "retry", target: "intake" }], capabilities: ["probe.run"], obligations: ["evidence"] }],
+    };
+    const store = new WorkflowStore(agentApiBridge(projected, requests) as never);
+    const current = await store.current({ projectPath: "/project", distro: "Ubuntu" } as never, "session-a");
+    expect(requests).toEqual([{ schema: 1, op: "workflow-current", sessionId: "session-a" }]);
     expect(current.workflowId).toBe("custom.branching");
     expect(current.workflowHash).toBe("abc");
+    expect(current.runId).toBe("run-1");
+    expect(current.updatedAt).toBe("now");
     expect(current.phases[0]?.transitions).toEqual([{ event: "retry", target: "intake" }]);
     expect(current.phases[0]?.capabilities).toEqual(["probe.run"]);
   });
 
+  it("never projects the run another conversation left in the workspace", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const projectPath = await mkdtemp(join(tmpdir(), "pi-cad-workflow-"));
+    await mkdir(join(projectPath, ".pi-cad"));
+    // The workspace projection is written by whichever conversation talked to
+    // the authority last; it is not authority and must not be read as state.
+    await writeFile(join(projectPath, ".pi-cad", "status.json"), JSON.stringify({ run: {
+      id: "run-from-another-conversation", workflowId: "custom.branching", phase: "final", status: "done", phases: [],
+    } }));
+    const store = new WorkflowStore(agentApiBridge(null, requests) as never);
+    const current = await store.current({ projectPath, distro: "Ubuntu" } as never, "session-b");
+    expect(current.runId).toBeUndefined();
+    expect(current).toMatchObject({ authoritative: false, phaseHistory: [], phases: [] });
+    expect(requests[0]).toMatchObject({ op: "workflow-current", sessionId: "session-b" });
+  });
+
+  it("shows a conversation with nothing selected as unbound without asking anyone", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const store = new WorkflowStore(agentApiBridge(null, requests) as never);
+    await expect(store.current({ projectPath: "/project", distro: "Ubuntu" } as never)).resolves.toMatchObject({
+      authoritative: false, phases: [], phaseHistory: [],
+    });
+    expect(requests).toEqual([]);
+  });
+
   it("returns an explicit idle state when no project is selected", async () => {
-    await expect(new WorkflowStore({} as never).current({ projectPath: "" } as never)).resolves.toMatchObject({ phases: [], phaseHistory: [] });
+    await expect(new WorkflowStore({} as never).current({ projectPath: "" } as never, "session-a")).resolves.toMatchObject({ phases: [], phaseHistory: [] });
   });
 
   it("ignores token deltas and refreshes only at state-changing boundaries", () => {

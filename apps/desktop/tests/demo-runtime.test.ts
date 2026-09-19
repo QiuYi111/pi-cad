@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DemoRuntime } from "../electron/main/demo-runtime";
+import { DEMO_TRACE_PATH, DemoRuntime } from "../electron/main/demo-runtime";
 import type { AppSettings, RuntimeStatus } from "../src/shared/contracts";
 
 const settings: AppSettings = {
@@ -58,8 +58,13 @@ describe("demo runtime phases", () => {
     await runtime.start({ ...settings, thinking: "high" });
     expect(runtime.status).toMatchObject({ sessionId: "desktop-e2e", thinking: "high" });
 
-    await runtime.switchSession("/workspace/.prime-sessions/demo.jsonl");
+    // Prime reports the resumed conversation's own identity: the transcript
+    // name. The Desktop projects workflow state for exactly that session.
+    await runtime.switchSession(DEMO_TRACE_PATH);
     expect(runtime.status).toMatchObject({ sessionId: "demo-restored", thinking: "medium" });
+
+    await runtime.switchSession("/workspace/.prime-sessions/conv-a.jsonl");
+    expect(runtime.status).toMatchObject({ sessionId: "conv-a", thinking: "medium" });
 
     await runtime.setThinking("high");
     expect(runtime.status.thinking).toBe("high");

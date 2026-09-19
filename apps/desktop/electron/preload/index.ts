@@ -29,6 +29,7 @@ const api: DesktopApi = {
     prompt: (message, images) => ipcRenderer.invoke(IPC.runtimePrompt, message, images),
     steer: (message, images) => ipcRenderer.invoke(IPC.runtimeSteer, message, images),
     newSession: () => ipcRenderer.invoke(IPC.runtimeNewSession),
+    newConversation: () => ipcRenderer.invoke(IPC.runtimeNewConversation),
     switchSession: (path) => ipcRenderer.invoke(IPC.runtimeSwitchSession, path),
     setSessionName: (name) => ipcRenderer.invoke(IPC.runtimeSetSessionName, name),
     abort: () => ipcRenderer.invoke(IPC.runtimeAbort),
@@ -40,6 +41,7 @@ const api: DesktopApi = {
     onEvent: (listener) => subscribe(IPC.runtimeEvent, listener),
     onStatus: (listener) => subscribe(IPC.runtimeStatus, listener),
     onUiRequest: (listener) => subscribe(IPC.runtimeUiRequest, listener),
+    onConversation: (listener) => subscribe(IPC.runtimeConversation, listener),
   },
   auth: {
     catalog: () => ipcRenderer.invoke(IPC.authCatalog),

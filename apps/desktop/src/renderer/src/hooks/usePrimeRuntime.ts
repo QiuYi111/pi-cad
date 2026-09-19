@@ -55,7 +55,11 @@ export function usePrimeRuntime() {
   };
 
   const newSession = async () => {
+    // The conversation is selected now, so the workflow projection drops to
+    // unbound immediately; its Prime session is opened by the first prompt,
+    // which keeps browsing conversations from leaving empty transcripts.
     pendingNewSession.current = status.state === "ready";
+    await window.piCad.runtime.newConversation();
     dispatch({ type: "desktop_session_loaded", messages: [] });
   };
 

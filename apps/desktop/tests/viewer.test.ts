@@ -109,4 +109,31 @@ describe("desktop viewer bridge", () => {
       "cp", "--", "/projects/bracket/build/bracket.step", "/mnt/c/Users/Jordan/Downloads/bracket.step",
     ]);
   });
+
+  it("reads the artifact catalog of the conversation the window shows", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const bridge = {
+      resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
+      toRuntimePath: async (path: string) => path,
+      homeDirectory: async () => "/home/tester",
+      commandPath: async () => "/usr/bin/node",
+      exec: async () => ({ stdout: "/projects/bracket\n", stderr: "" }),
+      pipe: async (_args: string[], input: string) => {
+        requests.push(JSON.parse(input) as Record<string, unknown>);
+        return { stdout: `${JSON.stringify({ schema: 1, ok: true, result: emptyCatalog })}\n`, stderr: "" };
+      },
+    };
+
+    await new ViewerBackend(bridge as never, () => "session-a").catalog({ projectPath: "/projects/bracket" } as never);
+    // An explicit conversation wins over the window's own.
+    await new ViewerBackend(bridge as never, () => "session-a").catalog({ projectPath: "/projects/bracket" } as never, "session-b");
+    // A hidden desktop E2E window with a stub runtime names no conversation.
+    await new ViewerBackend(bridge as never).catalog({ projectPath: "/projects/bracket" } as never);
+
+    expect(requests).toEqual([
+      { schema: 1, op: "viewer-catalog", sessionId: "session-a" },
+      { schema: 1, op: "viewer-catalog", sessionId: "session-b" },
+      { schema: 1, op: "viewer-catalog" },
+    ]);
+  });
 });
