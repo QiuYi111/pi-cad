@@ -42,6 +42,8 @@ cad.model.build(
     validation: str = "auto",
     parameters: dict[str, dict] | None = None,
 ) -> ArtifactRef
+cad.model.import_step(source: str | Path, output: str | Path | None = None) -> ArtifactRef
+cad.model.solidify_step(source: str | Path, output: str | Path | None = None) -> ArtifactRef
 cad.probe.run(
     *,
     subject: str | ArtifactRef = "current",
@@ -55,6 +57,15 @@ cad.review.prepare(candidate: Commit) -> dict
 
 The three engineering calls are therefore canonical exactly as
 `await cad.model.build("part.py", "part.step")`,
+`await cad.model.import_step("imports/reference.step")` for existing STEP files in the project,
+including face-only supplier models. This returns a reference artifact with seven
+views. A reference is not an authoritative CAD candidate; a solid candidate
+still needs `cad.model.build(...)`. Do not turn supplier surfaces into fake
+solids just to pass candidate validation.
+For a surface-only STEP that is actually closed, use
+`await cad.model.solidify_step("imports/supplier.step")`. Pi-CAD sews its
+existing faces only and returns a validated solid candidate. Open surfaces
+fail clearly; do not write ad hoc OCP code or add arbitrary thickness.
 `await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")`,
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.

@@ -22,6 +22,7 @@ import { PrimeConfigService } from "./prime-config.js";
 import { ParaViewBackend } from "./paraview.js";
 import { BlenderBackend } from "./blender.js";
 import { HumanApprovalStore } from "./approvals.js";
+import { importStepIntoProject } from "./step-import.js";
 
 // Keep existing settings and sign-in state across the public rename, while honoring
 // Electron's explicit profile override for managed deployments and isolated tests.
@@ -385,8 +386,14 @@ function registerIpc() {
     if (testOpenSteps.length) return testOpenSteps.shift()!;
     if (desktopE2E && desktopE2EOpenStep) return desktopE2EOpenStep;
     const settings = await settingsStore.get();
-    const result = await dialog.showOpenDialog(mainWindow!, { title: "Open STEP model", defaultPath: settings.projectPath || undefined, properties: ["openFile"], filters: [{ name: "STEP model", extensions: ["step", "stp"] }] });
-    return result.canceled ? null : result.filePaths[0] || null;
+    const result = await dialog.showOpenDialog(mainWindow!, { title: "Import STEP into project", defaultPath: settings.projectPath || undefined, properties: ["openFile"], filters: [{ name: "STEP model", extensions: ["step", "stp"] }] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const runtime = await bridge();
+    const { projectPath } = await runtime.resolveRuntimePaths(settings);
+    if (!projectPath) throw new Error("Choose a project before importing STEP.");
+    const source = await runtime.toRuntimePath(result.filePaths[0]);
+    const name = result.filePaths[0].split(/[\\/]/).at(-1) || "model.step";
+    return importStepIntoProject(runtime, { source, fileName: name, projectPath });
   });
   ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? demoMesh(path) : (await ensureViewer()).loadStep(await settingsStore.get(), path));
   ipcMain.handle(IPC.viewerExportStep, async (_event, source: string) => {

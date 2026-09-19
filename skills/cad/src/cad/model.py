@@ -27,8 +27,9 @@ async def _attach_images(images: list[dict[str, str]], artifact: ArtifactRef | N
                 raise ValueError("mandatory build image is not an inline PNG")
             view = image.get("name") or image.get("view")
             view_label = f"[{str(view).upper()}]" if view else "[VIEW]"
+            action = "Imported reference" if artifact is not None and artifact.role.endswith("reference") else "Built"
             label = (
-                f"Built {artifact!r}. Inspect the attached views carefully as the primary observation of the actual geometry. "
+                f"{action} {artifact!r}. Inspect the attached views carefully as the primary observation of the actual geometry. "
                 f"Reason about what the geometry actually does before your next action. Probe only for facts you need to verify.\n\n{view_label}"
                 if index == 0 and artifact is not None else view_label
             )
@@ -44,6 +45,7 @@ async def build(
     force: bool = False,
     validation: str = "auto",
     parameters: dict[str, dict[str, Any]] | None = None,
+    _import_mode: str | None = None,
 ) -> ArtifactRef:
     if validation not in {"auto", "fast", "full"}:
         raise CadApiError("validation must be auto, fast, or full", error_type="ModelBuildError")
@@ -57,6 +59,7 @@ async def build(
         force=force,
         validation=validation,
         **({"parameters": parameters} if parameters is not None else {}),
+        **({"importMode": _import_mode} if _import_mode is not None else {}),
     )
     envelope = response.get("build") or {}
     if not envelope.get("ok"):
@@ -67,6 +70,32 @@ async def build(
     if not artifact or not output_path.is_file():
         raise CadApiError(f"Pi-CAD model build did not create {output_relative.as_posix()}", error_type="ModelBuildError")
     digest = artifact.get("sha256") if artifact else None
-    ref = ArtifactRef(output_relative, digest, "candidate")
+    ref = ArtifactRef(output_relative, digest, response.get("referenceType", "reference") if _import_mode == "reference" else "candidate")
     await _attach_images(response.get("images") or [], ref)
     return ref
+
+
+async def import_step(
+    source: str | Path,
+    output: str | Path | None = None,
+    *,
+    force: bool = False,
+    validation: str = "auto",
+) -> ArtifactRef:
+    """Preserve and observe a project STEP reference, including valid surface models."""
+    if Path(source).suffix.lower() not in {".step", ".stp"}:
+        raise CadApiError("STEP import requires a .step or .stp file", error_type="ModelBuildError")
+    return await build(source, output, force=force, validation=validation, _import_mode="reference")
+
+
+async def solidify_step(
+    source: str | Path,
+    output: str | Path | None = None,
+    *,
+    force: bool = False,
+    validation: str = "auto",
+) -> ArtifactRef:
+    """Sew only closed STEP surfaces into a real solid candidate; fail on open faces."""
+    if Path(source).suffix.lower() not in {".step", ".stp"}:
+        raise CadApiError("STEP solidification requires a .step or .stp file", error_type="ModelBuildError")
+    return await build(source, output, force=force, validation=validation, _import_mode="solidify")

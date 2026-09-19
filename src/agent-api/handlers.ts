@@ -166,6 +166,10 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 }
 
 async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
+  const importingReference = request.importMode === "reference";
+  const solidifying = request.importMode === "solidify";
+  if ((importingReference || solidifying) && !/\.(step|stp)$/i.test(request.source)) throw new Error("STEP import requires a STEP file");
+  if ((importingReference || solidifying) && request.parameters) throw new Error("STEP import does not accept model parameters");
   const activeBeforeBuild = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
   if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
   const parameterContract = request.parameters
@@ -176,6 +180,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     output: request.output,
     force: request.force,
     parameters: parameterContract?.values,
+    solidify: solidifying,
   });
   if (!build.ok) return { build, visual: null, images: [] };
 
@@ -191,8 +196,12 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     const payload = geometry.payload as { error?: string } | undefined;
     throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");
   }
-  const validity = (geometry.payload as { validity?: { ok?: boolean; reasons?: string[]; solids?: Array<{ reasons?: string[] }> } }).validity;
-  if (!validity?.ok) {
+  const geometryPayload = geometry.payload as { validity?: { ok?: boolean; reasons?: string[]; checks?: { topology?: boolean }; solids?: Array<{ reasons?: string[] }> }; solidCount?: number; faceCount?: number };
+  const validity = geometryPayload.validity;
+  if (importingReference && (!validity?.checks?.topology || !geometryPayload.faceCount)) {
+    throw new Error("STEP reference import failed: the file has no valid displayable B-Rep faces");
+  }
+  if (!importingReference && !validity?.ok) {
     const reasons = [
       ...(validity?.reasons ?? []),
       ...(validity?.solids ?? []).flatMap((solid) => solid.reasons ?? []),
@@ -217,6 +226,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   ]));
   const artifactHash = envelopeArtifactHash(build, "step");
   if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
+  const referenceType = importingReference ? (geometryPayload.solidCount ? "solid-reference" : "surface-reference") : undefined;
   const sourcePath = projectRelativePath(cwd, request.source);
   const sourceHash = await sha256File(resolve(cwd, request.source));
   let parameterManifest: StoredModelParameterManifest | undefined;
@@ -238,7 +248,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
       manifest,
     };
   }
-  await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
+  if (!importingReference) await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
     let state = {
       ...loaded.state,
       artifacts: {
@@ -284,7 +294,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     data: (await readFile(view.path)).toString("base64"),
     mimeType: "image/png",
   })));
-  return { build, visual, geometry, images: inlineImages, ...(parameterManifest ? { parameterManifest } : {}) };
+  return { build, visual, geometry, images: inlineImages, ...(referenceType ? { referenceType } : {}), ...(parameterManifest ? { parameterManifest } : {}) };
 }
 
 export async function handleAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {

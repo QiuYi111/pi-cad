@@ -3,8 +3,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Sequence
@@ -38,7 +40,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         if parameters is not None and not isinstance(parameters, dict):
             raise TypeError("--parameters-json must contain an object")
         input_hashes = {"source": sha256_file(source)}
-        parameters_hash = canonical_parameters_hash(parameters)
+        parameters_hash = canonical_parameters_hash({"solidify": True} if args.solidify else parameters)
         if parameters is not None:
             input_hashes["parameters"] = parameters_hash
         with exclusive_build(Path.cwd(), output):
@@ -69,7 +71,37 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 )
                 return 0
 
-            result = run_source(source, output, parameters=parameters)
+            if source.suffix.lower() in {".step", ".stp"}:
+                if parameters is not None:
+                    raise ValueError("STEP import does not accept model parameters")
+                if source.resolve() == output.resolve():
+                    raise ValueError("STEP import output must differ from its source")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                if args.solidify:
+                    from .step_repair import solidify_closed_step
+
+                    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".step", delete=False) as temporary:
+                        temporary_path = Path(temporary.name)
+                    try:
+                        solidify_closed_step(source, temporary_path)
+                        os.replace(temporary_path, output)
+                    finally:
+                        temporary_path.unlink(missing_ok=True)
+                else:
+                    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".step", delete=False) as temporary:
+                        temporary_path = Path(temporary.name)
+                        try:
+                            with source.open("rb") as original:
+                                shutil.copyfileobj(original, temporary)
+                        except BaseException:
+                            temporary_path.unlink(missing_ok=True)
+                            raise
+                    os.replace(temporary_path, output)
+                result = {"exitCode": 0, "sourceFiles": [str(source.resolve())], "stdout": "", "stderr": ""}
+            else:
+                if args.solidify:
+                    raise ValueError("--solidify requires a .step or .stp source")
+                result = run_source(source, output, parameters=parameters)
             if result.get("exitCode", 1) != 0:
                 emit_error(
                     "cad_build_step",
@@ -728,6 +760,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", required=True)
     p.add_argument("--force", action="store_true")
     p.add_argument("--parameters-json")
+    p.add_argument("--solidify", action="store_true", help="sew only closed STEP surfaces into valid solids")
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("inspect", help="Return STEP geometry facts")
