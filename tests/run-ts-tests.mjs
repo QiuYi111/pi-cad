@@ -65,6 +65,7 @@ await import("./cadtestbench-metrics.test.mjs");
 await import("./cadtestbench-clarity-controls.test.mjs");
 await import("./cadtestbench-unit-normalization.test.mjs");
 await import("./cadtestbench-ambiguity-adjudication.test.mjs");
+await import("./experiment-contract.test.mjs");
 await jiti.import("./golden-phase0.test.ts", { default: true });
 await jiti.import("./observations.test.ts", { default: true });
 await jiti.import("./probe-registry.test.ts", { default: true });
