@@ -3,17 +3,31 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { makePhaseContractMessage, PHASE_CARD_CUSTOM_TYPE } from "./phase-card-message.ts";
-import { requestAuthority } from "./sidecar-client.ts";
+import { requestAuthority, type AuthorityRequestOptions } from "./sidecar-client.ts";
 import { registerExperienceTools } from "./experience-tools.ts";
+import { bindingFromTranscriptEntries, WORKFLOW_BINDING_CUSTOM_TYPE, type ConversationBindingV1 } from "./workflow-binding.ts";
 
 interface SidecarPhaseCard {
   text: string;
   images: Array<{ data: string; mimeType: string }>;
   digest: string;
+  runId?: string;
   workflowHash: string;
   phase: string;
   effectiveCapabilities?: string[];
 }
+
+interface ConversationScope {
+  sessionId: string;
+  binding: ConversationBindingV1 | null;
+}
+
+/**
+ * The live conversation scope of this Prime process. Prime runs one session
+ * at a time, so module state follows the active conversation; the transcript
+ * entry remains the durable copy that is re-read on resume.
+ */
+let conversationScope: ConversationScope | null = null;
 
 const REVIEW_COMPLETED_CUSTOM_TYPE = "pi-cad.review-completed";
 const CONCEPT_GROUNDED_CUSTOM_TYPE = "pi-cad.concept-grounded";
@@ -104,7 +118,7 @@ function originalUserRequest(messages: any[]): string | null {
 export default function piCadPhaseCard(pi: ExtensionAPI): void {
   registerExperienceTools(pi);
   pi.on("session_before_refine", async () => {
-    const gate = await requestAuthority<CompletionGate>({ op: "completion-gate" }).catch(() => null);
+    const gate = await authorityRequest<CompletionGate>({ op: "completion-gate" }).catch(() => null);
     return refineGateDecision(gate);
   });
   let reviewWatch: Promise<void> | null = null;
@@ -120,6 +134,65 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   let activeContractKey: string | null = null;
   let pendingMission: string | null = null;
   const MAX_RECOVERY_TURNS = 3;
+
+  let missingSessionWarned = false;
+  /**
+   * Prime 0.8 always exposes its session identity. An embedder without one
+   * keeps the older, project-scoped request shape instead of failing closed on
+   * an identity the host cannot provide.
+   */
+  const scopeOf = (ctx: { sessionManager?: { getSessionId(): string; getEntries(): unknown[] } }): ConversationScope | null => {
+    const sessionManager = ctx.sessionManager;
+    const sessionId = typeof sessionManager?.getSessionId === "function" ? sessionManager.getSessionId() : "";
+    if (!sessionId) {
+      conversationScope = null;
+      delete process.env.PI_CAD_SESSION_ID;
+      if (!missingSessionWarned) {
+        missingSessionWarned = true;
+        process.stderr.write("[pi-cad] Prime session identity is unavailable; workflow requests stay project-scoped\n");
+      }
+      return null;
+    }
+    if (!conversationScope || conversationScope.sessionId !== sessionId) {
+      const entries = typeof sessionManager?.getEntries === "function" ? sessionManager.getEntries() : [];
+      conversationScope = { sessionId, binding: bindingFromTranscriptEntries(entries, sessionId) };
+      // The IPython kernel inherits this process environment, and the cad
+      // Python client names its conversation with it. A kernel is created per
+      // session, so it never inherits another conversation's identity.
+      process.env.PI_CAD_SESSION_ID = sessionId;
+    }
+    return conversationScope;
+  };
+
+  /** Every authority request names the conversation it belongs to. */
+  const authorityRequest = <T>(request: Record<string, unknown>, options?: AuthorityRequestOptions): Promise<T> => {
+    const scope = conversationScope;
+    return requestAuthority<T>(
+      scope ? { ...request, sessionId: scope.sessionId, ...(scope.binding ? { binding: scope.binding } : {}) } : request,
+      options,
+    );
+  };
+
+  /**
+   * Mirror the sidecar's effective binding into the transcript. A run started
+   * by cad.workflow.start() becomes durable here; an unchanged binding is not
+   * rewritten.
+   */
+  const persistBinding = (card: SidecarPhaseCard): void => {
+    const scope = conversationScope;
+    if (!scope || !card.runId || !card.workflowHash) return;
+    if (scope.binding?.runId === card.runId && scope.binding.workflowHash === card.workflowHash) return;
+    const binding: ConversationBindingV1 = {
+      schema: 1,
+      sessionId: scope.sessionId,
+      runId: card.runId,
+      workflowHash: card.workflowHash,
+      boundAt: new Date().toISOString(),
+    };
+    pi.appendEntry(WORKFLOW_BINDING_CUSTOM_TYPE, binding);
+    scope.binding = binding;
+  };
+
   const reviewCompletionMessage = (review: ReviewHandle) => {
     const result = review.result;
     const findings = result?.findings ?? [];
@@ -156,7 +229,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   };
   const capturePendingMission = async () => {
     if (!pendingMission) return;
-    await requestAuthority({ op: "mission-capture", mission: pendingMission });
+    await authorityRequest({ op: "mission-capture", mission: pendingMission });
     pendingMission = null;
   };
   const fallbackContractMessage = (warning: string) => ({
@@ -174,10 +247,14 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     ].join("\n"),
     details: { warning: true },
   });
-  const loadContract = async () => requestAuthority<SidecarPhaseCard | null>(
-    { op: "phase-contract" },
-    { retries: 3, retryDelayMs: 25 },
-  );
+  const loadContract = async () => {
+    const card = await authorityRequest<SidecarPhaseCard | null>(
+      { op: "phase-contract" },
+      { retries: 3, retryDelayMs: 25 },
+    );
+    if (card) persistBinding(card);
+    return card;
+  };
   const appendChangedContract = async (deliverAs: "steer" | "followUp" = "steer") => {
     await capturePendingMission().catch(() => undefined);
     const card = await loadContract();
@@ -191,7 +268,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     if (review.status === "running" || notifiedReviews.has(review.reviewId)) return;
     let latest: ReviewHandle | null;
     try {
-      latest = await requestAuthority<null | ReviewHandle>({ op: "review-current" });
+      latest = await authorityRequest<null | ReviewHandle>({ op: "review-current" });
     } catch {
       return;
     }
@@ -206,7 +283,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   };
   const watchReview = () => {
     if (reviewWatch) return reviewWatch;
-    reviewWatch = requestAuthority<null | ReviewHandle>({ op: "review-watch" }, { timeoutMs: 145_000 })
+    reviewWatch = authorityRequest<null | ReviewHandle>({ op: "review-watch" }, { timeoutMs: 145_000 })
       .then(async (review) => {
         if (!review) return;
         await notifyReview(review);
@@ -220,6 +297,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
   // waiting. Hold the final assistant message only for an admitted, running
   // review; the sidecar completion event then queues the sole follow-up turn.
   pi.on("message_end", async (event, ctx) => {
+    scopeOf(ctx);
     if (event.message.role === "toolResult" && event.message.toolName === "codex_generate_image" && !event.message.isError) {
       const text = Array.isArray(event.message.content)
         ? event.message.content.filter((item: any) => item?.type === "text").map((item: any) => item.text || "").join("\n")
@@ -227,7 +305,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
       const path = text.match(/saved it to\s+(.+?\.png)(?:\.|\s|$)/i)?.[1];
       if (path) {
         try {
-          const recorded = await requestAuthority<{ recorded: boolean; path: string }>({ op: "image-generated", path });
+          const recorded = await authorityRequest<{ recorded: boolean; path: string }>({ op: "image-generated", path });
           if (recorded.recorded && !groundedConceptPaths.has(recorded.path)) {
             const project = process.env.PI_CAD_PROJECT_CWD ?? ctx.cwd;
             const bytes = await readFile(resolve(project, recorded.path));
@@ -280,18 +358,19 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
       return undefined;
     }
     if (event.message.role !== "assistant") return undefined;
-    const current = await requestAuthority<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
+    const current = await authorityRequest<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
     if (current?.status === "running") await watchReview();
     return undefined;
   });
   pi.on("before_agent_start", async (event, ctx) => {
+    scopeOf(ctx);
     try {
       const transcript = transcriptMessages(ctx);
       restoreContractKey(transcript);
       pendingMission ??= originalUserRequest(transcript) ?? (event.prompt.trim() || null);
       const model = ctx.model;
       if (model) {
-        await requestAuthority({
+        await authorityRequest({
           op: "author-model", provider: model.provider, model: model.id, thinking: pi.getThinkingLevel(),
         }, { retries: 1, retryDelayMs: 20 }).catch(() => undefined);
       }
@@ -312,9 +391,10 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     }
   });
   pi.on("tool_call", async (event, ctx) => {
+    scopeOf(ctx);
     if (event.toolName !== "codex_generate_image") return undefined;
     try {
-      const decision = await requestAuthority<null | { allowed: boolean; rendered?: string }>({ op: "authorize", operation: "image.generate" });
+      const decision = await authorityRequest<null | { allowed: boolean; rendered?: string }>({ op: "authorize", operation: "image.generate" });
       // Imagegen remains a general Prime capability outside an active CAD run.
       if (!decision || decision.allowed) return undefined;
       return { block: true, reason: decision.rendered ?? "image.generate is not authorized by the current workflow" };
@@ -330,6 +410,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
     // user prompt with a duplicate triggerTurn follow-up and can leave Prime's
     // session-action scheduler permanently "streaming" before provider I/O.
     for (const reviewId of persistedReviewNotificationIds(event.messages)) notifiedReviews.add(reviewId);
+    scopeOf(ctx);
     restoreContractKey(event.messages);
     pendingMission ??= originalUserRequest(event.messages);
     try {
@@ -337,7 +418,7 @@ export default function piCadPhaseCard(pi: ExtensionAPI): void {
       phaseCardFailureCount = 0;
       if (!card) return undefined;
       if (card.effectiveCapabilities?.includes("cad_submit_for_review")) {
-        const current = await requestAuthority<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
+        const current = await authorityRequest<null | ReviewHandle>({ op: "review-current" }).catch(() => null);
         if (current?.status === "running") {
           watchReview();
         } else if (current && !notifiedReviews.has(current.reviewId)) {

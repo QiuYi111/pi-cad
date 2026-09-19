@@ -16,6 +16,7 @@ import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import primeExtension from "../src/integrations/prime/extension.ts";
 import { PHASE_CARD_CUSTOM_TYPE } from "../src/integrations/prime/phase-card-message.ts";
+import { WORKFLOW_BINDING_CUSTOM_TYPE } from "../src/integrations/prime/workflow-binding.ts";
 import { requestAuthority } from "../src/integrations/prime/sidecar-client.ts";
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
 import probeExtension from "../src/extensions/probe/index.ts";
@@ -561,20 +562,32 @@ test("Python cad.commit crosses the real bridge with float snapshots and project
 });
 
 test("thin Prime extension durably appends Phase Contracts and is silent without a run", async () => {
-  const { cwd } = await projectFixture();
+  // Prime conversations own their workflow binding, so this fixture binds the
+  // run to the session the mock context reports and leaves the project pointer
+  // empty.
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-prime-"));
+  const sessionId = "prime-plan-c-session";
+  const bound = await new HarnessProjectStoreV7(cwd).startConversationRun({
+    sessionId,
+    workflow: workflow(),
+    registryContract: buildRegistryContract(mechanicalRegistries),
+  });
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-test-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
+  const previousSessionId = process.env.PI_CAD_SESSION_ID;
   let reportedModel: unknown;
   const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime, onAuthorModelSelection: (selection) => { reportedModel = selection; } });
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const handlers = new Map<string, Function>();
   const registeredTools = new Map<string, unknown>();
   const sentMessages: Array<{ message: any; options: any }> = [];
+  const appendedEntries: Array<{ customType: string; data: unknown }> = [];
   const pi = {
     on(name: string, handler: Function) { handlers.set(name, handler); },
     registerTool(tool: { name: string }) { registeredTools.set(tool.name, tool); },
     getThinkingLevel() { return "low"; },
     sendMessage(message: any, options: any) { sentMessages.push({ message, options }); },
+    appendEntry(customType: string, data: unknown) { appendedEntries.push({ customType, data }); },
   } as any;
   primeExtension(pi);
   assert.deepEqual([...registeredTools.keys()].sort(), [
@@ -584,30 +597,42 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   const context = handlers.get("context")!;
   const messageEnd = handlers.get("message_end")!;
   const toolCall = handlers.get("tool_call")!;
+  const transcriptContext = {
+    cwd,
+    model: { provider: "dashscope", id: "qwen3.8-max" },
+    sessionManager: { getSessionId: () => sessionId, getEntries: () => [], getBranch: () => [] },
+  };
   const original = [{ role: "user", content: "hello", timestamp: 1 }];
-  const prepared = await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  const prepared = await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, transcriptContext);
   const first = { messages: [...original, { role: "custom", ...prepared.message, timestamp: 2 }] };
-  await context({ messages: first.messages }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  await context({ messages: first.messages }, transcriptContext);
   assert.deepEqual(reportedModel, { provider: "dashscope", model: "qwen3.8-max", thinking: "low" });
   assert.equal(first.messages.length, 2);
   assert.equal(first.messages[1].customType, PHASE_CARD_CUSTOM_TYPE);
   assert.equal(first.messages[1].display, false);
+  // The conversation's own transcript holds the durable run binding, and the
+  // project-global pointer stays empty.
+  assert.equal((await new HarnessProjectStoreV7(cwd).load()).state.currentRunId, null);
+  assert.equal(appendedEntries.length, 1);
+  assert.equal(appendedEntries[0]!.customType, WORKFLOW_BINDING_CUSTOM_TYPE);
+  assert.deepEqual({ ...(appendedEntries[0]!.data as Record<string, unknown>), boundAt: "" }, {
+    schema: 1, sessionId, runId: bound.state.runId, workflowHash: bound.workflow.hash, boundAt: "",
+  });
+  assert.equal(process.env.PI_CAD_SESSION_ID, sessionId);
   const continued = [...original, { role: "assistant", content: "working", timestamp: 2 }, { role: "toolResult", content: "ok", timestamp: 3 }];
-  assert.equal(await context({ messages: continued }, { cwd }), undefined);
-  await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "same", isError: false } }, { cwd });
+  assert.equal(await context({ messages: continued }, transcriptContext), undefined);
+  await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "same", isError: false } }, transcriptContext);
   assert.deepEqual(sentMessages, [], "same phase must not append a duplicate contract");
   assert.equal(
-    await beforeAgentStart({ prompt: "continue", images: undefined, systemPrompt: "system" }, { cwd }),
+    await beforeAgentStart({ prompt: "continue", images: undefined, systemPrompt: "system" }, transcriptContext),
     undefined,
     "a new user turn in the same phase must not append a duplicate contract",
   );
-  const activeAfterContext = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
-  assert.ok(activeAfterContext);
-  const frame = await new HarnessRunStoreV7(cwd, activeAfterContext.state.runId).transactions.readJson<any>("context/frame.json");
+  const frame = await new HarnessRunStoreV7(cwd, bound.state.runId).transactions.readJson<any>("context/frame.json");
   assert.equal(frame?.mission, "hello");
-  await handleAgentApi(cwd, { schema: 1, op: "commit", name: "system-design" });
-  await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "integrated" });
-  await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "transition", isError: false } }, { cwd });
+  await handleAgentApi(cwd, { schema: 1, op: "commit", name: "system-design", sessionId });
+  await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "integrated", sessionId });
+  await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "transition", isError: false } }, transcriptContext);
   assert.equal(sentMessages.length, 1);
   assert.equal(sentMessages[0].options.deliverAs, "steer");
   const reviewContract = sentMessages[0].message;
@@ -616,17 +641,17 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   const priorProviderInput = [...first.messages, { role: "assistant", content: "working", timestamp: 3 }, { role: "toolResult", content: "advanced", timestamp: 4 }];
   const nextProviderInput = [...priorProviderInput, { role: "custom", ...reviewContract, timestamp: 5 }];
   assert.deepEqual(nextProviderInput.slice(0, priorProviderInput.length), priorProviderInput, "phase transition must be append-only");
-  const deniedImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });
+  const deniedImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, transcriptContext);
   assert.equal(deniedImage.block, true);
   assert.match(deniedImage.reason, /image\.generate is not granted in workflow phase review/);
 
   await sidecar.close();
-  const unavailableContext = await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, { cwd, model: { provider: "dashscope", id: "qwen3.8-max" } });
+  const unavailableContext = await beforeAgentStart({ prompt: "hello", images: undefined, systemPrompt: "system" }, transcriptContext);
   const fallbackCard = unavailableContext.message.content;
   assert.match(fallbackCard, /await cad\.workflow\.current\(\)/);
   assert.match(fallbackCard, /read only/);
   assert.doesNotMatch(fallbackCard, /CAN\n- none/);
-  const unavailableImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, { cwd });
+  const unavailableImage = await toolCall({ toolName: "codex_generate_image", input: { prompt: "concept" } }, transcriptContext);
   assert.equal(unavailableImage.block, true);
   assert.match(unavailableImage.reason, /authority sidecar unavailable/i);
   const empty = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-empty-"));
@@ -641,6 +666,8 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
     await emptySidecar.close();
     if (previousSocket === undefined) delete process.env.PI_CAD_AUTHOR_SOCKET;
     else process.env.PI_CAD_AUTHOR_SOCKET = previousSocket;
+    if (previousSessionId === undefined) delete process.env.PI_CAD_SESSION_ID;
+    else process.env.PI_CAD_SESSION_ID = previousSessionId;
     await rm(empty, { recursive: true, force: true });
     await rm(emptyRuntime, { recursive: true, force: true });
     await rm(runtime, { recursive: true, force: true });
