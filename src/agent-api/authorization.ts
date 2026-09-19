@@ -7,7 +7,7 @@ import {
   type Operation,
   type OperationAuthority,
 } from "../harness/permissions.ts";
-import { HarnessProjectStoreV7 } from "../harness/run-store.ts";
+import { resolveActiveRun } from "../harness/run-scope.ts";
 import { bootstrapAgentApiContracts } from "./bootstrap.ts";
 
 /** Resolve the active immutable run and make the single capability decision. */
@@ -17,7 +17,7 @@ export async function currentAuthorization(
   authority: OperationAuthority = "author",
 ): Promise<Authorization | null> {
   bootstrapAgentApiContracts();
-  const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const active = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!active) return null;
   return authorize(
     operation,

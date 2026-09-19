@@ -6,7 +6,8 @@ import { performance } from "node:perf_hooks";
 import { PermissionEngineV7 } from "./permissions.ts";
 import type { RegistrySet } from "./registry.ts";
 import { legalWorkflowTransitions, unmetPhaseObligations } from "./reducer.ts";
-import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } from "./run-store.ts";
+import { HarnessProjectStoreV7, type LoadedHarnessRunV7 } from "./run-store.ts";
+import { resolveActiveRun } from "./run-scope.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
 
 export interface PhaseCardImage {
@@ -29,6 +30,7 @@ export interface PhaseCard {
   text: string;
   images: PhaseCardImage[];
   digest: string;
+  runId: string;
   workflowHash: string;
   phase: string;
   effectiveCapabilities: string[];
@@ -309,10 +311,9 @@ export async function compilePhaseCard(cwd: string, options: { registries: Regis
   if (!Number.isInteger(maxTextBytes) || maxTextBytes < 1200) throw new Error("Phase Card text budget must be at least 1200 bytes");
   if (!Number.isInteger(maxImages) || maxImages < 0 || maxImages > 2) throw new Error("Phase Card image budget must be between zero and two");
 
-  const project = await new HarnessProjectStoreV7(cwd).load();
-  if (!project.state.currentRunId) return null;
-  const loaded = await new HarnessRunStoreV7(cwd, project.state.currentRunId).load(options.registries);
+  const loaded = await resolveActiveRun(cwd, options.registries);
   if (!loaded || ["done", "aborted"].includes(loaded.state.status)) return null;
+  const project = await new HarnessProjectStoreV7(cwd).load();
   const view = workflowCurrentView(loaded, options.registries);
   const rendered = renderBoundedPhaseCard(view, maxTextBytes);
   const text = rendered.text;
@@ -321,7 +322,7 @@ export async function compilePhaseCard(cwd: string, options: { registries: Regis
   const bytesRead = Buffer.byteLength(JSON.stringify(project.state)) + Buffer.byteLength(JSON.stringify(loaded.state)) + Buffer.byteLength(JSON.stringify(loaded.workflow));
   const bytesEmitted = Buffer.byteLength(text);
   return {
-    text, images, digest, workflowHash: loaded.workflow.hash, phase: loaded.state.phase,
+    text, images, digest, runId: loaded.state.runId, workflowHash: loaded.workflow.hash, phase: loaded.state.phase,
     effectiveCapabilities: view.operations.map((item) => item.capability), unmetObligations: view.unmet, legalTransitions: view.next,
     metrics: { durationMs: performance.now() - started, bytesRead, bytesEmitted, estimatedTokens: Math.ceil(bytesEmitted / 4), imageCount: images.length, truncated: rendered.truncated },
   };
@@ -343,11 +344,10 @@ export async function compilePhaseContract(
   const maxTextBytes = options.maxTextBytes ?? DEFAULT_TEXT_CAP;
   if (!Number.isInteger(maxTextBytes) || maxTextBytes < 1200) throw new Error("Phase Contract text budget must be at least 1200 bytes");
 
-  const project = await new HarnessProjectStoreV7(cwd).load();
-  if (!project.state.currentRunId) return null;
-  const loaded = await new HarnessRunStoreV7(cwd, project.state.currentRunId).load(options.registries);
+  const loaded = await resolveActiveRun(cwd, options.registries);
   if (!loaded || ["done", "aborted"].includes(loaded.state.status)) return null;
   if (loaded.workflow.id === "mechanical.naked") return null;
+  const project = await new HarnessProjectStoreV7(cwd).load();
   const phase = loaded.workflow.phases[loaded.state.phase];
   if (!phase) throw new Error(`phase contract cannot resolve phase: ${loaded.state.phase}`);
 
@@ -411,6 +411,7 @@ export async function compilePhaseContract(
     text,
     images: [],
     digest,
+    runId: loaded.state.runId,
     workflowHash: loaded.workflow.hash,
     phase: loaded.state.phase,
     effectiveCapabilities,

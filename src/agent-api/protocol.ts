@@ -9,7 +9,25 @@ export interface AgentArtifactSubject {
   role?: string;
 }
 
-export type AgentApiRequest =
+/**
+ * Prime conversation identity. `binding` is the durable transcript binding
+ * the extension restores, and its presence is authoritative: an explicit
+ * `null` declares a read transcript with no binding, so the conversation
+ * stays unbound instead of inheriting a registry entry from history.
+ * `bindingReadAt` is the read time the sidecar compares against the project
+ * conversation registry, which is how a run started by this conversation's
+ * cad Python kernel reaches the transcript. `runId` is kept for callers that
+ * assert only the run. An unbound conversation has no run — it never inherits
+ * the project-global pointer.
+ */
+export interface AgentApiConversationV1 {
+  sessionId?: string;
+  runId?: string;
+  binding?: { schema: 1; sessionId: string; runId: string; workflowHash: string; boundAt: string } | null;
+  bindingReadAt?: string;
+}
+
+export type AgentApiRequest = AgentApiConversationV1 & (
   | { schema: 1; op: "workflow-list" }
   | { schema: 1; op: "workflow-current" }
   | { schema: 1; op: "workflow-start"; id: string; interactionMode?: "interactive" | "headless" }
@@ -25,7 +43,8 @@ export type AgentApiRequest =
   | { schema: 1; op: "review-submit"; subjectCommit: string }
   | { schema: 1; op: "review-current"; reviewId?: string }
   | { schema: 1; op: "review-complete"; reviewId: string; result: { verdict: "pass" | "fail" | "clarification_required"; target: string; summary: string; findings: Array<{ id: string; severity: "info" | "warning" | "error"; finding: string; evidenceRefs: string[] }> } }
-  | { schema: 1; op: "review-watch"; after?: string };
+  | { schema: 1; op: "review-watch"; after?: string }
+);
 
 export interface AgentApiResponse {
   schema: 1;

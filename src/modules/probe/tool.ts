@@ -10,6 +10,7 @@ import { recordObservation } from "../../core/observation-index.ts";
 import { ensureProbePresets, probePreset, renderProbeResult } from "./index.ts";
 import { selectKernelEngine } from "../../harness/engine-router.ts";
 import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
+import { resolveActiveRun } from "../../harness/run-scope.ts";
 import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
 import { recordObservationV7 } from "../../harness/observations.ts";
 import type { AgentArtifactSubject } from "../../agent-api/protocol.ts";
@@ -164,7 +165,7 @@ async function resolveSubjectArtifact(
 ): Promise<string | null> {
   if (await selectKernelEngine(cwd) === "v7") {
     const project = new HarnessProjectStoreV7(cwd);
-    const loaded = await project.currentRun(mechanicalRegistries);
+    const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
     if (!loaded) return null;
     if ((subject ?? "current") === "baseline") {
       const { state } = await project.load();
@@ -265,7 +266,7 @@ async function persistProbeObservation(
 ) {
   if (!("details" in rendered) || !rendered.details) return rendered;
   if (await selectKernelEngine(cwd) === "v7") {
-    const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+    const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
     if (!loaded) return rendered;
     const envelope = rendered.details.envelope as any;
     const observation = rendered.details.observation as ObservationBundle | undefined;
