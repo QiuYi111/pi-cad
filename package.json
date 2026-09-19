@@ -43,6 +43,8 @@
     "test:py": "bash scripts/test.sh",
     "test:ts": "node tests/run-ts-tests.mjs",
     "test:prime": "node tests/run-prime-tests.mjs",
+    "test:contract": "node --test tests/experiment-contract.test.mjs",
+    "test:contract-red": "bash scripts/test-contract-red.sh",
     "test:prime-imagegen": "npm --prefix packages/prime-codex-image-gen test",
     "check:prime-imagegen": "npm --prefix packages/prime-codex-image-gen run check",
     "test:transcript-lab": "uv run --project packages/prime-transcript-lab --group dev pytest packages/prime-transcript-lab/tests",

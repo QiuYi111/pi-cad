@@ -1,0 +1,350 @@
+{
+  "contract_id": "reify-iclr2027-experiment-contract",
+  "version": "1.0.0",
+  "frozen_at": "2026-09-19",
+  "timezone": "Asia/Shanghai",
+  "repo": "QiuYi111/pi-cad",
+  "issues": {
+    "coordinator": "RES-344",
+    "contract": "RES-345",
+    "lifecycle": ["RES-342", "RES-343"]
+  },
+  "source_plan": {
+    "title": "ICLR 2027｜实验执行计划 v1（Linear执行版）",
+    "linear_document_id": "dc190e94-51f3-487b-a27e-88f4ac4571d8",
+    "source_file": "experiment-plan-v1.md",
+    "date": "2026-09-19",
+    "audit_baseline_commit": "0ba8c4d7aa9aa970b265cdd6202b5f696ab028ad"
+  },
+  "groups": {
+    "G": {
+      "label": "通用基线",
+      "definition": "通用 Prime ＋ 持久 IPython ＋ 与 Reify 相同的 build123d、渲染、几何查询、求解器、领域资料及可读方法",
+      "workflow": "通用 Prime 流程，不套用 Reify workflow 包",
+      "experience": "none",
+      "capability_parity": ["model", "provider", "thinking", "build123d", "render", "geometry_query", "solver", "domain_material", "readable_method_text"]
+    },
+    "R0": {
+      "label": "Reify 工作台，无提炼方法",
+      "definition": "Reify 工作台/受管工具 ＋ naked，仅有通用领域知识，没有从旧项目提炼的方法",
+      "workflow": "Reify 受管工具链",
+      "experience": "none",
+      "capability_parity": ["model", "provider", "thinking", "build123d", "render", "geometry_query", "solver", "domain_material"]
+    },
+    "RT": {
+      "label": "Reify ＋ 文字方法",
+      "definition": "R0 ＋ 专用 workflow 的完整文字方法，但不运行其阶段约束",
+      "workflow": "文字方法注入，阶段约束关闭",
+      "experience": "method_text_only",
+      "capability_parity": ["model", "provider", "thinking", "build123d", "render", "geometry_query", "solver", "domain_material"]
+    },
+    "RF": {
+      "label": "完整 Reify",
+      "definition": "完整 Reify；题目到轻量 default/专用 workflow 的映射在运行前冻结",
+      "workflow": "完整 Reify workflow 与阶段约束",
+      "experience": "reified_method",
+      "capability_parity": ["model", "provider", "thinking", "build123d", "render", "geometry_query", "solver", "domain_material", "readable_method_text"]
+    }
+  },
+  "group_rules": [
+    "G 不能缺工具、软件或文档，也不需要自己安装工程软件。",
+    "G 与 RF 的可读方法知识内容对齐。",
+    "G 与 RF 的差值是整体系统效果，不能单独归因给 Managed Context。",
+    "子 Agent 继承与主 Agent 相同的固定模型，并计入预算；不使用强模型规划、廉价模型执行的混合路由。",
+    "G/RF 能力差异未对齐前，不放行正式批量。"
+  ],
+  "models": {
+    "S": {
+      "role": "主模型",
+      "preference": "Sol / medium",
+      "record": "从环境导出精确 provider 与 model ID",
+      "must_verify": ["image_support", "thinking_semantics"]
+    },
+    "C": {
+      "role": "次模型",
+      "preference": "GLM-5.3-Flash / low",
+      "record": "从环境导出精确 provider 与 model ID",
+      "must_verify": ["image_support", "thinking_semantics"]
+    }
+  },
+  "matrix": [
+    {
+      "id": "E1",
+      "name": "公开 CADTestBench",
+      "tasks": 50,
+      "task_selection": "固定种子 20260919 均匀抽样",
+      "groups": ["G", "RF"],
+      "models": ["S", "C"],
+      "repeats": 1,
+      "rounds": 1,
+      "runs": 200,
+      "cap_minutes_per_run": 20,
+      "notes": [
+        "不拿历史失败、probe-regression 或 diagnostic 子集冒充无偏主基准。",
+        "官方题面与评分为主列，clarity/adjudication 修订另列。",
+        "每题新 project、新 HOME、新 session，方法与经验冻结。",
+        "缺产物、超时、澄清请求都计入完整分母。"
+      ]
+    },
+    {
+      "id": "E2",
+      "name": "连续工程项目",
+      "tasks": 12,
+      "groups": ["G", "RF"],
+      "models": ["S", "C"],
+      "repeats": 2,
+      "rounds": 3,
+      "runs": 96,
+      "cap_minutes_per_round": 30,
+      "cap_minutes_per_run": 90,
+      "notes": [
+        "12 个任务仍按 12 个独立 task 统计，轮次和重复不能放大 n。",
+        "后续要求由固定脚本按时点提供，不提前泄露，不由另一模型临时救场。",
+        "中间评分不反馈。"
+      ]
+    },
+    {
+      "id": "E3",
+      "name": "方法复用",
+      "tasks": 6,
+      "task_source": "复用 E2 的机构/工装任务（M1—M3、F1—F3）",
+      "base_group": "RF",
+      "base_group_reuse": "复用 E2 两次重复的 RF 结果，不重跑",
+      "groups": ["R0", "RT"],
+      "models": ["C"],
+      "repeats": 2,
+      "rounds": 1,
+      "runs": 24,
+      "cap_minutes_per_run": 90,
+      "notes": [
+        "R0→RT 测方法内容收益；RT→RF 测相同知识变成阶段/状态/回退的作用。",
+        "只用旧开发轨迹提炼方法，保留来源与人工修改记录，去除具体题目答案和坐标。",
+        "冻结后才开放新测试。"
+      ]
+    },
+    {
+      "id": "E4a",
+      "name": "观察设计",
+      "checkpoints": 12,
+      "checkpoint_mix": { "cad_defect": 4, "cad_normal": 4, "sim_defect_or_mismatch": 2, "sim_normal": 2 },
+      "conditions": ["O-standard", "O-managed"],
+      "models": ["S"],
+      "repeats": 2,
+      "rounds": 1,
+      "runs": 48,
+      "cap_minutes_per_run": 10,
+      "notes": [
+        "几何/求解结果、任务、权限和起点相同。",
+        "初始信息量不同时称为呈现策略，不把全部差异称纯顺序作用。",
+        "不在 prompt 透露缺陷位置。"
+      ]
+    },
+    {
+      "id": "E4b",
+      "name": "恢复",
+      "checkpoints": 6,
+      "scenarios": ["旧计划/新要求", "旧引用", "新载荷", "源码产物不符", "数组表格恢复", "参考版本变化"],
+      "conditions": ["P-files", "P-state"],
+      "models": ["S"],
+      "repeats": 2,
+      "rounds": 1,
+      "runs": 24,
+      "cap_minutes_per_run": 15,
+      "notes": [
+        "两组保留相同原始文件和任务，在同一个预登记边界用相同压缩器/摘要预算压缩一次。",
+        "不删基线文件，不塞垃圾撑窗口。"
+      ]
+    }
+  ],
+  "budget": {
+    "currency": "USD",
+    "core_runs": 392,
+    "slot_hours_ceiling": 260.7,
+    "concurrency": 4,
+    "utilization": 0.75,
+    "planning_margin": 0.1,
+    "planning_hours": 96,
+    "planning_assumptions_frozen_after_pilot": true,
+    "solver_and_render_rate_limited": true,
+    "optional_extension": {
+      "experiment": "E1",
+      "tasks": 150,
+      "groups": ["G", "RF"],
+      "models": ["S"],
+      "runs": 300,
+      "decision": "只按吞吐与预算决定，不按得分；扩到完整 200 题。"
+    },
+    "rules": [
+      "预算由 pilot 中位数与高分位估算，不外推旧版美元数。",
+      "订阅虚拟 cost 与现金支出分开记录。",
+      "四并发与模型/FEA 能力必须实测，不静默 GPU→CPU fallback。",
+      "负责人确认预算和运行清单后才放行付费批量。"
+    ]
+  },
+  "degradation": {
+    "order": ["取消公开 200 题扩展", "取消额外 thinking 扫描", "缩减 E4b", "缩减第二模型重复"],
+    "preserve_priority": ["12 个不同项目", "G/RF 配对", "S 模型重复"],
+    "rules": ["所有降级事先登记。", "不按得分挑题。", "不挑最好重复。"]
+  },
+  "rounds": {
+    "sequence": ["R1 提交封存", "R2 新要求", "再次封存", "R3 新要求", "最终提交"],
+    "count": 3,
+    "delivery": "固定脚本按时点提供，不提前泄露",
+    "intermediate_scoring": "不反馈",
+    "reference_solution": "不给参考解，只能继续自己的状态",
+    "missing_artifact": "如实记录缺产物",
+    "requirement_persistence": "未撤销的旧要求仍然有效",
+    "user_decision": "必要用户决定使用统一预审回答表，超出表的阻塞如实记录",
+    "continuation": "三轮修改、新会话与恢复不得串 workflow 或卡 terminal，不偷偷 reset canonical state，复用 RES-342/RES-343"
+  },
+  "submission": {
+    "artifact_resolution": "显式提交的 submission.json 指向的产物；禁止把最近修改的 STEP 当提交",
+    "core_deliverables": ["STEP", "确定性源码", "submission 清单", "submission hash"],
+    "motion_extra": ["部件", "关节"],
+    "simulation_extra": ["实际输入", "网格", "结果"],
+    "same_for_all_groups": true,
+    "baseline_extra_requirements": [],
+    "checklist": [
+      { "id": "step_explicit", "requirement": "最终 STEP 由显式提交记录指定，不按修改时间取最近文件" },
+      { "id": "source_deterministic", "requirement": "源码可确定性重建所提交的 STEP" },
+      { "id": "submission_manifest", "requirement": "所有组使用相同 submission.json 结构" },
+      { "id": "submission_hash", "requirement": "提交时记录 STEP 与 submission.json 的 sha256 并复验" },
+      { "id": "motion_bundle", "requirement": "运动题另交部件与关节数据" },
+      { "id": "simulation_bundle", "requirement": "仿真题另交实际输入、网格与结果" },
+      { "id": "no_group_private_record", "requirement": "不要求只有 Reify 才有的私有记录作为基线提交条件" }
+    ]
+  },
+  "experience": {
+    "main_experiment": {
+      "read": false,
+      "search": false,
+      "write": false,
+      "auto_refine": false,
+      "note": "主实验关闭跨题经验读取、检索、写入与自动 refine；不仅是换经验目录名。"
+    },
+    "E3_method_reuse": {
+      "source": "只用旧开发轨迹提炼方法",
+      "provenance": "保留来源与人工修改记录",
+      "sanitize": "去除具体题目答案和坐标",
+      "freeze_before_test": true,
+      "auto_distillation": "可选；只用开发轨迹生成一次候选，独立验证并冻结后再测试，不拿隐藏测试反复修方法"
+    },
+    "rules": [
+      "主实验禁止跨题经验读取与更新。",
+      "隐藏检查不回流，不用于返修。",
+      "经验开关是合约字段，必须进入每条运行记录。"
+    ]
+  },
+  "isolation": {
+    "required": [
+      "两个并发任务互不可见。",
+      "评分器与评分源码对 Agent 不可读。",
+      "历史经验与历史结果对主实验 Agent 不可读。",
+      "每个任务独立 project、HOME、session。",
+      "每题的评分素材只在没有该题 Agent 存活时物化。",
+      "取消或超时能结束该题的全部子进程与子 Agent。"
+    ],
+    "forbidden": [
+      "用共享可变 .cache/vault 目录做隔离。",
+      "依赖全程串行来假装隔离。",
+      "把压缩包当权限隔离。",
+      "让评分器读取 Agent 的私有中间状态。"
+    ]
+  },
+  "metering": {
+    "required_fields": [
+      "experiment",
+      "task",
+      "family",
+      "variant",
+      "model",
+      "reasoning",
+      "repeat",
+      "reify_sha",
+      "prime_sha",
+      "workflow_hash",
+      "skills_hash",
+      "runtime_hash",
+      "input_hash",
+      "protocol_hash",
+      "experience_read",
+      "experience_write",
+      "submission",
+      "round_results",
+      "provider_usage",
+      "cash_cost",
+      "virtual_cost",
+      "peak_context",
+      "compactions",
+      "wall_time",
+      "queue_time",
+      "tool_time",
+      "end_reason",
+      "integrity"
+    ],
+    "rules": [
+      "缺测保留 null，不能转 0。",
+      "不支持 seed 时只记录 repeat。",
+      "核验 provider usage 语义，不把 reasoning 重复相加。",
+      "子 Agent、额外图片服务、工具等待与供应商重试纳入计量。",
+      "一次 IPython 里多个 CAD 动作分别计量，不以一条 IPython 代替一次 CAD 操作。",
+      "子 Agent、重试与错误不漏账。",
+      "禁止把 peak context 或调用次数当新增 token。",
+      "禁止把文件字节或返回 token 当信息压缩率。",
+      "禁止把高缓存当高任务效率。",
+      "禁止把消息数当人工分钟。",
+      "别把不显著当等效。",
+      "别把缺测当零。",
+      "别把测试失败都叫基础设施事故。"
+    ],
+    "integrity_fields": [
+      "artifact_origin",
+      "artifact_sha256",
+      "submission_sha256",
+      "leakage_tier",
+      "leakage_flags",
+      "method_provenance",
+      "experience_mode",
+      "cancel_cleanup",
+      "run_end_reason"
+    ]
+  },
+  "pilot_gates": [
+    { "id": "gate.two_tasks_invisible", "requirement": "两并发任务互不可见", "issue_item": 1 },
+    { "id": "gate.grader_unreadable", "requirement": "评分源码与历史经验对 Agent 不可读", "issue_item": 1 },
+    { "id": "gate.experience_off", "requirement": "主实验经验读写均关闭", "issue_item": 2 },
+    { "id": "gate.public_prompt_clean", "requirement": "公共题面无旧审核或阶段暗示", "issue_item": 3 },
+    { "id": "gate.ipython_action_metering", "requirement": "一次 IPython 里多个 CAD 动作分别计量", "issue_item": 4 },
+    { "id": "gate.accounting_complete", "requirement": "子 Agent、重试与错误不漏账", "issue_item": 4 },
+    { "id": "gate.explicit_step_submission", "requirement": "最终 STEP 明确提交并复验 hash", "issue_item": 5 },
+    { "id": "gate.simulation_attachment", "requirement": "仿真图像进入模型请求，而不只是落盘 PNG", "issue_item": 6 },
+    { "id": "gate.session_binding_alignment", "requirement": "三轮续作复用 RES-342/RES-343 的 session 绑定，不另写第二套生命周期", "issue_item": 7 },
+    { "id": "gate.cancel_cleanup", "requirement": "取消或超时结束全部子进程与子 Agent", "issue_item": 7 },
+    { "id": "gate.method_provenance", "requirement": "记录实际发现/采用的 workflow、skill、方法与来源 hash", "issue_item": 8 }
+  ],
+  "protection_tests": {
+    "green": [
+      "tests/experiment-contract.test.mjs",
+      "packages/prime-transcript-lab/tests/test_smoke.py",
+      "packages/prime-transcript-lab/tests/test_protection_contract.py"
+    ],
+    "red": [
+      "tests/red/experiment-protection.red.test.mjs",
+      "packages/prime-transcript-lab/red-tests/test_metering_gaps.py"
+    ],
+    "rules": [
+      "每个用例注明对应问题、旧版失败与预期行为。",
+      "未修好的回归用例进入显式 red suite，不得显示成 skip 或 xfail。",
+      "现有通过套件不因无关改动破坏。",
+      "实现修复后先把 red 用例转绿，再改合约版本。"
+    ]
+  },
+  "prohibited": [
+    "不同时修生产实现。",
+    "不改题面追分。",
+    "不运行付费大批实验。",
+    "不放宽测试迁就后续代码。",
+    "不重做全项目测试框架。",
+    "不绕过 Human Review 自行 merge。"
+  ]
+}
