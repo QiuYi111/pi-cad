@@ -9,6 +9,9 @@
 
 不做 instruction-level 重放，不碰 hypervisor。
 
+`chaos:demo` / `chaos:run` 跑的是 `chaos/sut/`：形状和 Reify 一样，但代码是另写的，
+只用来验证 harness。要打**真 Reify 本体**，用 `chaos reify`（见下面「真 Reify slice」）。
+
 ## 一条命令跑起来
 
 ```bash
@@ -192,3 +195,77 @@ const noOrphanWorker: InvariantDefinition = {
 - worker 是本地进程，不是容器。想换成 Pumba 的容器 kill / pause，
   换掉进程故障实现即可，Action / Fault / Invariant 接口不用动；
 - 外部故障依赖 Toxiproxy 二进制，没装就自动只跑进程故障。
+
+## 真 Reify slice：`chaos reify`
+
+上面那套打的是 `chaos/sut/`（自写的假系统）。这一段打的是 Reify 本体，代码在 `chaos/reify/`。
+
+### 打的是真东西
+
+- 真控制面：每条请求起一个真 `scripts/pi-cad-agent-api.mjs` 进程，跑生产代码。
+- 真 run：真 `workflow-start` / `commit` / `workflow-advance`，状态落真 run store（`v7-project/state.json` + `runs/<id>/state.json`）。
+- 真 kernel：`model-build` 让控制面起它自己的真 `cadctl.worker` 进程（build123d），真出 STEP。
+- 真故障：对上面这些真进程发 SIGKILL / SIGSTOP / SIGCONT。
+- 真状态：invariant 全部从真 run store 和 `/proc` 读，不读假内存。
+
+### 命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `npm run chaos:reify -- demo` | 一条真链路：真 run → 真 build → kill 真 kernel → kill 真控制面 |
+| `npm run chaos:reify -- run --runs 6` | fast-check 生成真 action/fault 序列，发现失败就存 artifact |
+| `npm run chaos:reify -- replay <artifact.json>` | 用 artifact 里的序列重放（`--seed` 用 seed 重放） |
+| `npm run chaos:reify -- shrink <artifact.json>` | 用记录的 seed 重新 shrink |
+| `npm run chaos:reify -- invariants` | 列出这一段用的 invariant |
+
+`chaos:reify run` 发现问题退出码 1，没发现问题 0。
+
+### Action / Fault
+
+Action（真用户/系统操作）：`startRun`、`openConversation`、`commitPlan`、`advance`、`build`、`refresh`。
+每条序列前面固定有 `REIFY_SETUP`（startRun → commitPlan → advance(plan_ready)），保证故障有真 run 可打。
+
+Fault（真进程故障）：
+
+| 名字 | 打谁 |
+| --- | --- |
+| `killKernelDuringBuild` | 真 build 途中 SIGKILL 真 kernel，之后要求真 build 成功来证明恢复 |
+| `pauseKernelDuringBuild` | 真 build 途中 SIGSTOP 真 kernel，之后 SIGCONT |
+| `killAuthorityDuringBuild` | 真 build 途中 SIGKILL 真控制面进程 |
+
+### Invariant
+
+| 名字 | 含义 |
+| --- | --- |
+| `no-orphan-kernel` | 控制面进程死了，它起的 kernel 不能继续跑 |
+| `run-ownership` | 会话绑的 run 必须真存在，一个 run 只能属于一个会话 |
+| `terminal-state-stable` | terminal run 不能回到非 terminal |
+| `artifact-integrity` | run 记的 artifact 必须真在盘上、hash 一致，且候选件只有一份 |
+| `recovery-convergence` | 注入故障后必须在预算内由真 build 恢复 |
+
+### artifact
+
+`chaos:reify run` 失败时写 `chaos/artifacts/<时间>-reify-<invariant>.json`。
+除了 POC 那套 seed / path / 序列，还多出真身份：真 run / 会话 / kernel pid、
+真状态时间线、真请求日志、真恢复证据。可以直接 `replay` 和 `shrink`。
+
+### 已经抓到的真问题
+
+真 build 途中 SIGKILL 控制面进程，控制面死了，它起的真 kernel 还在跑 → 孤儿进程，
+触发 `no-orphan-kernel`。原因是 kernel 的清理只在正常关停时走
+（`WarmCadctlWorker.stop()` 里 `process.kill(-pid)`），被 SIGKILL 时不会跑。
+
+反过来，build 途中 SIGKILL / SIGSTOP kernel 都能正确恢复：控制面报
+`cadctl worker exited with SIGKILL`，下一次真 build 成功。
+
+`tests/chaos-reify.test.ts` 把这两条都做成用例。
+
+### 这一段的环境变量
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `CHAOS_REIFY_RECOVERY_BUDGET_MS` | 90000 | 故障后要求恢复的预算 |
+| `CHAOS_REIFY_ORPHAN_GRACE_MS` | 2000 | 控制面死后多久才把 kernel 算孤儿 |
+| `CHAOS_REIFY_PAUSE_MS` | 3000 | pause 故障观察窗口 |
+| `CHAOS_REIFY_FINAL_SETTLE_MS` | 1200 | 一轮结束前的稳定观察窗口 |
+| `CHAOS_REIFY_KEEP` | - | `1` 时保留真项目目录，方便手查 |

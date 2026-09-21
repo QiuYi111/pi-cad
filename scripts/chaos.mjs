@@ -18,6 +18,10 @@ if (subcommand === "__serve") {
 } else if (subcommand === "__upstream") {
   const { runUpstreamEntry } = await jiti.import(modulePath("../chaos/sut/upstream.ts"));
   await runUpstreamEntry(rest);
+} else if (subcommand === "reify") {
+  // Real-Reify vertical slice: drives production Reify processes, not the POC SUT.
+  const { runReifyCli } = await jiti.import(modulePath("../chaos/reify/cli.ts"));
+  process.exit(await runReifyCli(rest));
 } else {
   const { runCli } = await jiti.import(modulePath("../chaos/cli.ts"));
   const code = await runCli(process.argv.slice(2));

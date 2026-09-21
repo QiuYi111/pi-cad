@@ -55,6 +55,7 @@
     "chaos:replay": "node scripts/chaos.mjs replay",
     "chaos:shrink": "node scripts/chaos.mjs shrink",
     "chaos:bugs": "node scripts/chaos.mjs bugs",
+    "chaos:reify": "node scripts/chaos.mjs reify",
     "chaos:fetch-tools": "node scripts/chaos-fetch-tools.mjs",
     "setup:simulation-runtimes": "bash -lc 'sudo scripts/bootstrap-openfoam14.sh && sudo scripts/bootstrap-su2-8.5.0.sh && sudo scripts/bootstrap-torch-fem-runtimes.sh'",
     "setup:python": "bash scripts/bootstrap-python.sh",
