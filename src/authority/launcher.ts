@@ -183,6 +183,20 @@ export function resolveVenvPythonRoot(venvPython: string): string {
   return dirname(dirname(resolve(dirname(venvPython), linkTarget)));
 }
 
+/**
+ * Credentials are the one thing every run must share. Prime rotates the OAuth
+ * refresh token in place while it runs, so a per-launch copy means: a second
+ * concurrent run keeps failing its own refresh, and whichever run ends last
+ * writes its stale refresh token back over the fresh one. The user then has to
+ * sign in again. Settings and session state stay isolated per launch.
+ */
+function bindSharedCredentials(args: string[], agentDir: string, primeAgentDir: string): void {
+  args.push(
+    "--bind", agentDir, "/home/prime/.prime/agent",
+    "--bind", join(primeAgentDir, "auth.json"), "/home/prime/.prime/agent/auth.json",
+  );
+}
+
 export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string; modelArgs?: string[] }): string[] {
   const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/home/prime", "--dir", "/home/prime/.prime", "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad"];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
@@ -196,7 +210,6 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--ro-bind", join(paths.repository, "scripts"), "/opt/pi-cad/scripts",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
     "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv", "--ro-bind", paths.kernelPythonRoot, "/opt/python",
-    "--bind", input.reviewerAgentDir, "/home/prime/.prime/agent",
     "--ro-bind", input.reviewerSocketDirectory, "/run/pi-cad/reviewer",
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime", "--setenv", "TMPDIR", "/tmp",
@@ -211,6 +224,7 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
     "--setenv", "PI_OFFLINE", "1",
   );
+  bindSharedCredentials(args, input.reviewerAgentDir, paths.primeAgentDir);
   for (const name of ["TERM", "LANG", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) passEnvironment(args, name, process.env[name]);
   args.push(
     "--", "/opt/prime/prime-agent.sh", "--dist", "--cwd", "/workspace",
@@ -268,7 +282,6 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
     "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
     "--ro-bind", paths.kernelPythonRoot, "/opt/python",
-    "--bind", paths.ephemeralAgentDir, "/home/prime/.prime/agent",
     "--ro-bind", paths.authorSocketDirectory, "/run/pi-cad/author",
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime",
@@ -290,6 +303,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
     "--setenv", "PI_OFFLINE", process.env.PI_OFFLINE ?? "1",
   );
+  bindSharedCredentials(args, paths.ephemeralAgentDir, paths.primeAgentDir);
   for (const name of ["TERM", "COLORTERM", "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) {
     passEnvironment(args, name, process.env[name]);
   }
@@ -394,6 +408,19 @@ async function copyPrimeBootstrap(source: string, destination: string): Promise<
   }
 }
 
+/**
+ * The shared credential file must exist before the sandbox binds it. Prime
+ * writes `{}` itself when the file is missing, so an empty file is the same
+ * "nobody is signed in" state it would produce.
+ */
+export async function ensurePrimeCredentialFile(primeAgentDir: string): Promise<string> {
+  const authPath = join(primeAgentDir, "auth.json");
+  await mkdir(primeAgentDir, { recursive: true, mode: 0o700 });
+  if (!existsSync(authPath)) await writeFile(authPath, "{}\n", { encoding: "utf8", mode: 0o600 });
+  await chmod(authPath, 0o600);
+  return authPath;
+}
+
 async function configureBlenderMcp(agentDir: string, command: string, env: Record<string, { env: string }>): Promise<void> {
   const path = join(agentDir, "settings.json");
   let settings: Record<string, unknown> = {};
@@ -469,12 +496,44 @@ async function startManagedBlenderMcp(repository: string): Promise<{ close: () =
   }) };
 }
 
+export function mergePrimeCredentials(source: Record<string, unknown>, destination: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...destination };
+  for (const [provider, entry] of Object.entries(source)) {
+    const current = merged[provider];
+    if (current === undefined || isFresherCredential(entry, current)) merged[provider] = entry;
+  }
+  return merged;
+}
+
 /**
- * The author runs in an isolated, per-launch agent directory.  Prime's
- * /login writes auth.json there, so without this handoff API keys disappear
- * as soon as the sandbox is cleaned up.  Merge only credentials back into the
- * durable host directory; settings and session state intentionally remain
- * isolated per project launch.
+ * A refreshed OAuth credential carries a later expiry than the one it replaced.
+ * An older expiry means the copy failed to refresh, or refreshed before another
+ * run did: writing it back would hand the next launch a refresh token that is
+ * already spent, and the user would have to sign in again. Entries without an
+ * expiry (API keys) are taken from the source because /login inside the
+ * sandbox is the ordinary way to add them.
+ */
+function isFresherCredential(source: unknown, destination: unknown): boolean {
+  const sourceExpiry = credentialExpiry(source);
+  const destinationExpiry = credentialExpiry(destination);
+  if (sourceExpiry === null) return destinationExpiry === null;
+  if (destinationExpiry === null) return true;
+  return sourceExpiry > destinationExpiry;
+}
+
+function credentialExpiry(entry: unknown): number | null {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+  const expires = (entry as { expires?: unknown }).expires;
+  return typeof expires === "number" && Number.isFinite(expires) ? expires : null;
+}
+
+/**
+ * Linux binds the durable auth.json straight into the sandbox, so credentials
+ * never leave the one file Prime locks and rotates. The macOS sandbox cannot
+ * redirect a path, so the author still works on a per-launch copy; Prime's
+ * /login writes auth.json there, and without this handoff a fresh login would
+ * disappear with the runtime directory. Merge credentials back, newest first,
+ * and leave settings and session state isolated per launch.
  */
 async function persistPrimeCredentials(source: string, destination: string): Promise<void> {
   const sourcePath = join(source, "auth.json");
@@ -501,7 +560,7 @@ async function persistPrimeCredentials(source: string, destination: string): Pro
 
   await mkdir(destination, { recursive: true, mode: 0o700 });
   const temporaryPath = join(destination, `auth.json.${process.pid}.${Date.now()}.tmp`);
-  await writeFile(temporaryPath, `${JSON.stringify({ ...destinationCredentials, ...sourceCredentials }, null, 2)}\n`, {
+  await writeFile(temporaryPath, `${JSON.stringify(mergePrimeCredentials(sourceCredentials, destinationCredentials), null, 2)}\n`, {
     encoding: "utf8",
     mode: 0o600,
   });
@@ -633,6 +692,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const reviewerAgentDir = join(runtimeDirectory, "reviewer-agent");
   const reviewerWorkspace = join(runtimeDirectory, "reviewer-workspace");
   await mkdir(runtimeDirectory, { recursive: true, mode: 0o700 });
+  await ensurePrimeCredentialFile(primeAgentDir);
   await copyPrimeBootstrap(primeAgentDir, ephemeralAgentDir);
   await copyPrimeBootstrap(primeAgentDir, reviewerAgentDir);
   await mkdir(reviewerWorkspace, { recursive: true, mode: 0o700 });
@@ -646,9 +706,9 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     authorReadOnly: process.env.PI_CAD_DESKTOP_PERMISSION === "read-only",
     onAuthorModelSelection: (selection) => { currentAuthorModel = selection; },
     reviewerExecutor: async ({ reviewId, prompt, signal }) => {
-      // OAuth providers may rotate the refresh token while the author is
-      // running. Snapshot the live isolated author bootstrap at admission so
-      // a late reviewer never starts with the stale launch-time copy.
+      // Snapshot the live author bootstrap at admission so a late reviewer
+      // starts from the current settings instead of the launch-time copy.
+      // Credentials come from the shared durable file the sandbox binds.
       await copyPrimeBootstrap(ephemeralAgentDir, reviewerAgentDir);
       const modelArgs = reviewerModelArgs(reviewerLaunch.policy, currentAuthorModel);
       const result = process.platform === "darwin"
@@ -664,6 +724,9 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
         const detail = result.diagnostic.trim().split("\n").slice(-3).join(" | ").replace(/[A-Za-z0-9_-]{80,}/g, "[redacted]");
         throw new Error(`reviewer exited with code ${result.code}${detail ? `: ${detail}` : ""}`);
       }
+      // Linux shares the durable credential file with the reviewer. macOS hands
+      // the reviewer its own copy, so a token it refreshed has to come back.
+      if (process.platform === "darwin") await persistPrimeCredentials(reviewerAgentDir, primeAgentDir);
     },
   });
   const paths: LaunchPaths = {
@@ -697,9 +760,10 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
       : await childExit("/usr/bin/bwrap", buildPrimeBwrapArgs(paths, primeArgs, process.env.PI_CAD_DESKTOP_PERMISSION === "read-only" ? "read-only" : "workspace"), {
           PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         });
-		// Persist credentials entered via /login before the runtime directory is
-		// removed in finally. This makes provider keys available to future tasks.
-		await persistPrimeCredentials(ephemeralAgentDir, primeAgentDir);
+    // Linux writes credentials through the shared bind. macOS keeps the
+    // per-launch copy, so persist /login there before the runtime directory is
+    // removed in finally.
+    if (process.platform === "darwin") await persistPrimeCredentials(ephemeralAgentDir, primeAgentDir);
     const gate = await completionGate(project);
     await archivePrimeExperience(project, gate, currentAuthorModel);
     if (result.signal) return 128;

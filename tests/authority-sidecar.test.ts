@@ -341,7 +341,10 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /--ro-bind\n\/run\/private\/author\n\/run\/pi-cad\/author/);
   assert.doesNotMatch(joined, /reviewer/);
   assert.doesNotMatch(joined, /PI_CAD_CANONICAL_PROJECT_DIR/);
-  assert.doesNotMatch(joined, /\/host\/agent/);
+  // The durable agent directory itself stays outside the sandbox. Only the
+  // shared credential file is bound in, so concurrent runs rotate one token.
+  assert.doesNotMatch(joined, /--bind\n\/host\/agent\n/);
+  assert.match(joined, /--bind\n\/host\/agent\/auth\.json\n\/home\/prime\/\.prime\/agent\/auth\.json/);
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
