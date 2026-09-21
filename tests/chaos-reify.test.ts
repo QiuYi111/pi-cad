@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -842,4 +842,62 @@ test("reify chaos: runtime 暂停的时间窗收在 inject 里，后续真请求
   } finally {
     await session.close().catch(() => undefined);
   }
+});
+
+test("reify chaos: 两个 file-state 故障叠在一起，harness 不会造出假的 fault-outcome-honest", async (t) => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const runId = ((await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string }).runId;
+    assert.ok(runId, "setup 之后必须有真 run");
+    const stateFile = join(session.runDir(runId!), "state.json");
+    assert.ok(existsSync(stateFile), "真 run state 文件必须在");
+    const artifactCount = (await session.snapshot()).runs.find((run) => run.id === runId)?.artifacts.length ?? 0;
+    assert.ok(artifactCount > 0, "setup 的真 build 必须留下 artifact");
+
+    const unreadable = reifyFaultDefinitions.find((fault) => fault.name === "unreadableRunStateFile")!;
+    const partial = reifyFaultDefinitions.find((fault) => fault.name === "partialStateWrite")!;
+
+    const first = await injectReifyFault(session, unreadable, { kind: "fault", name: "unreadableRunStateFile", params: {} }, trace);
+    if (first.status === "NotApplicable") {
+      t.skip(`这一轮造不出「读不到」：${first.reason}`);
+      return;
+    }
+    assert.equal(first.status, "Injected");
+
+    // The composite case the campaign really generated: a previous fault made
+    // the state file unreadable, so a partially-written state file is not a
+    // scenario that exists. It must be "not applicable", never an injection
+    // failure that then reads as a product bug.
+    const second = await injectReifyFault(session, partial, { kind: "fault", name: "partialStateWrite", params: {} }, trace);
+    assert.equal(second.status, "NotApplicable", "读不到的文件上加「写一半」必须明说不适用");
+    assert.match(second.reason ?? "", /读不了或写不了/);
+
+    await unreadable.recover({ session, trace, params: {} });
+    assert.ok(JSON.parse(readFileSync(stateFile, "utf8")), "恢复之后 state.json 必须还是能读的 JSON");
+
+    // The fault itself still works when nothing else is holding the file.
+    const intact = readFileSync(stateFile);
+    const alone = await injectReifyFault(session, partial, { kind: "fault", name: "partialStateWrite", params: {} }, trace);
+    assert.equal(alone.status, "Injected", "没有别的故障时「写一半」要真的注入");
+    assert.ok(readFileSync(stateFile).length < intact.length, "state.json 必须真的被截短");
+
+    // Truncating a second time would overwrite the only intact copy, so the
+    // second injection must refuse instead of silently destroying the original.
+    const twice = await injectReifyFault(session, partial, { kind: "fault", name: "partialStateWrite", params: {} }, trace);
+    assert.equal(twice.status, "NotApplicable", "已经截过一次就不能再截，否则原件就没了");
+
+    await partial.recover({ session, trace, params: {} });
+    // A second truncation would have overwritten the only intact copy, so the
+    // recovered state must still describe the same run with the same artifacts.
+    await checkReifyInvariants({ session, snapshot: await session.snapshot(), now: Date.now() });
+    const recovered = (await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string };
+    assert.equal(recovered.runId, runId, "恢复之后同一个 run 还得在");
+    const restored = (await session.snapshot()).runs.find((run) => run.id === runId);
+    assert.equal(restored?.artifacts.length, artifactCount, "恢复之后 run 上的 artifact 不能少");
+    assert.ok(!session.harnessDamage.runs.has(runId!), "恢复之后 damage 必须清掉");
+  });
 });

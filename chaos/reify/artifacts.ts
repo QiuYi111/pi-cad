@@ -33,6 +33,13 @@ export interface ReifyFailureArtifact {
    * fault only reproduces in the same mode. Absent means one-shot authorities.
    */
   runtimeMode?: boolean;
+  /**
+   * The generator's fault pool for this failure, when the run was scoped to a
+   * campaign profile. A fast-check path only resolves against the same
+   * generator shape, so the pool is replayed with the seed and the path.
+   * Absent means the full fault space.
+   */
+  faultScope?: string[];
   originalSequence: Command[];
   shrunkSequence: Command[];
   replaySequence: Command[];

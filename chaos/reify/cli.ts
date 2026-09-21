@@ -1,6 +1,9 @@
 import { join } from "node:path";
 
 import { InvariantViolation } from "../types.ts";
+import { CAMPAIGNS_DIR, loadCampaign, runReifyCampaign, type CampaignOptions } from "../campaign/campaign.ts";
+import { CAMPAIGN_PROFILES, resolveProfiles } from "../campaign/profiles.ts";
+import { renderCampaignReport, renderCampaignSummary } from "../campaign/report.ts";
 import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "./artifacts.ts";
 import { inspectReifyComponents, runtimeObservation, type ReifyComponents } from "./components.ts";
@@ -23,6 +26,15 @@ const USAGE = `真 Reify chaos slice
   chaos reify inspect [--json] [--prime] [--provider-probe]
                                        起真 runtime，打真 run/kernel，看 provider/Desktop/WSL
   chaos reify space [--json]           列出 action / fault 空间和各自覆盖的边界
+  chaos reify campaign run [--mode short|nightly|targeted] [--rounds N] [--seed N]
+                           [--max-commands N] [--profiles a,b] [--runtime-ratio 0..1]
+                           [--provider-faults] [--concurrency N] [--triage-replays N]
+                           [--id NAME] [--out DIR] [--skip-triage] [--json]
+                                       跑大规模真 campaign，落 artifact + dedupe + report
+  chaos reify campaign rerun <dir> [--json]   用 manifest 原样重跑一条 campaign
+  chaos reify campaign report <dir> [--json]  用已落盘的数据重出 report
+  chaos reify campaign profiles        列出 campaign profile
+  chaos reify campaign list            列出本地 campaign
   chaos reify invariants
 `;
 
@@ -405,6 +417,112 @@ function sessionLine(report: any): string {
   return conversation?.label ?? "conv-a";
 }
 
+function campaignOptions(flags: ParsedArgs["flags"]): CampaignOptions {
+  return {
+    mode: flags.mode as CampaignOptions["mode"],
+    rounds: flags.rounds ? Number(flags.rounds) : undefined,
+    seed: flags.seed ? Number(flags.seed) : undefined,
+    maxCommands: flags["max-commands"] ? Number(flags["max-commands"]) : undefined,
+    profiles: typeof flags.profiles === "string" ? flags.profiles.split(",").map((name) => name.trim()).filter(Boolean) : undefined,
+    runtimeRatio: flags["runtime-ratio"] ? Number(flags["runtime-ratio"]) : undefined,
+    providerFaults: boolFlag(flags, "provider-faults") ? true : undefined,
+    concurrency: flags.concurrency ? Number(flags.concurrency) : undefined,
+    triageReplays: flags["triage-replays"] ? Number(flags["triage-replays"]) : undefined,
+    campaignId: typeof flags.id === "string" ? flags.id : undefined,
+    outDir: typeof flags.out === "string" ? flags.out : undefined,
+    skipTriage: boolFlag(flags, "skip-triage"),
+  };
+}
+
+/**
+ * `chaos reify campaign`: the long-running dataset builder. `run` is the
+ * repeatable entrypoint; `rerun` reads a manifest so the same seeds, profiles
+ * and generator settings can be replayed later.
+ */
+async function campaign(argv: string[]): Promise<number> {
+  const [subcommand, ...rest] = argv;
+  const { positionals, flags } = parseArgs(rest);
+  switch (subcommand) {
+    case "profiles": {
+      for (const profile of Object.values(CAMPAIGN_PROFILES)) {
+        process.stdout.write(
+          `${profile.name.padEnd(20)} w=${profile.weight} [${profile.boundaries.join(",")}] ${profile.description}\n`,
+        );
+      }
+      return 0;
+    }
+    case "list": {
+      const { readdirSync } = await import("node:fs");
+      const entries = readdirSync(CAMPAIGNS_DIR, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        try {
+          const loaded = loadCampaign(join(CAMPAIGNS_DIR, entry.name));
+          const failed = loaded.rounds.filter((round) => round.status === "failed").length;
+          process.stdout.write(
+            `${entry.name.padEnd(34)} ${loaded.manifest.mode.padEnd(9)} ${String(loaded.rounds.length).padStart(4)} 轮` +
+              ` 失败 ${String(failed).padStart(3)} unique ${String(loaded.clusters.length).padStart(2)} ${loaded.manifest.version.gitCommit.slice(0, 8)}\n`,
+          );
+        } catch (error) {
+          process.stdout.write(`${entry.name.padEnd(34)} 读不了：${(error as Error).message}\n`);
+        }
+      }
+      return 0;
+    }
+    case "report": {
+      const dir = positionals[0];
+      if (!dir) {
+        process.stderr.write("用法：chaos reify campaign report <campaignDir>\n");
+        return 2;
+      }
+      const loaded = loadCampaign(dir);
+      if (!loaded.report) {
+        process.stderr.write(`${dir} 还没有 report.json；先跑 campaign run，或看 report.md\n`);
+        return 2;
+      }
+      if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(loaded.report, null, 2)}\n`);
+      else process.stdout.write(renderCampaignReport(loaded.report));
+      return 0;
+    }
+    case "rerun": {
+      const dir = positionals[0];
+      if (!dir) {
+        process.stderr.write("用法：chaos reify campaign rerun <campaignDir>\n");
+        return 2;
+      }
+      const loaded = loadCampaign(dir);
+      const manifest = loaded.manifest;
+      const summary = await runReifyCampaign({
+        mode: manifest.mode,
+        rounds: manifest.rounds,
+        seed: manifest.seed,
+        maxCommands: manifest.maxCommands,
+        profiles: manifest.profiles,
+        runtimeRatio: manifest.runtimeRatio,
+        providerFaults: manifest.providerFaults,
+        concurrency: manifest.concurrency,
+        triageReplays: manifest.triageReplays,
+        parentCampaignId: manifest.campaignId,
+        quiet: boolFlag(flags, "json"),
+        outDir: typeof flags.out === "string" ? flags.out : undefined,
+      });
+      if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(summary.report, null, 2)}\n`);
+      else process.stdout.write(`${renderCampaignSummary(summary.report, summary.outDir)}\n`);
+      return summary.report.failures.reproducible > 0 ? 1 : 0;
+    }
+    case "run": {
+      const options = campaignOptions(flags);
+      const summary = await runReifyCampaign({ ...options, quiet: boolFlag(flags, "json") });
+      if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(summary.report, null, 2)}\n`);
+      else process.stdout.write(`${renderCampaignSummary(summary.report, summary.outDir)}\n`);
+      return summary.report.failures.reproducible > 0 ? 1 : 0;
+    }
+    default:
+      process.stderr.write(`未知 campaign 子命令 "${subcommand ?? ""}"\n`);
+      process.stdout.write(resolveProfiles().map((profile) => profile.name).join(", ") + "\n");
+      return 2;
+  }
+}
+
 export async function runReifyCli(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   const { positionals, flags } = parseArgs(rest);
@@ -444,6 +562,8 @@ export async function runReifyCli(argv: string[]): Promise<number> {
       return await inspect(flags);
     case "space":
       return await space(flags);
+    case "campaign":
+      return await campaign(rest);
     case "invariants":
       for (const invariant of reifyInvariantDefinitions) {
         process.stdout.write(`${invariant.name.padEnd(28)} ${invariant.description}\n`);
