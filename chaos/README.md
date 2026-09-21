@@ -387,6 +387,11 @@ RecoveryFailed   恢复没成 —— 也是失败
 带 `conversationIndex` 的 fault，precondition、真 build、recover 全程用同一个 index，
 记录里也直接写明真被打的会话和 run（`conv=… run=…`），artifact 的参数和真被打对象一致。
 
+暂停类 fault（`pauseRuntimeDuringBuild`）的冻结时间窗收在 `inject` 里：SIGSTOP 到
+`CHAOS_REIFY_PAUSE_MS` 之后自己 SIGCONT。否则请求会打在 harness 自己冻住的后端上，
+每个后续请求都卡到 harness 自己的 socket 超时，再被记成「产品没恢复」——那是 harness
+自己造的失败，不是产品问题；收在 inject 里之后，故障时长也不再随生成序列长短变化。
+
 不适用是常态而不是噪音，例如：
 
 - `cpuPressure` 在本机没有 `stress-ng` 时直接不适用（不自研压测工具）；

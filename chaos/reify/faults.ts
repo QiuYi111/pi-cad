@@ -498,7 +498,17 @@ export const killRuntimeDuringBuild: ReifyFaultDefinition = {
   },
 };
 
-/** SIGSTOP the long-lived runtime mid-build, then SIGCONT it. */
+/**
+ * SIGSTOP the long-lived runtime mid-build, then let it run again.
+ *
+ * The freeze window is bounded inside `inject` on purpose. The runtime is the
+ * process every request goes through, so leaving it SIGSTOPped while the rest
+ * of the sequence runs makes each following request hang on the harness's own
+ * socket timeout and then read as "the product never converged" — a failure
+ * the harness caused itself, not a product finding. A bounded window is also
+ * reproducible: its length no longer depends on how many commands the
+ * generator happens to append after the fault.
+ */
 export const pauseRuntimeDuringBuild: ReifyFaultDefinition = {
   name: "pauseRuntimeDuringBuild",
   description: "真 build 途中 SIGSTOP/SIGCONT 常驻 runtime",
@@ -509,17 +519,21 @@ export const pauseRuntimeDuringBuild: ReifyFaultDefinition = {
   inject: async (ctx) => {
     const build = await startFaultBuild(ctx, "pauseRuntimeDuringBuild");
     build.killOwner("SIGSTOP");
+    const windowMs = Number(process.env.CHAOS_REIFY_PAUSE_MS ?? 3_000);
+    await sleep(windowMs);
+    ctx.trace.note(`runtime 被 SIGSTOP ${windowMs}ms 期间真请求没有应答（${describeKernel(build)}）`);
+    build.killOwner("SIGCONT");
     ctx.session.armedFaults.set("pauseRuntimeDuringBuild", { build });
-    await sleep(Number(process.env.CHAOS_REIFY_PAUSE_MS ?? 3_000));
-    ctx.trace.note(`runtime 暂停中（${describeKernel(build)}）`);
+    const settled = await settleWithin(build, RECOVERY_BUDGET_MS);
+    ctx.trace.note(
+      settled ? `runtime 恢复运行后原请求结束（${settled.signal ?? settled.code}）` : "runtime 恢复运行后原请求仍未结束",
+    );
   },
   recover: async (ctx) => {
     const armed = ctx.session.armedFaults.get("pauseRuntimeDuringBuild") as { build: FaultBuild } | undefined;
     ctx.session.disarmFault("pauseRuntimeDuringBuild");
-    if (!armed) return;
-    armed.build.killOwner("SIGCONT");
-    const settled = await settleWithin(armed.build, RECOVERY_BUDGET_MS);
-    ctx.trace.note(settled ? `runtime 恢复运行，请求结束（${settled.signal ?? settled.code}）` : "runtime 恢复运行后请求仍未结束");
+    // SIGCONT already happened in inject; this is an idempotent safety net.
+    armed?.build.killOwner("SIGCONT");
     await proveRecovery(ctx, "pauseRuntimeDuringBuild");
   },
 };

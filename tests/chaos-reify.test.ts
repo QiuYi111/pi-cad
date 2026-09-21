@@ -811,3 +811,35 @@ test("reify chaos: transition race 先验真合法，产品在重启前拒绝就
     await session.close().catch(() => undefined);
   }
 });
+
+test("reify chaos: runtime 暂停的时间窗收在 inject 里，后续真请求不会被 harness 自己卡住", async () => {
+  const session = await startReifySession(true);
+  const trace = new ReifyTrace();
+  try {
+    const conversation = session.conversation(0);
+    await runReifySequence(session, REIFY_SETUP, trace);
+    const definition = reifyFaultDefinitions.find((fault) => fault.name === "pauseRuntimeDuringBuild")!;
+    const outcome = await injectReifyFault(session, definition, { kind: "fault", name: definition.name, params: {} }, trace);
+    assert.equal(outcome.status, "Injected", `真 runtime 暂停必须真的注入：${JSON.stringify(outcome)}`);
+
+    // 冻结是故障自己收的：后续真请求必须有人应答，不能卡在 harness 的 socket 超时上。
+    const startedAt = Date.now();
+    const view = await session.call("workflow-current", { sessionId: conversation });
+    const elapsed = Date.now() - startedAt;
+    assert.ok(runIdOf(view), "被暂停过的 runtime 恢复后必须还能答 workflow-current");
+    assert.ok(elapsed < 30_000, `后续真请求不能卡在 harness 自己的超时上：${elapsed}ms`);
+    assert.ok(
+      !session.requests.some((request) => request.error === "Reify runtime socket timed out"),
+      "不该出现 harness 自己造成的 socket 超时",
+    );
+
+    // 恢复仍然要用真 build 证明。
+    await definition.recover({ session, trace, params: {} });
+    assert.ok(
+      session.history.recoveries.some((recovery) => recovery.after === "pauseRuntimeDuringBuild"),
+      "暂停故障之后必须有一次真 build 作为恢复证据",
+    );
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+});
