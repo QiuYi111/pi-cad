@@ -117,7 +117,7 @@ workflow:
     cook:
       purpose: Execute the engineering design, recursively delegate only bounded work, integrate the real geometry, and close the physics-and-geometry loop.
       guidance: >-
-        Execute the user's engineering task, not the workflow. Continue from the Plan,
+        Execute the engineering task autonomously, not the workflow. Continue from the Plan,
         but treat design as an iterative closed loop rather than a one-way sequence.
         Use the persistent IPython kernel as the shared working notebook for the parent:
         keep the current requirements, calculations, whole-system layout, subsystem
