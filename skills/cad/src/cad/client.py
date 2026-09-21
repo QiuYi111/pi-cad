@@ -49,7 +49,20 @@ def project_path(value: str | Path, *, error_type: str = "CadApiError") -> tuple
 async def request(op: str, **payload: Any) -> Any:
     reviewer_socket = os.environ.get("PI_CAD_REVIEWER_SOCKET")
     reviewer_id = os.environ.get("PI_CAD_REVIEW_ID") if reviewer_socket else None
-    request_body = json.dumps({"schema": 1, "op": op, **payload, **({"reviewId": reviewer_id} if reviewer_id else {})}, ensure_ascii=False).encode()
+    # Prime sets this for the session that owns the kernel, so every cad.* call
+    # resolves that conversation's own workflow run and never the project-wide
+    # run pointer.
+    session_id = None if reviewer_socket else os.environ.get("PI_CAD_SESSION_ID")
+    request_body = json.dumps(
+        {
+            "schema": 1,
+            "op": op,
+            **payload,
+            **({"reviewId": reviewer_id} if reviewer_id else {}),
+            **({"sessionId": session_id} if session_id else {}),
+        },
+        ensure_ascii=False,
+    ).encode()
     authority_socket = reviewer_socket or os.environ.get("PI_CAD_AUTHOR_SOCKET")
     if authority_socket:
         try:

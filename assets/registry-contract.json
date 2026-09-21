@@ -287,7 +287,7 @@
     "observe_programmable": {
       "version": "1.0.0",
       "schemaDigest": "5d427b1a303e3cc93f7a4e75ef1d15d57cf9b28f7be7fe8ee292d9658e3d1916",
-      "semanticsDigest": "3b2b5a4a9e0b7183201428d4773a8a5ef960178077291fbe449481ed5268f037"
+      "semanticsDigest": "8b542b8f1a67f160a63999a20f8693b31739f7a7c7bdf2e525a9d9f8c75ef5cb"
     },
     "optimize": {
       "version": "1.0.0",
@@ -544,5 +544,5 @@
       "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
     }
   },
-  "hash": "a12c140a7662fcde57d2961c585476fca9d72dc4c31e3eb07aa7fa33b7c264c4"
+  "hash": "0e80579e1a18fef1a1b7b09fe69780afdb995c9e141e71f111b4d75c06ee8788"
 }

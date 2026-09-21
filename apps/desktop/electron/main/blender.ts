@@ -23,9 +23,10 @@ export class BlenderBackend {
     const scene = (await this.bridge.exec(["realpath", "-e", "--", requestedScene])).stdout.trim();
     const relative = posix.relative(project, scene);
     if (!relative || relative === ".." || relative.startsWith("../") || posix.isAbsolute(relative)) throw new Error("Blender scene must remain inside the active project.");
-    const probe = await this.bridge.exec(["bash", "-lc", `command -v blender || find ${JSON.stringify(`${runtime.piCadRepo}/.runtime/blender`)} -type f -name blender -perm -111 | head -1`]);
+    const python = `${runtime.piCadRepo}/python/.venv/bin/python`;
+    const probe = await this.bridge.exec([python, "-m", "cadctl", "blender", "--print-path"]);
     const blender = probe.stdout.trim();
-    if (!blender) throw new Error("Blender is not installed. Install the optional presentation component first.");
+    if (!blender) throw new Error("Managed Blender is not installed. Install the presentation component first.");
     return { ...runtime, scene, blender, script: `${runtime.piCadRepo}/scripts/desktop-blender-scene.py` };
   }
 

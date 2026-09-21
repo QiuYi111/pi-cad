@@ -114,7 +114,7 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
   const referenceQuickCheck = (agent = false) => {
     if (!quickCheck || !quickSummary) return;
     const target = targetScope === "current" || targetScope === "head" ? "current model" : `historical ${targetScope} artifact`;
-    onReferencePart?.(`${agent ? "Run workflow mechanical.quick-check and verify this read-only result" : "Reference this measured result"}: ${quickSummary}. Target the ${target} at ${quickCheck.source} with SHA-256 ${quickCheck.sha256}. Do not modify the artifact; verify its hash is unchanged.`);
+    onReferencePart?.(`${agent ? "Inspect and verify this read-only result in the current engineering task" : "Reference this measured result"}: ${quickSummary}. Target the ${target} at ${quickCheck.source} with SHA-256 ${quickCheck.sha256}. Do not modify the artifact; verify its hash is unchanged.`);
   };
 
   return <section className="cad-viewer" data-testid="cad-viewer">
@@ -130,11 +130,11 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
     </aside>}
     {mesh && <div className="viewer-file-actions">
       <span className="viewer-file-identity" title={mesh.source}>{mesh.source.split(/[\\/]/).at(-1)}{mesh.sha256 && <code>{mesh.sha256.slice(0, 10)}</code>}</span>
-      <button onClick={() => void open()}><FolderOpen size={14} />Open STEP</button>
+      <button onClick={() => void open()}><FolderOpen size={14} />Import STEP</button>
       <button onClick={() => void exportOpenModel()}><Share2 size={14} />Export copy</button>
     </div>}
     {mesh && error && <div className="viewer-load-error" role="alert"><strong>Could not open that STEP.</strong><span>The current model is preserved.</span><small>{error}</small></div>}
-    {(!mesh || viewerError) && <div className="viewer-empty"><span className="viewer-empty-mark"><Box size={28} /></span><strong>{viewerError ? "3D preview unavailable" : loading ? "Preparing model…" : error ? "Model unavailable" : "No model open"}</strong><p>{viewerError || error || "Build a candidate or open a project STEP file."}</p>{!viewerError && <button onClick={() => void open()}><FolderOpen size={15} />Open STEP</button>}</div>}
+    {(!mesh || viewerError) && <div className="viewer-empty"><span className="viewer-empty-mark"><Box size={28} /></span><strong>{viewerError ? "3D preview unavailable" : loading ? "Preparing model…" : error ? "Model unavailable" : "No model open"}</strong><p>{viewerError || error || "Build a candidate or open a project STEP file."}</p>{!viewerError && <button onClick={() => void open()}><FolderOpen size={15} />Import STEP</button>}</div>}
   </section>;
 }
 

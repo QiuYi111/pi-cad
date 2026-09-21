@@ -16,6 +16,8 @@ import { requireCurrentAuthorization } from "./authorization.ts";
 import type { Operation, OperationAuthority } from "../harness/permissions.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
 import { workflowCurrentView } from "../harness/card.ts";
+import { workflowRunStateView } from "../harness/workflow/phase-view.ts";
+import { resolveActiveRun, resolveRequestScope, runWithRunScope, type RunScopeRequestV1 } from "../harness/run-scope.ts";
 import { sha256File } from "../shared/store.ts";
 import { currentGitRevision, executeWorkflowGitActions, phaseGitActions, prepareWorkflowGit, type WorkflowGitResult } from "../authority/workflow-git.ts";
 import {
@@ -39,9 +41,13 @@ export const AGENT_API_MUTATION_OPERATIONS = {
 } as const satisfies Partial<Record<AgentApiRequest["op"], Operation>>;
 
 async function current(cwd: string) {
-  const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!loaded) return null;
-  return workflowCurrentView(loaded, mechanicalRegistries);
+  const view = workflowCurrentView(loaded, mechanicalRegistries);
+  // A conversation-scoped caller is answered for its own run only. The phase
+  // picture travels with the view so a client (the Desktop workflow rail) can
+  // render every phase without deriving statuses itself.
+  return jsonValue({ ...view, ...workflowRunStateView(loaded, view) });
 }
 
 async function recordGitResults(store: HarnessRunStoreV7, results: WorkflowGitResult[], moment: string): Promise<void> {
@@ -56,8 +62,11 @@ async function viewerCatalog(cwd: string) {
   const project = new HarnessProjectStoreV7(cwd);
   const [{ state: projectState }, active] = await Promise.all([
     project.load(),
-    project.currentRun(mechanicalRegistries),
+    resolveActiveRun(cwd, mechanicalRegistries),
   ]);
+  // Commit history lives in the run that recorded it, so it follows the
+  // caller's conversation like the run does. Project HEAD stays visible to
+  // every conversation because it is the shared project artifact.
   const commits = active ? await workspaceHistory(cwd, mechanicalRegistries) : [];
   const simulationRuns: JsonValue[] = [];
   const parameterManifests: StoredModelParameterManifest[] = [];
@@ -166,7 +175,11 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
 }
 
 async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
-  const activeBeforeBuild = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const importingReference = request.importMode === "reference";
+  const solidifying = request.importMode === "solidify";
+  if ((importingReference || solidifying) && !/\.(step|stp)$/i.test(request.source)) throw new Error("STEP import requires a STEP file");
+  if ((importingReference || solidifying) && request.parameters) throw new Error("STEP import does not accept model parameters");
+  const activeBeforeBuild = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
   const parameterContract = request.parameters
     ? normalizeModelParameterDefinitions(request.parameters)
@@ -176,6 +189,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     output: request.output,
     force: request.force,
     parameters: parameterContract?.values,
+    solidify: solidifying,
   });
   if (!build.ok) return { build, visual: null, images: [] };
 
@@ -191,8 +205,12 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     const payload = geometry.payload as { error?: string } | undefined;
     throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");
   }
-  const validity = (geometry.payload as { validity?: { ok?: boolean; reasons?: string[]; solids?: Array<{ reasons?: string[] }> } }).validity;
-  if (!validity?.ok) {
+  const geometryPayload = geometry.payload as { validity?: { ok?: boolean; reasons?: string[]; checks?: { topology?: boolean }; solids?: Array<{ reasons?: string[] }> }; solidCount?: number; faceCount?: number };
+  const validity = geometryPayload.validity;
+  if (importingReference && (!validity?.checks?.topology || !geometryPayload.faceCount)) {
+    throw new Error("STEP reference import failed: the file has no valid displayable B-Rep faces");
+  }
+  if (!importingReference && !validity?.ok) {
     const reasons = [
       ...(validity?.reasons ?? []),
       ...(validity?.solids ?? []).flatMap((solid) => solid.reasons ?? []),
@@ -217,6 +235,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   ]));
   const artifactHash = envelopeArtifactHash(build, "step");
   if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
+  const referenceType = importingReference ? (geometryPayload.solidCount ? "solid-reference" : "surface-reference") : undefined;
   const sourcePath = projectRelativePath(cwd, request.source);
   const sourceHash = await sha256File(resolve(cwd, request.source));
   let parameterManifest: StoredModelParameterManifest | undefined;
@@ -238,7 +257,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
       manifest,
     };
   }
-  await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
+  if (!importingReference) await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
     let state = {
       ...loaded.state,
       artifacts: {
@@ -284,10 +303,24 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     data: (await readFile(view.path)).toString("base64"),
     mimeType: "image/png",
   })));
-  return { build, visual, geometry, images: inlineImages, ...(parameterManifest ? { parameterManifest } : {}) };
+  return { build, visual, geometry, images: inlineImages, ...(referenceType ? { referenceType } : {}), ...(parameterManifest ? { parameterManifest } : {}) };
 }
 
+/**
+ * Conversation-scoped callers (the Prime extension, the cad Python client,
+ * or an explicit Agent API runId) enter here; callers that name no
+ * conversation keep the legacy project-global pointer.
+ */
 export async function handleAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {
+  const scope = request as RunScopeRequestV1;
+  if (scope.sessionId !== undefined || scope.runId !== undefined || scope.binding !== undefined) {
+    const resolved = await resolveRequestScope(cwd, scope);
+    return runWithRunScope(resolved, () => handleScopedAgentApi(cwd, request, authority));
+  }
+  return handleScopedAgentApi(cwd, request, authority);
+}
+
+async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {
   bootstrapAgentApiContracts();
   if (!request || request.schema !== 1 || typeof request.op !== "string") throw new Error("invalid Agent API request");
   const guardedOperation = AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS];
@@ -309,11 +342,14 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
       const store = new HarnessRunStoreV7(cwd, started.state.runId);
       await recordGitResults(store, startResults, "workflow-start");
       await recordGitResults(store, enterResults, `enter:${started.state.phase}`);
-      return jsonValue(await current(cwd));
+      // The new run is the answer even when the caller's conversation scope
+      // was unbound at the moment it asked to start.
+      const fresh = await store.load(mechanicalRegistries) ?? started;
+      return jsonValue(workflowCurrentView(fresh, mechanicalRegistries));
     }
     case "workflow-advance": {
       if (!request.event?.trim()) throw new Error("workflow event is required");
-      const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+      const active = await resolveActiveRun(cwd, mechanicalRegistries);
       if (!active) throw new Error("no active Pi-CAD v7 run");
       const store = new HarnessRunStoreV7(cwd, active.state.runId);
       // Validate the state transition before producing any external Git side effect.
@@ -326,7 +362,7 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
       return jsonValue({ phase: next.state.phase, status: next.state.status });
     }
     case "commit": {
-      const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+      const active = await resolveActiveRun(cwd, mechanicalRegistries);
       const gitResults = active
         ? await executeWorkflowGitActions(cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit").filter((action) => action === "commit"), `record ${request.name}`)
         : [];
@@ -340,7 +376,7 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
     case "viewer-catalog": return viewerCatalog(cwd);
     case "evidence-read": {
       if (!/^evidence\/[a-zA-Z0-9._/-]+\.json$/.test(request.path) || request.path.includes("..")) throw new Error("invalid evidence path");
-      const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+      const active = await resolveActiveRun(cwd, mechanicalRegistries);
       if (!active) throw new Error("no active Pi-CAD v7 run");
       const value = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<JsonValue>(request.path);
       if (value === null) throw new Error(`evidence not found: ${request.path}`);
@@ -369,6 +405,8 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
       return jsonValue({
         preset,
         value,
+        ...(preset === "python" && typeof details?.envelope?.payload?.stdout === "string" && details.envelope.payload.stdout
+          ? { stdout: details.envelope.payload.stdout } : {}),
         ...(images.length ? { images } : {}),
         artifactHash: details.artifactHash ?? details.envelope?.inputHashes?.artifact,
         scriptHash: details.envelope?.inputHashes?.script,
@@ -386,7 +424,7 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
       });
     }
     case "review-current": {
-      const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+      const active = await resolveActiveRun(cwd, mechanicalRegistries);
       if (!active) return null;
       return jsonValue({ expectedProfile: active.workflow.phases[active.state.phase]?.reviewProfile ?? null, latest: active.state.latestReview ?? null });
     }

@@ -7,7 +7,7 @@ import { prepareAndRunRecipe } from "../../harness/recipe/runner.ts";
 import { MechanicalRecipeRuntime } from "./recipe-runtime.ts";
 import { loadRecipeObservation, loadRecipeRun } from "../../harness/recipe/store.ts";
 import type { RecipeObservationSnapshotV1, RecipeRuntimeV1 } from "../../harness/recipe/types.ts";
-import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
+import { resolveActiveRun } from "../../harness/run-scope.ts";
 import { mechanicalRegistries } from "./registries.ts";
 
 const TOOL_BY_KIND = {
@@ -21,7 +21,7 @@ const TOOL_BY_KIND = {
 export type MechanicalRecipeKind = keyof typeof TOOL_BY_KIND;
 
 async function current(cwd: string) {
-  const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!loaded) throw new Error("Recipe action requires an active v7 run");
   return loaded;
 }

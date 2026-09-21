@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { createRegistrySet, type Registration, type RegistrySet } from "../../harness/registry.ts";
+import { contractEntry, createRegistrySet, type ContractEntry, type Registration, type RegistrySet } from "../../harness/registry.ts";
 import { CadStartParamsSchema } from "../../harness/kernel.ts";
 
 // Pi loads each configured extension independently. Some loaders therefore
@@ -14,8 +14,8 @@ export const mechanicalRegistries: RegistrySet =
   (sharedGlobal[MECHANICAL_REGISTRIES_KEY] as RegistrySet | undefined) ?? createRegistrySet();
 sharedGlobal[MECHANICAL_REGISTRIES_KEY] = mechanicalRegistries;
 
-function staticRegistration(id: string, schema: unknown, semantics: unknown): Registration {
-  return { id, contract: { version: "1.0.0", schema: schema as never, semantics: semantics as never } };
+function staticRegistration(id: string, schema: unknown, semantics: unknown, compatibleWith?: ContractEntry[]): Registration {
+  return { id, contract: { version: "1.0.0", schema: schema as never, semantics: semantics as never, ...(compatibleWith?.length ? { compatibleWith } : {}) } };
 }
 
 const genericActions = {
@@ -52,7 +52,7 @@ const grants: Record<string, { meaning: string; tools: string[]; writeBoundary: 
   file_edit_recipe: { meaning: "Edit Recipe authoring paths without changing design CAD.", tools: ["edit", "write"], writeBoundary: "simulation/** or recipes/**", safetyCap: "project-root-minus-harness" },
   observe: { meaning: "Create typed probes; v7 observations are read directly from immutable indexed files.", tools: ["cad_probe"], writeBoundary: "run-owned-observation-storage", safetyCap: "no-project-source-write" },
   observe_interference: { meaning: "Observe pairwise solid interference facts.", tools: ["cad_probe"], writeBoundary: "run-owned-observation-storage", safetyCap: "no-project-source-write" },
-  observe_programmable: { meaning: "Run fenced read-only B-Rep calculations.", tools: ["cad_probe"], writeBoundary: "run-owned-observation-storage", safetyCap: "no-project-source-write" },
+  observe_programmable: { meaning: "Run arbitrary B-Rep analysis on a disposable STEP copy.", tools: ["cad_probe"], writeBoundary: "run-owned-observation-storage", safetyCap: "no-project-source-write" },
   model_build: { meaning: "Execute deterministic MODEL primitives.", tools: ["cad_build_step"], writeBoundary: "declared-model-output", safetyCap: "no-head-promotion" },
   image_generate: { meaning: "Generate a conceptual raster image without creating geometry authority.", tools: ["codex_generate_image"], writeBoundary: "declared-image-output", safetyCap: "concept-hypothesis-only" },
   deliverable: { meaning: "Generate declared export, drawing, or presentation artifacts.", tools: ["cad_export", "cad_generate_drawing", "cad_render_scene"], writeBoundary: "declared-deliverable-output", safetyCap: "no-head-promotion" },
@@ -71,6 +71,12 @@ const grants: Record<string, { meaning: string; tools: string[]; writeBoundary: 
   finish: { meaning: "Finish after every closure guard is satisfied.", tools: ["cad_finish"], writeBoundary: "state-and-project-head", safetyCap: "ready-only" },
 };
 
+const legacyProgrammableProbe = contractEntry(staticRegistration(
+  "observe_programmable",
+  { tools: ["cad_probe"], maxWriteScopes: ["run:observation"] },
+  { meaning: "Run fenced read-only B-Rep calculations.", tools: ["cad_probe"], writeBoundary: "run-owned-observation-storage", safetyCap: "no-project-source-write" },
+));
+
 for (const [id, descriptor] of Object.entries(grants)) {
   const maxWriteScopes = id === "file_edit_source" ? ["project:source", "project:recipe", "project:deliverable"]
     : id === "file_edit_recipe" ? ["project:recipe"]
@@ -81,7 +87,12 @@ for (const [id, descriptor] of Object.entries(grants)) {
               : id === "route" || id === "reroute" || id === "transition" || id === "wait_for_user" ? ["run:state"]
                 : id === "finish" ? ["run:state", "project:head"]
                   : [];
-  mechanicalRegistries.grants.registerIdempotent(staticRegistration(id, { tools: descriptor.tools, maxWriteScopes }, descriptor));
+  mechanicalRegistries.grants.registerIdempotent(staticRegistration(
+    id,
+    { tools: descriptor.tools, maxWriteScopes },
+    descriptor,
+    id === "observe_programmable" ? [legacyProgrammableProbe] : undefined,
+  ));
 }
 
 const simple = (kind: keyof Pick<RegistrySet, "hooks" | "contextProviders" | "reviewProfiles" | "recordTypes" | "evidenceTypes" | "recipeKinds">, ids: Record<string, unknown>) => {

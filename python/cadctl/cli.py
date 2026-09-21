@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Sequence
@@ -36,7 +40,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
         if parameters is not None and not isinstance(parameters, dict):
             raise TypeError("--parameters-json must contain an object")
         input_hashes = {"source": sha256_file(source)}
-        parameters_hash = canonical_parameters_hash(parameters)
+        parameters_hash = canonical_parameters_hash({"solidify": True} if args.solidify else parameters)
         if parameters is not None:
             input_hashes["parameters"] = parameters_hash
         with exclusive_build(Path.cwd(), output):
@@ -67,7 +71,37 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 )
                 return 0
 
-            result = run_source(source, output, parameters=parameters)
+            if source.suffix.lower() in {".step", ".stp"}:
+                if parameters is not None:
+                    raise ValueError("STEP import does not accept model parameters")
+                if source.resolve() == output.resolve():
+                    raise ValueError("STEP import output must differ from its source")
+                output.parent.mkdir(parents=True, exist_ok=True)
+                if args.solidify:
+                    from .step_repair import solidify_closed_step
+
+                    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".step", delete=False) as temporary:
+                        temporary_path = Path(temporary.name)
+                    try:
+                        solidify_closed_step(source, temporary_path)
+                        os.replace(temporary_path, output)
+                    finally:
+                        temporary_path.unlink(missing_ok=True)
+                else:
+                    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".step", delete=False) as temporary:
+                        temporary_path = Path(temporary.name)
+                        try:
+                            with source.open("rb") as original:
+                                shutil.copyfileobj(original, temporary)
+                        except BaseException:
+                            temporary_path.unlink(missing_ok=True)
+                            raise
+                    os.replace(temporary_path, output)
+                result = {"exitCode": 0, "sourceFiles": [str(source.resolve())], "stdout": "", "stderr": ""}
+            else:
+                if args.solidify:
+                    raise ValueError("--solidify requires a .step or .stp source")
+                result = run_source(source, output, parameters=parameters)
             if result.get("exitCode", 1) != 0:
                 emit_error(
                     "cad_build_step",
@@ -656,6 +690,46 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_blender(args: argparse.Namespace) -> int:
+    """Run agent-authored Blender work through the managed runtime."""
+    from .presentation import blender_binary
+
+    binary, source = blender_binary()
+    if not binary or source in {"missing", "path-fallback", "override-missing"}:
+        print(
+            json.dumps({
+                "ok": False,
+                "tool": "cadctl_blender",
+                "payload": {
+                    "error": "managed Blender runtime is unavailable",
+                    "source": source,
+                },
+            }),
+            file=sys.stderr,
+        )
+        return 2
+    if args.print_path:
+        print(binary)
+        return 0
+    command = list(args.blender_args)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        print("cadctl blender requires Blender arguments or --print-path", file=sys.stderr)
+        return 2
+    lib_dir = Path(binary).parent / "lib"
+    env = {**os.environ, "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "1")}
+    if lib_dir.exists():
+        env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
+    return subprocess.run([binary, *command], env=env, check=False).returncode
+
+
+def _cmd_blender_bridge(args: argparse.Namespace) -> int:
+    from .blender_bridge import prepare_blender_bundle
+    print(json.dumps(prepare_blender_bundle(args.artifact, args.output_dir, args.source), indent=2))
+    return 0
+
+
 def _cmd_optimize(args: argparse.Namespace) -> int:
     from .simulation.topology import run_topology
 
@@ -686,6 +760,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", required=True)
     p.add_argument("--force", action="store_true")
     p.add_argument("--parameters-json")
+    p.add_argument("--solidify", action="store_true", help="sew only closed STEP surfaces into valid solids")
     p.set_defaults(func=_cmd_build)
 
     p = sub.add_parser("inspect", help="Return STEP geometry facts")
@@ -721,7 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "probe",
-        help="Run a read-only programmable B-Rep probe: arbitrary Python computation over the subject STEP, JSON result only",
+        help="Run arbitrary Python on a disposable STEP copy; return a JSON result without changing the candidate",
     )
     p.add_argument("--artifact", required=True)
     p.add_argument("--code-file", required=True, help="Path to the probe script (harness-managed temporary file)")
@@ -782,6 +857,17 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("doctor", help="Report the actual Pi-CAD execution environment")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=_cmd_doctor)
+
+    p = sub.add_parser("blender", help="Run the pinned managed Blender binary")
+    p.add_argument("--print-path", action="store_true", help="Print the managed Blender path and exit")
+    p.add_argument("blender_args", nargs=argparse.REMAINDER)
+    p.set_defaults(func=_cmd_blender)
+
+    p = sub.add_parser("blender-bridge", help="Tessellate STEP into a labeled Blender import bundle")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--source", default=None)
+    p.set_defaults(func=_cmd_blender_bridge)
 
     p = sub.add_parser("optimize", help="Run deterministic differentiable topology optimization")
     p.add_argument("--spec", required=True)

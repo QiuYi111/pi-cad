@@ -5,10 +5,10 @@
  *
  *   - preset mode: visual / geometry / surfaces / measure / section /
  *     sections_scan / compare / assembly / interference;
- *   - programmable mode: python (read-only B-Rep computation).
+ *   - programmable mode: python (arbitrary code on a disposable STEP copy).
  *
  * Design invariants:
- *   - the canonical design is immutable from here (read-only presets);
+ *   - the canonical design is unchanged by presets and disposable experiments;
  *   - `subject` resolution (current/baseline) reads run state, never a
  *     path supplied by the agent (python mode);
  *   - observations are hash-bound; only presets with an evidence kind
@@ -26,13 +26,13 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
     name: "cad_probe",
     label: "CAD Probe",
     description:
-      "Unified read-only observation interface. Its discriminated TypeBox schema is authoritative: every preset accepts only applicable fields; ordinary presets require exactly one subject form, compare requires explicit before/after, and programmable mode accepts only a bound subject, purpose, and code. Results echo the resolved subject and persist complete immutable pageable detail.",
+      "CAD observation interface. Presets inspect artifacts; python runs arbitrary analysis on a disposable STEP copy. The original candidate is unchanged. Results echo the resolved subject and persist pageable detail.",
     promptSnippet: "Observe design artifacts: typed presets or programmable Python probes",
     promptGuidelines: [
-      "One tool for all observation: pick the preset that answers the question; use preset=python only when no typed preset can express it.",
+      "Pick the preset that answers the question; use preset=python for custom geometry operations or analysis.",
       "Selectors (#pN/#cN/#fN, surface IDs) come from geometry/surfaces presets and are hash-scoped — they die with the next candidate.",
-      "preset=python needs subject=current|baseline, purpose, and code assigning a JSON-serializable `result`; scope preloads shape, bd, np, math, statistics.",
-      "Observations bind evidence only through the control plane (commit/review); probing never mutates the canonical design.",
+      "preset=python needs subject=current|baseline, purpose, and code assigning a JSON-serializable `result`; scope preloads shape, bd, np, math, statistics. Imports, shape changes, and scratch files are allowed.",
+      "Python experiments are discarded after returning result. Change the official candidate through model.build, not by writing to scratch.",
     ],
     parameters: CadProbeParametersSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

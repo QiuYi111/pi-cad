@@ -70,6 +70,59 @@ class CadctlBackendTests(unittest.TestCase):
         self.assertEqual(envelope["artifacts"][0]["kind"], "step")
         self.assertEqual(envelope["artifacts"][0]["sha256"], envelope["outputHashes"][str(step)])
 
+    def test_import_step_preserves_bytes_and_tracks_source(self) -> None:
+        source = self.build / "original.step"
+        self._build_plate()
+        source.write_bytes((self.build / "plate.step").read_bytes())
+        output = self.build / "imported.step"
+        first = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        second = run_cadctl("build", "--source", str(source), "--output", str(output), cwd=self.cwd)
+        self.assertTrue(first["ok"], first)
+        self.assertEqual(source.read_bytes(), output.read_bytes())
+        self.assertEqual(first["payload"]["cache"], "miss")
+        self.assertEqual(second["payload"]["cache"], "hit")
+        self.assertIn(str(source.resolve()), first["payload"]["sourceFiles"])
+        inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
+        self.assertTrue(inspected["payload"]["validity"]["ok"])
+
+    def test_solidify_only_closed_step_surfaces(self) -> None:
+        import build123d as bd
+
+        closed = self.cwd / "closed-faces.step"
+        bd.export_step(bd.Compound(children=bd.Box(10, 20, 30).faces()), str(closed))
+        output = self.build / "closed-solid.step"
+        converted = run_cadctl("build", "--source", str(closed), "--output", str(output), "--solidify", cwd=self.cwd)
+        self.assertTrue(converted["ok"], converted)
+        inspected = run_cadctl("inspect", "--artifact", str(output), cwd=self.cwd)
+        self.assertTrue(inspected["payload"]["validity"]["ok"], inspected)
+        self.assertEqual(inspected["payload"]["solidCount"], 1)
+
+        # A lone open surface has no closed shell at all.
+        open_faces = self.cwd / "open-faces.step"
+        bd.export_step(bd.Rectangle(10, 20), str(open_faces))
+        open_output = self.build / "open-solid.step"
+        rejected = run_cadctl("build", "--source", str(open_faces), "--output", str(open_output), "--solidify", cwd=self.cwd)
+        self.assertFalse(rejected["ok"])
+        self.assertFalse(open_output.exists())
+
+        # Closed box plus a free surface: sewing keeps the closed shell but the free
+        # face is not covered, so the whole file must be refused instead of filtering.
+        free_face = bd.Face.make_rect(10, 10).moved(bd.Location((100, 100, 100)))
+        mixed = self.cwd / "closed-plus-free.step"
+        bd.export_step(bd.Compound(children=[*bd.Box(10, 20, 30).faces(), free_face]), str(mixed))
+        mixed_output = self.build / "mixed-solid.step"
+        mixed_output.write_text("previous build output", encoding="utf-8")
+        mixed_result = run_cadctl("build", "--source", str(mixed), "--output", str(mixed_output), "--solidify", cwd=self.cwd)
+        self.assertFalse(mixed_result["ok"], mixed_result)
+        self.assertIn("no closed shell covers", mixed_result["payload"]["error"])
+        self.assertEqual(mixed_output.read_text(encoding="utf-8"), "previous build output")
+
+        # A failed conversion must not touch an output that already exists.
+        output.write_text("previous build output", encoding="utf-8")
+        failed = run_cadctl("build", "--source", str(open_faces), "--output", str(output), "--solidify", cwd=self.cwd)
+        self.assertFalse(failed["ok"])
+        self.assertEqual(output.read_text(encoding="utf-8"), "previous build output")
+
     def test_parameterized_build_calls_explicit_entrypoint(self) -> None:
         source = self.cwd / "parameterized.py"
         source.write_text(

@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { buildRegistryContract } from "../../harness/registry-contract.ts";
 import { replaceWorkflowSnapshot } from "../../harness/reducer.ts";
-import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } from "../../harness/run-store.ts";
+import { HarnessRunStoreV7, type LoadedHarnessRunV7 } from "../../harness/run-store.ts";
+import { resolveActiveRun } from "../../harness/run-scope.ts";
 import { compileWorkflowDefinition } from "../../harness/workflow/compiler.ts";
 import { isRoute, obligationsOf, routeKey, type Route } from "../../shared/route.ts";
 import { mechanicalRegistries } from "./registries.ts";
@@ -19,8 +20,7 @@ function isMonotoneReroute(before: Route, after: Route): boolean {
 
 export async function cadRouteV7(input: { cwd: string; route: Route; reason: string; commitStyle?: "semantic" | "workspace" }): Promise<LoadedHarnessRunV7> {
   if (!isRoute(input.route)) throw new Error("invalid Mechanical route");
-  const project = new HarnessProjectStoreV7(input.cwd);
-  const loaded = await project.currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(input.cwd, mechanicalRegistries);
   if (!loaded) throw new Error("cad_route requires an active v7 intake run");
   if (loaded.workflow.id !== "mechanical/intake" || loaded.state.phase !== "intake") throw new Error("cad_route is legal only in Mechanical intake");
   const definition = input.commitStyle === "workspace" ? mechanicalPlanCWorkflowDefinition(input.route) : mechanicalWorkflowDefinition(input.route);
@@ -33,8 +33,7 @@ export async function cadRouteV7(input: { cwd: string; route: Route; reason: str
 
 export async function cadRerouteV7(input: { cwd: string; route: Route; reason: string }): Promise<LoadedHarnessRunV7> {
   if (!isRoute(input.route)) throw new Error("invalid Mechanical route");
-  const project = new HarnessProjectStoreV7(input.cwd);
-  const loaded = await project.currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(input.cwd, mechanicalRegistries);
   if (!loaded) throw new Error("cad_reroute requires an active v7 run");
   const before = routeFromState(loaded);
   if (!before) throw new Error("active v7 workflow has no Mechanical route metadata");
@@ -74,7 +73,7 @@ export async function cadRerouteV7(input: { cwd: string; route: Route; reason: s
 }
 
 export async function approveMechanicalRerouteV7(cwd: string): Promise<LoadedHarnessRunV7> {
-  const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!loaded) throw new Error("No active v7 workflow");
   const pending = loaded.state.domainMetadata?.pendingReroute as { routeKey?: unknown } | undefined;
   if (typeof pending?.routeKey !== "string") throw new Error("No pending v7 reroute to approve");

@@ -1,12 +1,11 @@
-"""Tests for the programmable read-only B-Rep probe (cadctl probe).
+"""Tests for disposable programmable B-Rep experiments (cadctl probe).
 
 Covers the MVP acceptance criteria:
   1. arbitrary derived computation (bbox ratio / volume / solid count);
   2. subject binding + envelope hashes (script + artifact);
-  3. no open / import / subprocess inside the probe scope;
+  3. arbitrary Python and scratch writes leave the original artifact unchanged;
   4. infinite loops are killed by the alarm timeout;
-  5. the probe never writes project state (nothing to assert here beyond
-     the scope fence — the CLI writes no artifact paths);
+  5. probe artifacts and temporary files are discarded after execution;
   6. result must be JSON-serializable and named `result`.
 """
 from __future__ import annotations
@@ -72,28 +71,43 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("artifact", env["inputHashes"])
         self.assertIn("script", env["inputHashes"])
 
-    def test_artifact_path_is_a_read_only_runtime_binding(self) -> None:
+    def test_artifact_path_points_to_disposable_copy(self) -> None:
         env = run_probe("result = {'artifact_path': artifact_path}")
         self.assertTrue(env["ok"], env)
-        self.assertEqual(Path(env["payload"]["result"]["artifact_path"]).resolve(), STEP_FIXTURE.resolve())
+        self.assertNotEqual(Path(env["payload"]["result"]["artifact_path"]), STEP_FIXTURE)
+        self.assertFalse(Path(env["payload"]["result"]["artifact_path"]).exists())
 
-    def test_open_is_unavailable(self) -> None:
-        env = run_probe('result = open("/etc/passwd")')
-        self.assertFalse(env["ok"])
-        self.assertIn("open", env["payload"]["error"])
-
-    def test_import_is_unavailable(self) -> None:
-        env = run_probe("import subprocess")
-        self.assertFalse(env["ok"])
-
-    def test_exec_is_unavailable(self) -> None:
-        env = run_probe('exec("result = 1")')
-        self.assertFalse(env["ok"])
+    def test_arbitrary_python_and_geometry_are_isolated(self) -> None:
+        original = STEP_FIXTURE.read_bytes()
+        env = run_probe("""
+import os
+import sys
+from pathlib import Path
+cut = shape - bd.Box(1, 1, 1)
+Path('analysis.txt').write_text(str(cut.volume))
+Path(artifact_path).write_bytes(b'changed scratch STEP')
+result = {'cwd': os.getcwd(), 'argv': sys.argv, 'cut_volume': cut.volume, 'file': Path('analysis.txt').read_text()}
+""")
+        self.assertTrue(env["ok"], env)
+        self.assertGreater(env["payload"]["result"]["cut_volume"], 0)
+        self.assertFalse(Path(env["payload"]["result"]["cwd"]).exists())
+        self.assertNotIn(str(STEP_FIXTURE), env["payload"]["result"]["argv"])
+        self.assertEqual(STEP_FIXTURE.read_bytes(), original)
 
     def test_result_required(self) -> None:
         env = run_probe("x = 1")
         self.assertFalse(env["ok"])
         self.assertIn("result", env["payload"]["error"])
+
+    def test_print_does_not_break_json_transport(self) -> None:
+        env = run_probe("print('checking section')\nresult = {'ok': True}")
+        self.assertTrue(env["ok"], env)
+        self.assertIn("checking section", env["payload"]["stdout"])
+
+    def test_subprocess_output_does_not_break_json_transport(self) -> None:
+        env = run_probe("import subprocess\nimport sys\nsubprocess.run([sys.executable, '-c', \"print('external check')\"], check=True)\nresult = {'ok': True}")
+        self.assertTrue(env["ok"], env)
+        self.assertIn("external check", env["payload"]["stdout"])
 
     def test_result_must_be_serializable(self) -> None:
         env = run_probe("result = lambda: None")

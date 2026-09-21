@@ -2,17 +2,19 @@ import { describe, expect, it } from "vitest";
 import { reducePrimeEvent } from "../src/renderer/src/lib/activity";
 
 describe("Prime activity projection", () => {
-  it("shows thinking immediately and streams into one message", () => {
+  it("opens one assistant row per turn and fills it from provider deltas", () => {
     let messages = reducePrimeEvent([], { type: "agent_start" });
-    expect(messages[0]?.stream?.state).toBe("waiting");
+    expect(messages[0]?.stream?.startedAt).toBeTypeOf("number");
+    expect(messages[0]?.stream?.finishedAt).toBeUndefined();
     messages = reducePrimeEvent(messages, { type: "message_update", message: { id: "a1", role: "assistant" }, assistantMessageEvent: { type: "thinking_delta", delta: "hidden" } });
-    expect(messages[0]).toMatchObject({ text: "", stream: { state: "thinking" } });
+    expect(messages[0]?.text).toBe("");
     messages = reducePrimeEvent(messages, { type: "message_update", message: { id: "a1", role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: "Hello" } });
     messages = reducePrimeEvent(messages, { type: "message_update", message: { id: "a1", role: "assistant" }, assistantMessageEvent: { type: "text_delta", delta: " world" } });
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({ text: "Hello world", stream: { state: "responding" } });
+    expect(messages[0]?.text).toBe("Hello world");
     messages = reducePrimeEvent(messages, { type: "message_end", message: { id: "a1", role: "assistant", content: [{ type: "text", text: "Hello world" }] } });
-    expect(messages[0]).toMatchObject({ id: "a1", text: "Hello world", stream: { state: "complete" } });
+    expect(messages[0]).toMatchObject({ id: "a1", text: "Hello world" });
+    expect(messages[0]?.stream?.finishedAt).toBeTypeOf("number");
   });
 
   it("keeps event order when stream updates are frame-batched", () => {
@@ -22,7 +24,8 @@ describe("Prime activity projection", () => {
       { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Done" } },
       { type: "agent_end" },
     ] });
-    expect(messages[0]).toMatchObject({ text: "Done", stream: { state: "complete" } });
+    expect(messages[0]).toMatchObject({ text: "Done" });
+    expect(messages[0]?.stream?.finishedAt).toBeTypeOf("number");
   });
 
   it("replaces the visible conversation when a saved session is selected", () => {
@@ -49,11 +52,8 @@ describe("Prime activity projection", () => {
       },
     });
     expect(messages).toHaveLength(1);
-    expect(messages[0]).toMatchObject({
-      id: "expired",
-      text: "Provided authentication token is expired.",
-      stream: { state: "error" },
-    });
+    expect(messages[0]).toMatchObject({ id: "expired", text: "Provided authentication token is expired." });
+    expect(messages[0]?.stream?.finishedAt).toBeTypeOf("number");
   });
   it("turns a CAD build call into one completed semantic card", () => {
     let messages = reducePrimeEvent([], { type: "tool_execution_start", toolCallId: "b1", toolName: "ipython", args: { code: "await cad.model.build(source, output)" } });

@@ -1,5 +1,5 @@
 // E2E: load the unified probe extension through a fake pi, drive a routed
-// state, call cad_probe preset=python, and assert immutability + subject fence.
+// state, call cad_probe preset=python, and assert immutability + subject binding.
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

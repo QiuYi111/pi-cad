@@ -1,12 +1,13 @@
 import { canonicalDigest, jsonValue, type JsonValue } from "../../harness/canonical.ts";
 import { commitRecordRef, finishRun, reviseRecordRef, transitionRun } from "../../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../../harness/run-store.ts";
+import { resolveActiveRun } from "../../harness/run-scope.ts";
 import type { HarnessRunStateV7, RecordRefV7 } from "../../harness/state.ts";
 import { RELEASE_WORKSTREAMS } from "../../shared/route.ts";
 import { mechanicalRegistries } from "./registries.ts";
 
 async function current(cwd: string) {
-  const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!loaded) throw new Error("action requires an active v7 run");
   return loaded;
 }
@@ -122,7 +123,7 @@ export async function finishMechanicalRunV7(input: { cwd: string }) {
 }
 
 export async function resumeMechanicalRunV7(cwd: string): Promise<HarnessRunStateV7 | null> {
-  const loaded = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!loaded || loaded.state.status !== "waiting_user") return null;
   const next = await new HarnessRunStoreV7(cwd, loaded.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
     state: { ...state, status: "active", blocker: undefined, updatedAt: new Date().toISOString() },
@@ -133,7 +134,7 @@ export async function resumeMechanicalRunV7(cwd: string): Promise<HarnessRunStat
 
 export async function abortMechanicalRunV7(cwd: string): Promise<HarnessRunStateV7 | null> {
   const project = new HarnessProjectStoreV7(cwd);
-  const loaded = await project.currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!loaded) return null;
   const aborted = await new HarnessRunStoreV7(cwd, loaded.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
     state: { ...state, status: "aborted", blocker: undefined, updatedAt: new Date().toISOString() },

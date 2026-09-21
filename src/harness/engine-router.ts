@@ -1,5 +1,5 @@
 import { CadProjectStore } from "../shared/store.ts";
-import { HarnessProjectStoreV7 } from "./run-store.ts";
+import { resolveActiveRun } from "./run-scope.ts";
 
 export type KernelEngine = "v6" | "v7";
 
@@ -15,7 +15,7 @@ export async function selectKernelEngine(cwd: string, configured = process.env.P
     warnedV6Fallback = true;
     process.emitWarning("PI_CAD_KERNEL=v6 is a deprecated operational fallback; new work defaults to Harness Kernel v7.", { code: "PI_CAD_V6_DEPRECATED" });
   }
-  const v7 = await new HarnessProjectStoreV7(cwd).currentRun().catch(() => null);
+  const v7 = await resolveActiveRun(cwd).catch(() => null);
   if (v7 && !["done", "aborted", "blocked_external", "budget_exhausted"].includes(v7.state.status)) return "v7";
   const v6State = await new CadProjectStore(cwd).load().catch(() => null);
   if (v6State && !["done", "aborted", "blocked_external", "budget_exhausted"].includes(v6State.status)) return "v6";

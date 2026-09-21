@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { chmod, copyFile, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { createConnection, createServer } from "node:net";
 
 import { assertUnixRuntime } from "../shared/platform.ts";
 import { completionGate, startAuthoritySidecar } from "./sidecar.ts";
@@ -131,6 +132,7 @@ export interface LaunchPaths {
   nodeRoot: string;
   primeAgentDir: string;
   primeKernelVenv: string;
+  cadPythonRoot: string;
   kernelPythonRoot: string;
   kernelPythonExecutable: string;
   kernelSitePackages: string;
@@ -143,6 +145,19 @@ export interface LaunchPaths {
 // Prime's CLI requires positive autonomous limits. Max-safe values leave the
 // ordinary reviewer free of practical rollout, token, continuation, and time caps.
 const REVIEWER_UNBOUNDED_LIMIT = String(Number.MAX_SAFE_INTEGER);
+const PRIME_PYTHON_SKILLS = [
+  "agent-message", "agent-observe", "attach-image", "compact", "edit",
+  "goal", "refine", "rlm-heartbeat", "websearch",
+];
+
+function primePythonPath(primeRoot: string, kernelSitePackages: string, sandboxed: boolean): string {
+  const root = sandboxed ? "/opt/prime" : primeRoot;
+  const sitePackages = sandboxed ? `/opt/prime-kernel-venv/${kernelSitePackages}` : kernelSitePackages;
+  return [
+    sitePackages,
+    ...PRIME_PYTHON_SKILLS.map((name) => join(root, "packages", "coding-agent", "dist", "skills", name, "src")),
+  ].join(":");
+}
 
 export function resolvePrimeRepository(repository: string, primeAgentDir: string, explicit = process.env.PRIME_AGENT_REPO): string {
   const configPath = join(primeAgentDir, PRIME_CAD_CONFIG_FILE);
@@ -163,14 +178,22 @@ export function resolvePrimeRepository(repository: string, primeAgentDir: string
   return primeRoot;
 }
 
+export function resolveVenvPythonRoot(venvPython: string): string {
+  const linkTarget = readlinkSync(venvPython);
+  return dirname(dirname(resolve(dirname(venvPython), linkTarget)));
+}
+
 export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string; modelArgs?: string[] }): string[] {
   const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/home/prime", "--dir", "/home/prime/.prime", "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad"];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  bindAtOriginalPath(args, paths.cadPythonRoot);
   args.push(
     "--bind", input.reviewerWorkspace, "/workspace",
     "--dir", "/opt/node-bin", "--symlink", `/opt/node/${paths.nodeExecutableRelative ?? "bin/node"}`, "/opt/node-bin/node",
     "--ro-bind", paths.primeRoot, "/opt/prime", "--ro-bind", paths.nodeRoot, "/opt/node",
     "--ro-bind", join(paths.repository, "skills", "cad"), "/opt/pi-cad/cad",
+    "--ro-bind", join(paths.repository, "python"), "/opt/pi-cad/python",
+    "--ro-bind", join(paths.repository, "scripts"), "/opt/pi-cad/scripts",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
     "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv", "--ro-bind", paths.kernelPythonRoot, "/opt/python",
     "--bind", input.reviewerAgentDir, "/home/prime/.prime/agent",
@@ -183,7 +206,7 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PI_CAD_REVIEW_ID", input.reviewId,
     "--setenv", "PI_CAD_REVIEWER_MODE", "1", "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad", "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
-    "--setenv", "PYTHONPATH", `/opt/prime-kernel-venv/${paths.kernelSitePackages}:/opt/pi-cad/cad/src`,
+    "--setenv", "PYTHONPATH", `${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime", "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
     "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
     "--setenv", "PI_OFFLINE", "1",
@@ -206,6 +229,13 @@ function systemBind(args: string[], path: string): void {
   if (existsSync(path)) args.push("--ro-bind", path, path);
 }
 
+function bindAtOriginalPath(args: string[], path: string): void {
+  const parents: string[] = [];
+  for (let parent = dirname(path); parent !== "/"; parent = dirname(parent)) parents.push(parent);
+  for (const parent of parents.reverse()) args.push("--dir", parent);
+  args.push("--ro-bind", path, path);
+}
+
 function passEnvironment(args: string[], name: string, value: string | undefined): void {
   if (value !== undefined) args.push("--setenv", name, value);
 }
@@ -218,6 +248,10 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad",
   ];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  bindAtOriginalPath(args, paths.cadPythonRoot);
+  const blenderRuntime = join(paths.repository, ".runtime", "blender");
+  if (existsSync(blenderRuntime)) args.push("--ro-bind", blenderRuntime, "/opt/pi-cad/blender-runtime");
+  else args.push("--dir", "/opt/pi-cad/blender-runtime");
   args.push(
     permission === "read-only" ? "--ro-bind" : "--bind", paths.project, "/workspace",
     "--dir", "/opt/node-bin", "--symlink", `/opt/node/${paths.nodeExecutableRelative ?? "bin/node"}`, "/opt/node-bin/node",
@@ -226,6 +260,10 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--ro-bind", join(paths.repository, "src", "integrations", "prime"), "/opt/pi-cad/prime-extension",
     "--ro-bind", join(paths.repository, "skills", "cad"), "/opt/pi-cad/cad",
     "--ro-bind", join(paths.repository, "skills", "grill-me"), "/opt/pi-cad/grill-me",
+    "--ro-bind", join(paths.repository, "skills", "blender-product-rendering"), "/opt/pi-cad/blender-product-rendering",
+    "--ro-bind", join(paths.repository, "third_party", "blender-mcp"), "/opt/pi-cad/blender-mcp",
+    "--ro-bind", join(paths.repository, "python"), "/opt/pi-cad/python",
+    "--ro-bind", join(paths.repository, "scripts"), "/opt/pi-cad/scripts",
     "--ro-bind", join(paths.repository, "packages", "prime-codex-image-gen"), "/opt/pi-cad/imagegen",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
     "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
@@ -240,7 +278,11 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PI_CAD_AUTHOR_SOCKET", "/run/pi-cad/author/authority.sock",
     "--setenv", "PI_CAD_PROJECT_CWD", "/workspace",
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad",
-    "--setenv", "PYTHONPATH", `/opt/prime-kernel-venv/${paths.kernelSitePackages}:/opt/pi-cad/cad/src`,
+    "--setenv", "PI_CAD_BLENDER_RUNTIME", "/opt/pi-cad/blender-runtime",
+    "--setenv", "PI_CAD_BLENDER_MCP_ROOT", "/opt/pi-cad/blender-mcp",
+    "--setenv", "BLENDER_MCP_PORT", process.env.PI_CAD_BLENDER_MCP_PORT ?? "9876",
+    "--setenv", "PI_CAD_PYTHON", "/opt/pi-cad/python/.venv/bin/python",
+    "--setenv", "PYTHONPATH", `/opt/pi-cad/blender-mcp/deps:/opt/pi-cad/blender-mcp/mcp:${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime",
     "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
@@ -260,6 +302,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--extension", "/opt/pi-cad/imagegen/index.ts",
     "--skill", "/opt/pi-cad/cad/SKILL.md",
     "--skill", "/opt/pi-cad/grill-me/SKILL.md",
+    "--skill", "/opt/pi-cad/blender-product-rendering/SKILL.md",
     "--skill", "/opt/pi-cad/imagegen/skills/imagegen/SKILL.md",
     ...primeArgs,
   );
@@ -351,6 +394,81 @@ async function copyPrimeBootstrap(source: string, destination: string): Promise<
   }
 }
 
+async function configureBlenderMcp(agentDir: string, command: string, env: Record<string, { env: string }>): Promise<void> {
+  const path = join(agentDir, "settings.json");
+  let settings: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) settings = parsed as Record<string, unknown>;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const current = settings.mcpServers && typeof settings.mcpServers === "object" && !Array.isArray(settings.mcpServers)
+    ? settings.mcpServers as Record<string, unknown> : {};
+  settings.mcpServers = {
+    ...current,
+    blender: { type: "stdio", command, args: [], env, startupTimeoutMs: 20_000, callTimeoutMs: 300_000 },
+  };
+  await writeFile(path, `${JSON.stringify(settings, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+}
+
+async function freeTcpPort(): Promise<number> {
+  return new Promise((accept, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") return reject(new Error("could not allocate Blender MCP port"));
+      server.close((error) => error ? reject(error) : accept(address.port));
+    });
+  });
+}
+
+async function waitForTcp(port: number, child: ChildProcess): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`managed Blender MCP exited with code ${child.exitCode}`);
+    const connected = await new Promise<boolean>((accept) => {
+      const socket = createConnection({ host: "127.0.0.1", port });
+      socket.setTimeout(250);
+      socket.once("connect", () => { socket.destroy(); accept(true); });
+      socket.once("timeout", () => { socket.destroy(); accept(false); });
+      socket.once("error", () => accept(false));
+    });
+    if (connected) return;
+    await new Promise((accept) => setTimeout(accept, 100));
+  }
+  throw new Error("managed Blender MCP did not become ready within 30 seconds");
+}
+
+async function startManagedBlenderMcp(repository: string): Promise<{ close: () => Promise<void> } | null> {
+  const manifest = JSON.parse(await readFile(join(repository, "scripts", "blender-manifest.json"), "utf8")) as { version: string; platforms: Record<string, { binary?: string }> };
+  const key = process.arch === "arm64" ? "linux-arm64" : "linux-x64";
+  const entry = manifest.platforms[key];
+  if (!entry?.binary) return null;
+  const binary = join(repository, ".runtime", "blender", manifest.version, key, "blender");
+  if (!existsSync(binary)) return null;
+  const port = await freeTcpPort();
+  process.env.PI_CAD_BLENDER_MCP_PORT = String(port);
+  const addon = join(repository, "third_party", "blender-mcp", "addon");
+  const expression = `import sys;sys.path.insert(0,${JSON.stringify(addon)});import blender_mcp_addon;blender_mcp_addon.register()`;
+  const runtimeDir = dirname(binary);
+  const child = spawn(binary, ["--background", "--factory-startup", "--online-mode", "--python-expr", expression, "--command", "blender_mcp", "--host", "127.0.0.1", "--port", String(port)], {
+    stdio: ["ignore", "ignore", "pipe"],
+    env: { ...process.env, OMP_NUM_THREADS: "1", LD_LIBRARY_PATH: [join(runtimeDir, "lib"), process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") },
+  });
+  let diagnostic = "";
+  child.stderr?.on("data", (chunk: Buffer) => { diagnostic = `${diagnostic}${chunk.toString("utf8")}`.slice(-4096); });
+  try { await waitForTcp(port, child); }
+  catch (error) { child.kill("SIGTERM"); throw new Error(`${error instanceof Error ? error.message : String(error)}${diagnostic ? `: ${diagnostic.trim()}` : ""}`); }
+  return { close: () => new Promise((accept) => {
+    if (child.exitCode !== null) return accept();
+    child.once("exit", () => accept());
+    child.kill("SIGTERM");
+    setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 2_000).unref();
+  }) };
+}
+
 /**
  * The author runs in an isolated, per-launch agent directory.  Prime's
  * /login writes auth.json there, so without this handoff API keys disappear
@@ -432,7 +550,11 @@ function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string,
     PATH: `${process.env.PI_CAD_NODE_WRAPPER ? dirname(process.env.PI_CAD_NODE_WRAPPER) : join(paths.nodeRoot, "bin")}:${paths.primeRoot}:${join(paths.primeRoot, "node_modules", ".bin")}:/usr/local/bin:/usr/bin:/bin`,
     PI_CAD_PROJECT_CWD: reviewer ? join(paths.runtimeDirectory, "reviewer-workspace") : paths.project,
     PI_CAD_REPO: paths.repository,
-    PYTHONPATH: `${join(paths.primeKernelVenv, paths.kernelSitePackages)}:${join(paths.repository, "skills", "cad", "src")}`,
+    PI_CAD_BLENDER_RUNTIME: join(paths.repository, ".runtime", "blender"),
+    PI_CAD_BLENDER_MCP_ROOT: join(paths.repository, "third_party", "blender-mcp"),
+    BLENDER_MCP_PORT: process.env.PI_CAD_BLENDER_MCP_PORT,
+    PI_CAD_PYTHON: join(paths.repository, "python", ".venv", "bin", "python"),
+    PYTHONPATH: `${join(paths.repository, "third_party", "blender-mcp", "deps")}:${join(paths.repository, "third_party", "blender-mcp", "mcp")}:${primePythonPath(paths.primeRoot, join(paths.primeKernelVenv, paths.kernelSitePackages), false)}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
     PYTHONDONTWRITEBYTECODE: "1", PRIME_AGENT_REPO: paths.primeRoot,
     PRIME_AGENT_CODING_AGENT_DIR: agentDir,
     PRIME_AGENT_SESSION_DIR: reviewer ? undefined : join(paths.project, ".prime-sessions"),
@@ -465,6 +587,7 @@ function nativePrimeArgs(paths: LaunchPaths, primeArgs: string[]): string[] {
     "--extension", join(paths.repository, "packages", "prime-codex-image-gen", "index.ts"),
     "--skill", join(paths.repository, "skills", "cad", "SKILL.md"),
     "--skill", join(paths.repository, "skills", "grill-me", "SKILL.md"),
+    "--skill", join(paths.repository, "skills", "blender-product-rendering", "SKILL.md"),
     "--skill", join(paths.repository, "packages", "prime-codex-image-gen", "skills", "imagegen", "SKILL.md"), ...primeArgs];
 }
 
@@ -494,6 +617,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const primeRoot = resolvePrimeRepository(repository, primeAgentDir);
   process.env.PRIME_AGENT_REPO = primeRoot;
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
+  const cadPythonRoot = resolveVenvPythonRoot(join(repository, "python", ".venv", "bin", "python"));
   const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
   const kernelPythonRoot = dirname(dirname(kernelPython));
   const kernelPythonExecutable = basename(kernelPython);
@@ -544,11 +668,21 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   });
   const paths: LaunchPaths = {
     repository, project, primeRoot, nodeRoot, primeAgentDir, primeKernelVenv, runtimeDirectory,
-    kernelPythonRoot, kernelPythonExecutable, kernelSitePackages,
+    cadPythonRoot, kernelPythonRoot, kernelPythonExecutable, kernelSitePackages,
     ephemeralAgentDir, authorSocketDirectory: resolve(sidecar.authorSocket, ".."), nodeExecutableRelative,
   };
   launchPaths = paths;
   reviewerSocketDirectory = resolve(sidecar.reviewerSocket, "..");
+  const blenderMcp = process.platform === "linux" ? await startManagedBlenderMcp(repository) : null;
+  await configureBlenderMcp(
+    ephemeralAgentDir,
+    process.platform === "darwin" ? join(repository, "scripts", "blender-mcp-server.sh") : "/opt/pi-cad/scripts/blender-mcp-server.sh",
+    {
+      PRIME_AGENT_KERNEL_PYTHON: { env: "PRIME_AGENT_KERNEL_PYTHON" },
+      PI_CAD_BLENDER_MCP_ROOT: { env: "PI_CAD_BLENDER_MCP_ROOT" },
+      BLENDER_MCP_PORT: { env: "BLENDER_MCP_PORT" },
+    },
+  );
   try {
     const result = process.platform === "darwin"
       ? await (async () => {
@@ -574,6 +708,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     process.stderr.write(`WORKFLOW_INCOMPLETE: ${gate.reason}\n`);
     return WORKFLOW_INCOMPLETE_EXIT_CODE;
   } finally {
+    await blenderMcp?.close();
     await sidecar.close();
     await rm(runtimeDirectory, { recursive: true, force: true });
   }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { renderCurrentActionCard } from "../src/core/agent-contract.ts";
-import { isCurrentReviewCompletion, persistedReviewNotificationIds } from "../src/integrations/prime/extension.ts";
+import { isCurrentReviewCompletion, persistedReviewNotificationIds, refineGateDecision } from "../src/integrations/prime/extension.ts";
 
 function nextActionFromInstalledContext(actionCard: string): string {
   const line = actionCard.split(/\r?\n/).find((item) => item.startsWith("Recommended next action:"));
@@ -48,11 +48,10 @@ test("Prime CAD skill forbids nested Python adaptation and maps CadQuery tasks t
   assert.match(skill, /complete public signatures[\s\S]*cad\.model\.build[\s\S]*cad\.probe\.run[\s\S]*cad\.review\.submit/i);
   assert.match(skill, /There is no\s+reason to call `inspect\.signature\(\)`/i);
   assert.match(skill, /Every rebuild must overwrite[\s\S]*artifact = await cad\.model\.build/i);
-  assert.match(skill, /review\.submit\(\).*accepts the returned `Commit`/i);
-  assert.match(skill, /do not rediscover or guess commit identifiers/i);
-  assert.match(skill, /parent=final_commit[\s\S]*artifacts=list\(final_commit\.artifacts\)/i);
-  assert.match(skill, /phase obligation ->[\s\S]*build -> probe -> review-candidate commit -> transition -> review\.submit/i);
-  assert.match(skill, /parts-geometry[\s\S]*parts-visual[\s\S]*never call `cad\.commit` with those names/i);
+  assert.match(skill, /cad\.plan\.current\(\)/i);
+  assert.match(skill, /cad\.review\.prepare\(candidate\)/i);
+  assert.match(skill, /candidate_defect[\s\S]*plan_stale[\s\S]*missing_evidence/i);
+  assert.match(skill, /Do not spawn[\s\S]*reviewers by default/i);
 });
 
 test("Prime review completion uses ExtensionAPI messaging rather than event context", async () => {
@@ -65,7 +64,16 @@ test("Prime review completion uses ExtensionAPI messaging rather than event cont
   assert.doesNotMatch(extension, /else if \(current\) await notifyReview/);
   assert.match(extension, /persistedReviewNotificationIds\(event\.messages\)/);
   assert.match(extension, /op: "review-current"/);
-  assert.match(extension, /resumedReviewMessage = reviewCompletionMessage\(current\)/);
+  assert.match(extension, /pi\.sendMessage\(reviewCompletionMessage\(current\), \{ deliverAs: "steer" \}\)/);
+  assert.match(extension, /pi\.on\("session_before_refine"/);
+  assert.match(extension, /op: "completion-gate"/);
+});
+
+test("Prime refine is blocked only while a canonical engineering workflow is active", () => {
+  assert.equal(refineGateDecision(null), undefined);
+  assert.equal(refineGateDecision({ complete: false, reason: "no canonical workflow run exists" }), undefined);
+  assert.deepEqual(refineGateDecision({ complete: false, reason: "workflow running", runId: "run-1" }), { skip: true });
+  assert.equal(refineGateDecision({ complete: true, reason: "workflow done", runId: "run-1" }), undefined);
 });
 
 test("Prime review notification identity survives resume and imported legacy messages", () => {

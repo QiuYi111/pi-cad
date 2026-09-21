@@ -8,7 +8,7 @@ interface PhaseCardMessageInput {
 
 export const PHASE_CARD_CUSTOM_TYPE = "pi-cad.phase-card";
 
-export function makeEphemeralPhaseCardMessage(card: PhaseCardMessageInput) {
+export function makePhaseContractMessage(card: PhaseCardMessageInput) {
   const content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [
     { type: "text", text: card.text },
     ...card.images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
@@ -19,6 +19,5 @@ export function makeEphemeralPhaseCardMessage(card: PhaseCardMessageInput) {
     display: false,
     content,
     details: { digest: card.digest, workflowHash: card.workflowHash, phase: card.phase },
-    timestamp: Date.now(),
   };
 }
