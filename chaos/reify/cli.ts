@@ -10,7 +10,8 @@ const USAGE = `真 Reify chaos slice
 
   chaos reify demo                     一条真故障链：真 run → 真 kernel → 真 kill
   chaos reify run [--runs N] [--seed N] [--max-commands N] [--json]
-  chaos reify replay <artifact.json> [--seed]
+  chaos reify replay <artifact.json>              按 artifact 里存的序列重放
+  chaos reify replay <artifact.json> --seed       按 artifact 里的 seed+path 精确重放原路径
   chaos reify shrink <artifact.json>
   chaos reify invariants
 `;
@@ -120,7 +121,10 @@ async function demo(): Promise<number> {
       detail: violation.detail,
       evidence: violation.evidence,
       seed: 0,
-      replayPath: "demo",
+      // The fixed demo chain is hand-written, not generated, so it has no
+      // fast-check path: it replays by sequence only (`replay <artifact>`).
+      replayPath: "",
+      maxCommands: reproduction.length,
       originalSequence: reproduction,
       shrunkSequence: reproduction,
       replaySequence: reproduction,

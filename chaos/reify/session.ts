@@ -170,7 +170,6 @@ export class ReifySession {
   activeFaults: string[] = [];
 
   private authorityPids = new Map<number, string>();
-  private readonly hashes = new Map<string, string>();
   private readonly keepProject: boolean;
   private readonly initialConversations: string[];
 
@@ -414,13 +413,11 @@ export class ReifySession {
     }
     const artifacts = Object.values(raw.artifacts ?? {}).map((artifact) => {
       const absolute = resolve(this.project, artifact.path);
-      const cacheKey = `${absolute}:${artifact.sha256}`;
-      let digest = this.hashes.get(cacheKey);
-      if (digest === undefined) {
-        digest = sha256File(absolute) ?? "";
-        this.hashes.set(cacheKey, digest);
-      }
-      return { id: artifact.id, path: artifact.path, sha256: artifact.sha256, sha256OnDisk: digest || null };
+      // Always hash the file on disk. Caching the digest would hide a file
+      // that is tampered with after its first (clean) read, which is exactly
+      // what `artifact-integrity` exists to catch.
+      const digest = sha256File(absolute);
+      return { id: artifact.id, path: artifact.path, sha256: artifact.sha256, sha256OnDisk: digest };
     });
     return {
       id: runId,
@@ -500,7 +497,6 @@ export class ReifySession {
     this.history.orphanSince.clear();
     this.history.recoveries.length = 0;
     this.history.armedSince.clear();
-    this.hashes.clear();
     rmSync(this.project, { recursive: true, force: true });
     rmSync(this.canonical, { recursive: true, force: true });
     this.conversations.length = 0;

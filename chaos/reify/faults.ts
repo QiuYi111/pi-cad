@@ -125,9 +125,12 @@ export const killKernelDuringBuild: ReifyFaultDefinition = {
       })();
       ctx.trace.note(`kernel 被杀后控制面报：${message}`);
     } else {
-      // The control plane never noticed its kernel died; keep the run alive by
-      // clearing the stale authority, and let recover() judge convergence.
-      ctx.trace.note("kernel 被杀 45s 后控制面还没反应，按停顿记录");
+      // The control plane never noticed its kernel died, so the harness stops
+      // the stuck run itself -- kernel tree first, then the stale authority.
+      // That way this fault does not manufacture an orphan that the product
+      // never created; recover() only judges whether a fresh build works.
+      ctx.trace.note("kernel 被杀 45s 后控制面还没反应，由 harness 一起停掉 kernel 和控制面");
+      ctx.session.killKernel(build.kernelPid, "SIGKILL");
       ctx.session.killKernel(build.authorityPid, "SIGKILL");
     }
   },

@@ -214,8 +214,9 @@ const noOrphanWorker: InvariantDefinition = {
 | --- | --- |
 | `npm run chaos:reify -- demo` | 一条真链路：真 run → 真 build → kill 真 kernel → kill 真控制面 |
 | `npm run chaos:reify -- run --runs 6` | fast-check 生成真 action/fault 序列，发现失败就存 artifact |
-| `npm run chaos:reify -- replay <artifact.json>` | 用 artifact 里的序列重放（`--seed` 用 seed 重放） |
-| `npm run chaos:reify -- shrink <artifact.json>` | 用记录的 seed 重新 shrink |
+| `npm run chaos:reify -- replay <artifact.json>` | 用 artifact 里存的序列重放 |
+| `npm run chaos:reify -- replay <artifact.json> --seed` | 用 artifact 里的 seed + path 精确重放原路径（不重新搜索） |
+| `npm run chaos:reify -- shrink <artifact.json>` | 沿记录的 seed + path 复现原失败，再继续 shrink |
 | `npm run chaos:reify -- invariants` | 列出这一段用的 invariant |
 
 `chaos:reify run` 发现问题退出码 1，没发现问题 0。
@@ -248,6 +249,18 @@ Fault（真进程故障）：
 `chaos:reify run` 失败时写 `chaos/artifacts/<时间>-reify-<invariant>.json`。
 除了 POC 那套 seed / path / 序列，还多出真身份：真 run / 会话 / kernel pid、
 真状态时间线、真请求日志、真恢复证据。可以直接 `replay` 和 `shrink`。
+
+`seed` / `replayPath` / `maxCommands` 三个字段是一组：fast-check 的 path 只在
+同一个生成器形状下才解得开，所以重放和 shrink 都用存下来的 `maxCommands`
+重建生成器，按 path 精确复现原来的那条序列，不是拿同一个 seed 重新搜。
+demo 那条链是手写的，没有 fast-check path，只能按序列 replay。
+
+### 可信度上的两个坑（都已修）
+
+- recover 抛错（不是 invariant 失败那种）原来只记一条 note 就过去了，故障还
+  挂着也算这轮通过。现在一律转成 `recovery-convergence` violation。
+- recover 完之后原来直接 return。现在会再取一次真 snapshot、重查一遍 invariant，
+  避免「recover 之后状态其实不满足 invariant」被漏掉。
 
 ### 已经抓到的真问题
 

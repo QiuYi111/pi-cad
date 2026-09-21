@@ -20,6 +20,12 @@ export interface ReifyFailureArtifact {
   evidence?: unknown;
   seed: number;
   replayPath: string;
+  /**
+   * fast-check `maxLength` used to build the sequence arbitrary. A replay path
+   * only resolves against the same generator shape, so it is stored with the
+   * seed and replayed together.
+   */
+  maxCommands: number;
   originalSequence: Command[];
   shrunkSequence: Command[];
   replaySequence: Command[];
@@ -48,5 +54,8 @@ export function loadReifyArtifact(file: string): ReifyFailureArtifact {
   if (artifact.schema !== 1 || artifact.sut !== "reify") {
     throw new Error(`${file} 不是真 Reify slice 的 artifact`);
   }
+  // Artifacts written before the path replay fix do not carry the generator
+  // length; fall back to the recorded sequence so they still load.
+  artifact.maxCommands ??= Math.max(artifact.originalSequence.length, 4);
   return artifact;
 }

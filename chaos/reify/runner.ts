@@ -4,7 +4,7 @@ import { InvariantViolation } from "../types.ts";
 import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact, type ReifyFailureArtifact } from "./artifacts.ts";
 import { reifyFaultDefinitions } from "./faults.ts";
-import { checkReifyInvariants, reifyInvariantDefinitions } from "./invariants.ts";
+import { checkInvariantsOn, checkReifyInvariants, reifyInvariantDefinitions } from "./invariants.ts";
 import { buildReifySequenceArbitrary, describeCommand, type Command } from "./model.ts";
 import { ReifySession } from "./session.ts";
 import { ReifyTrace } from "./trace.ts";
@@ -26,6 +26,8 @@ const SETTLE_MS: Record<string, number> = {
   killAuthorityDuringBuild: 900,
 };
 const DEFAULT_SETTLE_MS = 200;
+/** fast-check sequence length used when a run does not ask for one. */
+const DEFAULT_MAX_COMMANDS = 9;
 const FINAL_SETTLE_MS = Number(process.env.CHAOS_REIFY_FINAL_SETTLE_MS ?? 1_200);
 const POLL_INTERVAL_MS = 75;
 
@@ -76,13 +78,19 @@ async function observeUntil(session: ReifySession, trace: ReifyTrace, label: str
 }
 
 /** Inject faults, then prove recovery with a real build before the next step. */
-async function recoverInjectedFaults(session: ReifySession, injected: ReifyFaultDefinition[], trace: ReifyTrace): Promise<void> {
+export async function recoverInjectedFaults(session: ReifySession, injected: ReifyFaultDefinition[], trace: ReifyTrace): Promise<void> {
   for (const definition of [...injected].reverse()) {
     try {
       await definition.recover({ session, trace, params: {} });
     } catch (error) {
       if (error instanceof InvariantViolation) throw error;
-      trace.note(`fault ${definition.name} 恢复失败`, (error as Error).message);
+      // A failed recovery is a real system failure, not a note: the fault may
+      // still be armed and nothing proved the system healed. Never swallow it.
+      throw new InvariantViolation(
+        "recovery-convergence",
+        `fault ${definition.name} 恢复失败：${(error as Error).message}`,
+        { fault: definition.name },
+      );
     }
   }
 }
@@ -99,12 +107,18 @@ export async function runReifySequence(session: ReifySession, commands: Command[
   }
   await observeUntil(session, trace, "final-settle", FINAL_SETTLE_MS);
   await recoverInjectedFaults(session, injected, trace);
+  // Recovery only counts if the real state after it still satisfies every
+  // invariant: take a fresh snapshot and check again instead of trusting that
+  // a build succeeded.
+  await checkInvariantsOn(session, trace, "post-recovery");
   return injected;
 }
 
 export interface ReifyRunOptions {
   numRuns?: number;
   seed?: number;
+  /** fast-check counterexample path; replays that exact path instead of re-searching. */
+  replayPath?: string;
   maxCommands?: number;
   quiet?: boolean;
   session?: ReifySession;
@@ -139,8 +153,9 @@ interface RecordedFailure {
  */
 export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<ReifyRunResult> {
   const session = options.session ?? (await ReifySession.start());
+  const maxCommands = options.maxCommands ?? DEFAULT_MAX_COMMANDS;
   try {
-    const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, options.maxCommands ?? 9);
+    const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, maxCommands);
     let firstFailure: RecordedFailure | null = null;
 
     const property = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
@@ -154,7 +169,13 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       }
     });
 
-    const details = await fc.check(property, { numRuns: options.numRuns ?? 3, seed: options.seed });
+    // `path` makes fast-check replay the recorded counterexample exactly (and
+    // then continue shrinking from it), instead of searching the seed again.
+    const details = await fc.check(property, {
+      numRuns: options.numRuns ?? 3,
+      seed: options.seed,
+      path: options.replayPath ?? "",
+    });
     if (!details.failed) {
       if (!options.quiet) {
         process.stdout.write(
@@ -178,6 +199,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
     const artifact = await captureFailure(session, {
       seed: details.seed,
       replayPath: details.counterexamplePath ?? "",
+      maxCommands,
       sequence: shrunk,
       fallback: original,
       expected: details.errorInstance instanceof InvariantViolation ? details.errorInstance : null,
@@ -220,6 +242,7 @@ async function captureFailure(
   input: {
     seed: number;
     replayPath: string;
+    maxCommands: number;
     sequence: Command[];
     fallback: Command[];
     expected: InvariantViolation | null;
@@ -263,6 +286,7 @@ async function captureFailure(
     evidence: effective?.evidence,
     seed: input.seed,
     replayPath: input.replayPath,
+    maxCommands: input.maxCommands,
     originalSequence: input.fallback,
     shrunkSequence: input.sequence,
     replaySequence: usedSequence,
@@ -284,19 +308,19 @@ async function captureFailure(
 
 export interface ReifyReplayResult {
   ok: boolean;
-  mode: "sequence" | "seed";
+  mode: "sequence" | "seed+path";
   expectedInvariant: string;
   observedInvariant?: string;
   detail?: string;
   steps: number;
 }
 
-/** Re-run a recorded sequence (or the recorded fast-check seed) and confirm it. */
+/** Re-run a recorded sequence (or the recorded seed+path) and confirm it. */
 export async function replayReifyArtifact(file: string, options: { seed?: boolean } = {}): Promise<ReifyReplayResult> {
   const artifact = loadReifyArtifact(file);
   const session = await ReifySession.start();
   try {
-    if (options.seed) return await replayBySeed(session, artifact);
+    if (options.seed) return await replayBySeedAndPath(session, artifact);
     const sequence = artifact.replaySequence ?? artifact.shrunkSequence;
     const trace = new ReifyTrace();
     await session.reset();
@@ -321,22 +345,51 @@ export async function replayReifyArtifact(file: string, options: { seed?: boolea
   }
 }
 
-async function replayBySeed(session: ReifySession, artifact: ReifyFailureArtifact): Promise<ReifyReplayResult> {
-  const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, Math.max(artifact.originalSequence.length, 4));
+/**
+ * Replay the exact fast-check counterexample: same seed, same path, same
+ * generator shape. Nothing is searched again, so a failure here means the
+ * recorded path really is the one the generator produced.
+ */
+async function replayBySeedAndPath(session: ReifySession, artifact: ReifyFailureArtifact): Promise<ReifyReplayResult> {
+  const missing = (detail: string): ReifyReplayResult => ({
+    ok: false,
+    mode: "seed+path",
+    expectedInvariant: artifact.invariant,
+    detail,
+    steps: 0,
+  });
+  if (!artifact.replayPath) return missing("artifact 里没有 fast-check path，没法按原路径重放");
+  const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, artifact.maxCommands);
   let observed: InvariantViolation | null = null;
+  let other: unknown = null;
   const property = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
     const trace = new ReifyTrace();
     await session.reset();
-    await runReifySequence(session, commands, trace);
+    try {
+      await runReifySequence(session, commands, trace);
+    } catch (error) {
+      other = error;
+      throw error;
+    }
   });
-  const details = await fc.check(property, { numRuns: 12, seed: artifact.seed });
+  const details = await fc.check(property, {
+    seed: artifact.seed,
+    path: artifact.replayPath,
+    endOnFailure: true,
+    numRuns: 1,
+  });
   if (details.errorInstance instanceof InvariantViolation) observed = details.errorInstance;
+  const ok = details.failed && observed?.invariant === artifact.invariant;
   return {
-    ok: details.failed && observed?.invariant === artifact.invariant,
-    mode: "seed",
+    ok,
+    mode: "seed+path",
     expectedInvariant: artifact.invariant,
     observedInvariant: observed?.invariant,
-    detail: details.failed ? `seed ${artifact.seed} 复现了 ${observed?.invariant ?? "失败"}` : `seed ${artifact.seed} 没有复现失败`,
+    detail: ok
+      ? `seed=${artifact.seed} path=${artifact.replayPath} 精确复现了 ${observed?.invariant}`
+      : details.failed
+        ? `seed=${artifact.seed} path=${artifact.replayPath} 复现了别的失败：${observed?.invariant ?? String(other)}`
+        : `seed=${artifact.seed} path=${artifact.replayPath} 没有复现失败`,
     steps: ((details.counterexample?.[0] as unknown[] | undefined) ?? []).length,
   };
 }
@@ -351,13 +404,14 @@ export interface ReifyShrinkResult {
   artifactPath?: string;
 }
 
-/** Re-derive the minimal real reproduction from the recorded seed. */
+/** Replay the recorded seed+path, then shrink from exactly that counterexample. */
 export async function shrinkReifyArtifact(file: string): Promise<ReifyShrinkResult> {
   const artifact = loadReifyArtifact(file);
+  if (!artifact.replayPath) throw new Error("artifact 里没有 fast-check path，没法按原路径 shrink");
   const result = await reifyChaosRun({
     seed: artifact.seed,
-    numRuns: 30,
-    maxCommands: Math.max(artifact.originalSequence.length, 4),
+    replayPath: artifact.replayPath,
+    maxCommands: artifact.maxCommands,
     quiet: true,
     save: false,
   });
@@ -365,7 +419,7 @@ export async function shrinkReifyArtifact(file: string): Promise<ReifyShrinkResu
     ok: result.failed && result.invariant === artifact.invariant,
     expectedInvariant: artifact.invariant,
     invariant: result.invariant,
-    originalLength: result.originalLength,
+    originalLength: artifact.originalSequence.length,
     shrunkLength: result.shrunkLength,
     numShrinks: result.numShrinks,
     artifactPath: result.artifactPath,
