@@ -304,6 +304,19 @@ export class ReifySession {
   }
 
   /**
+   * Let a real long-lived runtime (the authority sidecar the Desktop uses)
+   * register its pid, so kernels it spawns resolve to a real owner instead of
+   * looking like orphans.
+   */
+  registerAuthorityPid(pid: number, op = "runtime"): void {
+    if (pid > 0) this.authorityPids.set(pid, op);
+  }
+
+  unregisterAuthorityPid(pid: number): void {
+    this.authorityPids.delete(pid);
+  }
+
+  /**
    * Live CAD kernels with ownership resolved against the authority processes
    * this session started. A kernel whose recorded owner is gone is an orphan.
    */

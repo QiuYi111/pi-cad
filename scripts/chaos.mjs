@@ -22,6 +22,10 @@ if (subcommand === "__serve") {
   // Real-Reify vertical slice: drives production Reify processes, not the POC SUT.
   const { runReifyCli } = await jiti.import(modulePath("../chaos/reify/cli.ts"));
   process.exit(await runReifyCli(rest));
+} else if (subcommand === "__reify-runtime") {
+  // Long-lived real Reify runtime (authority sidecar) the chaos runner drives.
+  const { runReifyRuntimeHost } = await jiti.import(modulePath("../chaos/reify/runtime-host.ts"));
+  await runReifyRuntimeHost(rest);
 } else {
   const { runCli } = await jiti.import(modulePath("../chaos/cli.ts"));
   const code = await runCli(process.argv.slice(2));

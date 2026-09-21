@@ -23,6 +23,10 @@ npm run chaos:run             # 随机生成 action/fault 序列并检查 invari
 
 `pnpm` 用法一样：`pnpm chaos:run`、`pnpm chaos:replay <artifact>`。
 
+> 本地跑真 Reify slice 需要两样东西（桌面安装包和 CI 里已就绪）：`python/.venv`
+> （`npm run setup:python`），以及 Prime 的 peer 依赖；桌面会把它链到 prime-agent：
+> `mkdir -p node_modules/@earendil-works && ln -sfn <prime-agent>/packages/coding-agent node_modules/@earendil-works/pi-coding-agent && ln -sfn <prime-agent>/packages/ai node_modules/@earendil-works/pi-ai`。
+
 ## 命令
 
 | 命令 | 作用 |
@@ -282,3 +286,37 @@ demo 那条链是手写的，没有 fast-check path，只能按序列 replay。
 | `CHAOS_REIFY_PAUSE_MS` | 3000 | pause 故障观察窗口 |
 | `CHAOS_REIFY_FINAL_SETTLE_MS` | 1200 | 一轮结束前的稳定观察窗口 |
 | `CHAOS_REIFY_KEEP` | - | `1` 时保留真项目目录，方便手查 |
+
+## 接更多真组件：`chaos reify inspect`
+
+上面那套只打 agent-api（每条请求一个进程）+ kernel。`inspect` 把同一套接驳到 Reify 的
+主要运行面，本单只负责「接得上、看得见」，不新增 fault。
+
+| 组件 | 打的是真东西 |
+| --- | --- |
+| runtime | 真 Reify authority sidecar **常驻进程**（Desktop 和 Prime 都连的那个真后端），走真 Unix socket 发真请求；能 start / stop / restart，pid 真会变 |
+| Prime | 真 `prime-cad-sidecar.mjs --mode rpc` 进程，真 RPC `get_state` 握手（不发 provider turn）；另外从 `/proc` 看当前真在跑的 Prime 进程 |
+| provider / OAuth | 真凭证库 `~/.prime/agent/auth.json`（只读 id / 类型 / 过期，不读 token 值）+ 真 `settings.json` 里的选择 + 真 Prime 模型注册表里的 baseUrl；真发一次 provider 请求，记真状态（例如 401） |
+| Desktop ↔ backend | 真 `.pi-cad/status.json` 投影 vs 真 run store，给一组对照 |
+| Windows ↔ WSL | 真探针：在 WSL 里通过真 `wsl.exe` 看 Windows 侧（发行版、WSL 版本），同时探 Linux 侧 node / uv / python / bwrap |
+
+```bash
+npm run chaos:reify -- inspect                       # 读得懂的输出
+npm run chaos:reify -- inspect --json                # 机器可读
+npm run chaos:reify -- inspect --prime               # 额外起真 Prime runtime
+npm run chaos:reify -- inspect --no-provider-probe   # 不发真 provider 请求
+```
+
+统一 identity：`project / conversation / run / runtime / kernel / provider`。
+`inspect` 输出和 failure artifact 里都有这份归属图，每条边都带证据来源
+（run store 绑定、`/proc` ppid、真 runtime pid 等）。
+
+failure artifact 新增 `components`：runtime 的 pid 序列 / 真请求 / 日志尾巴、
+provider 边界、Desktop 投影对照、WSL 边界、Prime 进程，以及 identity 图。
+
+### 这一段新增的环境变量
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `CHAOS_REIFY_PROVIDER_PROBE` | 1 | `0` 时不发真 provider 请求，只读边界状态 |
+| `CHAOS_REIFY_PROVIDER` / `CHAOS_REIFY_MODEL` | - | 覆盖 provider 选择（默认读 `~/.prime/agent/settings.json`） |

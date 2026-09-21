@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 import fc from "fast-check";
 
 import { InvariantViolation } from "../chaos/types.ts";
 import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
+import { loadReifyArtifact, saveReifyArtifact } from "../chaos/reify/artifacts.ts";
+import { inspectReifyComponents } from "../chaos/reify/components.ts";
 import { reifyFaultDefinitions } from "../chaos/reify/faults.ts";
+import { inspectDesktopProjection, inspectProviderBoundary, resolvePrimeAgentRepo } from "../chaos/reify/inspect.ts";
 import { checkReifyInvariants } from "../chaos/reify/invariants.ts";
 import { REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
 import { recoverInjectedFaults, runReifySequence } from "../chaos/reify/runner.ts";
+import { ReifyRuntime } from "../chaos/reify/runtime.ts";
 import { ReifySession } from "../chaos/reify/session.ts";
 import { ReifyTrace } from "../chaos/reify/trace.ts";
 import type { Command } from "../chaos/reify/model.ts";
@@ -180,4 +184,136 @@ test("reify chaos: seed + path 能精确重放同一条生成序列", async () =
   });
   assert.ok(!replayed.failed, "重放的序列本身不该失败");
   assert.deepEqual(replay, shrunk, "seed + path 必须重放出 shrink 之后的那条序列");
+});
+
+async function withRuntime<T>(body: (session: ReifySession, runtime: ReifyRuntime) => Promise<T>): Promise<T> {
+  const session = await ReifySession.start();
+  const runtime = await ReifyRuntime.start({
+    project: session.project,
+    runtimeDirectory: join(session.root, "runtime"),
+    env: session.env,
+  });
+  session.registerAuthorityPid(runtime.pid);
+  try {
+    return await body(session, runtime);
+  } finally {
+    await runtime.close().catch(() => undefined);
+    await session.close().catch(() => undefined);
+  }
+}
+
+/** Drive a real run to `cook` through the runtime's own socket. */
+async function driveRunThroughRuntime(runtime: ReifyRuntime, conversation: string): Promise<string> {
+  const view = (await runtime.call("workflow-start", { id: "mechanical.default", sessionId: conversation })) as { runId?: string };
+  assert.ok(view.runId, "真 runtime 必须真建 run");
+  await runtime.call("commit", { name: "plan", sessionId: conversation });
+  await runtime.call("workflow-advance", { event: "plan_ready", sessionId: conversation });
+  return view.runId!;
+}
+
+test("reify chaos: 真 runtime 能起/停/重启，run 跨重启还在，kernel 真归属 runtime", async () => {
+  await withRuntime(async (session, runtime) => {
+    const conversation = session.conversation(0);
+    const runId = await driveRunThroughRuntime(runtime, conversation);
+
+    // A real slow build is in flight, so the kernel is a live child of the pid.
+    const pending = runtime.call("model-build", {
+      source: "slow_part.py",
+      output: `build/slow-${conversation}.step`,
+      validation: "fast",
+      sessionId: conversation,
+    });
+    let ownedKernel = null;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline && !ownedKernel) {
+      const snapshot = await session.snapshot();
+      ownedKernel = snapshot.kernels.find((kernel) => kernel.ppid === runtime.pid) ?? null;
+      if (!ownedKernel) await sleep(100);
+    }
+    const components = await inspectReifyComponents(session, {
+      runtimes: [{ kind: "authority", pid: runtime.pid, startedAt: Date.now(), runIds: [runId] }],
+      probeProvider: false,
+    });
+    await pending;
+
+    assert.ok(ownedKernel, "真 runtime 必须起一个真 cadctl kernel");
+    const edges = components.identities.edges.map((edge) => edge.kind);
+    assert.ok(edges.includes("conversation->run"), "归属图必须有 conversation→run");
+    assert.ok(edges.includes("run->runtime"), "归属图必须有 run→runtime");
+    assert.ok(edges.includes("kernel->runtime"), "归属图必须有 kernel→runtime");
+    assert.equal(components.identities.project, (await session.snapshot()).project.id);
+
+    // Restart really replaces the runtime process without losing the run.
+    const firstPid = runtime.pid;
+    const restarted = await runtime.restart();
+    session.registerAuthorityPid(runtime.pid);
+    assert.notEqual(restarted.pid, firstPid, "重启后 runtime pid 必须变");
+    const after = (await runtime.call("workflow-current", { sessionId: conversation })) as { runId?: string };
+    assert.equal(after.runId, runId, "run 跨 runtime 重启必须还在");
+  });
+});
+
+test("reify chaos: Desktop 投影和 backend 真状态一致", async () => {
+  await withRuntime(async (session, runtime) => {
+    const conversation = session.conversation(0);
+    const runId = await driveRunThroughRuntime(runtime, conversation);
+    const pair = inspectDesktopProjection(session.project, session.canonical, runId);
+    assert.ok(pair.projection.present, "真 authority 必须写 .pi-cad/status.json");
+    assert.equal(pair.projection.runId, runId);
+    assert.ok(pair.consistent, pair.mismatch ?? "投影和 backend 必须一致");
+  });
+});
+
+test("reify chaos: provider 边界读到真选择和凭证，且不泄露 token", async () => {
+  const boundary = await inspectProviderBoundary({ probe: false });
+  assert.ok(boundary.selection.provider.length > 0, "必须读到 provider 选择");
+  assert.ok(boundary.selection.source.length > 0, "必须说明选择来源");
+  assert.ok(Array.isArray(boundary.credentials));
+  for (const credential of boundary.credentials) {
+    assert.ok(!("access" in credential) && !("key" in credential), "凭证对象不能带 token 值");
+    assert.equal(typeof credential.hasCredentials, "boolean");
+  }
+  if (resolvePrimeAgentRepo()) {
+    // The real Prime model registry resolves a real endpoint for the selection.
+    assert.ok(boundary.baseUrl === null || boundary.baseUrl.startsWith("http"), "baseUrl 必须是真 URL");
+  }
+});
+
+test("reify chaos: artifact 能带上新组件的真观测", async () => {
+  const session = await ReifySession.start();
+  let file: string | undefined;
+  try {
+    const components = await inspectReifyComponents(session, { probeProvider: false });
+    assert.ok(components.wsl.command.length > 0, "WSL 探针必须给出可执行命令");
+    file = saveReifyArtifact({
+      schema: 1,
+      sut: "reify",
+      createdAt: new Date().toISOString(),
+      invariant: "test",
+      detail: "component carrier",
+      seed: 1,
+      replayPath: "",
+      maxCommands: 1,
+      originalSequence: [],
+      shrunkSequence: [],
+      replaySequence: [],
+      reproducible: false,
+      actionSequence: [],
+      faultSequence: [],
+      requests: [],
+      ids: { conversations: [], runs: [], kernels: [] },
+      stateTimeline: [],
+      logs: [],
+      recoveries: [],
+      project: { root: session.root, project: session.project, canonical: session.canonical, workflowHome: session.workflowHome },
+      components,
+    });
+    const loaded = loadReifyArtifact(file);
+    assert.ok(loaded.components, "artifact 必须带回 components");
+    assert.equal(loaded.components!.identities.project, components.identities.project);
+    assert.ok(loaded.components!.provider.selection.provider.length > 0);
+  } finally {
+    if (file) rmSync(file, { force: true });
+    await session.close().catch(() => undefined);
+  }
 });
