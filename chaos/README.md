@@ -597,3 +597,9 @@ setsid nohup node chaos/campaigns/progress-sync.mjs --dir chaos/campaigns/<id> \
 ```bash
 npm run chaos:reify -- campaign recluster chaos/campaigns/<id>
 ```
+
+`res388-main-500` 这一条的唯一产品发现是 `no-orphan-kernel`（26 次，最小复现
+`startRun → commitPlan → advance → killAuthorityDuringBuild`）。它跑在 `63814903`
+（base `5ff3dbbb`）上；RES-389 的修法合进 master（`d40b2e82`）之后，同一份
+`regressions/c41b23f2c-no-orphan-kernel.json` 按序列和按 seed+path 都不再复现：
+这是「campaign 报的问题是真问题、上游修法真的解决它」这两件事的同一个证据。
