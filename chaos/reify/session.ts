@@ -180,6 +180,12 @@ export class ReifySession {
     recoveries: [] as { at: number; after: string; buildMs: number }[],
     /** Fault name -> injection time, cleared when its recovery is proven. */
     armedSince: new Map<string, number>(),
+    /**
+     * When this round really asked the system to recover. Faults stay armed on
+     * purpose until then, so only time measured from here says "did not
+     * converge"; time since injection only says how long the round was.
+     */
+    recoveryStartedAt: undefined as number | undefined,
   };
   readonly conversations: string[] = ["conv-a"];
   /** Faults currently injected, plus whatever each one needs to recover. */
@@ -664,6 +670,7 @@ export class ReifySession {
     this.history.orphanSince.clear();
     this.history.recoveries.length = 0;
     this.history.armedSince.clear();
+    this.history.recoveryStartedAt = undefined;
     rmSync(this.project, { recursive: true, force: true });
     rmSync(this.canonical, { recursive: true, force: true });
     rmSync(join(this.root, "prime-agent"), { recursive: true, force: true });

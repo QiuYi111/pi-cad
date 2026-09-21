@@ -1021,9 +1021,23 @@ export const raceUserActionDuringKernelFault: ReifyFaultDefinition = {
     conversationIndex: fc.integer({ min: 0, max: 1 }),
   }),
   describe: (params) => `raceUserActionDuringKernelFault(${params.action},conv#${params.conversationIndex})`,
-  precondition: (ctx) => buildableRunPrecondition(ctx),
+  precondition: async (ctx) => {
+    // `viewer-catalog` is a long-lived sidecar operation; a one-shot CLI
+    // authority does not expose it at all. Asking for it there threw
+    // "author endpoint does not expose operation: viewer-catalog" and the
+    // runner honestly reported an injection failure — a harness fault, not a
+    // product one. Say "not applicable" instead, the same way the sidecar-only
+    // actions do.
+    if (String(ctx.params.action) === "viewerCatalog" && !ctx.session.attachedRuntime) {
+      return { applicable: false, reason: "viewer-catalog 是常驻 sidecar 面操作，这一轮没挂 runtime" };
+    }
+    return buildableRunPrecondition(ctx);
+  },
   inject: async (ctx) => {
     const index = faultConversationIndex(ctx);
+    if (String(ctx.params.action) === "viewerCatalog" && !ctx.session.attachedRuntime) {
+      throw new FaultNotApplicable("viewer-catalog 是常驻 sidecar 面操作，这一轮没挂 runtime");
+    }
     // The faulted kernel and the user action must be the same conversation.
     const build = await startFaultBuild(ctx, "raceUserActionDuringKernelFault", index);
     ctx.session.killKernel(build.kernelPid, "SIGKILL");

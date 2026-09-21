@@ -121,31 +121,38 @@ test("campaign dedupe: 同一个 bug 的不同 pid / seed 归成一个 cluster",
   assert.equal(clusters[0]!.occurrences, 2);
   assert.deepEqual(clusters[0]!.seeds, [11, 22]);
   assert.equal(clusters[0]!.boundary, "process");
+  assert.deepEqual(clusters[0]!.boundaries, ["process"]);
   assert.equal(clusters[0]!.nature, "product");
   assert.deepEqual(clusters[0]!.failingSteps, ["fault:killAuthorityDuringBuild"]);
   assert.equal(clusters[0]!.reason, "N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)", "出现次数不算身份");
 });
 
-test("campaign dedupe: 同一个 invariant 的同类触发合成一个，不同边界分开", () => {
+test("campaign dedupe: 同一个根因的不同触发合成一个，换了原因才分开", () => {
   const base = [command("action", "startRun"), command("action", "commitPlan"), command("action", "advance")];
-  const authority = artifact({ detail: "1 个 kernel 的父控制面已经死了，进程还在：1(owner=2)", sequence: [...base, command("fault", "killAuthorityDuringBuild")] });
+  const authority = artifact({
+    detail: "1 个 kernel 的父控制面已经死了，进程还在：1(owner=2)",
+    sequence: [...base, command("fault", "killAuthorityDuringBuild"), command("action", "commitPlan")],
+  });
   const runtime = artifact({
     detail: "1 个 kernel 的父控制面已经死了，进程还在：3(owner=4)",
     sequence: [...base, command("fault", "killRuntimeDuringBuild")],
     runtimeMode: true,
   });
   const clusters = clusterFailures([failure("/tmp/a.json", 0, 1, authority), failure("/tmp/r.json", 1, 2, runtime)]);
-  assert.equal(clusters.length, 1, "同一个 invariant + 同一个边界 + 同一个原因 = 一个 unique failure");
-  assert.ok(clusters.every((cluster) => cluster.boundary === "process"));
-  assert.deepEqual(clusters[0]!.failingSteps, ["fault:killAuthorityDuringBuild", "fault:killRuntimeDuringBuild"]);
+  assert.equal(clusters.length, 1, "同一个 invariant + 同一个原因 = 一个 unique failure");
+  assert.deepEqual(clusters[0]!.boundaries, ["process"], "换边界的触发也算同一个根因");
+  assert.deepEqual(clusters[0]!.failingSteps, [
+    "action:commitPlan",
+    "fault:killRuntimeDuringBuild",
+  ], "在哪些步骤上收场要留下来给人看");
   assert.equal(clusters[0]!.shapes.length, 2, "触发它的形状要留下来给人看");
 
-  const otherBoundary = artifact({
+  const otherReason = artifact({
     invariant: "artifact-integrity",
     detail: "run 记的 artifact 不在盘上",
     sequence: [...base, command("fault", "partialStateWrite")],
   });
-  assert.equal(clusterFailures([failure("/tmp/a.json", 0, 1, authority), failure("/tmp/f.json", 1, 2, otherBoundary)]).length, 2);
+  assert.equal(clusterFailures([failure("/tmp/a.json", 0, 1, authority), failure("/tmp/f.json", 1, 2, otherReason)]).length, 2);
 });
 
 test("campaign: harness 自己踩自己标成 harness，不报成产品 bug", () => {
@@ -245,6 +252,11 @@ test("campaign: normalizeText 抹掉 pid / 端口 / hash", () => {
   assert.equal(
     normalizeText("2 个 kernel 的父控制面已经死了，进程还在：1(owner=2), 3(owner=4)"),
     "N 个 kernel 的父控制面已经死了，进程还在：#(owner=#), #(owner=#)",
+  );
+  assert.equal(
+    normalizeText("run v7-1790022485343-1fcc3d90 绑了 0 个会话（无）"),
+    "run v#-#-# 绑了 # 个会话（无）",
+    "产品生成的真 id 每轮都不一样，不能算身份",
   );
   assert.equal(normalizeText("/tmp/reify-chaos-b8kVeQ/canonical/runs/v7-1790020333353-04333c50/state.json").startsWith("/tmp/#"), true);
 });

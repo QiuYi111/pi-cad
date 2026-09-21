@@ -225,6 +225,9 @@ export async function recoverInjectedFaults(
   const normalized: InjectedFault[] = injected.map((entry) =>
     "definition" in entry ? entry : { definition: entry, params: {} },
   );
+  // The convergence clock starts here, not at injection: until now the faults
+  // were supposed to stay armed while the sequence kept driving the system.
+  if (normalized.length) session.history.recoveryStartedAt = Date.now();
   for (const { definition, params } of [...normalized].reverse()) {
     try {
       // Recovery must see the same params the injection used: a race that hit

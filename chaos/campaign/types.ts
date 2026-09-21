@@ -114,7 +114,10 @@ export interface FailureCluster {
   id: string;
   signature: string;
   invariant: string;
+  /** The boundary of the representative's failure step, for the report. */
   boundary: FaultBoundary | "unknown";
+  /** Every boundary the clustered failures really touched. */
+  boundaries: (FaultBoundary | "unknown")[];
   nature: FailureNature;
   /** Every step that was running when it broke, for human review. */
   failingSteps: string[];

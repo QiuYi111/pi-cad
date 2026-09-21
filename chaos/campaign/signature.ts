@@ -25,6 +25,9 @@ export function normalizeText(text: string): string {
     .replace(/0x[0-9a-fA-F]+/g, "#")
     .replace(/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/g, "#")
     .replace(/[0-9a-fA-F]{16,}/g, "#")
+    // Real ids the product generates (`v7-1790022485343-1fcc3d90`) are
+    // different every round and never identify a bug.
+    .replace(/\b(?=[0-9a-fA-F]*\d)[0-9a-fA-F]{6,}\b/g, "#")
     .replace(/\d+/g, "#")
     .replace(/#{2,}/g, "#")
     .replace(/#(?:\s+#)+/g, "#")
@@ -76,18 +79,16 @@ export function logSignatureOf(artifact: ReifyFailureArtifact): string {
 }
 
 /**
- * The dedupe key: invariant + failing boundary + how it failed. Everything
- * else (pids, seeds, exact sequences, which command happened to run last, how
- * many orphans this round happened to leak) is evidence, not identity: the same
- * root cause must not become a new issue because the generator appended one
- * more step. Steps, shapes and log lines are kept on the cluster instead.
+ * The dedupe key: what invariant broke, and how it read once the identifying
+ * parts were removed. Everything else (pids, run ids, temp dirs, seeds, exact
+ * sequences, which command happened to run last, which fault happened to be
+ * armed earlier, how many orphans this round leaked) is evidence, not
+ * identity: the same root cause must not become a new issue because the
+ * generator appended one more step. Boundaries, steps, shapes and log lines
+ * are all kept on the cluster instead.
  */
 export function failureSignature(artifact: ReifyFailureArtifact): string {
-  return [
-    artifact.invariant,
-    boundaryOf(artifact),
-    normalizeText(artifact.detail ?? ""),
-  ].join(" | ");
+  return [artifact.invariant, normalizeText(artifact.detail ?? "")].join(" | ");
 }
 
 /**
@@ -139,6 +140,7 @@ export function clusterFailures(inputs: FailureInput[]): FailureCluster[] {
         signature,
         invariant: input.artifact.invariant,
         boundary: boundaryOf(input.artifact),
+        boundaries: [boundaryOf(input.artifact)],
         nature: failureNature(input.artifact),
         failingSteps: [failingStepOf(input.artifact)],
         reason: normalizeText(input.artifact.detail ?? ""),
@@ -163,6 +165,8 @@ export function clusterFailures(inputs: FailureInput[]): FailureCluster[] {
     cluster.artifactPaths.push(input.artifactPath);
     const failingStep = failingStepOf(input.artifact);
     if (!cluster.failingSteps.includes(failingStep)) cluster.failingSteps.push(failingStep);
+    const boundary = boundaryOf(input.artifact);
+    if (!cluster.boundaries.includes(boundary)) cluster.boundaries.push(boundary);
     const logSignature = logSignatureOf(input.artifact);
     if (logSignature && !cluster.logSignatures.includes(logSignature)) cluster.logSignatures.push(logSignature);
     if (!cluster.shapes.some((existing) => existing.join(">") === shapeKey)) cluster.shapes.push(shape);

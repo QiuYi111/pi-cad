@@ -867,6 +867,94 @@ test("reify chaos: runtime 暂停的时间窗收在 inject 里，后续真请求
   }
 });
 
+test("reify chaos: 没有常驻 runtime 时，viewer-catalog 的 race 明说不适用", async () => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(session, REIFY_SETUP, trace);
+    const definition = reifyFaultDefinitions.find((fault) => fault.name === "raceUserActionDuringKernelFault")!;
+    const outcome = await injectReifyFault(
+      session,
+      definition,
+      { kind: "fault", name: definition.name, params: { action: "viewerCatalog", conversationIndex: 0 } },
+      trace,
+    );
+    // viewer-catalog 是常驻 sidecar 面操作，一次性 CLI 控制面不暴露它。以前这里会
+    // 抛 "author endpoint does not expose operation: viewer-catalog"，再被记成
+    // fault-outcome-honest —— 那是 harness 自己的问题，不是产品失败。
+    assert.equal(outcome.status, "NotApplicable", JSON.stringify(outcome));
+    assert.match(outcome.reason ?? "", /sidecar/);
+    assert.ok(!session.activeFaults.includes(definition.name));
+  });
+});
+
+test("reify chaos: 一个 run 做完后新开 run，旧 run 是历史，不算归属串了", async (t) => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const first = ((await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string }).runId;
+    assert.ok(first, "setup 之后必须有真 run");
+
+    await runReifySequence(session, [{ kind: "action", name: "stopRun", params: { conversationIndex: 0 } }], trace);
+    const afterStop = (await session.call("workflow-current", { sessionId: session.conversation(0) })) as { status?: string };
+    if (afterStop.status !== "done") {
+      t.skip(`stopRun 之后状态是 ${afterStop.status}，这一轮走不到历史 run 的场景`);
+      return;
+    }
+
+    // 真产品允许做完的 run 被新 run 取代（active 的会被拒）。旧 run 这时没人绑着，
+    // 它是历史，不是归属错误；只有「active run 没人绑」才是问题。
+    await runReifySequence(session, [{ kind: "action", name: "startRun", params: { conversationIndex: 0 } }], trace);
+    const snapshot = await session.snapshot();
+    const second = snapshot.conversations.find((conversation) => conversation.id === session.conversation(0))?.runId;
+    assert.ok(second && second !== first, `新 run 必须真的换了会话绑的 run：${second}`);
+    assert.ok(snapshot.runs.some((run) => run.id === first), "旧 run 还得留在 run store 里当历史");
+  });
+});
+
+test("reify chaos: harness 自己占着坏的 state 文件时，terminal-state-stable 不判产品", async () => {
+  await withRealSession(async (session, trace) => {
+    // 这条序列在 state 文件完好时是干净的；只有在 harness 把 state.json 截半之后
+    // 才会看到「到过 done 现在又 active」。那是 harness 弄坏的东西，不是产品问题。
+    const sequence: Command[] = [
+      { kind: "action", name: "startRun", params: { conversationIndex: 0 } },
+      { kind: "action", name: "commitPlan", params: { conversationIndex: 0 } },
+      { kind: "action", name: "advance", params: { event: "plan_ready", conversationIndex: 0 } },
+      { kind: "action", name: "commitPlan", params: { conversationIndex: 0 } },
+      { kind: "action", name: "concurrentBuild", params: { conversationIndex: 0 } },
+      { kind: "fault", name: "partialStateWrite", params: {} },
+      { kind: "action", name: "stopRun", params: { conversationIndex: 0 } },
+      { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } },
+    ];
+    await runReifySequence(session, sequence, trace);
+    assert.ok(
+      session.faultOutcomes.some((outcome) => outcome.name === "partialStateWrite" && outcome.status === "Injected"),
+      "这一条要真的把 state 文件截半，才测得到「harness 占着坏文件」这件事",
+    );
+  });
+});
+
+test("reify chaos: 一轮跑得久不算没恢复，只有要求恢复后还挂着才算", async () => {
+  const session = await ReifySession.start();
+  try {
+    const snapshot = await session.snapshot();
+    session.armFault("killKernelDuringBuild");
+    session.history.armedSince.set("killKernelDuringBuild", Date.now() - 30 * 60_000);
+    // 故障故意挂着跟完整条序列：跑得久不是失败信号。
+    await checkReifyInvariants({ session, snapshot, now: Date.now() });
+
+    // 已经要求恢复、过了预算还挂着，才是真的没收敛。
+    session.history.recoveryStartedAt = Date.now() - 30 * 60_000;
+    await assert.rejects(
+      () => checkReifyInvariants({ session, snapshot, now: Date.now() }),
+      /recovery-convergence/,
+    );
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+});
+
 test("reify chaos: 两个 file-state 故障叠在一起，harness 不会造出假的 fault-outcome-honest", async (t) => {
   await withRealSession(async (session, trace) => {
     await runReifySequence(

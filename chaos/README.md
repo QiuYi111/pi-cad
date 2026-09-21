@@ -509,6 +509,11 @@ runtime 模式按 `--runtime-ratio` 隔轮切换。所以"覆盖了哪些边界"
 profile 决定这一轮的 fault 池。fault 池是生成器形状的一部分，所以它跟 seed、path、
 `maxCommands` 一起写进 artifact —— `replay --seed` 和 `shrink` 会按同一份池重建生成器。
 
+注意 profile 只换 fault 池，不动 action 的权重。池子越窄，序列里出现 fault 的比例越低：
+跑满整个空间时大约 55% 的生成步骤是 fault，只留 3 个凭证 fault 时只有 9%。
+所以定向 campaign 要多给轮数（`--profiles provider-oauth --rounds 50`），
+不能指望几轮就打到。
+
 ### 一轮打什么
 
 每轮独立 session，一轮最多一个 artifact，跑完立刻收掉自己的进程和 kernel。

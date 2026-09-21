@@ -20,7 +20,7 @@ function clusterRow(cluster: FailureCluster): string[] {
   return [
     cluster.id,
     cluster.invariant,
-    cluster.boundary,
+    cluster.boundaries.join("/"),
     cluster.nature,
     cluster.failingSteps.join(", "),
     String(cluster.occurrences),
@@ -130,10 +130,12 @@ export function renderCampaignReport(report: CampaignReport): string {
   lines.push("");
   const byBoundary = new Map<string, { clusters: number; occurrences: number }>();
   for (const cluster of clusters) {
-    const entry = byBoundary.get(cluster.boundary) ?? { clusters: 0, occurrences: 0 };
-    entry.clusters += 1;
-    entry.occurrences += cluster.occurrences;
-    byBoundary.set(cluster.boundary, entry);
+    for (const boundary of cluster.boundaries) {
+      const entry = byBoundary.get(boundary) ?? { clusters: 0, occurrences: 0 };
+      entry.occurrences += cluster.occurrences;
+      byBoundary.set(boundary, entry);
+    }
+    byBoundary.get(cluster.boundary)!.clusters += 1;
   }
   if (!byBoundary.size) lines.push("- 没有 failure");
   for (const [boundary, entry] of [...byBoundary.entries()].sort((a, b) => b[1].occurrences - a[1].occurrences)) {

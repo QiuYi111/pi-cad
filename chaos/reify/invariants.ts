@@ -53,17 +53,31 @@ const runOwnership: ReifyInvariantDefinition = {
     for (const run of snapshot.runs) {
       if (session.harnessDamage.runs.has(run.id)) continue;
       const owners = boundTo.get(run.id) ?? [];
-      if (owners.length !== 1) {
+      // Two conversations claiming one run is always wrong.
+      if (owners.length > 1) {
         throw new InvariantViolation("run-ownership", `run ${run.id} 绑了 ${owners.length} 个会话（${owners.join(",") || "无"}）`, { run: run.id, owners });
       }
+      // A run nobody owns is only legitimate history: the product refuses to
+      // replace a run that is still active ("cad_start cannot replace active v7
+      // run ... bound to this Prime conversation"), so a run really loses its
+      // conversation only after it reaches a terminal state and the
+      // conversation starts a fresh one. A live run with no owner is a leak.
+      if (owners.length === 0 && !isTerminal(run.status)) {
+        throw new InvariantViolation("run-ownership", `active run ${run.id} 没有会话绑着（status=${run.status}）`, { run: run.id, status: run.status });
+      }
     }
-    // Every run this conversation ever started must still be the only run it owns.
+    // A conversation keeps every run it ever started in the store as history,
+    // but only one of them may still be live. Two unfinished runs under one
+    // conversation is a real leak; a finished run plus its successor is just
+    // how the product works (it refuses to replace a run that is still active).
     for (const [conversation, runIds] of session.history.runsByConversation) {
-      const present = runIds.filter(
-        (runId) => !session.harnessDamage.runs.has(runId) && snapshot.runs.some((run) => run.id === runId),
-      );
-      if (present.length > 1) {
-        throw new InvariantViolation("run-ownership", `会话 ${conversation} 有 ${present.length} 个 run：${present.join(", ")}`, { conversation, runs: present });
+      const live = runIds.filter((runId) => {
+        if (session.harnessDamage.runs.has(runId)) return false;
+        const run = snapshot.runs.find((candidate) => candidate.id === runId);
+        return run !== undefined && !isTerminal(run.status);
+      });
+      if (live.length > 1) {
+        throw new InvariantViolation("run-ownership", `会话 ${conversation} 同时有 ${live.length} 个没结束的 run：${live.join(", ")}`, { conversation, runs: live });
       }
     }
   },
@@ -75,6 +89,11 @@ const terminalStateStable: ReifyInvariantDefinition = {
   description: "terminal run 不能回到非 terminal",
   async check({ session, snapshot }) {
     for (const run of snapshot.runs) {
+      // Same rule as run-ownership / artifact-integrity: a run whose state file
+      // the harness itself is holding broken is our damage, not a product
+      // verdict. Judging it here reported "到过 done，现在又是 active" purely
+      // because the harness had just truncated that same file.
+      if (session.harnessDamage.runs.has(run.id)) continue;
       if (isTerminal(run.status)) {
         session.history.runStatus.set(run.id, run.status);
         continue;
@@ -117,8 +136,17 @@ const recoveryConvergence: ReifyInvariantDefinition = {
   name: "recovery-convergence",
   description: "注入故障后必须在预算内由真 build 恢复",
   async check({ session, now }) {
+    // A round injects several faults on purpose and recovers them all after the
+    // sequence has run (race scenarios need the fault to stay armed across the
+    // following steps). So "how long has this fault been armed" is not a
+    // failure signal — a 3-minute round would trip it while every step was
+    // making real progress. The clock only starts once the harness has really
+    // asked for recovery; from there, a fault that is still armed past the
+    // budget is a hang.
+    const recoveryStartedAt = session.history.recoveryStartedAt;
+    if (recoveryStartedAt === undefined) return;
     for (const [fault, at] of session.history.armedSince) {
-      if (now - at < RECOVERY_BUDGET_MS) continue;
+      if (now - recoveryStartedAt < RECOVERY_BUDGET_MS) continue;
       if (session.history.recoveries.some((recovery) => recovery.at > at)) continue;
       // A fault whose own recovery really ran (and proved itself) counts as
       // convergence even when its proof is not a build, e.g. the credential
@@ -132,8 +160,8 @@ const recoveryConvergence: ReifyInvariantDefinition = {
       }
       throw new InvariantViolation(
         "recovery-convergence",
-        `故障 ${fault} 注入 ${now - at}ms 后还没恢复`,
-        { fault, armedAt: at },
+        `要求恢复已经 ${now - recoveryStartedAt}ms，故障 ${fault} 还挂着`,
+        { fault, armedAt: at, recoveryStartedAt },
       );
     }
   },
