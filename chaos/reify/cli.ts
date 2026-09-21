@@ -1,7 +1,7 @@
 import { join } from "node:path";
 
 import { InvariantViolation } from "../types.ts";
-import { CAMPAIGNS_DIR, loadCampaign, runReifyCampaign, type CampaignOptions } from "../campaign/campaign.ts";
+import { CAMPAIGNS_DIR, loadCampaign, reclusterCampaign, runReifyCampaign, type CampaignOptions } from "../campaign/campaign.ts";
 import { CAMPAIGN_PROFILES, resolveProfiles } from "../campaign/profiles.ts";
 import { renderCampaignReport, renderCampaignSummary } from "../campaign/report.ts";
 import { reifyActionDefinitions } from "./actions.ts";
@@ -33,6 +33,7 @@ const USAGE = `真 Reify chaos slice
                                        跑大规模真 campaign，落 artifact + dedupe + report
   chaos reify campaign rerun <dir> [--json]   用 manifest 原样重跑一条 campaign
   chaos reify campaign report <dir> [--json]  用已落盘的数据重出 report
+  chaos reify campaign recluster <dir> [--json]  不重跑轮次，只重算 dedupe / triage / report
   chaos reify campaign profiles        列出 campaign profile
   chaos reify campaign list            列出本地 campaign
   chaos reify invariants
@@ -508,6 +509,21 @@ async function campaign(argv: string[]): Promise<number> {
       if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(summary.report, null, 2)}\n`);
       else process.stdout.write(`${renderCampaignSummary(summary.report, summary.outDir)}\n`);
       return summary.report.failures.reproducible > 0 ? 1 : 0;
+    }
+    case "recluster": {
+      const dir = positionals[0];
+      if (!dir) {
+        process.stderr.write("用法：chaos reify campaign recluster <campaignDir>\n");
+        return 2;
+      }
+      const summary = await reclusterCampaign(dir, {
+        triageReplays: flags["triage-replays"] ? Number(flags["triage-replays"]) : undefined,
+        skipTriage: boolFlag(flags, "skip-triage"),
+        quiet: boolFlag(flags, "json"),
+      });
+      if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(summary.report, null, 2)}\n`);
+      else process.stdout.write(`${renderCampaignSummary(summary.report, summary.outDir)}\n`);
+      return 0;
     }
     case "run": {
       const options = campaignOptions(flags);

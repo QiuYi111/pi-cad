@@ -100,13 +100,18 @@ export function failureSignature(artifact: ReifyFailureArtifact): string {
  */
 export function failureNature(artifact: ReifyFailureArtifact): FailureNature {
   if (artifact.invariant !== "fault-outcome-honest") return "product";
-  if (boundaryOf(artifact) !== "file-state") return "product";
   const failed = (artifact.faultOutcomes ?? []).find((outcome) => outcome.status === "InjectionFailed");
   const reason = `${failed?.reason ?? ""} ${artifact.detail ?? ""}`;
-  return /\b(EACCES|EPERM|ENOENT|EISDIR|ENOTDIR|EROFS)\b|permission denied|no such file or directory/.test(reason)
+  // The harness tripping over its own fault injection: a permission/missing
+  // file error while it manipulates its own files, or asking a surface for an
+  // operation that surface simply does not have.
+  if (boundaryOf(artifact) === "file-state" && HARNESS_FILE_ERROR.test(reason)) return "harness";
+  return /does not expose operation/.test(reason)
     ? "harness"
     : "product";
 }
+
+const HARNESS_FILE_ERROR = /\b(EACCES|EPERM|ENOENT|EISDIR|ENOTDIR|EROFS)\b|permission denied|no such file or directory/;
 
 function clusterId(signature: string): string {
   let hash = 0x811c9dc5;

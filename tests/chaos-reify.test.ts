@@ -867,8 +867,10 @@ test("reify chaos: runtime 暂停的时间窗收在 inject 里，后续真请求
   }
 });
 
-test("reify chaos: 没有常驻 runtime 时，viewer-catalog 的 race 明说不适用", async () => {
-  await withRealSession(async (session, trace) => {
+test("reify chaos: 常驻 runtime 面不暴露 viewer-catalog，race 明说不适用", async () => {
+  const session = await startReifySession(true);
+  const trace = new ReifyTrace();
+  try {
     await runReifySequence(session, REIFY_SETUP, trace);
     const definition = reifyFaultDefinitions.find((fault) => fault.name === "raceUserActionDuringKernelFault")!;
     const outcome = await injectReifyFault(
@@ -877,13 +879,16 @@ test("reify chaos: 没有常驻 runtime 时，viewer-catalog 的 race 明说不�
       { kind: "fault", name: definition.name, params: { action: "viewerCatalog", conversationIndex: 0 } },
       trace,
     );
-    // viewer-catalog 是常驻 sidecar 面操作，一次性 CLI 控制面不暴露它。以前这里会
-    // 抛 "author endpoint does not expose operation: viewer-catalog"，再被记成
-    // fault-outcome-honest —— 那是 harness 自己的问题，不是产品失败。
+    // 常驻 runtime（authority sidecar）不暴露 viewer-catalog，只有一次性 CLI
+    // 控制面才有。以前这里会抛 "author endpoint does not expose operation:
+    // viewer-catalog"，再被记成 fault-outcome-honest —— 那是 harness 自己的
+    // 问题，不是产品失败。
     assert.equal(outcome.status, "NotApplicable", JSON.stringify(outcome));
-    assert.match(outcome.reason ?? "", /sidecar/);
+    assert.match(outcome.reason ?? "", /viewer-catalog/);
     assert.ok(!session.activeFaults.includes(definition.name));
-  });
+  } finally {
+    await session.close().catch(() => undefined);
+  }
 });
 
 test("reify chaos: 一个 run 做完后新开 run，旧 run 是历史，不算归属串了", async (t) => {

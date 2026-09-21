@@ -436,6 +436,54 @@ export interface LoadedCampaign {
   report?: CampaignReport;
 }
 
+/**
+ * Recompute clusters, triage and the report from the rounds that are already
+ * on disk.
+ *
+ * 500 real rounds are expensive; a better dedupe rule or a sharper
+ * product-vs-harness rule must not cost another 500 rounds. The raw rounds stay
+ * exactly as they ran — only the analysis is redone, and the report says which
+ * commit did it.
+ */
+export async function reclusterCampaign(dir: string, options: { triageReplays?: number; skipTriage?: boolean; quiet?: boolean } = {}): Promise<CampaignRunSummary> {
+  const loaded = loadCampaign(dir);
+  const failureInputs: FailureInput[] = [];
+  for (const round of loaded.rounds) {
+    if (round.status !== "failed" || !round.artifactPath) continue;
+    try {
+      failureInputs.push({
+        roundIndex: round.index,
+        seed: round.seed,
+        artifactPath: round.artifactPath,
+        commit: loaded.manifest.version.gitCommit === "unknown" ? null : loaded.manifest.version.gitCommit,
+        runtimeMode: round.runtimeMode,
+        artifact: loadReifyArtifact(round.artifactPath),
+      });
+    } catch (error) {
+      if (!options.quiet) process.stdout.write(`round #${round.index} 的 artifact 读不了，跳过：${(error as Error).message}\n`);
+    }
+  }
+  let clusters = clusterFailures(failureInputs);
+  if (!options.skipTriage && clusters.length) {
+    clusters = await triageClusters(clusters, {
+      replays: options.triageReplays ?? loaded.manifest.triageReplays,
+      regressionDir: join(dir, "regressions"),
+      quiet: options.quiet,
+    });
+  }
+  writeFileSync(join(dir, "clusters.json"), `${JSON.stringify(clusters, null, 2)}\n`, "utf8");
+  const coverage = aggregateCoverage(
+    loaded.rounds,
+    reifyInvariantDefinitions.map((definition) => definition.name),
+    loaded.manifest.profiles,
+  );
+  const report = buildReport(loaded.manifest, coverage, clusters, loaded.rounds);
+  report.notes.unshift(`本轮报告由 ${gitInfo().commit.slice(0, 12)} 重新聚类生成（轮次跑在 ${loaded.manifest.version.gitCommit.slice(0, 12)}）`);
+  writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  writeFileSync(join(dir, "report.md"), renderCampaignReport(report), "utf8");
+  return { outDir: dir, manifest: loaded.manifest, report, clusters };
+}
+
 /** Read a finished (or partial) campaign back off disk. */
 export function loadCampaign(dir: string): LoadedCampaign {
   const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as CampaignManifest;

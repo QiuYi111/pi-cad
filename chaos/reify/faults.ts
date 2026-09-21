@@ -1022,21 +1022,21 @@ export const raceUserActionDuringKernelFault: ReifyFaultDefinition = {
   }),
   describe: (params) => `raceUserActionDuringKernelFault(${params.action},conv#${params.conversationIndex})`,
   precondition: async (ctx) => {
-    // `viewer-catalog` is a long-lived sidecar operation; a one-shot CLI
-    // authority does not expose it at all. Asking for it there threw
-    // "author endpoint does not expose operation: viewer-catalog" and the
-    // runner honestly reported an injection failure — a harness fault, not a
-    // product one. Say "not applicable" instead, the same way the sidecar-only
-    // actions do.
-    if (String(ctx.params.action) === "viewerCatalog" && !ctx.session.attachedRuntime) {
-      return { applicable: false, reason: "viewer-catalog 是常驻 sidecar 面操作，这一轮没挂 runtime" };
+    // The authority sidecar (the long-lived runtime Desktop and Prime talk to)
+    // does not expose `viewer-catalog`; only the one-shot CLI authority does.
+    // Asking for it on the runtime threw "author endpoint does not expose
+    // operation: viewer-catalog" and the runner honestly reported an injection
+    // failure — a harness fault, not a product one. Say "not applicable"
+    // instead, the same way the sidecar-only actions do it the other way round.
+    if (String(ctx.params.action) === "viewerCatalog" && ctx.session.attachedRuntime) {
+      return { applicable: false, reason: "常驻 runtime 面不暴露 viewer-catalog，只有一次性 CLI 控制面才有" };
     }
     return buildableRunPrecondition(ctx);
   },
   inject: async (ctx) => {
     const index = faultConversationIndex(ctx);
-    if (String(ctx.params.action) === "viewerCatalog" && !ctx.session.attachedRuntime) {
-      throw new FaultNotApplicable("viewer-catalog 是常驻 sidecar 面操作，这一轮没挂 runtime");
+    if (String(ctx.params.action) === "viewerCatalog" && ctx.session.attachedRuntime) {
+      throw new FaultNotApplicable("常驻 runtime 面不暴露 viewer-catalog，只有一次性 CLI 控制面才有");
     }
     // The faulted kernel and the user action must be the same conversation.
     const build = await startFaultBuild(ctx, "raceUserActionDuringKernelFault", index);
