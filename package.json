@@ -52,6 +52,13 @@
     "test:openfoam14": "node scripts/qualify-openfoam14.mjs",
     "test:torch-fem-cuda": "node scripts/qualify-torch-fem-cuda.mjs",
     "test:su2": "node scripts/qualify-su2-8.5.0.mjs",
+    "chaos:run": "node scripts/chaos.mjs run",
+    "chaos:demo": "node scripts/chaos.mjs demo",
+    "chaos:replay": "node scripts/chaos.mjs replay",
+    "chaos:shrink": "node scripts/chaos.mjs shrink",
+    "chaos:bugs": "node scripts/chaos.mjs bugs",
+    "chaos:reify": "node scripts/chaos.mjs reify",
+    "chaos:fetch-tools": "node scripts/chaos-fetch-tools.mjs",
     "setup:simulation-runtimes": "bash -lc 'sudo scripts/bootstrap-openfoam14.sh && sudo scripts/bootstrap-su2-8.5.0.sh && sudo scripts/bootstrap-torch-fem-runtimes.sh'",
     "setup:python": "bash scripts/bootstrap-python.sh",
     "pack": "npm pack --cache .npm-cache",
@@ -67,6 +74,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
+    "fast-check": "^4.10.2",
     "typescript": "^5.9.3"
   },
   "files": [

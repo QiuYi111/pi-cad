@@ -37,3 +37,8 @@ apps/desktop/resources/runtime/
 apps/desktop/test-results/
 apps/desktop/playwright-report/
 *.tsbuildinfo
+
+# Chaos POC: cached external tool binaries and generated failure artifacts
+.chaos-cache/
+chaos/artifacts/*
+!chaos/artifacts/.gitkeep
