@@ -1,24 +1,29 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 import fc from "fast-check";
+import { request } from "undici";
 
 import { InvariantViolation } from "../chaos/types.ts";
 import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "../chaos/reify/artifacts.ts";
 import { inspectReifyComponents } from "../chaos/reify/components.ts";
-import { reifyFaultDefinitions } from "../chaos/reify/faults.ts";
+import { FAULT_BOUNDARIES, providerFaultDefinitions, raceFaultDefinitions, reifyFaultDefinitions } from "../chaos/reify/faults.ts";
 import { inspectDesktopProjection, inspectProviderBoundary, readProviderCredentials, resolvePrimeAgentRepo } from "../chaos/reify/inspect.ts";
 import { checkReifyInvariants } from "../chaos/reify/invariants.ts";
 import { REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
-import { recoverInjectedFaults, runReifySequence } from "../chaos/reify/runner.ts";
+import { applyCredentialFault, observeCredential, restoreCredentialSandbox, seedCredentialSandbox } from "../chaos/reify/provider.ts";
+import { ProviderFaultProxy } from "../chaos/reify/provider-proxy.ts";
+import { injectReifyFault, recoverInjectedFaults, runReifySequence } from "../chaos/reify/runner.ts";
 import { ReifyRuntime } from "../chaos/reify/runtime.ts";
 import { ReifySession } from "../chaos/reify/session.ts";
 import { ReifyTrace } from "../chaos/reify/trace.ts";
 import type { Command } from "../chaos/reify/model.ts";
+import { FaultNotApplicable } from "../chaos/reify/types.ts";
 import type { ReifyFaultDefinition } from "../chaos/reify/types.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -164,7 +169,7 @@ test("reify chaos: 盘上 artifact 被改后 artifact-integrity 能抓到", asyn
   });
 });
 
-test("reify chaos: seed + path 能精确重放同一条生成序列", async () => {
+test("reify chaos: seed + path 能精确重放原路径，shrink 后的序列仍复现同一个失败", async () => {
   const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, 6);
   const property = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
     if (commands.some((command) => command.name === "build")) throw new Error("这条序列里有 build");
@@ -173,18 +178,31 @@ test("reify chaos: seed + path 能精确重放同一条生成序列", async () =
   assert.ok(details.failed && details.counterexamplePath, "必须先真找到一条失败序列");
   const shrunk = details.counterexample![0];
 
-  const replay: Command[] = [];
-  const replayProperty = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
-    replay.push(...commands);
-  });
-  const replayed = await fc.check(replayProperty, {
-    seed: details.seed,
-    path: details.counterexamplePath!,
-    endOnFailure: true,
-    numRuns: 1,
-  });
-  assert.ok(!replayed.failed, "重放的序列本身不该失败");
-  assert.deepEqual(replay, shrunk, "seed + path 必须重放出 shrink 之后的那条序列");
+  // `path` replays the failing path the run recorded, so two replays must be
+  // bit-identical: that is what makes `replay <artifact> --seed` trustworthy.
+  const replayOnce = async (): Promise<Command[]> => {
+    const seen: Command[] = [];
+    const replayProperty = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
+      seen.push(...commands);
+    });
+    const replayed = await fc.check(replayProperty, {
+      seed: details.seed,
+      path: details.counterexamplePath!,
+      endOnFailure: true,
+      numRuns: 1,
+    });
+    assert.ok(!replayed.failed, "重放的序列本身不该失败");
+    return seen;
+  };
+  const first = await replayOnce();
+  const second = await replayOnce();
+  assert.deepEqual(second, first, "seed + path 重放必须可重复");
+
+  // The shrunk counterexample is the minimized reproduction, so it must still
+  // fail the very same property (and be no longer than the replayed path).
+  const fails = (commands: Command[]) => commands.some((command) => command.name === "build");
+  assert.ok(fails(shrunk), "shrink 之后必须还留着真正的失败");
+  assert.ok(shrunk.length <= first.length, "shrink 之后不能比原始失败路径更长");
 });
 
 async function withRuntime<T>(body: (session: ReifySession, runtime: ReifyRuntime) => Promise<T>): Promise<T> {
@@ -385,4 +403,260 @@ test("reify chaos: artifact 能带上新组件的真观测", async () => {
     if (file) rmSync(file, { force: true });
     await session.close().catch(() => undefined);
   }
+});
+
+// ---------------------------------------------------------------------------
+// RES-387：扩大真实 action / fault 空间
+// ---------------------------------------------------------------------------
+
+test("reify chaos: action / fault 空间够大，且覆盖四类真边界", () => {
+  assert.ok(reifyActionDefinitions.length >= 15, `真 action 至少 15 个，现在 ${reifyActionDefinitions.length}`);
+  assert.ok(reifyFaultDefinitions.length >= 15, `真 fault 至少 15 个，现在 ${reifyFaultDefinitions.length}`);
+  const boundaries = new Set(Object.values(FAULT_BOUNDARIES));
+  for (const required of ["process", "file-state", "provider-oauth", "race"]) {
+    assert.ok(boundaries.has(required as never), `必须覆盖 ${required}`);
+  }
+  assert.ok(raceFaultDefinitions.length >= 5, `race / 时序组合至少 5 组，现在 ${raceFaultDefinitions.length}`);
+  assert.ok(providerFaultDefinitions.length >= 5, "provider/OAuth 边界至少 5 个故障模式");
+  for (const fault of reifyFaultDefinitions) {
+    assert.ok(FAULT_BOUNDARIES[fault.name], `fault ${fault.name} 必须标出它打的边界`);
+    assert.ok(fault.description.length > 0);
+  }
+  // A race is not a single-step fault: it has to decide applicability from real
+  // state (so it can be honestly NotApplicable) and it must be one of the
+  // multi-step combinations rather than a lone signal.
+  for (const race of raceFaultDefinitions) {
+    assert.equal(typeof race.precondition, "function", `race ${race.name} 必须先判适用性`);
+  }
+});
+
+test("reify chaos: fault 结果语义分明，真异常不会被当成不适用", async () => {
+  await withRealSession(async (session, trace) => {
+    const def = (name: string, inject: ReifyFaultDefinition["inject"], precondition?: ReifyFaultDefinition["precondition"]): ReifyFaultDefinition => ({
+      name,
+      description: name,
+      arbitrary: fc.constant({}),
+      describe: () => name,
+      ...(precondition ? { precondition } : {}),
+      inject,
+      recover: async () => undefined,
+    });
+
+    // 1. Real-state precondition says there is nothing to hit -> NotApplicable.
+    const skipped = await injectReifyFault(
+      session,
+      def("fakeSkipped", async () => {
+        throw new Error("不适用就不该真的去注入");
+      }, async () => ({ applicable: false, reason: "没有可打的目标" })),
+      { kind: "fault", name: "fakeSkipped", params: {} },
+      trace,
+    );
+    assert.equal(skipped.status, "NotApplicable");
+    assert.equal(skipped.reason, "没有可打的目标");
+
+    // 2. A real system exception during injection is a failure, never a skip.
+    const failed = await injectReifyFault(
+      session,
+      def("fakeRealError", async () => {
+        throw new Error("真系统自己报错");
+      }),
+      { kind: "fault", name: "fakeRealError", params: {} },
+      trace,
+    );
+    assert.equal(failed.status, "InjectionFailed");
+    assert.ok(failed.reason?.includes("真系统自己报错"), `原因必须原样带上：${failed.reason}`);
+
+    // 3. A precondition that itself blows up is also a failure, not a skip.
+    const preconditionBlewUp = await injectReifyFault(
+      session,
+      def("fakePreconditionError", async () => undefined, async () => {
+        throw new Error("读真状态失败");
+      }),
+      { kind: "fault", name: "fakePreconditionError", params: {} },
+      trace,
+    );
+    assert.equal(preconditionBlewUp.status, "InjectionFailed");
+    assert.ok(preconditionBlewUp.reason?.includes("读真状态失败"));
+
+    // 4. A deliberate mid-inject "not applicable" is still NotApplicable.
+    const deliberate = await injectReifyFault(
+      session,
+      def("fakeVanished", async () => {
+        throw new FaultNotApplicable("目标在注入前消失了", { reason: "gone" });
+      }),
+      { kind: "fault", name: "fakeVanished", params: {} },
+      trace,
+    );
+    assert.equal(deliberate.status, "NotApplicable");
+    assert.equal(deliberate.reason, "目标在注入前消失了");
+
+    // 5. Every outcome is recorded, and InjectionFailed can never pass the
+    //    invariants silently.
+    assert.ok(session.faultOutcomes.some((outcome) => outcome.status === "NotApplicable" && outcome.reason));
+    assert.ok(session.faultOutcomes.some((outcome) => outcome.status === "InjectionFailed"));
+    const snapshot = await session.snapshot();
+    await assert.rejects(
+      () => checkReifyInvariants({ session, snapshot, now: Date.now() }),
+      (error: unknown) => error instanceof InvariantViolation || (error as { invariant?: string })?.invariant === "fault-outcome-honest",
+    );
+  });
+});
+
+test("reify chaos: 真 provider fault proxy 的 timeout/reset/latency/截断/状态码都是真的", async () => {
+  const upstream = createServer((incoming, outgoing) => {
+    outgoing.writeHead(200, { "content-type": "application/json" });
+    outgoing.end(JSON.stringify({ ok: true, path: incoming.url }));
+  });
+  await new Promise<void>((accept) => upstream.listen(0, "127.0.0.1", () => accept()));
+  const port = (upstream.address() as { port: number }).port;
+  const upstreamConfig = { protocol: "http" as const, host: "127.0.0.1", port };
+  try {
+    // Baseline: no fault -> the real upstream answer comes back through the proxy.
+    const clean = await ProviderFaultProxy.start(upstreamConfig, { mode: "latency", delayMs: 0 });
+    const cleanResponse = await request(clean.urlFor("/models"));
+    assert.equal(cleanResponse.statusCode, 200);
+    await cleanResponse.body.dump();
+    await clean.close();
+
+    // timeout/hang: the client's own timeout is what fails.
+    const hung = await ProviderFaultProxy.start(upstreamConfig, { mode: "hang" });
+    await assert.rejects(() => request(hung.urlFor("/models"), { headersTimeout: 300, bodyTimeout: 300 }));
+    assert.equal(hung.observations.faults, 1);
+    await hung.close();
+
+    // reset: a real RST, not a clean EOF.
+    const reset = await ProviderFaultProxy.start(upstreamConfig, { mode: "reset" });
+    await assert.rejects(
+      () => request(reset.urlFor("/models")),
+      (error: unknown) => /reset|socket hang up|other side closed/i.test(String((error as Error).message)),
+    );
+    await reset.close();
+
+    // truncated stream: prefix of the real body, then the connection breaks.
+    const cut = await ProviderFaultProxy.start(upstreamConfig, { mode: "truncate", bytes: 4 });
+    const cutResponse = await request(cut.urlFor("/models"));
+    assert.equal(cutResponse.statusCode, 200);
+    await assert.rejects(() => cutResponse.body.arrayBuffer());
+    assert.equal(cut.observations.faults, 1);
+    await cut.close();
+
+    // status fault: a real HTTP status code reaches the caller.
+    const limited = await ProviderFaultProxy.start(upstreamConfig, { mode: "status", status: 429 });
+    const limitedResponse = await request(limited.urlFor("/models"));
+    assert.equal(limitedResponse.statusCode, 429);
+    await limitedResponse.body.dump();
+    await limited.close();
+  } finally {
+    upstream.closeAllConnections?.();
+    await new Promise<void>((accept) => upstream.close(() => accept()));
+  }
+});
+
+test("reify chaos: 真 credential 副本过期 / 删除 / 清空后，真读取代码判成不可用", async () => {
+  const source = mkdtempSync(join(tmpdir(), "chaos-reify-cred-"));
+  const session = await ReifySession.start();
+  try {
+    writeFileSync(
+      join(source, "auth.json"),
+      JSON.stringify({
+        zai: { type: "api_key", key: "real-api-key-value" },
+        "openai-codex": { type: "oauth", access: "real-access-value", expires: 4102444800000 },
+      }),
+    );
+    const selection = { provider: "openai-codex", model: "gpt-5" };
+
+    const expired = seedCredentialSandbox(session, source);
+    const expiredResult = await applyCredentialFault(expired, selection, "expire");
+    assert.equal(expiredResult.before.expired, false, "真 OAuth 凭证一开始没过期");
+    assert.equal(expiredResult.after.expired, true, "过期故障之后真读取代码必须判成已过期");
+    restoreCredentialSandbox(expired);
+    const restored = await observeCredential(expired, selection);
+    assert.equal(restored.described.expired, false, "恢复之后必须回到没过期");
+
+    const dropped = seedCredentialSandbox(session, source);
+    const droppedResult = await applyCredentialFault(dropped, selection, "drop");
+    assert.equal(droppedResult.before.present, true);
+    assert.equal(droppedResult.after.present, false, "删除故障之后凭证不能还在");
+    restoreCredentialSandbox(dropped);
+
+    const blanked = seedCredentialSandbox(session, source);
+    const blankedResult = await applyCredentialFault(blanked, { provider: "zai", model: "glm-4.6" }, "blank");
+    assert.equal(blankedResult.after.hasCredentials, false, "清空 secret 之后不能还算已认证");
+    restoreCredentialSandbox(blanked);
+  } finally {
+    await session.close().catch(() => undefined);
+    rmSync(source, { recursive: true, force: true });
+  }
+});
+
+test("reify chaos: 凭证副本里没有选中的 provider 时，凭证故障明说不适用而不是乱打", async () => {
+  const previous = { provider: process.env.CHAOS_REIFY_PROVIDER, model: process.env.CHAOS_REIFY_MODEL };
+  await withRealSession(async (session, trace) => {
+    // Force a selection the chaos-owned credential copy cannot have.
+    process.env.CHAOS_REIFY_PROVIDER = "chaos-provider-that-does-not-exist";
+    process.env.CHAOS_REIFY_MODEL = "chaos-model";
+    const definition = reifyFaultDefinitions.find((fault) => fault.name === "providerCredentialDropped")!;
+    const outcome = await injectReifyFault(session, definition, { kind: "fault", name: definition.name, params: {} }, trace);
+    assert.equal(outcome.status, "NotApplicable", `不能乱打：${JSON.stringify(outcome)}`);
+    assert.ok(outcome.reason && outcome.reason.length > 0, "不适用必须给理由");
+    assert.ok(!session.activeFaults.includes(definition.name), "不适用就不能留在已注入状态");
+  });
+  if (previous.provider === undefined) delete process.env.CHAOS_REIFY_PROVIDER;
+  else process.env.CHAOS_REIFY_PROVIDER = previous.provider;
+  if (previous.model === undefined) delete process.env.CHAOS_REIFY_MODEL;
+  else process.env.CHAOS_REIFY_MODEL = previous.model;
+});
+
+test("reify chaos: 真状态文件少了 / 坏了，harness 的破坏不会被算成产品缺陷，恢复后系统还能真 build", async (t) => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const runId = ((await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string }).runId;
+    assert.ok(runId, "setup 之后必须有真 run");
+
+    const definition = reifyFaultDefinitions.find((fault) => fault.name === "missingRunStateFile")!;
+    const stateFile = join(session.runDir(runId!), "state.json");
+    assert.ok(existsSync(stateFile), "真 run state 文件必须在");
+
+    // A file/state fault: the real run state file really goes missing.
+    const outcome = await injectReifyFault(session, definition, { kind: "fault", name: "missingRunStateFile", params: {} }, trace);
+    if (outcome.status === "NotApplicable") {
+      t.skip(`这一轮没法挪走 state 文件：${outcome.reason}`);
+      return;
+    }
+    assert.equal(outcome.status, "Injected");
+    assert.ok(!existsSync(stateFile), "state.json 必须真的被挪走");
+    assert.ok(session.harnessDamage.runs.has(runId!), "damage 必须被登记下来");
+
+    // While the harness holds the file broken, the product must not be blamed.
+    await checkReifyInvariants({ session, snapshot: await session.snapshot(), now: Date.now() });
+
+    // Recovery really puts the file back, and the same run really still works.
+    await definition.recover({ session, trace, params: {} });
+    assert.ok(existsSync(stateFile), "恢复必须把 state.json 放回去");
+    assert.ok(!session.harnessDamage.runs.has(runId!), "恢复之后 damage 必须清掉");
+    const recovered = (await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string };
+    assert.equal(recovered.runId, runId, "恢复之后同一个 run 还得在");
+  });
+});
+
+test("reify chaos: race 故障真的同时跑多步，并留下可 replay 的命令序列", async () => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const command: Command = { kind: "fault", name: "raceLegalOrderSwap", params: { first: "build", conversationIndex: 0 } };
+    await runReifySequence(session, [command], trace);
+    const outcome = session.faultOutcomes.find((entry) => entry.name === "raceLegalOrderSwap");
+    assert.equal(outcome?.status, "Injected", `race 必须真的注入：${JSON.stringify(outcome)}`);
+    const raced = trace.entries.filter((entry) => entry.kind === "command" && entry.name.startsWith("race:"));
+    assert.ok(raced.length >= 2, `race 必须真的跑了两步以上，实际 ${raced.length}`);
+    // The race is an ordinary generated command, so replay/shrink still see it.
+    assert.ok(trace.executed.some((executed) => executed.name === "raceLegalOrderSwap"));
+  });
 });

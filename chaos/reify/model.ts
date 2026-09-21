@@ -7,22 +7,75 @@ export interface Command {
   params: Record<string, unknown>;
 }
 
+/**
+ * Generation weights. The point is not uniform coverage: common user paths
+ * stay frequent, and the expensive / high-risk races get a directed weight so
+ * they are actually explored without drowning the cheap paths.
+ */
 const WEIGHTS: Record<string, number> = {
+  // Common user paths, high frequency.
   startRun: 6,
   openConversation: 4,
   commitPlan: 5,
   advance: 4,
   build: 6,
-  refresh: 2,
+  refresh: 3,
+  // Cheap real reads and repeats.
+  switchConversation: 2,
+  resumeRun: 2,
+  listWorkflows: 1,
+  history: 1,
+  burstRefresh: 2,
+  duplicateCommit: 2,
+  retryBuild: 3,
+  phaseCard: 1,
+  phaseContract: 1,
+  completionGate: 1,
+  authorize: 1,
+  // Real multi-actor combinations.
+  concurrentBuild: 3,
+  multiConversationBuild: 3,
+  desktopRestart: 2,
+  // Process / resource faults.
   killKernelDuringBuild: 6,
   pauseKernelDuringBuild: 3,
   killAuthorityDuringBuild: 5,
+  pauseAuthorityDuringBuild: 3,
+  killIdleKernel: 3,
+  killKernelChild: 3,
+  killRuntimeDuringBuild: 4,
+  pauseRuntimeDuringBuild: 2,
+  restartRuntimeDuringBuild: 4,
+  killPrimeRuntime: 2,
+  cpuPressure: 1,
+  // File / state faults.
+  missingRunStateFile: 3,
+  unreadableRunStateFile: 2,
+  partialStateWrite: 2,
+  missingDesktopProjection: 2,
+  // Provider / OAuth faults.
+  providerCredentialExpired: 3,
+  providerCredentialDropped: 2,
+  providerCredentialBlanked: 2,
+  providerTimeout: 2,
+  providerReset: 2,
+  providerLatency: 1,
+  providerStreamCut: 1,
+  providerRateLimited: 1,
+  providerServerError: 1,
+  // Directed weight for timing combinations.
+  raceUserActionDuringKernelFault: 4,
+  raceTwoConversationsBuild: 3,
+  raceRestartDuringTransition: 3,
+  raceLegalOrderSwap: 2,
+  raceRepeatSubmitDuringFault: 2,
+  raceCrossConversationFault: 3,
 };
 
 /**
  * Every generated sequence starts from a real run that is really in `cook`,
- * so a generated fault always has a real kernel to hit. The prefix is part of
- * the sequence, so replay and shrink see exactly what ran.
+ * so a generated fault always has a real run (and often a real kernel) to hit.
+ * The prefix is part of the sequence, so replay and shrink see exactly what ran.
  */
 export const REIFY_SETUP: Command[] = [
   { kind: "action", name: "startRun", params: { conversationIndex: 0 } },
@@ -30,7 +83,7 @@ export const REIFY_SETUP: Command[] = [
   { kind: "action", name: "advance", params: { event: "plan_ready", conversationIndex: 0 } },
 ];
 
-/** One fast-check command list: real Reify actions mixed with real process faults. */
+/** One fast-check command list: real Reify actions mixed with real faults. */
 export function buildReifySequenceArbitrary(
   actions: ReifyActionDefinition[],
   faults: ReifyFaultDefinition[],

@@ -58,7 +58,7 @@ interface AuthEntry {
   access?: string;
 }
 
-function homeAgentDir(): string {
+export function homeAgentDir(): string {
   return process.env.PRIME_AGENT_CODING_AGENT_DIR ?? join(homedir(), ".prime", "agent");
 }
 
@@ -253,6 +253,23 @@ function readAccessToken(agentDir: string, provider: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Real auth header for one provider, taken from the real credential store.
+ * Only ever used to build a request header; the value is never logged or put
+ * into an observation object.
+ */
+export function providerAuthHeaders(agentDir: string, provider: string): Record<string, string> {
+  const token = readAccessToken(agentDir, provider);
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+/** Resolve the real endpoint of the selected provider from Prime's own registry. */
+export async function resolveProviderEndpoint(
+  selection: { provider: string; model: string },
+): Promise<{ baseUrl: string; api: string; source: string } | null> {
+  return await resolveModelEndpoint(resolvePrimeAgentRepo(), selection.provider, selection.model);
 }
 
 // ---------------------------------------------------------------------------

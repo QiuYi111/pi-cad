@@ -1,4 +1,5 @@
 import fc from "fast-check";
+import { join } from "node:path";
 
 import { InvariantViolation } from "../types.ts";
 import { reifyActionDefinitions } from "./actions.ts";
@@ -9,7 +10,8 @@ import { checkInvariantsOn, checkReifyInvariants, reifyInvariantDefinitions } fr
 import { buildReifySequenceArbitrary, describeCommand, type Command } from "./model.ts";
 import { ReifySession } from "./session.ts";
 import { ReifyTrace } from "./trace.ts";
-import type { ReifyActionDefinition, ReifyFaultDefinition } from "./types.ts";
+import { ReifyRuntime } from "./runtime.ts";
+import { FaultNotApplicable, type FaultOutcome, type FaultPrecondition, type ReifyActionDefinition, type ReifyFaultDefinition } from "./types.ts";
 
 export const REIFY_ACTIONS = new Map(reifyActionDefinitions.map((definition) => [definition.name, definition]));
 export const REIFY_FAULTS = new Map(reifyFaultDefinitions.map((definition) => [definition.name, definition]));
@@ -22,6 +24,20 @@ const SETTLE_MS: Record<string, number> = {
   advance: 250,
   build: 500,
   refresh: 250,
+  history: 250,
+  listWorkflows: 200,
+  retryBuild: 500,
+  concurrentBuild: 700,
+  multiConversationBuild: 900,
+  duplicateCommit: 350,
+  burstRefresh: 300,
+  switchConversation: 300,
+  resumeRun: 300,
+  stopRun: 300,
+  phaseCard: 250,
+  phaseContract: 250,
+  completionGate: 250,
+  authorize: 200,
   killKernelDuringBuild: 900,
   pauseKernelDuringBuild: 900,
   killAuthorityDuringBuild: 900,
@@ -34,8 +50,104 @@ const POLL_INTERVAL_MS = 75;
 
 export const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
+/**
+ * A real session in the same mode the run used. Runtime mode matters for
+ * replay: a fault that kills the long-lived runtime only applies when the
+ * requests really go through that runtime.
+ */
+export async function startReifySession(runtimeMode = false): Promise<ReifySession> {
+  const session = await ReifySession.start();
+  if (!runtimeMode) return session;
+  const runtime = await ReifyRuntime.start({
+    project: session.project,
+    runtimeDirectory: join(session.root, "runtime"),
+    env: session.env,
+  });
+  session.attachRuntime(runtime);
+  return session;
+}
+
 export function reifySettleWindowFor(command: Command): number {
   return SETTLE_MS[command.name] ?? DEFAULT_SETTLE_MS;
+}
+
+/**
+ * Inject one fault and record exactly what happened.
+ *
+ * Applicability is decided from real state *before* injection (or by a fault
+ * deliberately raising `FaultNotApplicable`). Every other exception is a real
+ * failure and is recorded as `InjectionFailed`; it is never folded into
+ * "this fault did not apply".
+ */
+export async function injectReifyFault(
+  session: ReifySession,
+  definition: ReifyFaultDefinition,
+  command: Command,
+  trace: ReifyTrace,
+): Promise<FaultOutcome> {
+  const ctx = { session, trace, params: command.params };
+  let precondition: FaultPrecondition = { applicable: true };
+  if (definition.precondition) {
+    try {
+      precondition = await definition.precondition(ctx);
+    } catch (error) {
+      const outcome: FaultOutcome = {
+        name: definition.name,
+        phase: "inject",
+        status: "InjectionFailed",
+        at: Date.now(),
+        reason: `前置检查读真状态失败：${(error as Error).message}`,
+      };
+      session.recordFaultOutcome(outcome);
+      return outcome;
+    }
+  }
+  if (!precondition.applicable) {
+    const outcome: FaultOutcome = {
+      name: definition.name,
+      phase: "inject",
+      status: "NotApplicable",
+      at: Date.now(),
+      reason: precondition.reason ?? "不适用",
+      ...(precondition.evidence === undefined ? {} : { evidence: precondition.evidence }),
+    };
+    session.recordFaultOutcome(outcome);
+    trace.note(`fault ${definition.name} 不适用：${outcome.reason}`);
+    return outcome;
+  }
+  try {
+    await definition.inject(ctx);
+    session.armFault(definition.name);
+    const outcome: FaultOutcome = { name: definition.name, phase: "inject", status: "Injected", at: Date.now() };
+    session.recordFaultOutcome(outcome);
+    return outcome;
+  } catch (error) {
+    if (error instanceof FaultNotApplicable) {
+      const outcome: FaultOutcome = {
+        name: definition.name,
+        phase: "inject",
+        status: "NotApplicable",
+        at: Date.now(),
+        reason: error.reason,
+        ...(error.evidence === undefined ? {} : { evidence: error.evidence }),
+      };
+      session.recordFaultOutcome(outcome);
+      trace.note(`fault ${definition.name} 不适用：${error.reason}`);
+      return outcome;
+    }
+    // A real invariant the product broke while we were injecting is a finding,
+    // not a harness problem: let it through unchanged.
+    if (error instanceof InvariantViolation) throw error;
+    const outcome: FaultOutcome = {
+      name: definition.name,
+      phase: "inject",
+      status: "InjectionFailed",
+      at: Date.now(),
+      reason: (error as Error).message,
+    };
+    session.recordFaultOutcome(outcome);
+    return outcome;
+  }
 }
 
 /** Run one real command. Rejected requests are notes; invariants judge state. */
@@ -54,12 +166,16 @@ export async function executeReifyCommand(session: ReifySession, command: Comman
     trace.note(`未知 fault ${command.name}`);
     return;
   }
-  try {
-    await definition.inject({ session, trace, params: command.params });
-  } catch (error) {
-    // A fault the product did not expose (no active run, no kernel) must never
-    // masquerade as a system failure.
-    trace.note(`fault ${command.name} 注入失败`, (error as Error).message);
+  const outcome = await injectReifyFault(session, definition, command, trace);
+  if (outcome.status === "InjectionFailed") {
+    // InjectionFailed is never silent: the fault said the precondition held and
+    // then the real system threw. That is either a harness bug or a product
+    // bug, and either way it must be visible in the failure artifact.
+    throw new InvariantViolation(
+      "fault-outcome-honest",
+      `fault ${definition.name} 注入失败：${outcome.reason}`,
+      { fault: definition.name, reason: outcome.reason },
+    );
   }
 }
 
@@ -78,12 +194,35 @@ async function observeUntil(session: ReifySession, trace: ReifyTrace, label: str
   }
 }
 
+/** A fault that really got injected, together with the params it ran with. */
+export interface InjectedFault {
+  definition: ReifyFaultDefinition;
+  params: Record<string, unknown>;
+}
+
 /** Inject faults, then prove recovery with a real build before the next step. */
-export async function recoverInjectedFaults(session: ReifySession, injected: ReifyFaultDefinition[], trace: ReifyTrace): Promise<void> {
-  for (const definition of [...injected].reverse()) {
+export async function recoverInjectedFaults(
+  session: ReifySession,
+  injected: Array<ReifyFaultDefinition | InjectedFault>,
+  trace: ReifyTrace,
+): Promise<void> {
+  const normalized: InjectedFault[] = injected.map((entry) =>
+    "definition" in entry ? entry : { definition: entry, params: {} },
+  );
+  for (const { definition, params } of [...normalized].reverse()) {
     try {
-      await definition.recover({ session, trace, params: {} });
+      // Recovery must see the same params the injection used: a race that hit
+      // conversation B has to prove recovery for conversation B.
+      await definition.recover({ session, trace, params });
+      session.recordFaultOutcome({ name: definition.name, phase: "recover", status: "Recovered", at: Date.now() });
     } catch (error) {
+      session.recordFaultOutcome({
+        name: definition.name,
+        phase: "recover",
+        status: "RecoveryFailed",
+        at: Date.now(),
+        ...(error instanceof InvariantViolation ? {} : { reason: (error as Error).message }),
+      });
       if (error instanceof InvariantViolation) throw error;
       // A failed recovery is a real system failure, not a note: the fault may
       // still be armed and nothing proved the system healed. Never swallow it.
@@ -97,22 +236,29 @@ export async function recoverInjectedFaults(session: ReifySession, injected: Rei
 }
 
 export async function runReifySequence(session: ReifySession, commands: Command[], trace: ReifyTrace): Promise<ReifyFaultDefinition[]> {
-  const injected: ReifyFaultDefinition[] = [];
+  const injected: InjectedFault[] = [];
   for (const command of commands) {
     trace.executed.push(command);
     await executeReifyCommand(session, command, trace);
     if (command.kind === "fault" && REIFY_FAULTS.has(command.name) && session.activeFaults.includes(command.name)) {
-      injected.push(REIFY_FAULTS.get(command.name)!);
+      injected.push({ definition: REIFY_FAULTS.get(command.name)!, params: command.params });
     }
     await observeUntil(session, trace, describeCommand(command), reifySettleWindowFor(command));
   }
   await observeUntil(session, trace, "final-settle", FINAL_SETTLE_MS);
   await recoverInjectedFaults(session, injected, trace);
+  if (session.activeFaults.length) {
+    // Every injected fault must have been really recovered; a fault left armed
+    // means the next iteration starts from damaged state.
+    throw new InvariantViolation("recovery-convergence", `故障没回收：${session.activeFaults.join(", ")}`, {
+      activeFaults: [...session.activeFaults],
+    });
+  }
   // Recovery only counts if the real state after it still satisfies every
   // invariant: take a fresh snapshot and check again instead of trusting that
   // a build succeeded.
   await checkInvariantsOn(session, trace, "post-recovery");
-  return injected;
+  return injected.map((entry) => entry.definition);
 }
 
 export interface ReifyRunOptions {
@@ -121,6 +267,8 @@ export interface ReifyRunOptions {
   /** fast-check counterexample path; replays that exact path instead of re-searching. */
   replayPath?: string;
   maxCommands?: number;
+  /** Drive every request through the long-lived runtime instead of one process per call. */
+  runtime?: boolean;
   quiet?: boolean;
   session?: ReifySession;
   save?: boolean;
@@ -140,6 +288,8 @@ export interface ReifyRunResult {
   replayOk?: boolean;
   invariants: string[];
   recoveries: { at: number; after: string; buildMs: number }[];
+  /** Explicit fault results: NotApplicable / Injected / InjectionFailed / Recovered / RecoveryFailed. */
+  faultOutcomes: FaultOutcome[];
 }
 
 interface RecordedFailure {
@@ -153,8 +303,12 @@ interface RecordedFailure {
  * fast-check, replayed against a fresh real project and saved as evidence.
  */
 export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<ReifyRunResult> {
-  const session = options.session ?? (await ReifySession.start());
+  const session = options.session ?? (await startReifySession(options.runtime ?? false));
   const maxCommands = options.maxCommands ?? DEFAULT_MAX_COMMANDS;
+  const runtimeMode = options.runtime ?? session.attachedRuntime !== null;
+  // Outcomes are cleared by `reset()` at the start of every iteration, so the
+  // whole run's results have to be collected as the iterations go.
+  const allFaultOutcomes: FaultOutcome[] = [];
   try {
     const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, maxCommands);
     let firstFailure: RecordedFailure | null = null;
@@ -167,6 +321,8 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       } catch (error) {
         if (!firstFailure) firstFailure = { commands: [...commands], error };
         throw error;
+      } finally {
+        allFaultOutcomes.push(...session.faultOutcomes);
       }
     });
 
@@ -192,6 +348,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
         numShrinks: 0,
         invariants: reifyInvariantDefinitions.map((definition) => definition.name),
         recoveries: session.history.recoveries,
+        faultOutcomes: [...allFaultOutcomes],
       };
     }
 
@@ -201,6 +358,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       seed: details.seed,
       replayPath: details.counterexamplePath ?? "",
       maxCommands,
+      runtimeMode,
       sequence: shrunk,
       fallback: original,
       expected: details.errorInstance instanceof InvariantViolation ? details.errorInstance : null,
@@ -232,6 +390,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       replayOk: artifact.reproducible,
       invariants: reifyInvariantDefinitions.map((definition) => definition.name),
       recoveries: session.history.recoveries,
+      faultOutcomes: [...allFaultOutcomes],
     };
   } finally {
     if (!options.session) await session.close().catch(() => undefined);
@@ -245,6 +404,7 @@ async function captureFailure(
     seed: number;
     replayPath: string;
     maxCommands: number;
+    runtimeMode: boolean;
     sequence: Command[];
     fallback: Command[];
     expected: InvariantViolation | null;
@@ -305,6 +465,7 @@ async function captureFailure(
     seed: input.seed,
     replayPath: input.replayPath,
     maxCommands: input.maxCommands,
+    runtimeMode: input.runtimeMode,
     originalSequence: input.fallback,
     shrunkSequence: input.sequence,
     replaySequence: usedSequence,
@@ -320,6 +481,7 @@ async function captureFailure(
     stateTimeline: trace.timeline,
     logs: trace.notes,
     recoveries: session.history.recoveries,
+    faultOutcomes: [...session.faultOutcomes],
     project: { root: session.root, project: session.project, canonical: session.canonical, workflowHome: session.workflowHome },
     ...(components ? { components } : {}),
   };
@@ -337,7 +499,9 @@ export interface ReifyReplayResult {
 /** Re-run a recorded sequence (or the recorded seed+path) and confirm it. */
 export async function replayReifyArtifact(file: string, options: { seed?: boolean } = {}): Promise<ReifyReplayResult> {
   const artifact = loadReifyArtifact(file);
-  const session = await ReifySession.start();
+  // Replay in the mode the failure was recorded in: a runtime-lifecycle fault
+  // only reproduces when requests really go through the long-lived runtime.
+  const session = await startReifySession(artifact.runtimeMode ?? false);
   try {
     if (options.seed) return await replayBySeedAndPath(session, artifact);
     const sequence = artifact.replaySequence ?? artifact.shrunkSequence;
@@ -431,6 +595,7 @@ export async function shrinkReifyArtifact(file: string): Promise<ReifyShrinkResu
     seed: artifact.seed,
     replayPath: artifact.replayPath,
     maxCommands: artifact.maxCommands,
+    runtime: artifact.runtimeMode ?? false,
     quiet: true,
     save: false,
   });

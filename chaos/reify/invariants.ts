@@ -37,6 +37,9 @@ const runOwnership: ReifyInvariantDefinition = {
   description: "会话和 run 的绑定必须真实且唯一",
   async check({ session, snapshot }) {
     for (const conversation of snapshot.conversations) {
+      // A run state file the harness itself is holding broken is our damage,
+      // not a product defect.
+      if (conversation.runId !== null && session.harnessDamage.runs.has(conversation.runId)) continue;
       if (conversation.runId !== null && !conversation.runPresent) {
         throw new InvariantViolation("run-ownership", `会话 ${conversation.id} 绑定 ${conversation.runId}，但 run 不在 store 里`, conversation);
       }
@@ -44,9 +47,11 @@ const runOwnership: ReifyInvariantDefinition = {
     const boundTo = new Map<string, string[]>();
     for (const conversation of snapshot.conversations) {
       if (!conversation.runId) continue;
+      if (session.harnessDamage.runs.has(conversation.runId)) continue;
       boundTo.set(conversation.runId, [...(boundTo.get(conversation.runId) ?? []), conversation.id]);
     }
     for (const run of snapshot.runs) {
+      if (session.harnessDamage.runs.has(run.id)) continue;
       const owners = boundTo.get(run.id) ?? [];
       if (owners.length !== 1) {
         throw new InvariantViolation("run-ownership", `run ${run.id} 绑了 ${owners.length} 个会话（${owners.join(",") || "无"}）`, { run: run.id, owners });
@@ -54,7 +59,9 @@ const runOwnership: ReifyInvariantDefinition = {
     }
     // Every run this conversation ever started must still be the only run it owns.
     for (const [conversation, runIds] of session.history.runsByConversation) {
-      const present = runIds.filter((runId) => snapshot.runs.some((run) => run.id === runId));
+      const present = runIds.filter(
+        (runId) => !session.harnessDamage.runs.has(runId) && snapshot.runs.some((run) => run.id === runId),
+      );
       if (present.length > 1) {
         throw new InvariantViolation("run-ownership", `会话 ${conversation} 有 ${present.length} 个 run：${present.join(", ")}`, { conversation, runs: present });
       }
@@ -84,8 +91,9 @@ const terminalStateStable: ReifyInvariantDefinition = {
 const artifactIntegrity: ReifyInvariantDefinition = {
   name: "artifact-integrity",
   description: "run 记录的 artifact 必须真存在且 hash 一致，且候选件只有一份",
-  async check({ snapshot }) {
+  async check({ session, snapshot }) {
     for (const run of snapshot.runs) {
+      if (session.harnessDamage.runs.has(run.id)) continue;
       const candidates = run.artifacts.filter((artifact) => artifact.id === "candidate:authoritative");
       if (candidates.length > 1) {
         throw new InvariantViolation("artifact-integrity", `run ${run.id} 有 ${candidates.length} 份 candidate:authoritative`, { run: run.id });
@@ -112,11 +120,43 @@ const recoveryConvergence: ReifyInvariantDefinition = {
     for (const [fault, at] of session.history.armedSince) {
       if (now - at < RECOVERY_BUDGET_MS) continue;
       if (session.history.recoveries.some((recovery) => recovery.at > at)) continue;
+      // A fault whose own recovery really ran (and proved itself) counts as
+      // convergence even when its proof is not a build, e.g. the credential
+      // copy going back to a usable state.
+      if (
+        session.faultOutcomes.some(
+          (outcome) => outcome.name === fault && outcome.phase === "recover" && outcome.status === "Recovered" && outcome.at > at,
+        )
+      ) {
+        continue;
+      }
       throw new InvariantViolation(
         "recovery-convergence",
         `故障 ${fault} 注入 ${now - at}ms 后还没恢复`,
         { fault, armedAt: at },
       );
+    }
+  },
+};
+
+/**
+ * Fault semantics must stay honest: a fault may only be "not applicable" when
+ * a real-state decision said so, with a reason. An `InjectionFailed` outcome
+ * means the real system threw where the fault expected to act; the runner
+ * turns that into a failure, and this invariant makes sure it can never be
+ * recorded and then quietly ignored.
+ */
+const faultOutcomeHonest: ReifyInvariantDefinition = {
+  name: "fault-outcome-honest",
+  description: "fault 结果必须有明确语义：不适用要给理由，注入失败不能被吞",
+  async check({ session }) {
+    for (const outcome of session.faultOutcomes) {
+      if (outcome.status === "NotApplicable" && !outcome.reason) {
+        throw new InvariantViolation("fault-outcome-honest", `fault ${outcome.name} 判成不适用但没给理由`, outcome);
+      }
+      if (outcome.status === "InjectionFailed") {
+        throw new InvariantViolation("fault-outcome-honest", `fault ${outcome.name} 注入失败：${outcome.reason ?? "没有原因"}`, outcome);
+      }
     }
   },
 };
@@ -127,6 +167,7 @@ export const reifyInvariantDefinitions: ReifyInvariantDefinition[] = [
   terminalStateStable,
   artifactIntegrity,
   recoveryConvergence,
+  faultOutcomeHonest,
 ];
 
 export async function checkReifyInvariants(input: { session: ReifySession; snapshot: ReifySnapshot; now: number }): Promise<void> {

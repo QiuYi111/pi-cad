@@ -1,8 +1,10 @@
 import { join } from "node:path";
 
 import { InvariantViolation } from "../types.ts";
+import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "./artifacts.ts";
 import { inspectReifyComponents, runtimeObservation, type ReifyComponents } from "./components.ts";
+import { FAULT_BOUNDARIES, reifyFaultDefinitions } from "./faults.ts";
 import { ReifyPrimeRuntime } from "./prime.ts";
 import { ReifyRuntime } from "./runtime.ts";
 import { checkInvariantsOn, reifyInvariantDefinitions } from "./invariants.ts";
@@ -14,12 +16,13 @@ import { ReifyTrace } from "./trace.ts";
 const USAGE = `真 Reify chaos slice
 
   chaos reify demo                     一条真故障链：真 run → 真 kernel → 真 kill
-  chaos reify run [--runs N] [--seed N] [--max-commands N] [--json]
+  chaos reify run [--runs N] [--seed N] [--max-commands N] [--runtime] [--json]
   chaos reify replay <artifact.json>              按 artifact 里存的序列重放
   chaos reify replay <artifact.json> --seed       按 artifact 里的 seed+path 精确重放原路径
   chaos reify shrink <artifact.json>
   chaos reify inspect [--json] [--prime] [--provider-probe]
                                        起真 runtime，打真 run/kernel，看 provider/Desktop/WSL
+  chaos reify space [--json]           列出 action / fault 空间和各自覆盖的边界
   chaos reify invariants
 `;
 
@@ -160,20 +163,83 @@ async function demo(): Promise<number> {
 }
 
 async function commandRun(flags: ParsedArgs["flags"]): Promise<number> {
-  const result = await reifyChaosRun({
-    numRuns: flags.runs ? Number(flags.runs) : undefined,
-    seed: flags.seed ? Number(flags.seed) : undefined,
-    maxCommands: flags["max-commands"] ? Number(flags["max-commands"]) : undefined,
-    quiet: boolFlag(flags, "json"),
-  });
-  if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  else {
-    process.stdout.write(`真实 invariant：${result.invariants.join(", ")}\n`);
-    if (result.recoveries.length) {
-      process.stdout.write(`真 build 恢复证据 ${result.recoveries.length} 次（最近 ${result.recoveries.at(-1)?.buildMs}ms）\n`);
+  const session = await ReifySession.start();
+  try {
+    // `--runtime` drives every request through the long-lived authority sidecar
+    // (the real Desktop/Prime backend), which is what makes the runtime
+    // lifecycle faults real instead of a per-call wrapper dying.
+    if (boolFlag(flags, "runtime")) {
+      const runtime = await ReifyRuntime.start({
+        project: session.project,
+        runtimeDirectory: join(session.root, "runtime"),
+        env: session.env,
+      });
+      session.attachRuntime(runtime);
     }
+    const result = await reifyChaosRun({
+      numRuns: flags.runs ? Number(flags.runs) : undefined,
+      seed: flags.seed ? Number(flags.seed) : undefined,
+      maxCommands: flags["max-commands"] ? Number(flags["max-commands"]) : undefined,
+      quiet: boolFlag(flags, "json"),
+      session,
+    });
+    if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    else {
+      process.stdout.write(`真实 invariant：${result.invariants.join(", ")}\n`);
+      process.stdout.write(`fault 结果：${summarizeFaultOutcomes(result.faultOutcomes)}\n`);
+      if (result.recoveries.length) {
+        process.stdout.write(`真 build 恢复证据 ${result.recoveries.length} 次（最近 ${result.recoveries.at(-1)?.buildMs}ms）\n`);
+      }
+    }
+    return result.failed ? 1 : 0;
+  } finally {
+    await session.close().catch(() => undefined);
   }
-  return result.failed ? 1 : 0;
+}
+
+/** One line that says how the fault space really behaved, not just "no error". */
+function summarizeFaultOutcomes(outcomes: { status: string }[]): string {
+  const counts = new Map<string, number>();
+  for (const outcome of outcomes) counts.set(outcome.status, (counts.get(outcome.status) ?? 0) + 1);
+  if (!counts.size) return "这轮没跑到 fault";
+  return [...counts.entries()].map(([status, count]) => `${status}=${count}`).join(" ");
+}
+
+/**
+ * Show the explored space: how many real actions, how many real faults, and
+ * which boundary each fault really hits.
+ */
+async function space(flags: ParsedArgs["flags"]): Promise<number> {
+  const boundaries = new Set(Object.values(FAULT_BOUNDARIES));
+  const report = {
+    actions: reifyActionDefinitions.map((definition) => ({ name: definition.name, description: definition.description })),
+    faults: reifyFaultDefinitions.map((definition) => ({
+      name: definition.name,
+      boundary: FAULT_BOUNDARIES[definition.name] ?? "unknown",
+      description: definition.description,
+      hasPrecondition: typeof definition.precondition === "function",
+    })),
+    counts: {
+      actions: reifyActionDefinitions.length,
+      faults: reifyFaultDefinitions.length,
+      boundaries: [...boundaries],
+      races: reifyFaultDefinitions.filter((definition) => FAULT_BOUNDARIES[definition.name] === "race").length,
+    },
+  };
+  if (boolFlag(flags, "json")) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    return 0;
+  }
+  process.stdout.write(`\n== action（${report.counts.actions} 个，全是真操作）\n`);
+  for (const action of report.actions) process.stdout.write(`  ${action.name.padEnd(26)} ${action.description}\n`);
+  process.stdout.write(`\n== fault（${report.counts.faults} 个）\n`);
+  for (const boundary of [...boundaries]) {
+    const faults = report.faults.filter((fault) => fault.boundary === boundary);
+    process.stdout.write(`  [${boundary}] ${faults.length} 个\n`);
+    for (const fault of faults) process.stdout.write(`    ${fault.name.padEnd(30)} ${fault.description}\n`);
+  }
+  process.stdout.write(`\n覆盖边界：${report.counts.boundaries.join(", ")}\n`);
+  return 0;
 }
 
 /**
@@ -376,6 +442,8 @@ export async function runReifyCli(argv: string[]): Promise<number> {
     }
     case "inspect":
       return await inspect(flags);
+    case "space":
+      return await space(flags);
     case "invariants":
       for (const invariant of reifyInvariantDefinitions) {
         process.stdout.write(`${invariant.name.padEnd(28)} ${invariant.description}\n`);

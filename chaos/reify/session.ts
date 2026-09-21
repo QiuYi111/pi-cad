@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { isProcessAlive, REPO_ROOT } from "../sut/proc.ts";
+import type { ReifyRuntime } from "./runtime.ts";
+import type { FaultOutcome } from "./types.ts";
 
 /**
  * The real Reify system under test.
@@ -66,6 +68,21 @@ interface LiveCall {
   op: string;
   startedAt: number;
   done: Promise<{ code: number | null; signal: string | null; stdout: string; stderr: string }>;
+}
+
+/**
+ * One real long `model-build` in flight, whichever process really serves it:
+ * a one-shot authority process, or the long-lived runtime sidecar.
+ */
+export interface ReifyBuildHandle {
+  op: string;
+  conversation: string;
+  /** The real process that owns the CAD kernel this build spawns. */
+  ownerPid: number;
+  /** True when the long-lived runtime serves this build instead of a one-shot authority. */
+  viaRuntime: boolean;
+  settle: Promise<{ code: number | null; signal: string | null; stdout: string }>;
+  kill(signal?: NodeJS.Signals): void;
 }
 
 const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
@@ -167,9 +184,18 @@ export class ReifySession {
   readonly conversations: string[] = ["conv-a"];
   /** Faults currently injected, plus whatever each one needs to recover. */
   readonly armedFaults = new Map<string, unknown>();
+  /** Explicit inject/recover results, in order; the artifact carries them. */
+  readonly faultOutcomes: FaultOutcome[] = [];
+  /**
+   * Real state the harness itself is currently holding broken on purpose.
+   * Invariants must not blame the product for damage a fault just did, and
+   * every entry here is cleared by that fault's own recovery.
+   */
+  readonly harnessDamage = { runs: new Set<string>(), projection: false };
   activeFaults: string[] = [];
 
   private authorityPids = new Map<number, string>();
+  private runtime: ReifyRuntime | null = null;
   private readonly keepProject: boolean;
   private readonly initialConversations: string[];
 
@@ -241,8 +267,48 @@ export class ReifySession {
     return id;
   }
 
+  /**
+   * Route every request through the long-lived Reify runtime (the authority
+   * sidecar the Desktop and Prime really talk to) instead of one process per
+   * request. That is what makes a runtime-lifecycle fault a real fault: the
+   * process being killed is the real backend, not a per-call wrapper.
+   */
+  attachRuntime(runtime: ReifyRuntime): void {
+    this.runtime = runtime;
+    this.registerAuthorityPid(runtime.pid, "runtime");
+  }
+
+  get attachedRuntime(): ReifyRuntime | null {
+    return this.runtime;
+  }
+
   /** One real Agent API request in its own authority process. */
   async call(op: string, extra: Record<string, unknown> = {}, options: { timeoutMs?: number } = {}): Promise<any> {
+    if (this.runtime?.alive) {
+      const conversation = typeof extra.sessionId === "string" ? extra.sessionId : undefined;
+      const startedAt = Date.now();
+      try {
+        const result = await this.runtime.call(op, extra, options);
+        this.requests.push({
+          at: startedAt,
+          op,
+          ok: true,
+          ms: Date.now() - startedAt,
+          ...(conversation ? { conversation } : {}),
+        });
+        return result;
+      } catch (error) {
+        this.requests.push({
+          at: startedAt,
+          op,
+          ok: false,
+          ms: Date.now() - startedAt,
+          ...(conversation ? { conversation } : {}),
+          error: (error as Error).message,
+        });
+        throw error;
+      }
+    }
     const live = this.spawnCall(op, extra);
     const timer = setTimeout(() => {
       live.child.kill("SIGKILL");
@@ -259,6 +325,58 @@ export class ReifySession {
       clearTimeout(timer);
       this.authorityPids.delete(live.pid);
     }
+  }
+
+  /**
+   * Start a real long request without waiting, so a fault can hit it mid-flight.
+   * Returns the real owner of the kernel the build will spawn.
+   */
+  startBuild(op: string, extra: Record<string, unknown>): ReifyBuildHandle {
+    const conversation = typeof extra.sessionId === "string" ? extra.sessionId : "(none)";
+    if (this.runtime?.alive) {
+      const pid = this.runtime.pid;
+      const startedAt = Date.now();
+      const settle = this.runtime.call(op, extra).then(
+        () => {
+          this.requests.push({ at: startedAt, op, ok: true, ms: Date.now() - startedAt, conversation });
+          return { code: 0, signal: null, stdout: "" };
+        },
+        (error: unknown) => {
+          const message = (error as Error).message;
+          this.requests.push({ at: startedAt, op, ok: false, ms: Date.now() - startedAt, conversation, error: message });
+          return { code: 1, signal: null, stdout: JSON.stringify({ error: { message } }) };
+        },
+      );
+      return {
+        op,
+        conversation,
+        ownerPid: pid,
+        viaRuntime: true,
+        settle,
+        kill: (signal: NodeJS.Signals = "SIGKILL") => {
+          try {
+            process.kill(pid, signal);
+          } catch {
+            /* already gone */
+          }
+        },
+      };
+    }
+    const live = this.spawnCall(op, extra);
+    return {
+      op,
+      conversation,
+      ownerPid: live.pid,
+      viaRuntime: false,
+      settle: live.done,
+      kill: (signal: NodeJS.Signals = "SIGKILL") => {
+        try {
+          process.kill(live.pid, signal);
+        } catch {
+          /* already gone */
+        }
+      },
+    };
   }
 
   /**
@@ -484,8 +602,40 @@ export class ReifySession {
     this.history.recoveries.push({ at: Date.now(), after, buildMs });
   }
 
+  /** The real on-disk directory of one run in the canonical store. */
+  runDir(runId: string): string {
+    return join(this.canonical, "runs", runId);
+  }
+
+  recordFaultOutcome(outcome: FaultOutcome): void {
+    this.faultOutcomes.push(outcome);
+  }
+
+  markDamagedRun(runId: string): void {
+    this.harnessDamage.runs.add(runId);
+  }
+
+  unmarkDamagedRun(runId: string): void {
+    this.harnessDamage.runs.delete(runId);
+  }
+
+  markDamagedProjection(): void {
+    this.harnessDamage.projection = true;
+  }
+
+  unmarkDamagedProjection(): void {
+    this.harnessDamage.projection = false;
+  }
+
   /** Drop stale authority/kernel bookkeeping and rebuild the project. */
   async reset(): Promise<void> {
+    // The long-lived runtime holds the project directory we are about to
+    // rewrite, so it is restarted rather than left pointing at deleted state.
+    const runtime = this.runtime;
+    if (runtime) {
+      this.unregisterAuthorityPid(runtime.pid);
+      await runtime.stop().catch(() => undefined);
+    }
     // Our own kernel trees first: a child that reparented to init is no longer
     // discoverable from its old wrapper pid.
     for (const pid of this.history.ownedKernelPids) this.killKernel(pid);
@@ -502,6 +652,10 @@ export class ReifySession {
     await sleep(150);
     this.authorityPids.clear();
     this.activeFaults = [];
+    this.armedFaults.clear();
+    this.faultOutcomes.length = 0;
+    this.harnessDamage.runs.clear();
+    this.harnessDamage.projection = false;
     this.requests.length = 0;
     this.history.runStatus.clear();
     this.history.runsByConversation.clear();
@@ -512,13 +666,21 @@ export class ReifySession {
     this.history.armedSince.clear();
     rmSync(this.project, { recursive: true, force: true });
     rmSync(this.canonical, { recursive: true, force: true });
+    rmSync(join(this.root, "prime-agent"), { recursive: true, force: true });
     this.conversations.length = 0;
     this.conversations.push(...this.initialConversations);
     this.writeFixture();
+    if (runtime) {
+      const info = await runtime.start();
+      this.registerAuthorityPid(info.pid, "runtime");
+    }
   }
 
   async close(): Promise<void> {
+    const runtime = this.runtime;
+    this.runtime = null;
     await this.reset().catch(() => undefined);
+    await runtime?.close().catch(() => undefined);
     if (!this.keepProject) rmSync(this.root, { recursive: true, force: true });
   }
 }

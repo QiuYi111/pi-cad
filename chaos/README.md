@@ -227,16 +227,34 @@ const noOrphanWorker: InvariantDefinition = {
 
 ### Action / Fault
 
-Action（真用户/系统操作）：`startRun`、`openConversation`、`commitPlan`、`advance`、`build`、`refresh`。
+Action / Fault 空间现在很大，用一条命令看全：
+
+```bash
+npm run chaos:reify -- space          # 读得懂的清单
+npm run chaos:reify -- space --json   # 机器可读
+```
+
+Action（真用户 / 系统操作，21 个）：`startRun`、`openConversation`、`switchConversation`、
+`resumeRun`、`listWorkflows`、`history`、`commitPlan`、`duplicateCommit`、`advance`、`stopRun`、
+`build`、`retryBuild`、`concurrentBuild`、`multiConversationBuild`、`refresh`、`burstRefresh`、
+`phaseCard`、`phaseContract`、`completionGate`、`authorize`、`desktopRestart`。
 每条序列前面固定有 `REIFY_SETUP`（startRun → commitPlan → advance(plan_ready)），保证故障有真 run 可打。
 
-Fault（真进程故障）：
+`phaseCard` / `phaseContract` / `completionGate` / `authorize` 是常驻 sidecar 面上的操作
+（Desktop 和 Prime 走的就是它），所以只在一轮挂了 `--runtime` 的时候才真的发；没挂就记一条
+「跳过：这是 sidecar 面操作」——一次性 CLI authority 本来就不暴露这几个 op。
 
-| 名字 | 打谁 |
+Fault（30 个，按它真正打的边界分组）：
+
+| 边界 | 名字 |
 | --- | --- |
-| `killKernelDuringBuild` | 真 build 途中 SIGKILL 真 kernel，之后要求真 build 成功来证明恢复 |
-| `pauseKernelDuringBuild` | 真 build 途中 SIGSTOP 真 kernel，之后 SIGCONT |
-| `killAuthorityDuringBuild` | 真 build 途中 SIGKILL 真控制面进程 |
+| 进程 / 资源 | `killKernelDuringBuild`、`pauseKernelDuringBuild`、`killAuthorityDuringBuild`、`pauseAuthorityDuringBuild`、`killIdleKernel`、`killKernelChild`、`killRuntimeDuringBuild`、`pauseRuntimeDuringBuild`、`restartRuntimeDuringBuild`、`killPrimeRuntime`、`cpuPressure` |
+| 文件 / 状态 | `missingRunStateFile`、`unreadableRunStateFile`、`partialStateWrite`、`missingDesktopProjection` |
+| provider / OAuth | `providerCredentialExpired`、`providerCredentialDropped`、`providerCredentialBlanked`、`providerTimeout`、`providerReset`、`providerLatency`、`providerStreamCut`、`providerRateLimited`、`providerServerError` |
+| race / 时序 | `raceUserActionDuringKernelFault`、`raceTwoConversationsBuild`、`raceRestartDuringTransition`、`raceLegalOrderSwap`、`raceRepeatSubmitDuringFault`、`raceCrossConversationFault` |
+
+race 那一组不是单步 fault：它在一个 `inject` 里真的同时或交错跑多步
+（用户操作 + 故障、两个会话同时 build、transition 跑着的时候重启 runtime、两个合法操作换顺序、故障挂着时重复提交）。
 
 ### Invariant
 
@@ -324,3 +342,103 @@ provider 边界、Desktop 投影对照、WSL 边界、Prime 进程，以及 iden
 | --- | --- | --- |
 | `CHAOS_REIFY_PROVIDER_PROBE` | - | 设 `1` 才真发 provider 请求；否则只读边界状态 |
 | `CHAOS_REIFY_PROVIDER` / `CHAOS_REIFY_MODEL` | - | 覆盖 provider 选择（默认读 `~/.prime/agent/settings.json`） |
+
+## 扩大真实 action / fault 空间：`chaos reify run`
+
+这一段把可探索的行为 / 故障空间从「少量 kernel、进程 fault」扩到 Reify 的主要运行边界。
+
+```bash
+npm run chaos:reify -- run --runs 8 --max-commands 8            # 一次性控制面（每条请求一个进程）
+npm run chaos:reify -- run --runs 8 --max-commands 8 --runtime  # 请求真的走常驻 runtime
+npm run chaos:reify -- space                                    # 看空间有多大、各打哪条边界
+```
+
+`--runtime` 不是换一套假系统：它把每条请求送到真 `authority sidecar` 常驻进程
+（Desktop 和 Prime 连的那个真后端）的 Unix socket 上，所以 `killRuntimeDuringBuild`
+杀的是真后端，不是一次性的包装进程。
+
+### fault 语义：不适用要明说，真异常不能被吞
+
+每个 fault 步骤都留下一条明确结果，写进 trace 和 artifact 的 `faultOutcomes`：
+
+```
+NotApplicable    真的没有可打的目标（带原因）
+Injected         真的注入了
+InjectionFailed  前置检查通过，注入却抛了真异常 —— 这是失败，不是「不适用」
+Recovered        恢复跑了，而且证明了系统还能干活
+RecoveryFailed   恢复没成 —— 也是失败
+```
+
+判定顺序是刻意设计的：先跑 `precondition()` 读真状态；只有 precondition 说不适用，
+或者 fault 自己显式抛 `FaultNotApplicable`，才算 `NotApplicable`。其它任何异常一律
+`InjectionFailed`，并由 `fault-outcome-honest` invariant 兜底，不可能被记成「这轮跳过」。
+
+不适用是常态而不是噪音，例如：
+
+- `cpuPressure` 在本机没有 `stress-ng` 时直接不适用（不自研压测工具）；
+- `unreadableRunStateFile` 在 root 下不适用（root 无视文件权限，`chmod` 造不出「读不到」）；
+- provider 传输故障默认不适用（`CHAOS_REIFY_PROVIDER_FAULTS=1` 才真打网络）；
+- `killRuntimeDuringBuild` 在一轮没有挂常驻 runtime 时不适用（用 `--runtime`）。
+
+### provider / OAuth 边界
+
+两种真故障：
+
+- 凭证侧：改的是**真 schema 的副本**（`<project>/prime-agent/auth.json`，从真
+  `~/.prime/agent` 拷来），所以永远不会动本机真登录。过期 / 删除 / 清空 secret 之后，
+  用真读取代码看它是不是真的判成不可用。
+- 传输侧：真 `fault proxy`（`chaos/reify/provider-proxy.ts`）挡在真 provider endpoint
+  前面，上游那一跳是真 TLS 连接、带真凭证 header，故障真的打在线上：
+  `hang`（客户端自己的超时才是失败）、`reset`（真 RST）、`latency`、`truncate`
+  （真响应的前缀之后断流）、`status`（429 / 5xx）。
+
+传输侧是显式 opt-in：
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `CHAOS_REIFY_PROVIDER_FAULTS` | - | 设 `1` 才真发 provider 请求做传输故障 |
+| `CHAOS_REIFY_PROVIDER_TIMEOUT_MS` | 2500 | 传输故障里客户端自己的超时 |
+
+这一段不发真 LLM turn：真端点、真凭证、真字节在线上都是真的，只有 agent 回合本身没跑。
+
+### 文件 / 状态故障与「harness 自己弄坏的东西」
+
+`missingRunStateFile`、`unreadableRunStateFile`、`partialStateWrite` 会真的动
+`runs/<id>/state.json`，`missingDesktopProjection` 会真的删 `.pi-cad/status.json`。
+动过的东西登记在 `session.harnessDamage` 里，`run-ownership` / `artifact-integrity`
+在这些对象上不判产品，免得分不清「产品坏了」和「是我们刚弄坏的」。
+每个 fault 的 `recover()` 必须把原件放回去，否则那一轮算失败。
+
+### 多 conversation / 多 run
+
+`openConversation` 起第二个真会话，`multiConversationBuild` 两个会话同时真 build，
+`raceTwoConversationsBuild` 在两边都 build 的时候杀其中一个 kernel，
+`raceCrossConversationFault` 一边被打故障、另一边继续做真操作。
+`run-ownership` 盯着归属不串。
+
+### replay / shrink 跟着一起对
+
+artifact 现在记了 `runtimeMode`：runtime 生命周期故障只在同样的模式下才复现，
+所以 `replay` / `replay --seed` / `shrink` 会自动按 artifact 记的模式起 runtime。
+
+### 已经抓到的真问题（`--runtime`）
+
+build 途中 SIGKILL 常驻 runtime，runtime 死了但它起的真 cadctl kernel 还在跑，
+触发 `no-orphan-kernel`。路径：
+
+```
+startRun → commitPlan → advance(plan_ready) → killRuntimeDuringBuild → commitPlan
+```
+
+seed=5、path=2，原始 5 步、shrink 后仍是 5 步。`replay`、`replay --seed`、`shrink`
+都能复现。和 RES-384 抓到的一次性控制面孤儿是同一类：kernel 的清理只在正常关停路径上走。
+
+### 这一段新增的环境变量
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `CHAOS_REIFY_PROVIDER_FAULTS` | - | 设 `1` 才做 provider 传输故障（真联网） |
+| `CHAOS_REIFY_PROVIDER_TIMEOUT_MS` | 2500 | provider 传输故障里客户端自己的超时 |
+| `CHAOS_REIFY_CPU_WORKERS` | 2 | `cpuPressure` 用几个 CPU worker（上限 4） |
+
+`recovery-convergence` 的预算、`CHAOS_REIFY_PAUSE_MS` 等沿用上面那张表。

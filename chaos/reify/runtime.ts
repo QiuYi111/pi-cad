@@ -77,6 +77,8 @@ export class ReifyRuntime {
   readonly requests: ReifyRuntimeRequest[] = [];
   /** Wall-clock times the runtime was restarted, for the artifact timeline. */
   readonly restarts: number[] = [];
+  /** The pid of the runtime we just stopped, if its exit is still settling. */
+  closingPid: number | null = null;
   private child?: ChildProcess;
   private info?: ReifyRuntimeInfo;
   private log = "";
@@ -160,6 +162,7 @@ export class ReifyRuntime {
 
   async stop(signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
     const child = this.child;
+    this.closingPid = this.info?.pid ?? null;
     this.child = undefined;
     this.info = undefined;
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
