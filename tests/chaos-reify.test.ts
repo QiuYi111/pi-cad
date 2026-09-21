@@ -1169,3 +1169,14 @@ test("reify chaos: 两个 file-state 故障叠在一起，harness 不会造出�
     assert.ok(!session.harnessDamage.runs.has(runId!), "恢复之后 damage 必须清掉");
   });
 });
+
+test("reify chaos: campaign 落盘的最小复现能直接当回归输入", async () => {
+  // chaos/campaigns/<id>/regressions/ 是 campaign 自己 verify + shrink 出来的
+  // 最小复现。res388-main-500 那条 no-orphan-kernel 跑在 63814903（RES-389 修
+  // 之前），所以现在按序列和按 seed+path 都不该再复现；孤儿真漏回来这条会红。
+  const artifact = resolve("chaos/campaigns/res388-main-500/regressions/c41b23f2c-no-orphan-kernel.json");
+  const bySequence = await replayReifyArtifact(artifact, {});
+  assert.equal(bySequence.ok, false, `RES-389 修完之后不该再复现：${bySequence.detail ?? ""}`);
+  const bySeed = await replayReifyArtifact(artifact, { seed: true });
+  assert.equal(bySeed.ok, false, `按 seed+path 也不该再复现：${bySeed.detail ?? ""}`);
+});
