@@ -296,7 +296,7 @@ demo 那条链是手写的，没有 fast-check path，只能按序列 replay。
 | --- | --- |
 | runtime | 真 Reify authority sidecar **常驻进程**（Desktop 和 Prime 都连的那个真后端），走真 Unix socket 发真请求；能 start / stop / restart，pid 真会变 |
 | Prime | 真 `prime-cad-sidecar.mjs --mode rpc` 进程，真 RPC `get_state` 握手（不发 provider turn）；另外从 `/proc` 看当前真在跑的 Prime 进程 |
-| provider / OAuth | 真凭证库 `~/.prime/agent/auth.json`（只读 id / 类型 / 过期，不读 token 值）+ 真 `settings.json` 里的选择 + 真 Prime 模型注册表里的 baseUrl；真发一次 provider 请求，记真状态（例如 401） |
+| provider / OAuth | 真凭证库 `~/.prime/agent/auth.json`（只读 id / 类型 / 过期，不读 token 值）+ 真 `settings.json` 里的选择 + 真 Prime 模型注册表里的 baseUrl。默认只读，不发请求；要看真状态才显式开 `--provider-probe` |
 | Desktop ↔ backend | 真 `.pi-cad/status.json` 投影 vs 真 run store，给一组对照 |
 | Windows ↔ WSL | 真探针：在 WSL 里通过真 `wsl.exe` 看 Windows 侧（发行版、WSL 版本），同时探 Linux 侧 node / uv / python / bwrap |
 
@@ -304,8 +304,11 @@ demo 那条链是手写的，没有 fast-check path，只能按序列 replay。
 npm run chaos:reify -- inspect                       # 读得懂的输出
 npm run chaos:reify -- inspect --json                # 机器可读
 npm run chaos:reify -- inspect --prime               # 额外起真 Prime runtime
-npm run chaos:reify -- inspect --no-provider-probe   # 不发真 provider 请求
+npm run chaos:reify -- inspect --provider-probe      # 才真发一次 provider 请求（默认不发）
 ```
+
+provider 网络 probe 是**显式 opt-in**：默认只读本地凭证元数据 / 选择 / 注册表 endpoint，
+不动外部世界。失败 artifact 收集固定不发 provider 请求。
 
 统一 identity：`project / conversation / run / runtime / kernel / provider`。
 `inspect` 输出和 failure artifact 里都有这份归属图，每条边都带证据来源
@@ -318,5 +321,5 @@ provider 边界、Desktop 投影对照、WSL 边界、Prime 进程，以及 iden
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
-| `CHAOS_REIFY_PROVIDER_PROBE` | 1 | `0` 时不发真 provider 请求，只读边界状态 |
+| `CHAOS_REIFY_PROVIDER_PROBE` | - | 设 `1` 才真发 provider 请求；否则只读边界状态 |
 | `CHAOS_REIFY_PROVIDER` / `CHAOS_REIFY_MODEL` | - | 覆盖 provider 选择（默认读 `~/.prime/agent/settings.json`） |

@@ -70,6 +70,7 @@ export interface InspectReifyOptions {
   /** A live real Prime runtime the caller started, if any. */
   prime?: { pid: number; provider: string; model: string; thinking: string; sessionId: string | null; alive: boolean } | null;
   providerOverride?: { provider?: string; model?: string };
+  /** Opt-in real provider request; false by default so capture stays read-only. */
   probeProvider?: boolean;
   expectedRunId?: string | null;
 }

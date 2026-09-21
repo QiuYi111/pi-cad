@@ -287,7 +287,9 @@ async function captureFailure(
   let components: ReifyComponents | undefined;
   if (input.inspect) {
     try {
-      components = await inspectReifyComponents(session);
+      // Artifact capture is evidence collection, so it stays read-only: never
+      // fire a real provider request while saving a failure artifact.
+      components = await inspectReifyComponents(session, { probeProvider: false });
     } catch (error) {
       trace.note(`组件观测失败：${(error as Error).message}`);
     }

@@ -146,8 +146,10 @@ async function httpProbe(url: string, headers: Record<string, string>, timeoutMs
 
 /**
  * Observe the real provider/OAuth boundary: which provider is selected, which
- * credentials really exist, where the provider lives, and — when the endpoint
- * is resolvable — the real status of a real provider request.
+ * credentials really exist, and where the provider lives. Network probing is
+ * off by default: reading the boundary must not change the outside world. A
+ * real provider request only happens when the caller explicitly opts in
+ * (`probe: true` or `CHAOS_REIFY_PROVIDER_PROBE=1`).
  */
 export async function inspectProviderBoundary(options: { agentDir?: string; override?: { provider?: string; model?: string }; probe?: boolean } = {}): Promise<ProviderBoundary> {
   const agentDir = options.agentDir ?? homeAgentDir();
@@ -157,7 +159,7 @@ export async function inspectProviderBoundary(options: { agentDir?: string; over
   const endpoint = await resolveModelEndpoint(primeAgentRepo, selection.provider, selection.model);
   const credential = credentials.find((item) => item.id === selection.provider);
   const authed = Boolean(credential?.hasCredentials);
-  const probeEnabled = options.probe ?? process.env.CHAOS_REIFY_PROVIDER_PROBE !== "0";
+  const probeEnabled = options.probe ?? process.env.CHAOS_REIFY_PROVIDER_PROBE === "1";
   let probe: ProviderProbe = {
     url: endpoint ? `${endpoint.baseUrl.replace(/\/$/, "")}/models` : null,
     status: null,
@@ -170,7 +172,7 @@ export async function inspectProviderBoundary(options: { agentDir?: string; over
     const result = await httpProbe(probe.url!, authed ? { authorization: `Bearer ${readAccessToken(agentDir, selection.provider) ?? ""}` } : {}, 15_000);
     probe = { ...probe, ...result };
   } else if (endpoint && !probeEnabled) {
-    probe.skipped = "probe disabled by CHAOS_REIFY_PROVIDER_PROBE=0";
+    probe.skipped = "provider probe is opt-in (--provider-probe / CHAOS_REIFY_PROVIDER_PROBE=1)";
   }
   return {
     agentDir,

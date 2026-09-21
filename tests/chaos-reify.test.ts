@@ -279,11 +279,41 @@ test("reify chaos: provider 边界读到真选择和凭证，且不泄露 token"
   }
 });
 
+test("reify chaos: provider 网络 probe 默认只读，只有显式 opt-in 才联网", async () => {
+  const previous = process.env.CHAOS_REIFY_PROVIDER_PROBE;
+  try {
+    delete process.env.CHAOS_REIFY_PROVIDER_PROBE;
+    // No call-site flag and no env opt-in: this must stay read-only and never
+    // fire a real provider request.
+    const byDefault = await inspectProviderBoundary();
+    assert.equal(byDefault.probe.status, null, "默认不能发 provider 请求");
+    assert.equal(byDefault.probe.ok, false);
+    if (byDefault.probe.url) {
+      assert.ok(byDefault.probe.skipped, "默认必须说明为什么没发请求");
+    }
+    // An explicit opt-out at the call site is also read-only.
+    const forcedOff = await inspectProviderBoundary({ probe: false });
+    assert.equal(forcedOff.probe.status, null, "显式关闭也不能发 provider 请求");
+    // The shared component inspector keeps the same read-only default, so an
+    // artifact capture can never trigger a real provider request.
+    const session = await ReifySession.start();
+    try {
+      const components = await inspectReifyComponents(session);
+      assert.equal(components.provider.probe.status, null, "capture 路径默认不能发 provider 请求");
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+  } finally {
+    if (previous === undefined) delete process.env.CHAOS_REIFY_PROVIDER_PROBE;
+    else process.env.CHAOS_REIFY_PROVIDER_PROBE = previous;
+  }
+});
+
 test("reify chaos: artifact 能带上新组件的真观测", async () => {
   const session = await ReifySession.start();
   let file: string | undefined;
   try {
-    const components = await inspectReifyComponents(session, { probeProvider: false });
+    const components = await inspectReifyComponents(session);
     assert.ok(components.wsl.command.length > 0, "WSL 探针必须给出可执行命令");
     file = saveReifyArtifact({
       schema: 1,

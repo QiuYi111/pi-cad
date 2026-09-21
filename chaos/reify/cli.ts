@@ -18,7 +18,7 @@ const USAGE = `真 Reify chaos slice
   chaos reify replay <artifact.json>              按 artifact 里存的序列重放
   chaos reify replay <artifact.json> --seed       按 artifact 里的 seed+path 精确重放原路径
   chaos reify shrink <artifact.json>
-  chaos reify inspect [--json] [--prime] [--no-provider-probe]
+  chaos reify inspect [--json] [--prime] [--provider-probe]
                                        起真 runtime，打真 run/kernel，看 provider/Desktop/WSL
   chaos reify invariants
 `;
@@ -192,7 +192,9 @@ async function inspect(flags: ParsedArgs["flags"]): Promise<number> {
   session.registerAuthorityPid(runtime.pid);
   const drivenRuns: string[] = [];
   const pidSequence: number[] = [runtime.pid];
-  const probeProvider = flags["no-provider-probe"] === true ? false : true;
+  // Provider network probe is explicit opt-in: observing the boundary must not
+  // change the outside world. Without the flag this only reads local state.
+  const probeProvider = flags["provider-probe"] === true;
   let orphaned: number[] = [];
   try {
     // Real run + real plan, served by the long-lived runtime over its socket.
