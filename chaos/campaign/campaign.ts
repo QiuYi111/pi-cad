@@ -407,6 +407,13 @@ function buildReport(
   if (manifest.version.gitDirty) notes.push("campaign 起点工作区不干净，结论要对着 gitCommit 看");
   if (coverage.roundsErrored) notes.push(`${coverage.roundsErrored} 轮是 harness 自己报错，已单独计，不算产品发现`);
   if (unverified) notes.push(`${unverified} 个 unique failure 没验成，看 triage notes`);
+  const harnessClusters = clusters.filter((cluster) => cluster.nature === "harness");
+  if (harnessClusters.length) {
+    notes.push(
+      `${harnessClusters.length} 个 unique failure 是 harness 侧（${harnessClusters.map((cluster) => cluster.id).join(", ")}）：` +
+        "那是 campaign 自己的 fault 注入打错了，不是产品发现；修在 harness 里，回归用例进 tests/chaos-reify.test.ts。",
+    );
+  }
   return {
     campaignId: manifest.campaignId,
     createdAt: new Date().toISOString(),
@@ -464,8 +471,19 @@ export async function reclusterCampaign(dir: string, options: { triageReplays?: 
     }
   }
   let clusters = clusterFailures(failureInputs);
-  if (!options.skipTriage && clusters.length) {
-    clusters = await triageClusters(clusters, {
+  // A cluster whose signature did not change already has a verdict: reuse it
+  // instead of replaying the same real sequences again.
+  const previous = new Map(loaded.clusters.map((cluster) => [cluster.signature, cluster]));
+  for (const cluster of clusters) {
+    const old = previous.get(cluster.signature);
+    if (old?.triage) {
+      cluster.triage = old.triage;
+      cluster.verdict = old.verdict;
+    }
+  }
+  const untriaged = clusters.filter((cluster) => cluster.verdict === "unverified");
+  if (!options.skipTriage && untriaged.length) {
+    await triageClusters(untriaged, {
       replays: options.triageReplays ?? loaded.manifest.triageReplays,
       regressionDir: join(dir, "regressions"),
       quiet: options.quiet,
@@ -478,7 +496,10 @@ export async function reclusterCampaign(dir: string, options: { triageReplays?: 
     loaded.manifest.profiles,
   );
   const report = buildReport(loaded.manifest, coverage, clusters, loaded.rounds);
-  report.notes.unshift(`本轮报告由 ${gitInfo().commit.slice(0, 12)} 重新聚类生成（轮次跑在 ${loaded.manifest.version.gitCommit.slice(0, 12)}）`);
+  report.notes.unshift(
+    `本轮报告由 campaign recluster 在已落盘的轮次上重算（轮次跑在 ${loaded.manifest.version.gitCommit.slice(0, 12)}）；` +
+      "聚类口径见 chaos/campaign/signature.ts。",
+  );
   writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
   writeFileSync(join(dir, "report.md"), renderCampaignReport(report), "utf8");
   return { outDir: dir, manifest: loaded.manifest, report, clusters };

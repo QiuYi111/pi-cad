@@ -573,3 +573,16 @@ chaos/campaigns/<id>/
 setsid nohup node chaos/campaigns/progress-sync.mjs --dir chaos/campaigns/<id> \
   > /tmp/campaign-sync.log 2>&1 < /dev/null &
 ```
+
+### 已经跑过的 campaign
+
+`chaos/campaigns/<id>/` 里提交了三样东西：`manifest.json`（跑法）、
+`clusters.json`（unique failure 和证据）、`report.md` / `report.json`（结论），
+以及验证过的 `regressions/` 最小复现（可以直接当回归输入）。原始
+`rounds.jsonl` / `status.json` / `artifacts/` 不进 git。
+
+改了去重口径或 product/harness 判定，不用重跑 500 轮：
+
+```bash
+npm run chaos:reify -- campaign recluster chaos/campaigns/<id>
+```

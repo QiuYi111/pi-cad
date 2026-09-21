@@ -85,8 +85,9 @@ export function renderCampaignReport(report: CampaignReport): string {
   lines.push("## 3. 发现多少 failure，多少 unique");
   lines.push("");
   lines.push(
-    `失败轮 ${failures.rounds} 轮 → unique ${failures.unique} 个。归并维度：invariant + 失败边界 + 归一化后的失败原因` +
-      `（pid、临时目录、hash、出现次数都不算身份）；每个 cluster 另外留下出错步骤、序列形状和日志签名。`,
+    `失败轮 ${failures.rounds} 轮 → unique ${failures.unique} 个。归并维度：坏掉哪个 invariant + 归一化后的失败原因` +
+      `（pid、run id、临时目录、hash、出现次数、哪一步收场都不算身份）；每个 cluster 另外留下失败边界、出错步骤、` +
+      `序列形状和日志签名。`,
   );
   lines.push("");
   lines.push(
