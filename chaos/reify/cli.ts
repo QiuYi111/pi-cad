@@ -1,5 +1,10 @@
+import { join } from "node:path";
+
 import { InvariantViolation } from "../types.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "./artifacts.ts";
+import { inspectReifyComponents, runtimeObservation, type ReifyComponents } from "./components.ts";
+import { ReifyPrimeRuntime } from "./prime.ts";
+import { ReifyRuntime } from "./runtime.ts";
 import { checkInvariantsOn, reifyInvariantDefinitions } from "./invariants.ts";
 import type { Command } from "./model.ts";
 import { executeReifyCommand, reifyChaosRun, reifySettleWindowFor, replayReifyArtifact, runReifySequence, shrinkReifyArtifact } from "./runner.ts";
@@ -13,6 +18,8 @@ const USAGE = `真 Reify chaos slice
   chaos reify replay <artifact.json>              按 artifact 里存的序列重放
   chaos reify replay <artifact.json> --seed       按 artifact 里的 seed+path 精确重放原路径
   chaos reify shrink <artifact.json>
+  chaos reify inspect [--json] [--prime] [--provider-probe]
+                                       起真 runtime，打真 run/kernel，看 provider/Desktop/WSL
   chaos reify invariants
 `;
 
@@ -169,6 +176,169 @@ async function commandRun(flags: ParsedArgs["flags"]): Promise<number> {
   return result.failed ? 1 : 0;
 }
 
+/**
+ * Drive the real Reify runtime, observe every component RES-385 connected,
+ * and print the unified identity graph. This is the "接得上、看得见" command:
+ * no fault campaign, only real start / observe evidence.
+ */
+async function inspect(flags: ParsedArgs["flags"]): Promise<number> {
+  const session = await ReifySession.start();
+  const conversation = session.conversation(0);
+  const runtime = await ReifyRuntime.start({
+    project: session.project,
+    runtimeDirectory: join(session.root, "runtime"),
+    env: session.env,
+  });
+  session.registerAuthorityPid(runtime.pid);
+  const drivenRuns: string[] = [];
+  const pidSequence: number[] = [runtime.pid];
+  // Provider network probe is explicit opt-in: observing the boundary must not
+  // change the outside world. Without the flag this only reads local state.
+  const probeProvider = flags["provider-probe"] === true;
+  let orphaned: number[] = [];
+  try {
+    // Real run + real plan, served by the long-lived runtime over its socket.
+    const view = (await runtime.call("workflow-start", { id: "mechanical.default", sessionId: conversation })) as {
+      runId?: string;
+      phase?: string;
+      status?: string;
+    };
+    if (typeof view?.runId === "string") drivenRuns.push(view.runId);
+    await runtime.call("commit", { name: "plan", sessionId: conversation });
+    await runtime.call("workflow-advance", { event: "plan_ready", sessionId: conversation });
+
+    // A real slow build in flight, so the CAD kernel really is a live child of
+    // the runtime pid while the identity graph is built.
+    const pendingBuild = runtime.call("model-build", {
+      source: "slow_part.py",
+      output: `build/slow-${conversation}.step`,
+      validation: "fast",
+      sessionId: conversation,
+    });
+    const ownedKernel = await waitForRuntimeKernel(session, runtime.pid, 20_000);
+    const runtimes = [runtimeObservation(runtime, drivenRuns)];
+    const components = await inspectReifyComponents(session, { runtimes, probeProvider });
+    const build = (await pendingBuild) as { build?: { ok?: boolean; durationMs?: number } };
+
+    // Optional real Prime runtime: start the real Desktop runtime process and
+    // handshake its real RPC without sending a provider turn.
+    let primeInfo: { pid: number; sessionId: string | null; alive: boolean } | null = null;
+    let primeLog = "";
+    if (flags.prime === true) {
+      if (!ReifyPrimeRuntime.available()) {
+        process.stdout.write("Prime runtime 不可用：没有可解析的 prime-agent checkout\n");
+      } else {
+        const selection = components.provider.selection;
+        const prime = await ReifyPrimeRuntime.start({
+          project: session.project,
+          env: session.env,
+          provider: selection.provider,
+          model: selection.model,
+          thinking: selection.thinking ?? "medium",
+        });
+        primeInfo = { pid: prime.pid, sessionId: prime.current?.sessionId ?? null, alive: prime.alive };
+        primeLog = prime.logTail;
+        await prime.close();
+      }
+    }
+
+    // Real runtime lifecycle: restart, then stop, then start again. After each
+    // change the fresh runtime must still answer for the same durable run.
+    const restarted = await runtime.restart();
+    pidSequence.push(restarted.pid);
+    session.registerAuthorityPid(runtime.pid);
+    const afterRestart = (await runtime.call("workflow-current", { sessionId: conversation })) as { runId?: string; status?: string } | null;
+    await runtime.stop();
+    const startedAgain = await runtime.start();
+    pidSequence.push(startedAgain.pid);
+    session.registerAuthorityPid(runtime.pid);
+    const afterStart = (await runtime.call("workflow-current", { sessionId: conversation })) as { runId?: string; status?: string } | null;
+    const snapshot = await session.snapshot();
+    orphaned = snapshot.kernels.filter((kernel) => kernel.orphan).map((kernel) => kernel.pid);
+
+    const report = {
+      runtime: {
+        pid: runtime.pid,
+        pidSequence,
+        restarts: runtime.restarts.length,
+        authorSocket: runtime.authorSocket,
+        requests: runtime.requests,
+        logTail: runtime.logTail,
+      },
+      run: {
+        id: drivenRuns[0] ?? null,
+        phase: view.phase ?? null,
+        afterRestartRunId: afterRestart?.runId ?? null,
+        afterRestartStatus: afterRestart?.status ?? null,
+        afterStartRunId: afterStart?.runId ?? null,
+        build: build.build ?? null,
+      },
+      kernel: { ownedByRuntimePid: ownedKernel ?? null, orphanedAfterRestart: orphaned },
+      components,
+      prime: primeInfo ? { ...primeInfo, logTail: primeLog } : { available: ReifyPrimeRuntime.available(), started: false },
+    };
+
+    if (boolFlag(flags, "json")) {
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    } else {
+      printInspect(report, components);
+    }
+    return 0;
+  } finally {
+    // Never leave a real orphan behind: stop the runtime and its kernels.
+    await runtime.close().catch(() => undefined);
+    for (const pid of orphaned) session.killKernel(pid, "SIGKILL");
+    await session.close().catch(() => undefined);
+  }
+}
+
+/** Wait until the runtime pid really owns a live CAD kernel. */
+async function waitForRuntimeKernel(session: ReifySession, runtimePid: number, timeoutMs: number): Promise<{ pid: number; ppid: number; orphan: boolean } | null> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const snapshot = await session.snapshot();
+    const kernel = snapshot.kernels.find((candidate) => candidate.ppid === runtimePid) ?? null;
+    if (kernel) return kernel;
+    if (Date.now() > deadline) return null;
+    await new Promise((accept) => setTimeout(accept, 100));
+  }
+}
+
+function printInspect(report: any, components: ReifyComponents): void {
+  const provider = components.provider;
+  const desktop = report.components?.desktop ?? components.desktop;
+  const wsl = components.wsl;
+  process.stdout.write(`\n== 真 runtime（authority sidecar 常驻进程）\n`);
+  process.stdout.write(`  pid 序列=${report.runtime.pidSequence.join(" → ")}（restarts=${report.runtime.restarts}）\n`);
+  process.stdout.write(`  socket=${report.runtime.authorSocket}\n`);
+  process.stdout.write(`  真请求：${report.runtime.requests.map((r: any) => `${r.op}${r.ok ? "✓" : "✗"}`).join(", ")}\n`);
+  process.stdout.write(`\n== conversation → run → runtime/kernel\n`);
+  process.stdout.write(`  conversation=${sessionLine(report)} run=${report.run.id ?? "none"}\n`);
+  process.stdout.write(`  kernel=${report.kernel.ownedByRuntimePid ? `pid=${report.kernel.ownedByRuntimePid.pid} ppid=${report.kernel.ownedByRuntimePid.ppid}(runtime)` : "none"}；重启后孤儿=${report.kernel.orphanedAfterRestart.join(",") || "无"}\n`);
+  process.stdout.write(`  identity 节点=${components.identities.nodes.length} 边=${components.identities.edges.length}\n`);
+  process.stdout.write(`\n== provider / OAuth 边界\n`);
+  process.stdout.write(`  选择=${provider.selection.provider}/${provider.selection.model}（${provider.selection.source}）\n`);
+  process.stdout.write(`  凭证=${provider.credentials.map((c) => `${c.id}(${c.type}${c.expired ? ",expired" : ""})`).join(", ") || "无"}\n`);
+  process.stdout.write(`  probe ${provider.probe.url ?? "(no endpoint)"} → ${provider.probe.status ?? provider.probe.error ?? provider.probe.skipped}\n`);
+  process.stdout.write(`\n== Desktop ↔ backend 投影\n`);
+  process.stdout.write(`  ${desktop.consistent ? "一致" : "不一致"}：${desktop.mismatch ?? `${desktop.projection.runId} ${desktop.projection.phase}/${desktop.projection.status}`}\n`);
+  process.stdout.write(`\n== Windows ↔ WSL 边界\n`);
+  process.stdout.write(`  host=${wsl.host} boundary=${wsl.boundary} distro=${wsl.distro ?? "-"}\n`);
+  process.stdout.write(`  Windows 侧：${wsl.windows?.reachable ? `wsl.exe 看到 ${wsl.windows.distros.join(", ") || "无"}；${wsl.windows.version ?? ""}` : "不可达"}\n`);
+  process.stdout.write(`  ${wsl.note}\n`);
+  if (components.prime.processes.length) {
+    process.stdout.write(`\n== 真 Prime 进程\n`);
+    for (const process_ of components.prime.processes) {
+      process.stdout.write(`  ${process_.role} pid=${process_.pid} provider=${process_.provider ?? "?"} model=${process_.model ?? "?"}\n`);
+    }
+  }
+}
+
+function sessionLine(report: any): string {
+  const conversation = report.components?.identities?.nodes?.find((node: any) => node.kind === "conversation");
+  return conversation?.label ?? "conv-a";
+}
+
 export async function runReifyCli(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   const { positionals, flags } = parseArgs(rest);
@@ -204,6 +374,8 @@ export async function runReifyCli(argv: string[]): Promise<number> {
       );
       return result.ok ? 0 : 1;
     }
+    case "inspect":
+      return await inspect(flags);
     case "invariants":
       for (const invariant of reifyInvariantDefinitions) {
         process.stdout.write(`${invariant.name.padEnd(28)} ${invariant.description}\n`);

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { ARTIFACTS_DIR } from "../runner/artifacts.ts";
+import type { ReifyComponents } from "./components.ts";
 import type { ApiLogEntry } from "./session.ts";
 import type { ReifyTimelineEntry } from "./trace.ts";
 import type { Command } from "./model.ts";
@@ -38,6 +39,13 @@ export interface ReifyFailureArtifact {
   logs: string[];
   recoveries: { at: number; after: string; buildMs: number }[];
   project: { root: string; project: string; canonical: string; workflowHome: string };
+  /**
+   * Real observations of the components RES-385 connected: the long-lived
+   * runtime, the provider/OAuth boundary, the Desktop projection pair, the
+   * Prime runtime surface and the Windows↔WSL probe, plus the unified identity
+   * graph that joins them. Absent on artifacts written before this existed.
+   */
+  components?: ReifyComponents;
 }
 
 export function saveReifyArtifact(artifact: ReifyFailureArtifact): string {

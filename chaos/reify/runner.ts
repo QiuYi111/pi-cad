@@ -3,6 +3,7 @@ import fc from "fast-check";
 import { InvariantViolation } from "../types.ts";
 import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact, type ReifyFailureArtifact } from "./artifacts.ts";
+import { inspectReifyComponents, type ReifyComponents } from "./components.ts";
 import { reifyFaultDefinitions } from "./faults.ts";
 import { checkInvariantsOn, checkReifyInvariants, reifyInvariantDefinitions } from "./invariants.ts";
 import { buildReifySequenceArbitrary, describeCommand, type Command } from "./model.ts";
@@ -203,6 +204,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       sequence: shrunk,
       fallback: original,
       expected: details.errorInstance instanceof InvariantViolation ? details.errorInstance : null,
+      inspect: options.save !== false,
     });
     const artifactPath = options.save === false ? undefined : saveReifyArtifact(artifact);
 
@@ -246,6 +248,8 @@ async function captureFailure(
     sequence: Command[];
     fallback: Command[];
     expected: InvariantViolation | null;
+    /** Attach real component observations; disabled for cheap in-process shrinks. */
+    inspect: boolean;
   },
 ): Promise<ReifyFailureArtifact> {
   const attempt = async (sequence: Command[]) => {
@@ -277,6 +281,20 @@ async function captureFailure(
   const executed = [...trace.executed];
   const usedSequence = violation ? executed : replayed;
 
+  // Join the newly connected real components (runtime/provider/desktop/wsl)
+  // into the evidence. A component probe that fails must not hide the primary
+  // invariant failure, so it degrades to `undefined` with a note.
+  let components: ReifyComponents | undefined;
+  if (input.inspect) {
+    try {
+      // Artifact capture is evidence collection, so it stays read-only: never
+      // fire a real provider request while saving a failure artifact.
+      components = await inspectReifyComponents(session, { probeProvider: false });
+    } catch (error) {
+      trace.note(`组件观测失败：${(error as Error).message}`);
+    }
+  }
+
   return {
     schema: 1,
     sut: "reify",
@@ -303,6 +321,7 @@ async function captureFailure(
     logs: trace.notes,
     recoveries: session.history.recoveries,
     project: { root: session.root, project: session.project, canonical: session.canonical, workflowHome: session.workflowHome },
+    ...(components ? { components } : {}),
   };
 }
 
