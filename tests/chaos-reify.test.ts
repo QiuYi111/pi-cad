@@ -18,7 +18,7 @@ import { checkReifyInvariants } from "../chaos/reify/invariants.ts";
 import { REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
 import { applyCredentialFault, observeCredential, restoreCredentialSandbox, seedCredentialSandbox } from "../chaos/reify/provider.ts";
 import { ProviderFaultProxy } from "../chaos/reify/provider-proxy.ts";
-import { injectReifyFault, recoverInjectedFaults, runReifySequence } from "../chaos/reify/runner.ts";
+import { injectReifyFault, recoverInjectedFaults, runReifySequence, startReifySession } from "../chaos/reify/runner.ts";
 import { ReifyRuntime } from "../chaos/reify/runtime.ts";
 import { ReifySession } from "../chaos/reify/session.ts";
 import { ReifyTrace } from "../chaos/reify/trace.ts";
@@ -643,7 +643,7 @@ test("reify chaos: 真状态文件少了 / 坏了，harness 的破坏不会被�
   });
 });
 
-test("reify chaos: race 故障真的同时跑多步，并留下可 replay 的命令序列", async () => {
+test("reify chaos: race 故障真的跑多步，并留下可 replay 的命令序列", async () => {
   await withRealSession(async (session, trace) => {
     await runReifySequence(
       session,
@@ -659,4 +659,155 @@ test("reify chaos: race 故障真的同时跑多步，并留下可 replay 的命
     // The race is an ordinary generated command, so replay/shrink still see it.
     assert.ok(trace.executed.some((executed) => executed.name === "raceLegalOrderSwap"));
   });
+});
+
+const runIdOf = (view: unknown): string | null => {
+  const runId = (view as { runId?: string } | null)?.runId;
+  return typeof runId === "string" ? runId : null;
+};
+
+test("reify chaos: 带 conversationIndex 的 fault 真打对会话，conv#1 不会打到 conv#0", async () => {
+  await withRealSession(async (session, trace) => {
+    // conv-a: 真 run + 真 kernel。
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const runA = runIdOf(await session.call("workflow-current", { sessionId: session.conversation(0) }));
+    assert.ok(runA, "conv-a 必须有真 run");
+
+    // 第二个真会话，也推到真 build 被允许的阶段。
+    await runReifySequence(
+      session,
+      [
+        { kind: "action", name: "openConversation", params: {} },
+        { kind: "action", name: "commitPlan", params: { conversationIndex: 1 } },
+        { kind: "action", name: "advance", params: { event: "plan_ready", conversationIndex: 1 } },
+      ],
+      trace,
+    );
+    const conversationB = session.conversation(1);
+    assert.notEqual(conversationB, session.conversation(0), "必须真的有第二个会话");
+    const runB = runIdOf(await session.call("workflow-current", { sessionId: conversationB }));
+    assert.ok(runB && runB !== runA, `conv#1 必须有自己的 run：${runB}`);
+
+    const entriesBefore = trace.entries.length;
+    const requestsBefore = session.requests.length;
+    const outcome = await injectReifyFault(
+      session,
+      reifyFaultDefinitions.find((fault) => fault.name === "killKernelDuringBuild")!,
+      { kind: "fault", name: "killKernelDuringBuild", params: { conversationIndex: 1 } },
+      trace,
+    );
+    assert.equal(outcome.status, "Injected", `fault 必须真的注入：${JSON.stringify(outcome)}`);
+
+    // 真证据一：被杀的 build 请求真的发给了 conv#1。
+    const builtFor = session.requests.slice(requestsBefore).filter((entry) => entry.op === "model-build").map((entry) => entry.conversation);
+    assert.ok(builtFor.includes(conversationB), `被杀的真 build 必须发往 conv#1，实际 ${builtFor.join(",") || "无"}`);
+    assert.ok(!builtFor.includes(session.conversation(0)), `conv#1 的故障不能打到 conv#0，实际 ${builtFor.join(",")}`);
+
+    // 真证据二：记录里写的也是 conv#1 的 run。
+    const recorded = JSON.stringify(trace.entries.slice(entriesBefore).map((entry) => entry.detail));
+    assert.ok(recorded.includes(`conv=${conversationB}`), `记录必须写明真被打的会话：${recorded}`);
+    assert.ok(recorded.includes(`run=${runB}`), `记录必须写明真被打的 run：${recorded}`);
+
+    // 恢复也必须落在同一个会话上。
+    const requestsBeforeRecovery = session.requests.length;
+    await recoverInjectedFaults(
+      session,
+      [{ definition: reifyFaultDefinitions.find((fault) => fault.name === "killKernelDuringBuild")!, params: { conversationIndex: 1 } }],
+      trace,
+    );
+    const recoveredFor = session.requests
+      .slice(requestsBeforeRecovery)
+      .filter((entry) => entry.op === "model-build")
+      .map((entry) => entry.conversation);
+    assert.ok(recoveredFor.includes(conversationB), `恢复的真 build 必须在 conv#1，实际 ${recoveredFor.join(",") || "无"}`);
+  });
+});
+
+test("reify chaos: 真状态读不出来时 precondition 直接失败，不会被当成不适用", async () => {
+  const session = await ReifySession.start();
+  const trace = new ReifyTrace();
+  try {
+    // The real state source (workflow-current) really fails; the harness must
+    // report InjectionFailed, never a silent NotApplicable.
+    (session as unknown as { call: () => Promise<never> }).call = async () => {
+      throw new Error("workflow-current 真读挂了");
+    };
+    for (const name of ["killKernelDuringBuild", "raceUserActionDuringKernelFault", "raceLegalOrderSwap"]) {
+      const definition = reifyFaultDefinitions.find((fault) => fault.name === name)!;
+      const outcome = await injectReifyFault(session, definition, { kind: "fault", name, params: { conversationIndex: 0 } }, trace);
+      assert.equal(outcome.status, "InjectionFailed", `${name} 读不到真状态必须算注入失败：${JSON.stringify(outcome)}`);
+      assert.ok(outcome.reason?.includes("workflow-current 真读挂了"), `${name} 必须原样带上真异常：${outcome.reason}`);
+    }
+    assert.ok(
+      !session.faultOutcomes.some((entry) => entry.status === "NotApplicable"),
+      "读不到真状态不能变成不适用",
+    );
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+});
+
+test("reify chaos: 两个合法操作真按生成器选的顺序跑，A→B 与 B→A 不一样", async () => {
+  await withRealSession(async (session) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      new ReifyTrace(),
+    );
+    const definition = reifyFaultDefinitions.find((fault) => fault.name === "raceLegalOrderSwap")!;
+    const injectOutcome = (before: number) =>
+      session.faultOutcomes.slice(before).find((entry) => entry.name === "raceLegalOrderSwap" && entry.phase === "inject");
+    const orderOf = async (first: string): Promise<string[]> => {
+      const trace = new ReifyTrace();
+      const before = session.faultOutcomes.length;
+      await runReifySequence(session, [{ kind: "fault", name: "raceLegalOrderSwap", params: { first, conversationIndex: 0 } }], trace);
+      const outcome = injectOutcome(before);
+      assert.equal(outcome?.status, "Injected", `${first} 分支必须真的注入：${JSON.stringify(outcome)}`);
+      return trace.entries.filter((entry) => entry.kind === "command" && entry.name.startsWith("race:")).map((entry) => entry.name);
+    };
+
+    const buildFirst = await orderOf("build");
+    const commitFirst = await orderOf("commitPlan");
+    assert.deepEqual(buildFirst, ["race:retryBuild", "race:commitPlan"], `first=build 必须真先 build：${buildFirst.join("→")}`);
+    assert.deepEqual(commitFirst, ["race:commitPlan", "race:retryBuild"], `first=commitPlan 必须真先 commit：${commitFirst.join("→")}`);
+    assert.notDeepEqual(buildFirst, commitFirst, "两个生成分支的执行顺序必须真的不同");
+  });
+});
+
+test("reify chaos: transition race 先验真合法，产品在重启前拒绝就不算注入", async () => {
+  const session = await startReifySession(true);
+  const trace = new ReifyTrace();
+  try {
+    const conversation = session.conversation(0);
+    await runReifySequence(session, REIFY_SETUP, trace);
+    const phase = ((await session.call("workflow-current", { sessionId: conversation })) as { phase?: string } | null)?.phase;
+    assert.equal(phase, "cook", `setup 之后必须在 cook：${phase}`);
+
+    const definition = reifyFaultDefinitions.find((fault) => fault.name === "raceRestartDuringTransition")!;
+    // cook 阶段不接受 plan_ready：不合法的事件不能算一次真的 transition race。
+    const illegal = await injectReifyFault(session, definition, { kind: "fault", name: definition.name, params: { event: "plan_ready" } }, trace);
+    assert.equal(illegal.status, "NotApplicable", `不合法的事件必须明说不适用：${JSON.stringify(illegal)}`);
+    assert.ok(illegal.reason?.includes("plan_ready"), `不适用必须说清哪个事件不合法：${illegal.reason}`);
+    assert.ok(!session.activeFaults.includes("raceRestartDuringTransition"), "不适用就不能留在已注入状态");
+
+    // cook 阶段真合法的 finished 才真的和重启同时发生。
+    const beforeLegal = session.faultOutcomes.length;
+    await runReifySequence(session, [{ kind: "fault", name: "raceRestartDuringTransition", params: { event: "finished" } }], trace);
+    const legal = session.faultOutcomes
+      .slice(beforeLegal)
+      .find((entry) => entry.name === "raceRestartDuringTransition" && entry.phase === "inject");
+    assert.equal(legal?.status, "Injected", `合法的事件必须真的注入：${JSON.stringify(legal)}`);
+
+    // 记录里必须带上产品自己的答案，不能只写“我重启了”。
+    const note = trace.entries.find((entry) => entry.kind === "note" && entry.name === "raceRestartDuringTransition");
+    assert.ok(note, "必须记录 transition 与重启各自的真结果");
+    const answer = (note!.detail as { answer?: { result?: unknown; error?: string } }).answer;
+    assert.ok(answer && (answer.result !== undefined || typeof answer.error === "string"), `记录必须带产品答案：${JSON.stringify(note!.detail)}`);
+  } finally {
+    await session.close().catch(() => undefined);
+  }
 });

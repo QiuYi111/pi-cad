@@ -256,6 +256,14 @@ Fault（30 个，按它真正打的边界分组）：
 race 那一组不是单步 fault：它在一个 `inject` 里真的同时或交错跑多步
 （用户操作 + 故障、两个会话同时 build、transition 跑着的时候重启 runtime、两个合法操作换顺序、故障挂着时重复提交）。
 
+其中两组的判定要更严：
+
+- `raceRestartDuringTransition` 先读真 `workflow-current` 的 transitions，事件在当前阶段不合法就不适用；
+  inject 里真发 transition 和真重启重叠，产品在重启生效前按 `illegal workflow transition` 一类理由拒绝，
+  就报不适用，不记成一次注入。
+- `raceLegalOrderSwap` 的 `first` 真的决定顺序：先跑完 A 再跑 B，所以 `build→commit` 和 `commit→build`
+  是两条不同的真序列；precondition 先确认 build 和 commit 在当前阶段都真合法。
+
 ### Invariant
 
 | 名字 | 含义 |
@@ -372,6 +380,12 @@ RecoveryFailed   恢复没成 —— 也是失败
 判定顺序是刻意设计的：先跑 `precondition()` 读真状态；只有 precondition 说不适用，
 或者 fault 自己显式抛 `FaultNotApplicable`，才算 `NotApplicable`。其它任何异常一律
 `InjectionFailed`，并由 `fault-outcome-honest` invariant 兜底，不可能被记成「这轮跳过」。
+
+这条规则对 precondition 自己读真状态同样成立：`workflow-current` 读失败不会被当成
+「没有 active run / 当前阶段不允许」，而是直接抛出去，变成 `InjectionFailed`。
+
+带 `conversationIndex` 的 fault，precondition、真 build、recover 全程用同一个 index，
+记录里也直接写明真被打的会话和 run（`conv=… run=…`），artifact 的参数和真被打对象一致。
 
 不适用是常态而不是噪音，例如：
 

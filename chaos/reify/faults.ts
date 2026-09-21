@@ -45,7 +45,19 @@ let buildCounter = 0;
 
 const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
-function conversationOf(ctx: ReifyContext, index = Number(ctx.params.conversationIndex ?? 0)): string {
+/**
+ * The conversation a generated fault param really selects.
+ *
+ * Every fault that carries `conversationIndex` must use this one value from
+ * precondition through injection to recovery. Otherwise the artifact names one
+ * object and the fault hits another, and the multi-conversation evidence the
+ * artifact carries is not trustworthy.
+ */
+function faultConversationIndex(ctx: ReifyContext): number {
+  return Number(ctx.params.conversationIndex ?? 0);
+}
+
+function conversationOf(ctx: ReifyContext, index = faultConversationIndex(ctx)): string {
   return ctx.session.conversation(index);
 }
 
@@ -57,20 +69,23 @@ async function runView(ctx: ReifyContext, conversation: string): Promise<{ runId
   return { runId: view?.runId ?? null, status: view?.status ?? null, phase: view?.phase ?? null };
 }
 
-/** Honest applicability: an active run is what makes most faults meaningful. */
-async function requireActiveRun(ctx: ReifyContext, conversation: string): Promise<{ runId: string }> {
-  let view: { runId: string | null; status: string | null };
+/**
+ * Read a conversation's real run state, keeping a read failure a failure.
+ *
+ * The real system answering with an error is never "this fault does not
+ * apply": it is thrown here so the runner records `InjectionFailed` (or
+ * `RecoveryFailed`) instead of quietly turning a broken state source into a
+ * skip.
+ */
+async function runViewOrThrow(
+  ctx: ReifyContext,
+  conversation: string,
+): Promise<{ runId: string | null; status: string | null; phase: string | null }> {
   try {
-    view = await runView(ctx, conversation);
+    return await runView(ctx, conversation);
   } catch (error) {
-    // The real system answering with an error is not "this fault does not
-    // apply"; it is a genuine failure and must surface as InjectionFailed.
-    throw new Error(`真状态读不出来：${(error as Error).message}`);
+    throw new Error(`读不到会话 ${conversation} 的真状态：${(error as Error).message}`);
   }
-  if (view.status !== "active") {
-    throw new FaultNotApplicable(`会话没有 active run（当前 ${view.status ?? "无"}）`, { conversation });
-  }
-  return { runId: view.runId! };
 }
 
 /**
@@ -81,45 +96,73 @@ async function requireActiveRun(ctx: ReifyContext, conversation: string): Promis
  * of hardcoding a phase name is what keeps the harness from demanding a build
  * in `plan` and calling the refusal "no recovery".
  */
-async function buildAllowed(ctx: ReifyContext, conversation: string): Promise<boolean> {
-  try {
-    const view = (await ctx.session.call("workflow-current", { sessionId: conversation })) as
-      | { operations?: { capability?: string }[]; can?: string[] }
-      | null;
-    if (!view) return false;
-    if ((view.operations ?? []).some((operation) => operation.capability === "cad_build_step")) return true;
-    return (view.can ?? []).some((entry) => entry.startsWith("cad_build_step"));
-  } catch {
-    // The authority could not answer. That is not a licence to demand a build:
-    // treat it as "not allowed" and let the preconditions say so honestly.
-    return false;
-  }
+async function capabilityAllowed(ctx: ReifyContext, conversation: string, capability: string): Promise<boolean> {
+  // A read failure from the authority is a real failure. Folding it into
+  // "this phase does not allow it" would turn a broken state source into a
+  // silent NotApplicable, which is exactly what these faults must not do.
+  const view = (await ctx.session.call("workflow-current", { sessionId: conversation })) as
+    | { operations?: { capability?: string }[]; can?: string[] }
+    | null;
+  if (!view) return false;
+  if ((view.operations ?? []).some((operation) => operation.capability === capability)) return true;
+  return (view.can ?? []).some((entry) => entry.startsWith(capability));
+}
+
+function buildAllowed(ctx: ReifyContext, conversation: string): Promise<boolean> {
+  return capabilityAllowed(ctx, conversation, "cad_build_step");
+}
+
+function commitAllowed(ctx: ReifyContext, conversation: string): Promise<boolean> {
+  return capabilityAllowed(ctx, conversation, "cad_commit");
+}
+
+/** The events this conversation's run really accepts right now. */
+async function legalTransitions(ctx: ReifyContext, conversation: string): Promise<string[]> {
+  const view = (await ctx.session.call("workflow-current", { sessionId: conversation })) as
+    | { transitions?: { event?: string }[] }
+    | null;
+  return (view?.transitions ?? []).map((transition) => String(transition.event ?? "")).filter((event) => event.length > 0);
+}
+
+/**
+ * A product answer that means "this transition was refused", as opposed to
+ * "the runtime died while the request was in flight". Only the refusal means
+ * no real transition-versus-restart race happened.
+ */
+const TRANSITION_DENIAL =
+  /illegal workflow transition|cannot transition run in status|phase obligations remain unmet|transition requires|transition forbids/;
+
+function transitionDeniedByProduct(message: string): boolean {
+  return TRANSITION_DENIAL.test(message);
 }
 
 /** Real-state precondition: is there an active run that may build right now? */
 async function activeRunPrecondition(
   ctx: ReifyContext,
-  conversationIndex = Number(ctx.params.conversationIndex ?? 0),
+  conversationIndex = faultConversationIndex(ctx),
   options: { requireBuild?: boolean } = {},
 ): Promise<FaultPrecondition> {
   const conversation = ctx.session.conversation(conversationIndex);
-  const view = await runView(ctx, conversation).catch(() => null);
-  if (view?.status !== "active") {
-    return { applicable: false, reason: `会话 ${conversation} 没有 active run（${view?.status ?? "读不到"}）` };
+  // Only a successful read that says "no active run" may be NotApplicable.
+  const view = await runViewOrThrow(ctx, conversation);
+  if (view.status !== "active") {
+    return { applicable: false, reason: `会话 ${conversation} 没有 active run（${view.status ?? "无"}）` };
   }
   if (options.requireBuild && !(await buildAllowed(ctx, conversation))) {
     return { applicable: false, reason: `会话 ${conversation} 当前阶段 ${view.phase ?? "?"} 不允许 model.build` };
   }
-  return { applicable: true };
+  return { applicable: true, evidence: { conversation, runId: view.runId, phase: view.phase } };
 }
 
 /** Precondition for the faults that really build: the run must be in `cook`. */
 function buildableRunPrecondition(ctx: ReifyContext, conversationIndex?: number): Promise<FaultPrecondition> {
-  return activeRunPrecondition(ctx, conversationIndex ?? Number(ctx.params.conversationIndex ?? 0), { requireBuild: true });
+  return activeRunPrecondition(ctx, conversationIndex ?? faultConversationIndex(ctx), { requireBuild: true });
 }
 
 interface FaultBuild {
   conversation: string;
+  /** The run this build really belongs to, so the artifact names the object hit. */
+  runId: string | null;
   /** The process that owns the CAD kernel: a one-shot authority, or the runtime. */
   ownerPid: number;
   kernelPid: number;
@@ -134,9 +177,11 @@ interface FaultBuild {
  * CAD kernel. Throws FaultNotApplicable when the system cannot reach that
  * state, so a fault never invents a failure the product did not have.
  */
-async function startFaultBuild(ctx: ReifyContext, fault: string, conversationIndex = 0): Promise<FaultBuild> {
+async function startFaultBuild(ctx: ReifyContext, fault: string, conversationIndex = faultConversationIndex(ctx)): Promise<FaultBuild> {
   const conversation = conversationOf(ctx, conversationIndex);
-  const view = await runView(ctx, conversation);
+  // The index the generator chose is the index used all the way through, so a
+  // build generated for conversation 1 can never land on conversation 0.
+  const view = await runViewOrThrow(ctx, conversation);
   if (view.status !== "active") {
     throw new FaultNotApplicable(`会话 ${conversation} 没有 active run（${view.status ?? "无"}）`, { conversation });
   }
@@ -159,6 +204,7 @@ async function startFaultBuild(ctx: ReifyContext, fault: string, conversationInd
   ctx.session.armFault(fault);
   return {
     conversation,
+    runId: view.runId,
     ownerPid: live.ownerPid,
     kernelPid: kernel.pid,
     viaRuntime: live.viaRuntime,
@@ -173,9 +219,9 @@ async function settleWithin(build: FaultBuild, timeoutMs: number): Promise<{ cod
 }
 
 /** A recovered system answers another real build with a real STEP artifact. */
-async function proveRecovery(ctx: ReifyContext, after: string, conversationIndex = 0): Promise<void> {
+async function proveRecovery(ctx: ReifyContext, after: string, conversationIndex = faultConversationIndex(ctx)): Promise<void> {
   const conversation = conversationOf(ctx, conversationIndex);
-  const view = await runView(ctx, conversation);
+  const view = await runViewOrThrow(ctx, conversation);
   if (view.status !== "active") {
     ctx.trace.note(`${after} 之后 run 状态是 ${view.status ?? "无"}，不再要求重建`);
     return;
@@ -214,7 +260,9 @@ async function proveRecovery(ctx: ReifyContext, after: string, conversationIndex
 
 /** How the fault handle names itself in a trace note. */
 function describeKernel(build: FaultBuild): string {
-  return `kernel=${build.kernelPid} owner=${build.ownerPid}${build.viaRuntime ? "(runtime)" : "(authority)"}`;
+  return `conv=${build.conversation} run=${build.runId ?? "无"} kernel=${build.kernelPid} owner=${build.ownerPid}${
+    build.viaRuntime ? "(runtime)" : "(authority)"
+  }`;
 }
 
 // ---------------------------------------------------------------------------
@@ -229,7 +277,8 @@ export const killKernelDuringBuild: ReifyFaultDefinition = {
   describe: (params) => `killKernelDuringBuild(conv#${params.conversationIndex})`,
   precondition: (ctx) => buildableRunPrecondition(ctx),
   inject: async (ctx) => {
-    const build = await startFaultBuild(ctx, "killKernelDuringBuild");
+    // Precondition, injection and recovery all use the generated index.
+    const build = await startFaultBuild(ctx, "killKernelDuringBuild", faultConversationIndex(ctx));
     ctx.session.killKernel(build.kernelPid, "SIGKILL");
     ctx.trace.record({ kind: "note", name: "killKernelDuringBuild", detail: { detail: describeKernel(build) } });
     const settled = await settleWithin(build, 45_000);
@@ -244,7 +293,7 @@ export const killKernelDuringBuild: ReifyFaultDefinition = {
     }
   },
   recover: async (ctx) => {
-    await proveRecovery(ctx, "killKernelDuringBuild");
+    await proveRecovery(ctx, "killKernelDuringBuild", faultConversationIndex(ctx));
     ctx.session.disarmFault("killKernelDuringBuild");
   },
 };
@@ -569,8 +618,10 @@ export const cpuPressure: ReifyFaultDefinition = {
     if (!(await commandAvailable("stress-ng"))) {
       return { applicable: false, reason: "本机没有 stress-ng；不自研压测工具" };
     }
-    const view = await runView(ctx, conversationOf(ctx)).catch(() => null);
-    if (view?.status !== "active") return { applicable: false, reason: "会话没有 active run" };
+    const conversation = conversationOf(ctx);
+    // A failed state read is thrown, not reported as "no active run".
+    const view = await runViewOrThrow(ctx, conversation);
+    if (view.status !== "active") return { applicable: false, reason: `会话 ${conversation} 没有 active run（${view.status ?? "无"}）` };
     return { applicable: true };
   },
   inject: async (ctx) => {
@@ -935,16 +986,17 @@ export const raceUserActionDuringKernelFault: ReifyFaultDefinition = {
   describe: (params) => `raceUserActionDuringKernelFault(${params.action},conv#${params.conversationIndex})`,
   precondition: (ctx) => buildableRunPrecondition(ctx),
   inject: async (ctx) => {
-    const build = await startFaultBuild(ctx, "raceUserActionDuringKernelFault");
+    const index = faultConversationIndex(ctx);
+    // The faulted kernel and the user action must be the same conversation.
+    const build = await startFaultBuild(ctx, "raceUserActionDuringKernelFault", index);
     ctx.session.killKernel(build.kernelPid, "SIGKILL");
     await concurrently([
       async () => {
         const action = String(ctx.params.action);
-        const params = { conversationIndex: Number(ctx.params.conversationIndex ?? 0) };
         ctx.trace.note(`race：故障挂着时跑用户操作 ${action}`);
-        if (action === "refresh") await readWorkflow(ctx, params.conversationIndex!);
-        else if (action === "viewerCatalog") await readCatalog(ctx, params.conversationIndex!);
-        else await retryBuild(ctx, params.conversationIndex!);
+        if (action === "refresh") await readWorkflow(ctx, index);
+        else if (action === "viewerCatalog") await readCatalog(ctx, index);
+        else await retryBuild(ctx, index);
       },
       async () => {
         await settleWithin(build, 20_000);
@@ -953,7 +1005,7 @@ export const raceUserActionDuringKernelFault: ReifyFaultDefinition = {
     ctx.trace.record({ kind: "note", name: "raceUserActionDuringKernelFault", detail: { action: ctx.params.action } });
   },
   recover: async (ctx) => {
-    await proveRecovery(ctx, "raceUserActionDuringKernelFault", Number(ctx.params.conversationIndex ?? 0));
+    await proveRecovery(ctx, "raceUserActionDuringKernelFault", faultConversationIndex(ctx));
     ctx.session.disarmFault("raceUserActionDuringKernelFault");
   },
 };
@@ -965,12 +1017,20 @@ export const raceTwoConversationsBuild: ReifyFaultDefinition = {
   arbitrary: fc.constant<Params>({}),
   describe: () => "raceTwoConversationsBuild",
   precondition: async (ctx) => {
+    // Two conversations, not the same conversation twice: without a second
+    // real conversation this is not the multi-conversation race at all.
+    if (ctx.session.conversations.length < 2) {
+      return { applicable: false, reason: "只有一个会话；多会话 race 要先 openConversation" };
+    }
+    const first = ctx.session.conversation(0);
     const second = ctx.session.conversation(1);
-    const view = await runView(ctx, second).catch(() => null);
-    if (view?.status !== "active") return { applicable: false, reason: `第二个会话 ${second} 还没有 active run（先 openConversation）` };
-    if (!(await buildAllowed(ctx, ctx.session.conversation(0)))) return { applicable: false, reason: "会话 A 当前阶段不允许 model.build" };
+    const firstView = await runViewOrThrow(ctx, first);
+    if (firstView.status !== "active") return { applicable: false, reason: `会话 ${first} 还没有 active run` };
+    const secondView = await runViewOrThrow(ctx, second);
+    if (secondView.status !== "active") return { applicable: false, reason: `第二个会话 ${second} 还没有 active run（先 openConversation）` };
+    if (!(await buildAllowed(ctx, first))) return { applicable: false, reason: `会话 ${first} 当前阶段不允许 model.build` };
     if (!(await buildAllowed(ctx, second))) return { applicable: false, reason: `会话 ${second} 当前阶段不允许 model.build` };
-    return { applicable: true };
+    return { applicable: true, evidence: { first, second, runs: [firstView.runId, secondView.runId] } };
   },
   inject: async (ctx) => {
     const first = await startFaultBuild(ctx, "raceTwoConversationsBuild", 0);
@@ -997,56 +1057,132 @@ export const raceTwoConversationsBuild: ReifyFaultDefinition = {
   },
 };
 
-/** Restart the runtime while a real workflow transition is in flight. */
+/**
+ * Restart the runtime while a real workflow transition is in flight.
+ *
+ * The precondition asks the product itself which events this run really
+ * accepts right now, so an event that is illegal in the current phase can
+ * never be counted as a transition race. If the product then refuses the
+ * request before the restart takes effect, that refusal is reported as
+ * NotApplicable instead of being swallowed and labelled `Injected`.
+ */
 export const raceRestartDuringTransition: ReifyFaultDefinition = {
   name: "raceRestartDuringTransition",
   description: "真 workflow transition 正在跑的时候重启 runtime",
   arbitrary: fc.record({ event: fc.constantFrom("plan_ready", "finished") }),
   describe: (params) => `raceRestartDuringTransition(${params.event})`,
-  precondition: async (ctx) =>
-    ctx.session.attachedRuntime ? { applicable: true } : { applicable: false, reason: "这一轮没有挂常驻 runtime（用 --runtime 驱动）" },
+  precondition: async (ctx) => {
+    if (!ctx.session.attachedRuntime) {
+      return { applicable: false, reason: "这一轮没有挂常驻 runtime（用 --runtime 驱动）" };
+    }
+    const conversation = conversationOf(ctx);
+    const view = await runViewOrThrow(ctx, conversation);
+    if (view.status !== "active") {
+      return { applicable: false, reason: `会话 ${conversation} 没有 active run（${view.status ?? "无"}）` };
+    }
+    const event = String(ctx.params.event);
+    const legal = await legalTransitions(ctx, conversation);
+    if (!legal.includes(event)) {
+      return {
+        applicable: false,
+        reason: `会话 ${conversation} 在 ${view.phase ?? "?"} 阶段不接受事件 ${event}（合法：${legal.join(", ") || "无"}）`,
+        evidence: { conversation, runId: view.runId, phase: view.phase, event, legal },
+      };
+    }
+    return { applicable: true, evidence: { conversation, runId: view.runId, phase: view.phase, event, legal } };
+  },
   inject: async (ctx) => {
     const runtime = ctx.session.attachedRuntime!;
     const conversation = conversationOf(ctx);
-    const transition = ctx.session.call("workflow-advance", { event: String(ctx.params.event), sessionId: conversation }).catch(
-      (error: Error) => ({ error: error.message }),
-    );
+    const event = String(ctx.params.event);
+    // Fire the real transition and restart the runtime underneath it: the two
+    // really overlap, and the request's own answer says what happened.
+    const transition = ctx.session
+      .call("workflow-advance", { event, sessionId: conversation })
+      .then((result) => ({ result }), (error: Error) => ({ error: error.message }));
     const oldPid = runtime.pid;
     const restarted = await runtime.restart();
     ctx.session.registerAuthorityPid(restarted.pid, "runtime");
-    ctx.session.armFault("raceRestartDuringTransition");
     const before = await transition;
-    ctx.trace.record({ kind: "note", name: "raceRestartDuringTransition", detail: { oldPid, newPid: restarted.pid, event: ctx.params.event, result: before } });
+    if (before.error && transitionDeniedByProduct(before.error)) {
+      // The product answered while its runtime was still up: it refused the
+      // transition, so no transition raced the restart.
+      throw new FaultNotApplicable(`产品在重启生效前就拒了这个 transition：${before.error}`, {
+        conversation,
+        event,
+        error: before.error,
+      });
+    }
+    ctx.session.armFault("raceRestartDuringTransition");
+    ctx.trace.record({
+      kind: "note",
+      name: "raceRestartDuringTransition",
+      detail: { oldPid, newPid: restarted.pid, conversation, event, answer: before },
+    });
   },
   recover: async (ctx) => {
     const conversation = conversationOf(ctx);
-    const view = await runView(ctx, conversation);
+    const view = await runViewOrThrow(ctx, conversation);
     if (view.status === "active") await proveRecovery(ctx, "raceRestartDuringTransition");
     ctx.session.disarmFault("raceRestartDuringTransition");
   },
 };
 
-/** Two legal operations in a generator-chosen order, in the same conversation. */
+/**
+ * Two legal operations run in the order the generator chose, in the same
+ * conversation: A→B or B→A.
+ *
+ * The order is real — the first request settles before the second is sent — so
+ * the two generated branches are genuinely different sequences instead of the
+ * same concurrent pair under a different label. Both operations are checked to
+ * be legal first, otherwise the "order" is between one real request and one
+ * refusal.
+ */
 export const raceLegalOrderSwap: ReifyFaultDefinition = {
   name: "raceLegalOrderSwap",
-  description: "两个合法操作按生成器选的顺序交错（build / commit 前后互换）",
+  description: "两个合法操作按生成器选的顺序真串起来（build→commit 与 commit→build 两种）",
   arbitrary: fc.record({
     first: fc.constantFrom("build", "commitPlan"),
     conversationIndex: fc.integer({ min: 0, max: 1 }),
   }),
   describe: (params) => `raceLegalOrderSwap(${params.first},conv#${params.conversationIndex})`,
-  precondition: (ctx) => buildableRunPrecondition(ctx),
+  precondition: async (ctx) => {
+    const index = faultConversationIndex(ctx);
+    const conversation = ctx.session.conversation(index);
+    const view = await runViewOrThrow(ctx, conversation);
+    if (view.status !== "active") {
+      return { applicable: false, reason: `会话 ${conversation} 没有 active run（${view.status ?? "无"}）` };
+    }
+    // Both operations have to be really legal right now, or one of the two
+    // "steps" is just a refusal and the swap means nothing.
+    if (!(await buildAllowed(ctx, conversation))) {
+      return { applicable: false, reason: `会话 ${conversation} 当前阶段 ${view.phase ?? "?"} 不允许 model.build` };
+    }
+    if (!(await commitAllowed(ctx, conversation))) {
+      return { applicable: false, reason: `会话 ${conversation} 当前阶段 ${view.phase ?? "?"} 不允许 commit` };
+    }
+    return { applicable: true, evidence: { conversation, runId: view.runId, phase: view.phase } };
+  },
   inject: async (ctx) => {
-    const index = Number(ctx.params.conversationIndex ?? 0);
+    const index = faultConversationIndex(ctx);
+    const conversation = ctx.session.conversation(index);
+    const view = await runViewOrThrow(ctx, conversation);
     const steps: Record<string, () => Promise<void>> = {
       build: () => retryBuild(ctx, index),
       commitPlan: () => commitPlanStep(ctx, index),
     };
     const first = String(ctx.params.first);
     const second = first === "build" ? "commitPlan" : "build";
-    await concurrently([steps[first]!, steps[second]!]);
+    // The generated order is the real order: the first operation answers
+    // before the second one is sent, so A→B and B→A really differ.
+    await steps[first]!();
+    await steps[second]!();
     ctx.session.armFault("raceLegalOrderSwap");
-    ctx.trace.record({ kind: "note", name: "raceLegalOrderSwap", detail: { first, second, conversationIndex: index } });
+    ctx.trace.record({
+      kind: "note",
+      name: "raceLegalOrderSwap",
+      detail: { conversation, runId: view.runId, order: [first, second] },
+    });
   },
   recover: async (ctx) => {
     ctx.session.disarmFault("raceLegalOrderSwap");
@@ -1092,14 +1228,18 @@ export const raceCrossConversationFault: ReifyFaultDefinition = {
   }),
   describe: (params) => `raceCrossConversationFault(conv#${params.faultedIndex})`,
   precondition: async (ctx) => {
-    const faulted = Number(ctx.params.faultedIndex ?? 0);
-    const other = ctx.session.conversation(faulted === 0 ? 1 : 0);
-    const view = await runView(ctx, other).catch(() => null);
-    if (view?.status !== "active") return { applicable: false, reason: `另一个会话 ${other} 还没有 active run` };
-    if (!(await buildAllowed(ctx, ctx.session.conversation(faulted)))) {
-      return { applicable: false, reason: `会话 ${ctx.session.conversation(faulted)} 当前阶段不允许 model.build` };
+    if (ctx.session.conversations.length < 2) {
+      return { applicable: false, reason: "只有一个会话；跨会话 race 要先 openConversation" };
     }
-    return { applicable: true };
+    const faulted = Number(ctx.params.faultedIndex ?? 0);
+    const faultedConversation = ctx.session.conversation(faulted);
+    const other = ctx.session.conversation(faulted === 0 ? 1 : 0);
+    const view = await runViewOrThrow(ctx, other);
+    if (view.status !== "active") return { applicable: false, reason: `另一个会话 ${other} 还没有 active run` };
+    if (!(await buildAllowed(ctx, faultedConversation))) {
+      return { applicable: false, reason: `会话 ${faultedConversation} 当前阶段不允许 model.build` };
+    }
+    return { applicable: true, evidence: { faulted: faultedConversation, other, otherRunId: view.runId } };
   },
   inject: async (ctx) => {
     const faulted = Number(ctx.params.faultedIndex ?? 0);
