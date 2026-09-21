@@ -37,6 +37,7 @@ await jiti.import("./recipe-adapter.test.ts", { default: true });
 await jiti.import("./permissions-v7.test.ts", { default: true });
 await jiti.import("./authorization-v7.test.ts", { default: true });
 await jiti.import("./authority-sidecar.test.ts", { default: true });
+await jiti.import("./prime-credentials.test.ts", { default: true });
 await jiti.import("./conversation-lifecycle.test.ts", { default: true });
 await jiti.import("./desktop-conversation-projection.test.ts", { default: true });
 await jiti.import("./workflow-packages.test.ts", { default: true });

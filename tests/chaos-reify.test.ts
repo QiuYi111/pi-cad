@@ -18,15 +18,52 @@ import { checkReifyInvariants } from "../chaos/reify/invariants.ts";
 import { REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
 import { applyCredentialFault, observeCredential, restoreCredentialSandbox, seedCredentialSandbox } from "../chaos/reify/provider.ts";
 import { ProviderFaultProxy } from "../chaos/reify/provider-proxy.ts";
-import { injectReifyFault, recoverInjectedFaults, runReifySequence, startReifySession } from "../chaos/reify/runner.ts";
+import { injectReifyFault, recoverInjectedFaults, replayReifyArtifact, runReifySequence, startReifySession } from "../chaos/reify/runner.ts";
 import { ReifyRuntime } from "../chaos/reify/runtime.ts";
-import { ReifySession } from "../chaos/reify/session.ts";
+import { ReifySession, listKernelProcesses, processTree } from "../chaos/reify/session.ts";
 import { ReifyTrace } from "../chaos/reify/trace.ts";
+import { isProcessAlive } from "../chaos/sut/proc.ts";
 import type { Command } from "../chaos/reify/model.ts";
 import { FaultNotApplicable } from "../chaos/reify/types.ts";
 import type { ReifyFaultDefinition } from "../chaos/reify/types.ts";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wait until the kernel has really forked a build child. A kernel that was just
+ * found is still warming up; the fault has to land mid-build to be the fault
+ * this issue is about.
+ */
+async function waitForKernelTree(rootPid: number, minPids: number, timeoutMs: number): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  let tree = processTree(rootPid);
+  while (tree.length < minPids && Date.now() < deadline) {
+    await sleep(100);
+    tree = processTree(rootPid);
+  }
+  return tree;
+}
+
+/** Every pid of the tree that is still alive when the budget runs out. */
+async function waitForProcessesGone(pids: number[], timeoutMs: number): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const alive = pids.filter((pid) => isProcessAlive(pid));
+    if (!alive.length || Date.now() > deadline) return alive;
+    await sleep(100);
+  }
+}
+
+/** A real kernel rooted at the given runtime, once it has one. */
+async function waitForRuntimeKernel(session: ReifySession, runtimePid: number, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const kernel = (await session.snapshot()).kernels.find((item) => item.ppid === runtimePid && !item.orphan);
+    if (kernel) return kernel;
+    if (Date.now() > deadline) return null;
+    await sleep(100);
+  }
+}
 
 async function withRealSession<T>(body: (session: ReifySession, trace: ReifyTrace) => Promise<T>): Promise<T> {
   const session = await ReifySession.start();
@@ -60,7 +97,7 @@ test("reify chaos: 真 kernel 被杀后系统自己恢复，invariant 全过", a
   });
 });
 
-test("reify chaos: 控制面被杀后 kernel 成孤儿会被 no-orphan-kernel 抓到", async (t) => {
+test("reify chaos: 控制面被 SIGKILL 后 kernel 跟着退，不留孤儿", async () => {
   await withRealSession(async (session) => {
     await runReifySequence(session, REIFY_SETUP, new ReifyTrace());
     const conversation = session.conversation(0);
@@ -73,34 +110,149 @@ test("reify chaos: 控制面被杀后 kernel 成孤儿会被 no-orphan-kernel �
     });
     const kernel = await Promise.race([session.waitForOwnedKernel(live.pid, 30_000), live.done.then(() => null)]);
     assert.ok(kernel, "真 model-build 必须起一个真 cadctl kernel");
+    // uv wrapper + warm worker + the forked build child: the fault has to land
+    // while a real build is in flight, not while the worker is warming up.
+    const tree = await waitForKernelTree(kernel.pid, 3, 30_000);
+    assert.ok(tree.length >= 3, `真 build 途中 kernel 树至少要 3 个进程，实际 ${tree.join(", ")}`);
 
     process.kill(live.pid, "SIGKILL");
     await live.done;
 
-    // Give the kernel the real shutdown grace, then look for a real leak.
-    let orphan = null;
-    const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline) {
-      orphan = session.orphanKernels().find((candidate) => candidate.pid === kernel!.pid) ?? null;
-      if (orphan) break;
-      await sleep(200);
-    }
-    if (!orphan) {
-      t.skip("控制面死后 kernel 也跟着退了，这轮没留下孤儿");
-      return;
-    }
-
+    const stubborn = await waitForProcessesGone(tree, 15_000);
+    assert.deepEqual(stubborn, [], `控制面死后它起的 kernel 树必须自己退干净，还活着：${stubborn.join(", ")}`);
+    assert.deepEqual(session.orphanKernels(), [], "不该再有孤儿 kernel");
     const snapshot = await session.snapshot();
-    let violation: InvariantViolation | null = null;
-    try {
-      await checkReifyInvariants({ session, snapshot, now: Date.now() });
-    } catch (error) {
-      if (error instanceof InvariantViolation) violation = error;
-      else throw error;
-    }
-    assert.ok(violation, "孤儿 kernel 必须触发 invariant");
-    assert.equal(violation!.invariant, "no-orphan-kernel");
+    await checkReifyInvariants({ session, snapshot, now: Date.now() });
   });
+});
+
+test("reify chaos: 正常 stop 也带走 kernel 和 fork 出来的 build 子进程", async () => {
+  await withRuntime(async (session, runtime) => {
+    const conversation = session.conversation(0);
+    await driveRunThroughRuntime(runtime, conversation);
+    // A stop kills the request in flight, so the rejection is expected and is
+    // handled from the moment the call is made.
+    const pending = runtime.call("model-build", {
+      source: "slow_part.py",
+      output: "build/slow-stop.step",
+      validation: "fast",
+      sessionId: conversation,
+    }).catch(() => undefined);
+    const kernel = await waitForRuntimeKernel(session, runtime.pid);
+    assert.ok(kernel, "真 runtime 必须起一个真 cadctl kernel");
+    const tree = await waitForKernelTree(kernel!.pid, 3, 30_000);
+    assert.ok(tree.length >= 3, `真 build 途中 kernel 树至少要 3 个进程，实际 ${tree.join(", ")}`);
+
+    await runtime.stop();
+    await pending;
+
+    const stubborn = await waitForProcessesGone(tree, 15_000);
+    assert.deepEqual(stubborn, [], `正常 stop 也必须带走整棵树，还活着：${stubborn.join(", ")}`);
+  });
+});
+
+test("reify chaos: runtime 重启后旧 kernel 退干净，run 还在", async () => {
+  await withRuntime(async (session, runtime) => {
+    const conversation = session.conversation(0);
+    const runId = await driveRunThroughRuntime(runtime, conversation);
+    const pending = runtime.call("model-build", {
+      source: "slow_part.py",
+      output: "build/slow-restart.step",
+      validation: "fast",
+      sessionId: conversation,
+    }).catch(() => undefined);
+    const kernel = await waitForRuntimeKernel(session, runtime.pid);
+    assert.ok(kernel, "真 runtime 必须起一个真 cadctl kernel");
+    const tree = await waitForKernelTree(kernel!.pid, 3, 30_000);
+
+    const previousPid = runtime.pid;
+    const restarted = await runtime.restart();
+    session.registerAuthorityPid(runtime.pid);
+    await pending;
+
+    assert.notEqual(restarted.pid, previousPid, "重启后 runtime pid 必须变");
+    const stubborn = await waitForProcessesGone(tree, 15_000);
+    assert.deepEqual(stubborn, [], `重启后旧 kernel 树必须退干净，还活着：${stubborn.join(", ")}`);
+    const after = (await runtime.call("workflow-current", { sessionId: conversation })) as { runId?: string };
+    assert.equal(after.runId, runId, "run 跨 runtime 重启必须还在");
+  });
+});
+
+test("reify chaos: 杀一个 runtime 不会带走别的 run 的 kernel", async () => {
+  const first = await ReifySession.start();
+  const second = await ReifySession.start();
+  const runtimeFirst = await ReifyRuntime.start({
+    project: first.project,
+    runtimeDirectory: join(first.root, "runtime"),
+    env: first.env,
+  });
+  const runtimeSecond = await ReifyRuntime.start({
+    project: second.project,
+    runtimeDirectory: join(second.root, "runtime"),
+    env: second.env,
+  });
+  first.registerAuthorityPid(runtimeFirst.pid);
+  second.registerAuthorityPid(runtimeSecond.pid);
+  try {
+    const conversationFirst = first.conversation(0);
+    const conversationSecond = second.conversation(0);
+    await driveRunThroughRuntime(runtimeFirst, conversationFirst);
+    await driveRunThroughRuntime(runtimeSecond, conversationSecond);
+    const pendingFirst = runtimeFirst.call("model-build", {
+      source: "slow_part.py",
+      output: "build/slow-a.step",
+      validation: "fast",
+      sessionId: conversationFirst,
+    }).catch(() => undefined);
+    const pendingSecond = runtimeSecond.call("model-build", {
+      source: "slow_part.py",
+      output: "build/slow-b.step",
+      validation: "fast",
+      sessionId: conversationSecond,
+    });
+    const kernelFirst = await waitForRuntimeKernel(first, runtimeFirst.pid);
+    const kernelSecond = await waitForRuntimeKernel(second, runtimeSecond.pid);
+    assert.ok(kernelFirst && kernelSecond, "两个 run 必须各有自己的真 kernel");
+    const treeFirst = await waitForKernelTree(kernelFirst!.pid, 3, 30_000);
+    const treeSecond = await waitForKernelTree(kernelSecond!.pid, 3, 30_000);
+
+    // SIGKILL one owner. Only its own kernel may converge.
+    process.kill(runtimeFirst.pid, "SIGKILL");
+    const leakedFirst = await waitForProcessesGone(treeFirst, 15_000);
+    assert.deepEqual(leakedFirst, [], `被杀 runtime 的 kernel 树必须退干净，还活着：${leakedFirst.join(", ")}`);
+
+    const survivors = treeSecond.filter((pid) => isProcessAlive(pid));
+    assert.equal(
+      survivors.length,
+      treeSecond.length,
+      `别的 run 的 kernel 不能被误杀：${treeSecond.filter((pid) => !isProcessAlive(pid)).join(", ")}`,
+    );
+    // The untouched run still finishes its real build.
+    await pendingSecond;
+    assert.ok(listKernelProcesses().some((process) => process.pid === kernelSecond!.pid), "另一个 kernel 必须还在");
+    await pendingFirst;
+  } finally {
+    await runtimeFirst.close().catch(() => undefined);
+    await runtimeSecond.close().catch(() => undefined);
+    await first.close().catch(() => undefined);
+    await second.close().catch(() => undefined);
+  }
+});
+
+test("reify chaos: 原 no-orphan-kernel artifact 重放后不再复现", async () => {
+  // RES-387 留下的那条失败 artifact。产品修好之后，同一段序列必须跑完，
+  // 不再触发 no-orphan-kernel。`chaos reify replay` 的退出码语义是「有没有
+  // 复现失败」，所以这里直接看重放结果，不借用它的退出码。
+  const artifactFile = resolve("tests/fixtures/chaos/2026-09-21T15-49-19-348Z-reify-no-orphan-kernel.json");
+  assert.ok(existsSync(artifactFile), "原始失败 artifact 必须留在仓库里");
+  assert.equal(loadReifyArtifact(artifactFile).invariant, "no-orphan-kernel");
+
+  const replayed = await replayReifyArtifact(artifactFile);
+  assert.equal(
+    replayed.observedInvariant,
+    undefined,
+    `这条 artifact 记的失败不该再出现：${replayed.detail ?? ""}`,
+  );
 });
 
 test("reify chaos: recover 抛普通 Error 会变成 recovery-convergence，不会静默过", async () => {
