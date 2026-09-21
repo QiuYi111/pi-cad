@@ -292,16 +292,27 @@ demo 那条链是手写的，没有 fast-check path，只能按序列 replay。
 - recover 完之后原来直接 return。现在会再取一次真 snapshot、重查一遍 invariant，
   避免「recover 之后状态其实不满足 invariant」被漏掉。
 
-### 已经抓到的真问题
+### 已经抓到的真问题（已修，RES-389）
 
 真 build 途中 SIGKILL 控制面进程，控制面死了，它起的真 kernel 还在跑 → 孤儿进程，
 触发 `no-orphan-kernel`。原因是 kernel 的清理只在正常关停时走
 （`WarmCadctlWorker.stop()` 里 `process.kill(-pid)`），被 SIGKILL 时不会跑。
+失败证据留在 `tests/fixtures/chaos/2026-09-21T15-49-19-348Z-reify-no-orphan-kernel.json`
+（`chaos/artifacts/` 是生成物目录，不提交），
+`chaos reify replay <artifact>` 可以重放同一段序列；修好之后同一段序列跑完不再复现。
+
+修法（`python/cadctl/owner.py`）：spawn kernel 时把 owner 的 pid 和它当时的启动
+时间放进环境（`PI_CAD_OWNER_PID` / `PI_CAD_OWNER_START`），kernel 自己盯着 owner。
+owner 一没就先杀掉 fork 出来的 build 子树，再自己退出；fork 出来的 build 子进程
+另外挂 `PR_SET_PDEATHSIG`，parent 被强杀也不会留下。被复用的 pid、僵尸进程都按死
+处理。手工起的 cadctl 没有这份身份，行为不变；每个 kernel 只认自己的 owner，不会
+碰别的 run 的进程。
+
+`tests/chaos-reify.test.ts` 覆盖：owner 被 SIGKILL、正常 stop、runtime 重启、
+两个 run 只清自己的 kernel，以及原失败 artifact 重放不再复现。
 
 反过来，build 途中 SIGKILL / SIGSTOP kernel 都能正确恢复：控制面报
 `cadctl worker exited with SIGKILL`，下一次真 build 成功。
-
-`tests/chaos-reify.test.ts` 把这两条都做成用例。
 
 ### 这一段的环境变量
 
