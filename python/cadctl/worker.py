@@ -20,6 +20,13 @@ from pathlib import Path
 from typing import Any
 
 from .cli import main
+from . import owner as _owner
+
+# Bind the kernel to its owner before the CAD preheat below. A worker whose
+# owner dies while it is still warming up has to leave no process behind
+# either, and the preheat is the longest part of startup.
+_owner.watch_signals()
+_owner.start_watchdog()
 
 # Preload build123d/OCC once. Forked build children inherit these read-only
 # module pages and exit after one request.
@@ -130,6 +137,7 @@ def _forked_response(request: dict[str, Any]) -> dict[str, Any]:
     child_pid = os.fork()
     if child_pid == 0:
         try:
+            _owner.detach_from_parent()
             os.setsid()
             devnull = os.open(os.devnull, os.O_RDWR)
             try:
