@@ -76,3 +76,4 @@ await jiti.import("./no-source-agent-smoke.test.ts", { default: true });
 await jiti.import("./skill-system.test.ts", { default: true });
 await jiti.import("./final-review.test.ts", { default: true });
 await jiti.import("./product-evaluation.test.ts", { default: true });
+await jiti.import("./chaos.test.ts", { default: true });
