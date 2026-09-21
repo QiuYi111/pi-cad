@@ -50,8 +50,56 @@ export interface ProviderBoundary {
   probe: ProviderProbe;
 }
 
+/** Raw credential entry as stored by Prime in its real `auth.json`. */
+interface AuthEntry {
+  type?: string;
+  expires?: number;
+  key?: string;
+  access?: string;
+}
+
 function homeAgentDir(): string {
   return process.env.PRIME_AGENT_CODING_AGENT_DIR ?? join(homedir(), ".prime", "agent");
+}
+
+/**
+ * Classify a credential by Prime's real `auth.json` schema (see
+ * `docs/providers.md` in the prime-agent checkout): API-key providers store
+ * `{ "type": "api_key", "key": ... }` and OAuth providers store
+ * `{ "type": "oauth", "access": ..., "expires": ... }`. Prime spells the
+ * API-key type `api_key`, so a bare `apikey` comparison misreads the real
+ * store; older/compact spellings are still folded in.
+ */
+function credentialKind(entry: AuthEntry | undefined): "api_key" | "oauth" | "unknown" {
+  const raw = typeof entry?.type === "string" ? entry.type.trim().toLowerCase().replace(/[-_\s]/g, "") : "";
+  if (raw === "apikey") return "api_key";
+  if (raw === "oauth") return "oauth";
+  return "unknown";
+}
+
+/**
+ * Resolve a stored `key` the way Prime's host does (`docs/providers.md`): a
+ * literal value is used as-is, an env-var name resolves to its value, and a
+ * `!command` indirection is skipped because the host, not the kernel, runs
+ * those. Private: the resolved secret only ever feeds a probe header.
+ */
+function resolveApiKeyValue(key: string | undefined): string | null {
+  if (typeof key !== "string") return null;
+  const value = key.trim();
+  if (!value || value.startsWith("!")) return null;
+  return process.env[value] ?? value;
+}
+
+/** Whether a stored credential actually carries a usable secret. */
+function entryHasSecret(entry: AuthEntry | undefined): boolean {
+  switch (credentialKind(entry)) {
+    case "api_key":
+      return Boolean(entry?.key);
+    case "oauth":
+      return Boolean(entry?.access);
+    default:
+      return Boolean(entry?.key) || Boolean(entry?.access);
+  }
 }
 
 /** Real Prime checkout the Desktop runtime is built from, when one is resolvable. */
@@ -71,7 +119,7 @@ export function resolvePrimeAgentRepo(): string | null {
 export function readProviderCredentials(agentDir = homeAgentDir()): ProviderCredential[] {
   const path = join(agentDir, "auth.json");
   if (!existsSync(path)) return [];
-  let parsed: Record<string, { type?: string; expires?: number; key?: string; access?: string }>;
+  let parsed: Record<string, AuthEntry>;
   try {
     parsed = JSON.parse(readFileSync(path, "utf8")) as typeof parsed;
   } catch {
@@ -79,7 +127,7 @@ export function readProviderCredentials(agentDir = homeAgentDir()): ProviderCred
   }
   return Object.entries(parsed).map(([id, entry]) => {
     const type = typeof entry?.type === "string" ? entry.type : "unknown";
-    const hasCredentials = type === "apikey" ? Boolean(entry?.key) : Boolean(entry?.access);
+    const hasCredentials = entryHasSecret(entry);
     const expiresAt = typeof entry?.expires === "number" ? entry.expires : null;
     return { id, type, hasCredentials, expiresAt, expired: expiresAt === null ? null : expiresAt <= Date.now() };
   });
@@ -192,8 +240,16 @@ function readAccessToken(agentDir: string, provider: string): string | null {
   const path = join(agentDir, "auth.json");
   if (!existsSync(path)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, { access?: string; key?: string }>;
-    return parsed[provider]?.access ?? parsed[provider]?.key ?? null;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as Record<string, AuthEntry>;
+    const entry = parsed[provider];
+    switch (credentialKind(entry)) {
+      case "api_key":
+        return resolveApiKeyValue(entry?.key);
+      case "oauth":
+        return entry?.access ?? null;
+      default:
+        return entry?.access ?? resolveApiKeyValue(entry?.key);
+    }
   } catch {
     return null;
   }

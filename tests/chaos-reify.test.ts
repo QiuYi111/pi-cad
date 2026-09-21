@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 
@@ -10,7 +11,7 @@ import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "../chaos/reify/artifacts.ts";
 import { inspectReifyComponents } from "../chaos/reify/components.ts";
 import { reifyFaultDefinitions } from "../chaos/reify/faults.ts";
-import { inspectDesktopProjection, inspectProviderBoundary, resolvePrimeAgentRepo } from "../chaos/reify/inspect.ts";
+import { inspectDesktopProjection, inspectProviderBoundary, readProviderCredentials, resolvePrimeAgentRepo } from "../chaos/reify/inspect.ts";
 import { checkReifyInvariants } from "../chaos/reify/invariants.ts";
 import { REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
 import { recoverInjectedFaults, runReifySequence } from "../chaos/reify/runner.ts";
@@ -306,6 +307,44 @@ test("reify chaos: provider 网络 probe 默认只读，只有显式 opt-in 才�
   } finally {
     if (previous === undefined) delete process.env.CHAOS_REIFY_PROVIDER_PROBE;
     else process.env.CHAOS_REIFY_PROVIDER_PROBE = previous;
+  }
+});
+
+test("reify chaos: 真 auth.json 格式（api_key / oauth）都算已认证，且不泄露 token", () => {
+  const dir = mkdtempSync(join(tmpdir(), "chaos-reify-auth-"));
+  try {
+    // The exact shapes Prime writes (docs/providers.md): API-key providers use
+    // `type: "api_key"` + `key`, OAuth providers use `type: "oauth"` + `access`.
+    writeFileSync(
+      join(dir, "auth.json"),
+      JSON.stringify({
+        zai: { type: "api_key", key: "real-api-key-value" },
+        "openai-codex": { type: "oauth", access: "real-access-value", refresh: "real-refresh-value", expires: 4102444800000 },
+      }),
+    );
+    const credentials = readProviderCredentials(dir);
+    const byId = new Map(credentials.map((credential) => [credential.id, credential]));
+    assert.equal(byId.get("zai")?.type, "api_key");
+    assert.equal(byId.get("zai")?.hasCredentials, true, "真 api_key 凭证必须算已认证");
+    assert.equal(byId.get("openai-codex")?.type, "oauth");
+    assert.equal(byId.get("openai-codex")?.hasCredentials, true, "真 oauth 凭证必须算已认证");
+    for (const credential of credentials) {
+      assert.ok(!("access" in credential) && !("key" in credential), "凭证对象不能带 token 值");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reify chaos: provider 边界对真 api_key 判为已认证，且默认只读", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chaos-reify-auth-"));
+  try {
+    writeFileSync(join(dir, "auth.json"), JSON.stringify({ zai: { type: "api_key", key: "real-api-key-value" } }));
+    const boundary = await inspectProviderBoundary({ agentDir: dir, override: { provider: "zai", model: "glm-4.6" }, probe: false });
+    assert.equal(boundary.probe.status, null, "默认只读，不能发请求");
+    assert.equal(boundary.probe.authenticated, true, "真 api_key 凭证必须判为已认证（显式 probe 才会带真 header）");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

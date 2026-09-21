@@ -308,7 +308,8 @@ npm run chaos:reify -- inspect --provider-probe      # 才真发一次 provider 
 ```
 
 provider 网络 probe 是**显式 opt-in**：默认只读本地凭证元数据 / 选择 / 注册表 endpoint，
-不动外部世界。失败 artifact 收集固定不发 provider 请求。
+不动外部世界。失败 artifact 收集固定不发 provider 请求。凭证类型按 Prime 真 schema 认：
+`api_key` 读 `key`，`oauth` 读 `access`；显式 probe 时才拿真凭证带认证 header 发请求。
 
 统一 identity：`project / conversation / run / runtime / kernel / provider`。
 `inspect` 输出和 failure artifact 里都有这份归属图，每条边都带证据来源
