@@ -6,6 +6,7 @@ import type { ReifyComponents } from "./components.ts";
 import type { ApiLogEntry } from "./session.ts";
 import type { ReifyTimelineEntry } from "./trace.ts";
 import type { Command } from "./model.ts";
+import type { FaultOutcome } from "./types.ts";
 
 /**
  * A failure artifact for the real Reify slice. It keeps the same replay fields
@@ -27,6 +28,11 @@ export interface ReifyFailureArtifact {
    * seed and replayed together.
    */
   maxCommands: number;
+  /**
+   * Whether the failing run drove the long-lived runtime. A runtime-lifecycle
+   * fault only reproduces in the same mode. Absent means one-shot authorities.
+   */
+  runtimeMode?: boolean;
   originalSequence: Command[];
   shrunkSequence: Command[];
   replaySequence: Command[];
@@ -38,6 +44,12 @@ export interface ReifyFailureArtifact {
   stateTimeline: ReifyTimelineEntry[];
   logs: string[];
   recoveries: { at: number; after: string; buildMs: number }[];
+  /**
+   * Explicit inject/recover results for every fault this sequence ran:
+   * `NotApplicable` / `Injected` / `InjectionFailed` / `Recovered` /
+   * `RecoveryFailed`. Absent on artifacts written before this existed.
+   */
+  faultOutcomes?: FaultOutcome[];
   project: { root: string; project: string; canonical: string; workflowHome: string };
   /**
    * Real observations of the components RES-385 connected: the long-lived
