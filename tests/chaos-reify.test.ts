@@ -607,6 +607,29 @@ test("reify chaos: 凭证副本里没有选中的 provider 时，凭证故障明
   else process.env.CHAOS_REIFY_MODEL = previous.model;
 });
 
+test("reify chaos: 没有显式 override 时，凭证故障也认得机器自己的真选择", async () => {
+  const source = mkdtempSync(join(tmpdir(), "chaos-reify-cred-select-"));
+  const session = await ReifySession.start();
+  try {
+    writeFileSync(join(source, "auth.json"), JSON.stringify({ zai: { type: "api_key", key: "real-api-key-value" } }));
+    writeFileSync(join(source, "settings.json"), JSON.stringify({ defaultProvider: "zai", defaultModel: "glm-5.3-flash" }));
+
+    // An empty override is what a campaign round really passes. Looking the
+    // credential up by the *input* selection instead of the resolved one
+    // returned `undefined`, so every credential fault quietly reported
+    // "凭证副本里没有可打的 provider" and the whole provider/OAuth boundary
+    // was never really exercised.
+    const sandbox = seedCredentialSandbox(session, source);
+    const observed = await observeCredential(sandbox, {});
+    assert.equal(observed.boundary.selection.provider, "zai", "必须用机器自己的选择");
+    assert.equal(observed.described.present, true, "机器自己的凭证必须被认出来");
+    assert.equal(observed.described.hasCredentials, true);
+  } finally {
+    await session.close().catch(() => undefined);
+    rmSync(source, { recursive: true, force: true });
+  }
+});
+
 test("reify chaos: 真状态文件少了 / 坏了，harness 的破坏不会被算成产品缺陷，恢复后系统还能真 build", async (t) => {
   await withRealSession(async (session, trace) => {
     await runReifySequence(

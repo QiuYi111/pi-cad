@@ -108,10 +108,16 @@ function describe(boundary: ProviderBoundary, provider: string) {
 /** Read the boundary the way the product reader does, without any network. */
 export async function observeCredential(
   sandbox: CredentialSandbox,
-  selection: { provider: string; model: string },
+  /** A partial override; an empty one means "use the machine's own selection". */
+  selection: { provider?: string; model?: string },
 ): Promise<{ boundary: ProviderBoundary; described: ReturnType<typeof describe> }> {
   const boundary = await inspectProviderBoundary({ agentDir: sandbox.dir, override: selection, probe: false });
-  return { boundary, described: describe(boundary, selection.provider) };
+  // The caller's `selection` may be an empty override (`{}`) and rely on the
+  // sandbox's own settings.json. Reading the credential by the *input* would
+  // then look up `undefined` and report "no credential for this provider",
+  // which made every credential fault quietly NotApplicable. Only the resolved
+  // selection names a provider.
+  return { boundary, described: describe(boundary, boundary.selection.provider) };
 }
 
 /**
