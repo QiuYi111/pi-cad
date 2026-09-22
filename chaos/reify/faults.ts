@@ -950,6 +950,13 @@ function credentialFault(name: string, fault: "expire" | "drop" | "blank"): Reif
  * thing we meant to inject. "Returned 200 anyway" is a failed injection, not a
  * passing step.
  */
+const CREDENTIAL_FAULT_NAMES = ["providerCredentialExpired", "providerCredentialDropped", "providerCredentialBlanked"];
+
+/** The credential fault this round is still holding, if any. */
+function credentialFaultArmed(ctx: ReifyContext): string | null {
+  return ctx.session.activeFaults.find((name) => CREDENTIAL_FAULT_NAMES.includes(name)) ?? null;
+}
+
 function assertTransportFaultLanded(
   name: string,
   plan: { mode: "latency" | "hang" | "reset" | "truncate" | "status"; delayMs?: number; status?: number },
@@ -1010,10 +1017,26 @@ function transportFault(
         authHeaders: target.authHeaders,
         timeoutMs: Number(process.env.CHAOS_REIFY_PROVIDER_TIMEOUT_MS ?? 2_500),
       });
+      try {
+        assertTransportFaultLanded(name, plan, result);
+      } catch (error) {
+        // A credential fault armed in the same round really can break the
+        // probe: with the credential blanked or dropped the real endpoint
+        // answers 401, and the transport fault then "did not land" because the
+        // harness itself broke the request. That is not a product finding and
+        // not a transport-fault failure, so say NotApplicable with the real
+        // reason instead of blaming the fault.
+        const credential = credentialFaultArmed(ctx);
+        if (credential) {
+          throw new FaultNotApplicable(
+            `本轮已经挂着凭证故障 ${credential}，传输故障的探测请求带着被改坏的凭证（得到 ${result.status ?? result.error}），打不实`,
+          );
+        }
+        throw error;
+      }
       ctx.session.armFault(name);
       ctx.session.armedFaults.set(name, { result });
       ctx.trace.record({ kind: "note", name, detail: result });
-      assertTransportFaultLanded(name, plan, result);
     },
     recover: async (ctx) => {
       ctx.session.disarmFault(name);
