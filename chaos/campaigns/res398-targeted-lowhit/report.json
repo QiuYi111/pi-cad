@@ -1,6 +1,6 @@
 {
   "campaignId": "res398-targeted-lowhit",
-  "createdAt": "2026-09-22T15:44:26.313Z",
+  "createdAt": "2026-09-22T18:53:04.148Z",
   "manifest": {
     "campaignId": "res398-targeted-lowhit",
     "createdAt": "2026-09-22T14:28:43.827Z",
@@ -167,9 +167,9 @@
   "failures": {
     "rounds": 1,
     "unique": 1,
-    "reproducible": 1,
+    "reproducible": 0,
     "flaky": 0,
-    "falsePositive": 0,
+    "falsePositive": 1,
     "unverified": 0,
     "product": 1,
     "harness": 0
@@ -229,30 +229,23 @@
       "commits": [
         "e184332ef9b148a8f811ddac98bd1304c2d1a686"
       ],
-      "verdict": "reproducible",
+      "verdict": "false-positive",
       "triage": {
         "ruleVersion": 3,
-        "attempts": 3,
-        "reproductions": 3,
-        "sequenceReplayOk": true,
-        "seedPathReplayOk": true,
-        "shrinkOk": true,
-        "originalLength": 15,
-        "shrunkLength": 7,
-        "numShrinks": 5,
-        "minimalSequence": [
-          "action:startRun",
-          "action:commitPlan",
-          "action:advance",
-          "fault:missingDesktopProjection",
-          "fault:missingDesktopProjection",
-          "action:openConversation",
-          "action:multiConversationBuild"
-        ],
+        "attempts": 2,
+        "reproductions": 0,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": false,
+        "shrinkOk": false,
+        "originalLength": 0,
+        "shrunkLength": 0,
+        "numShrinks": 0,
+        "minimalSequence": [],
         "notes": [
-          "最小复现 7 步（原始 15 步，numShrinks=5），commit=1be42b538647"
-        ],
-        "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/campaigns/res398-targeted-lowhit/regressions/cc1cac0ed-recovery-convergence.json"
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "按 seed+path 没复现：seed=1147211961 path=0 没有复现失败"
+        ]
       }
     }
   ],
@@ -260,7 +253,7 @@
     "provider-oauth：0 次真注入"
   ],
   "notes": [
-    "本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 e184332ef9b1，recluster / re-triage / report 用的是 1be42b538647（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。",
+    "本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 e184332ef9b1，recluster / re-triage / report 用的是 1188beb8b241（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。",
     "campaign 起点工作区不干净，结论要对着 gitCommit 看"
   ]
 }

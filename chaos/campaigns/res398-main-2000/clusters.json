@@ -101,30 +101,23 @@
     "commits": [
       "e184332ef9b148a8f811ddac98bd1304c2d1a686"
     ],
-    "verdict": "reproducible",
+    "verdict": "false-positive",
     "triage": {
       "ruleVersion": 3,
-      "attempts": 3,
-      "reproductions": 3,
-      "sequenceReplayOk": true,
-      "seedPathReplayOk": true,
-      "shrinkOk": true,
-      "originalLength": 8,
-      "shrunkLength": 7,
-      "numShrinks": 1,
-      "minimalSequence": [
-        "action:startRun",
-        "action:commitPlan",
-        "action:advance",
-        "fault:missingDesktopProjection",
-        "fault:missingDesktopProjection",
-        "action:listWorkflows",
-        "action:multiConversationBuild"
-      ],
+      "attempts": 2,
+      "reproductions": 0,
+      "sequenceReplayOk": false,
+      "seedPathReplayOk": false,
+      "shrinkOk": false,
+      "originalLength": 0,
+      "shrunkLength": 0,
+      "numShrinks": 0,
+      "minimalSequence": [],
       "notes": [
-        "最小复现 7 步（原始 8 步，numShrinks=1），commit=5e191b9894bc"
-      ],
-      "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/campaigns/res398-main-2000/regressions/cc1cac0ed-recovery-convergence.json"
+        "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "按 seed+path 没复现：seed=742519939 path=0 没有复现失败"
+      ]
     }
   }
 ]

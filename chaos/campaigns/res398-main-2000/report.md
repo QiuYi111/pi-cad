@@ -1,6 +1,6 @@
 # Reify chaos campaign res398-main-2000
 
-跑完 2000 轮真 Reify：通过 1996、失败 4、harness 报错 0。失败里 unique 1 个：稳定 1、偶发 0、假阳性 0、未验 0；其中产品侧 1 个、harness 侧 0 个。
+跑完 2000 轮真 Reify：通过 1996、失败 4、harness 报错 0。失败里 unique 1 个：稳定 0、偶发 0、假阳性 1、未验 0；其中产品侧 1 个、harness 侧 0 个。
 
 起点 commit `e184332ef9b1`（labrunner/res-398-chaos-06），node v22.23.2，package 0.9.0。
 
@@ -65,18 +65,18 @@
 
 | cluster | invariant | 边界 | 哪一侧 | 出错步骤 | 次数 | 结论 | 最小复现 | 原因 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| cc1cac0ed | recovery-convergence | process/file-state | product | fault:pauseAuthorityDuringBuild, action:multiConversationBuild, action:concurrentBuild, action:commitPlan | 4 | reproducible | 7 步 | 真 authority 没有把 .pi-cad/status.json 写回来 |
+| cc1cac0ed | recovery-convergence | process/file-state | product | fault:pauseAuthorityDuringBuild, action:multiConversationBuild, action:concurrentBuild, action:commitPlan | 4 | false-positive | - | 真 authority 没有把 .pi-cad/status.json 写回来 |
 
 ## 4. 哪些可以稳定 replay
 
-- cc1cac0ed `recovery-convergence`：reproducible（按序列 replay 3/3，seed+path 复现）
-  - 最小复现 7 步（原始 8 步，numShrinks=1），commit=5e191b9894bc
-  - artifact：/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/campaigns/res398-main-2000/regressions/cc1cac0ed-recovery-convergence.json
+- cc1cac0ed `recovery-convergence`：false-positive（按序列 replay 0/2，seed+path 未复现）
+  - 第 1 次按序列 replay 没复现：序列跑完但没有复现失败
+  - 第 2 次按序列 replay 没复现：序列跑完但没有复现失败
+  - 按 seed+path 没复现：seed=742519939 path=0 没有复现失败
 
 ## 5. shrink 后最小路径
 
-- cc1cac0ed（8 步 → 7 步）
-  `action:startRun → action:commitPlan → action:advance → fault:missingDesktopProjection → fault:missingDesktopProjection → action:listWorkflows → action:multiConversationBuild`
+- 没有 shrink 成功的最小路径
 
 ## 6. 高频 failure 集中在哪些边界
 
@@ -112,5 +112,5 @@ npm run chaos:reify -- campaign rerun chaos/campaigns/res398-main-2000
 
 ## 备注
 
-- 本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 e184332ef9b1，recluster / re-triage / report 用的是 5e191b9894bc（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。
+- 本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 e184332ef9b1，recluster / re-triage / report 用的是 1188beb8b241（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。
 
