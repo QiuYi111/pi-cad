@@ -300,27 +300,33 @@ test("reify chaos: 被 SIGSTOP 的 warm kernel 在 owner 被杀后不用 SIGCONT
 });
 
 test("reify chaos: RES-390 round #92 的 no-orphan-kernel artifact 重放后不再复现", async () => {
-  // RES-390 主 soak round #92 的原 artifact（seed 1959249991，常驻 runtime
-  // 模式，startRun→commitPlan→advance→pauseKernelDuringBuild→
-  // restartRuntimeDuringBuild）。产品修好之后，同一段序列必须跑完，不再触发
-  // no-orphan-kernel。
-  const artifactFile = resolve("tests/fixtures/chaos/2026-09-22T05-24-59-068Z-reify-no-orphan-kernel.json");
-  assert.ok(existsSync(artifactFile), "RES-390 round #92 的原始 artifact 必须留在仓库里");
-  const artifact = loadReifyArtifact(artifactFile);
-  assert.equal(artifact.invariant, "no-orphan-kernel");
-  assert.equal(artifact.runtimeMode, true, "这条 artifact 记的是常驻 runtime 模式下的失败");
-  assert.deepEqual(
-    artifact.replaySequence.map((command) => command.name),
-    ["startRun", "commitPlan", "advance", "pauseKernelDuringBuild", "restartRuntimeDuringBuild"],
-    "重放的是原 artifact 记下的序列",
-  );
+  // RES-390 主 soak round #92 的两条原 artifact，症状和序列完全一样：seed
+  // 1959249991，常驻 runtime 模式，startRun→commitPlan→advance→
+  // pauseKernelDuringBuild→restartRuntimeDuringBuild。
+  // - `05-24-59`：探索那一轮的 artifact（issue 正文引用过）；
+  // - `06-38-11`：复跑那轮 round #92 的 raw artifactPath。
+  // 产品修好之后，两条的同一段序列都必须跑完，不再触发 no-orphan-kernel。
+  const artifacts = [
+    "tests/fixtures/chaos/2026-09-22T05-24-59-068Z-reify-no-orphan-kernel.json",
+    "tests/fixtures/chaos/2026-09-22T06-38-11-069Z-reify-no-orphan-kernel.json",
+  ];
+  const sequence = ["startRun", "commitPlan", "advance", "pauseKernelDuringBuild", "restartRuntimeDuringBuild"];
+  for (const relative of artifacts) {
+    const artifactFile = resolve(relative);
+    assert.ok(existsSync(artifactFile), `${relative} 必须留在仓库里`);
+    const artifact = loadReifyArtifact(artifactFile);
+    assert.equal(artifact.invariant, "no-orphan-kernel", relative);
+    assert.equal(artifact.seed, 1959249991, relative);
+    assert.equal(artifact.runtimeMode, true, `${relative} 记的是常驻 runtime 模式下的失败`);
+    assert.deepEqual(artifact.replaySequence.map((command) => command.name), sequence, `${relative} 重放的是原序列`);
 
-  const replayed = await replayReifyArtifact(artifactFile);
-  assert.equal(
-    replayed.observedInvariant,
-    undefined,
-    `这条 artifact 记的失败不该再出现：${replayed.detail ?? ""}`,
-  );
+    const replayed = await replayReifyArtifact(artifactFile);
+    assert.equal(
+      replayed.observedInvariant,
+      undefined,
+      `${relative} 记的失败不该再出现：${replayed.detail ?? ""}`,
+    );
+  }
 });
 
 test("reify chaos: 原 no-orphan-kernel artifact 重放后不再复现", async () => {
