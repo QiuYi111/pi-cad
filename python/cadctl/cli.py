@@ -78,6 +78,42 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 )
                 return 0
 
+            from .identity import (
+                IdentityError,
+                prune_stale_manifest,
+                write_manifest as write_identity_manifest,
+            )
+
+            artifacts: list[dict[str, str]] = []
+            if result.get("identity") is not None:
+                try:
+                    identity_file, _ = write_identity_manifest(
+                        result["identity"],
+                        output,
+                        source_files=result.get("sourceFiles") or [str(source.resolve())],
+                        parameters=parameters,
+                    )
+                except IdentityError as error:
+                    emit_error(
+                        "cad_build_step",
+                        error.message,
+                        input_hashes=input_hashes,
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                        stderr=result.get("stderr", ""),
+                    )
+                    return 0
+                artifacts.append(
+                    {
+                        "path": str(identity_file),
+                        "kind": "identity",
+                        "sha256": sha256_file(identity_file),
+                    }
+                )
+            else:
+                # No declaration this build: drop a manifest that described an
+                # earlier artifact so it cannot masquerade as this model.
+                prune_stale_manifest(output)
+
             manifest = make_manifest(
                 source_files=result.get("sourceFiles") or [str(source.resolve())],
                 root=Path.cwd(),
@@ -94,7 +130,7 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 "cad_build_step",
                 {
                     "step": str(output),
-                    "sidecars": [],
+                    "sidecars": [artifact["path"] for artifact in artifacts],
                     "exitCode": 0,
                     "stdout": result.get("stdout", ""),
                     "stderr": result.get("stderr", ""),
@@ -105,7 +141,8 @@ def _cmd_build(args: argparse.Namespace) -> int:
                 input_artifacts=input_artifacts,
                 artifacts=[
                     {"path": str(output), "kind": "step", "sha256": manifest["outputHash"]}
-                ],
+                ]
+                + artifacts,
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
         return 0
@@ -383,6 +420,66 @@ def _cmd_assembly_tree(args: argparse.Namespace) -> int:
     except Exception as exc:
         emit_error(
             "cad_assembly_tree",
+            str(exc),
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+
+
+def _cmd_identity(args: argparse.Namespace) -> int:
+    from .identity import IdentityError, IdentityIndex
+
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    tool = f"cad_identity_{args.stage}"
+    try:
+        index = IdentityIndex(artifact)
+        if args.stage == "verify":
+            payload = index.verify()
+        elif args.stage == "list":
+            payload = {
+                "source": index.source,
+                "artifactHash": index.artifact_hash,
+                "verification": index.verify(),
+                "entities": [
+                    resolution.as_payload()
+                    for resolution in index.entities(kind=args.kind, owner=args.owner)
+                ],
+            }
+        else:
+            expect = args.expect
+            if isinstance(expect, str) and expect.lstrip("-").isdigit():
+                expect = int(expect)
+            payload = index.resolve(
+                args.target,
+                kind=args.kind,
+                owner=args.owner,
+                expect=expect,
+            ).as_payload()
+        artifacts: list[dict[str, str]] = []
+        if args.output:
+            write_json(args.output, payload)
+            artifacts.append({"path": args.output, "kind": "identity", "sha256": sha256_file(args.output)})
+        emit(
+            tool,
+            payload,
+            input_hashes={"artifact": sha256_file(artifact)},
+            artifacts=artifacts,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except IdentityError as exc:
+        emit_error(
+            tool,
+            exc.message,
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 0
+    except Exception as exc:
+        emit_error(
+            tool,
             str(exc),
             input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
             duration_ms=int((time.monotonic() - started) * 1000),
@@ -751,6 +848,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--artifact", required=True)
     p.add_argument("--output", default=None)
     p.set_defaults(func=_cmd_assembly_tree)
+
+    p = sub.add_parser(
+        "identity",
+        help="List, resolve, or verify the declared names of one artifact",
+    )
+    p.add_argument("stage", choices=("list", "resolve", "verify"))
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--target", default=None, help="Semantic path or current-artifact ref (resolve)")
+    p.add_argument("--kind", default=None, help="Restrict to one entity kind")
+    p.add_argument("--owner", default=None, help="Restrict to one owner semantic path")
+    p.add_argument("--expect", default=None, help="one, many, or an exact count")
+    p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
+    p.set_defaults(func=_cmd_identity)
 
     p = sub.add_parser("inspect-interference", help="Return pairwise solid interference facts (penetration/contact/clearance)")
     p.add_argument("--artifact", required=True)
