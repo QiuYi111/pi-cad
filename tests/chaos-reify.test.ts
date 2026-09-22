@@ -1368,3 +1368,53 @@ test("reify chaos: campaign 落盘的最小复现能直接当回归输入", asyn
   const bySeed = await replayReifyArtifact(artifact, { seed: true });
   assert.equal(bySeed.ok, false, `按 seed+path 也不该再复现：${bySeed.detail ?? ""}`);
 });
+
+test("reify chaos: 同一轮重复出现的 fault 第二次不适用时，只 recover 真注入的那次", async () => {
+  // RES-399：res390-main-1000 的 regression artifact。同一轮里
+  // missingDesktopProjection 出现两次，第二次没东西可删、如实报 NotApplicable，
+  // 但 runner 原来按 `activeFaults` 判断「这步注入成功没有」，把它也算成注入过，
+  // 于是 recover 多跑一次：那次没 arm 记录，只能拿空路径去 existsSync，必然失败，
+  // 误报 recovery-convergence。
+  const artifactFile = resolve("chaos/campaigns/res390-main-1000/regressions/ca17c3c29-recovery-convergence.json");
+  assert.ok(existsSync(artifactFile), "这条 regression artifact 必须留在仓库里");
+  const artifact = loadReifyArtifact(artifactFile);
+  assert.equal(artifact.invariant, "recovery-convergence");
+  assert.equal(artifact.runtimeMode, true, "这条失败记的是常驻 runtime 模式");
+  assert.deepEqual(
+    artifact.replaySequence.map((command) => command.name),
+    ["startRun", "commitPlan", "advance", "missingDesktopProjection", "missingDesktopProjection", "advance", "missingRunStateFile"],
+    "重放的就是「同 fault 出现两次」那条序列",
+  );
+
+  // 序列重放和 seed+path 重放都不该再复现这条误报。
+  const bySequence = await replayReifyArtifact(artifactFile, {});
+  assert.equal(bySequence.ok, false, `修完之后不该再复现：${bySequence.detail ?? ""}`);
+  const bySeed = await replayReifyArtifact(artifactFile, { seed: true });
+  assert.equal(bySeed.ok, false, `按 seed+path 也不该再复现：${bySeed.detail ?? ""}`);
+
+  // 同一段序列再跑一次，直接看真相：第二次确实没注入，所以只该回收第一次。
+  const session = await startReifySession(true);
+  const trace = new ReifyTrace();
+  try {
+    await runReifySequence(session, artifact.replaySequence, trace);
+    const injections = session.faultOutcomes.filter(
+      (outcome) => outcome.name === "missingDesktopProjection" && outcome.phase === "inject",
+    );
+    assert.deepEqual(
+      injections.map((outcome) => outcome.status),
+      ["Injected", "NotApplicable"],
+      `这一轮的注入结果必须是「真注入一次 + 如实不适用一次」：${JSON.stringify(injections)}`,
+    );
+    const recoveries = session.faultOutcomes.filter(
+      (outcome) => outcome.name === "missingDesktopProjection" && outcome.phase === "recover",
+    );
+    assert.deepEqual(
+      recoveries.map((outcome) => outcome.status),
+      ["Recovered"],
+      `只该回收真注入过的那一次，不能多跑：${JSON.stringify(recoveries)}`,
+    );
+    assert.deepEqual(session.activeFaults, [], `回收之后不能还挂着 fault：${session.activeFaults.join(", ")}`);
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+});
