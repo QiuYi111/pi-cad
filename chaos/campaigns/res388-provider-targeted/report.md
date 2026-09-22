@@ -71,3 +71,7 @@
 npm run chaos:reify -- campaign rerun chaos/campaigns/res388-provider-targeted
 ```
 
+## 备注
+
+- 本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 446da8dedcb8，recluster / re-triage / report 用的是 73f9824a857f（triage 规则 v2）；聚类口径见 chaos/campaign/signature.ts。
+
