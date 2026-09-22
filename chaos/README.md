@@ -603,3 +603,18 @@ npm run chaos:reify -- campaign recluster chaos/campaigns/<id>
 （base `5ff3dbbb`）上；RES-389 的修法合进 master（`d40b2e82`）之后，同一份
 `regressions/c41b23f2c-no-orphan-kernel.json` 按序列和按 seed+path 都不再复现：
 这是「campaign 报的问题是真问题、上游修法真的解决它」这两件事的同一个证据。
+
+`res388-main-500-post` 是它的同 seed 对照：同样 500 个 seed、同样的 profile 循环、
+同样的 `maxCommands` 和 runtime 比例，跑在 `446da8de`（含 RES-389 `d40b2e82` 和
+RES-383 `6b944fc6`）上。两边逐轮计划完全一致，真注入次数也基本一样
+（process 141 / file-state 54 / provider-oauth 51 / race 52），结果从 28 轮失败 /
+2 个 unique 变成 0 失败 —— 差别来自修好的产品行为，不是探索强度变了。
+
+`res388-provider-targeted` 是显式开传输故障的定向 campaign（`--provider-faults`）：
+60 轮全过，provider-oauth 边界真注入 52 次，凭证侧（expired / dropped / blanked）
+和传输侧（timeout / reset / rateLimited / serverError / streamCut）8 个 fault 都真的
+`Injected` 过，没有「只排进计划没真打」的轮次。
+
+多 sandbox 共用凭证 / refresh 这条路不在这套 fault 里 —— campaign 打的是真
+agent-api，不起 bwrap 沙箱。它由 `tests/prime-credentials.test.ts` 覆盖：两个真
+bwrap 沙箱抢同一把 AuthStorage 锁，谁的写都不丢。
