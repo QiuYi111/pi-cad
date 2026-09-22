@@ -18,7 +18,7 @@ import type { ReifyReplayResult, ReifyRunResult } from "../chaos/reify/runner.ts
 import { FAULT_BOUNDARIES } from "../chaos/reify/faults.ts";
 import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import type { ReifyFailureArtifact } from "../chaos/reify/artifacts.ts";
-import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, buildReifySequenceArbitrary, type Command } from "../chaos/reify/model.ts";
+import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, REIFY_WARM_KERNEL_SETUP, buildReifySequenceArbitrary, type Command } from "../chaos/reify/model.ts";
 import { selectReifyFaults } from "../chaos/reify/runner.ts";
 
 const command = (kind: "action" | "fault", name: string): Command => ({ kind, name, params: {} });
@@ -168,6 +168,33 @@ test("campaign: 多会话 profile 的准备动作真的进生成序列", () => {
   const prefix = [...REIFY_SETUP, ...REIFY_MULTI_CONVERSATION_SETUP];
   for (const sequence of fc.sample(arbitrary, { numRuns: 5, seed: 11 })) {
     assert.deepEqual(sequence.slice(0, prefix.length), prefix, "准备动作必须在每条生成序列最前面，replay/shrink 才看得到");
+  }
+});
+
+test("campaign: idle-kernel profile 先用真 build 摆出 warm kernel", () => {
+  // `killIdleKernel` 的 precondition 是「有活着的 warm kernel」，而 warm kernel
+  // 只有真 build 过才会有。低命中就补真实 preparation，不是放宽 precondition。
+  const prepared = resolveCampaign({ mode: "targeted", profiles: ["idle-kernel"], rounds: 2 });
+  assert.deepEqual(prepared.plan[0]!.preparation, REIFY_WARM_KERNEL_SETUP, "idle-kernel profile 必须带真 build 准备");
+  assert.deepEqual(
+    prepared.plan[0]!.preparation.map((command) => command.name),
+    ["build"],
+    "准备动作必须是真的 build，不是直接摆一个假的 kernel",
+  );
+  assert.ok(
+    CAMPAIGN_PROFILES["idle-kernel"]!.faults!.includes("killIdleKernel"),
+    "准备就是为了这条 fault 能真注入",
+  );
+
+  const arbitrary = buildReifySequenceArbitrary(
+    reifyActionDefinitions,
+    selectReifyFaults(prepared.plan[0]!.faultScope ?? undefined),
+    4,
+    prepared.plan[0]!.preparation,
+  );
+  const prefix = [...REIFY_SETUP, ...REIFY_WARM_KERNEL_SETUP];
+  for (const sequence of fc.sample(arbitrary, { numRuns: 5, seed: 13 })) {
+    assert.deepEqual(sequence.slice(0, prefix.length), prefix, "真 build 必须排在 run 准备好之后、生成序列之前");
   }
 });
 

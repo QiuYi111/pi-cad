@@ -102,6 +102,18 @@ export const CAMPAIGN_PROFILES: Record<string, CampaignProfile> = {
     boundaries: ["process"],
     faults: ["killRuntimeDuringBuild", "pauseRuntimeDuringBuild", "restartRuntimeDuringBuild", "killPrimeRuntime"],
   },
+  "idle-kernel": {
+    name: "idle-kernel",
+    description: "定向：warm kernel 空闲时被杀 / kernel 树里的子进程",
+    // `killIdleKernel` needs an owned warm kernel, which only a real build
+    // creates: in the mixed soak it reported "这一轮还没真 build 过" more often
+    // than it injected. The round builds once first instead of the campaign
+    // hoping a build happened before the fault.
+    weight: 1,
+    boundaries: ["process"],
+    faults: ["killIdleKernel", "killKernelChild", "killKernelDuringBuild", "pauseKernelDuringBuild"],
+    preparation: "warm-kernel",
+  },
   "session-isolation": {
     name: "session-isolation",
     description: "定向：conversation / run 隔离",
