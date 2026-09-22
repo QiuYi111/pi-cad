@@ -38,6 +38,12 @@ function clusterRow(cluster: FailureCluster): string[] {
 export function renderCampaignReport(report: CampaignReport): string {
   const { manifest, coverage, failures, clusters } = report;
   const total = Math.max(1, coverage.rounds);
+  // Reports written before the four-state split have no InjectionFailed /
+  // RecoveryFailed buckets. Rendering an already-committed campaign must not
+  // crash: fall back to empty buckets, which is exactly what "not recorded"
+  // means for those two states.
+  const faultsInjectionFailed = coverage.faultsInjectionFailed ?? {};
+  const faultsRecoveryFailed = coverage.faultsRecoveryFailed ?? {};
   const lines: string[] = [];
   lines.push(`# Reify chaos campaign ${report.campaignId}`);
   lines.push("");
@@ -68,8 +74,32 @@ export function renderCampaignReport(report: CampaignReport): string {
   lines.push(`- action：${counts(coverage.actions)}`);
   lines.push(`- fault 真注入：${counts(coverage.faultsInjected)}`);
   lines.push(`- fault 不适用：${counts(coverage.faultsNotApplicable)}`);
+  lines.push(`- fault 注入失败（InjectionFailed，前置成立却抛了真异常）：${counts(faultsInjectionFailed)}`);
+  lines.push(`- fault 恢复失败（RecoveryFailed）：${counts(faultsRecoveryFailed)}`);
   lines.push(`- invariant 每轮都查：${coverage.invariantsChecked.join(", ")}`);
   lines.push(`- 真实组件：${counts(coverage.components)}`);
+  lines.push("");
+  // Per-fault three-way split: a fault that only ever shows up as
+  // NotApplicable is not coverage, and the report has to make that visible.
+  const faultNames = [
+    ...new Set([
+      ...Object.keys(coverage.faultsInjected),
+      ...Object.keys(coverage.faultsNotApplicable),
+      ...Object.keys(faultsInjectionFailed),
+    ]),
+  ].sort((a, b) => (coverage.faultsInjected[b] ?? 0) - (coverage.faultsInjected[a] ?? 0) || a.localeCompare(b));
+  lines.push("### 每个 fault 的注入结果");
+  lines.push("");
+  lines.push(...table(
+    ["fault", "Injected", "NotApplicable", "InjectionFailed", "RecoveryFailed"],
+    faultNames.map((name) => [
+      name,
+      String(coverage.faultsInjected[name] ?? 0),
+      String(coverage.faultsNotApplicable[name] ?? 0),
+      String(faultsInjectionFailed[name] ?? 0),
+      String(faultsRecoveryFailed[name] ?? 0),
+    ]),
+  ));
   lines.push("");
   lines.push(...table(
     ["边界", "轮数", "真注入次数", "注入/轮"],

@@ -65,6 +65,8 @@ export function aggregateCoverage(
     actions: {},
     faultsInjected: {},
     faultsNotApplicable: {},
+    faultsInjectionFailed: {},
+    faultsRecoveryFailed: {},
     invariantsChecked: [...invariantsChecked],
     boundaries: Object.fromEntries(
       ["process", "file-state", "provider-oauth", "race"].map((boundary) => [boundary, { rounds: 0, injected: 0 }]),
@@ -101,6 +103,12 @@ export function aggregateCoverage(
       }
     }
     for (const name of round.notApplicableFaults) bump(coverage.faultsNotApplicable, name);
+    // InjectionFailed / RecoveryFailed are real signals, so they are counted
+    // from the explicit outcomes rather than only from the round's summary.
+    for (const outcome of round.faultOutcomes) {
+      if (outcome.phase === "inject" && outcome.status === "InjectionFailed") bump(coverage.faultsInjectionFailed, outcome.name);
+      if (outcome.phase === "recover" && outcome.status === "RecoveryFailed") bump(coverage.faultsRecoveryFailed, outcome.name);
+    }
     for (const boundary of roundBoundaries) coverage.boundaries[boundary]!.rounds += 1;
   }
 
