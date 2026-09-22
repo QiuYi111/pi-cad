@@ -166,6 +166,8 @@ interface FaultBuild {
   /** The process that owns the CAD kernel: a one-shot authority, or the runtime. */
   ownerPid: number;
   kernelPid: number;
+  /** The forked child that really runs the request inside the warm kernel. */
+  buildChildPid: number;
   viaRuntime: boolean;
   settle: () => Promise<{ code: number | null; signal: string | null; stdout: string }>;
   /** Really kill the process serving this build. */
@@ -174,8 +176,15 @@ interface FaultBuild {
 
 /**
  * Start a real slow `model-build` and wait until its owner really holds a live
- * CAD kernel. Throws FaultNotApplicable when the system cannot reach that
- * state, so a fault never invents a failure the product did not have.
+ * CAD kernel that is really inside the build. Throws FaultNotApplicable when
+ * the system cannot reach that state, so a fault never invents a failure the
+ * product did not have.
+ *
+ * The kernel exists as soon as it is spawned, but the worker imports
+ * build123d/OCC (seconds) before it forks the child that runs a request. Every
+ * `*DuringBuild` fault has to land on the real build, so this waits for that
+ * forked child: stopping a kernel that is still warming up is a different
+ * fault, and the worker has not bound itself to its owner yet either.
  */
 async function startFaultBuild(ctx: ReifyContext, fault: string, conversationIndex = faultConversationIndex(ctx)): Promise<FaultBuild> {
   const conversation = conversationOf(ctx, conversationIndex);
@@ -201,12 +210,21 @@ async function startFaultBuild(ctx: ReifyContext, fault: string, conversationInd
   if (!kernel) {
     throw new FaultNotApplicable("没等到真的 kernel 进程", { conversation, ownerPid: live.ownerPid });
   }
+  const buildChildPid = await ctx.session.waitForBuildChild(kernel.pid);
+  if (buildChildPid === null) {
+    throw new FaultNotApplicable("kernel 起了但没有进入真 build（没等到 build 子进程）", {
+      conversation,
+      ownerPid: live.ownerPid,
+      kernelPid: kernel.pid,
+    });
+  }
   ctx.session.armFault(fault);
   return {
     conversation,
     runId: view.runId,
     ownerPid: live.ownerPid,
     kernelPid: kernel.pid,
+    buildChildPid,
     viaRuntime: live.viaRuntime,
     settle: () => live.settle,
     killOwner: (signal: NodeJS.Signals = "SIGKILL") => live.kill(signal),
@@ -260,7 +278,7 @@ async function proveRecovery(ctx: ReifyContext, after: string, conversationIndex
 
 /** How the fault handle names itself in a trace note. */
 function describeKernel(build: FaultBuild): string {
-  return `conv=${build.conversation} run=${build.runId ?? "无"} kernel=${build.kernelPid} owner=${build.ownerPid}${
+  return `conv=${build.conversation} run=${build.runId ?? "无"} kernel=${build.kernelPid} build=${build.buildChildPid} owner=${build.ownerPid}${
     build.viaRuntime ? "(runtime)" : "(authority)"
   }`;
 }
@@ -445,11 +463,10 @@ export const killKernelChild: ReifyFaultDefinition = {
   precondition: (ctx) => buildableRunPrecondition(ctx, 0),
   inject: async (ctx) => {
     const build = await startFaultBuild(ctx, "killKernelChild");
-    const tree = processTree(build.kernelPid);
-    const child = tree.find((pid) => pid !== build.kernelPid);
-    if (child === undefined) {
-      throw new FaultNotApplicable("kernel 树里只有 wrapper，没有子进程可杀", { kernelPid: build.kernelPid });
-    }
+    // `startFaultBuild` only returns once the request really runs in the
+    // forked child, so this kills the build child and leaves the warm kernel
+    // itself alive -- which is the whole point of the fault.
+    const child = build.buildChildPid;
     ctx.session.killKernel(child, "SIGKILL");
     ctx.trace.record({ kind: "note", name: "killKernelChild", detail: { child, detail: describeKernel(build) } });
     const settled = await settleWithin(build, 45_000);

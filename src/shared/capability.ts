@@ -40,6 +40,32 @@ export function pythonInvocation(extra?: "simulation", _cwd?: string): { command
   };
 }
 
+/** The interpreter the runtime installed, or the project venv `uv` builds. */
+export function managedPythonInterpreter(): string | null {
+  const configured = (process.env.PI_CAD_PYTHON ?? "").trim();
+  if (configured && existsSync(configured)) return configured;
+  const venv = join(packageRoot(), "python", ".venv", "bin", "python");
+  return existsSync(venv) ? venv : null;
+}
+
+/**
+ * Command line for the warm cadctl kernel.
+ *
+ * The kernel has to be a direct child of the process that owns it. The only
+ * owner-death signal that still reaches a stopped process is
+ * `PR_SET_PDEATHSIG`, and a process can only arm that against its own parent,
+ * so `uv run` -- which puts an interpreter child in that slot and outlives a
+ * SIGKILLed owner -- cannot be the launcher. The managed interpreter is
+ * spawned directly; `uv` stays the launcher only while that environment does
+ * not exist yet, where building it is the whole point.
+ */
+function warmKernelInvocation(extra?: "simulation"): { command: string; args: string[] } {
+  const managed = managedPythonInterpreter();
+  if (managed) return { command: managed, args: ["-m", "cadctl.worker"] };
+  const python = pythonInvocation(extra);
+  return { command: python.command, args: [...python.prefixArgs, "-m", "cadctl.worker"] };
+}
+
 /** Minimal host environment for spawning the uv-managed cadctl process. */
 export function cadctlEnv(cwd?: string): NodeJS.ProcessEnv {
   assertLinuxRuntime("Pi-CAD cadctl capability");
@@ -66,12 +92,13 @@ async function runCadctl(
   const maxStdoutBytes = 16 * 1024 * 1024;
   const maxStderrBytes = 1024 * 1024;
   const useWorker = process.env.PI_CAD_CADCTL_TRANSPORT !== "process" && isWarmCadctlCommand(args[0]);
-  const result = useWorker
+  const kernel = useWorker ? warmKernelInvocation(options.extra) : null;
+  const result = kernel
     ? await runWarmCadctl(
         {
-          key: `${python.command}\0${python.prefixArgs.join("\0")}`,
-          command: python.command,
-          args: [...python.prefixArgs, "-m", "cadctl.worker"],
+          key: `${kernel.command}\0${kernel.args.join("\0")}`,
+          command: kernel.command,
+          args: kernel.args,
           cwd: packageRoot(),
           env: cadctlEnv(),
         },

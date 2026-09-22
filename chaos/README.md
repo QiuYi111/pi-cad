@@ -314,6 +314,30 @@ owner 一没就先杀掉 fork 出来的 build 子树，再自己退出；fork �
 反过来，build 途中 SIGKILL / SIGSTOP kernel 都能正确恢复：控制面报
 `cadctl worker exited with SIGKILL`，下一次真 build 成功。
 
+### 被 SIGSTOP 的 warm kernel（已修，RES-394）
+
+真 build 途中先把 warm kernel 整棵树 SIGSTOP，再 SIGKILL 它的 owner（一次性控制面
+或常驻 runtime），kernel 会一直停在 `T` 状态，只有 `SIGCONT` 才退 →
+`no-orphan-kernel`。RES-389 那套看门狗是 kernel 里的 Python 线程，进程被停住线程也
+不跑；而且 warm kernel 的父进程本来是 `uv run`，owner 死了 uv 不死，kernel 连
+「父进程没了」都等不到。
+
+失败证据：`tests/fixtures/chaos/2026-09-22T05-24-59-068Z-reify-no-orphan-kernel.json`
+（RES-390 主 soak round #92，seed 1959249991，`startRun → commitPlan → advance →
+pauseKernelDuringBuild → restartRuntimeDuringBuild`）。
+
+修法：kernel 改成由托管解释器直接 spawn（`python/.venv/bin/python -m cadctl.worker`，
+`uv run` 只在环境还没装好时兜底），kernel 就是 owner 的直接子进程；worker 在 import
+重活之前 arm `PR_SET_PDEATHSIG`，owner 一死由内核送 SIGKILL，进程停在 `T` 也照杀。
+没有 owner 身份、或 owner 不是父进程（中间还夹着 launcher）时不 arm，行为照旧。
+
+`tests/chaos-reify.test.ts` 覆盖：被 SIGSTOP 的 warm kernel 在 owner 被 SIGKILL 后不用
+SIGCONT 也自己退，以及上面那条 artifact 重放不再复现。
+
+顺带修正：`*DuringBuild` 这类故障现在会等到真 build 子进程（kernel fork 出来、
+`setsid()` 过）出现才注入，否则可能停在一个还在 import build123d 的 kernel 上——那不
+是这些故障声称的形态，worker 那时也还没绑好 owner。
+
 ### 这一段的环境变量
 
 | 变量 | 默认 | 作用 |
