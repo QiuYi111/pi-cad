@@ -1,6 +1,6 @@
 # Reify chaos campaign res388-main-500
 
-跑完 500 轮真 Reify：通过 472、失败 28、harness 报错 0。失败里 unique 2 个：稳定 1、偶发 0、假阳性 1、未验 0；其中产品侧 1 个、harness 侧 1 个。
+跑完 500 轮真 Reify：通过 472、失败 28、harness 报错 0。失败里 unique 2 个：稳定 0、偶发 0、假阳性 2、未验 0；其中产品侧 1 个、harness 侧 1 个。
 
 起点 commit `6381490317e9`（labrunner/res-388-chaos-04），node v22.23.2，package 0.9.0。
 
@@ -34,14 +34,15 @@
 
 | cluster | invariant | 边界 | 哪一侧 | 出错步骤 | 次数 | 结论 | 最小复现 | 原因 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| c41b23f2c | no-orphan-kernel | process/provider-oauth | product | fault:killAuthorityDuringBuild, fault:providerCredentialExpired, fault:killKernelDuringBuild, fault:killPrimeRuntime, fault:pauseKernelDuringBuild, action:concurrentBuild, action:listWorkflows, action:retryBuild, action:build, fault:killRuntimeDuringBuild, action:startRun | 26 | reproducible | 6 步 | N 个 kernel 的父控制面已经死了，进程还在：#(owner=#) |
+| c41b23f2c | no-orphan-kernel | process/provider-oauth | product | fault:killAuthorityDuringBuild, fault:providerCredentialExpired, fault:killKernelDuringBuild, fault:killPrimeRuntime, fault:pauseKernelDuringBuild, action:concurrentBuild, action:listWorkflows, action:retryBuild, action:build, fault:killRuntimeDuringBuild, action:startRun | 26 | false-positive | - | N 个 kernel 的父控制面已经死了，进程还在：#(owner=#) |
 | c3ea4e272 | fault-outcome-honest | race | harness | fault:raceUserActionDuringKernelFault | 2 | false-positive | - | fault raceUserActionDuringKernelFault 注入失败：author endpoint does not expose opera |
 
 ## 4. 哪些可以稳定 replay
 
-- c41b23f2c `no-orphan-kernel`：reproducible（按序列 replay 2/2，seed+path 复现）
-  - 最小复现 6 步（原始 8 步，numShrinks=4），commit=51626ab89c74
-  - artifact：chaos/campaigns/res388-main-500/regressions/c41b23f2c-no-orphan-kernel.json
+- c41b23f2c `no-orphan-kernel`：false-positive（按序列 replay 0/2，seed+path 未复现）
+  - 第 1 次按序列 replay 没复现：序列跑完但没有复现失败
+  - 第 2 次按序列 replay 没复现：序列跑完但没有复现失败
+  - 按 seed+path 没复现：seed=-1090223884 path=0 没有复现失败
 - c3ea4e272 `fault-outcome-honest`：false-positive（按序列 replay 0/2，seed+path 未复现）
   - 第 1 次按序列 replay 没复现：序列跑完但没有复现失败
   - 第 2 次按序列 replay 没复现：序列跑完但没有复现失败
@@ -49,8 +50,7 @@
 
 ## 5. shrink 后最小路径
 
-- c41b23f2c（8 步 → 6 步）
-  `action:startRun → action:commitPlan → action:advance → fault:killAuthorityDuringBuild`
+- 没有 shrink 成功的最小路径
 
 ## 6. 高频 failure 集中在哪些边界
 
@@ -92,6 +92,6 @@ npm run chaos:reify -- campaign rerun chaos/campaigns/res388-main-500
 
 ## 备注
 
-- 本轮报告由 campaign recluster 在已落盘的轮次上重算（轮次跑在 6381490317e9）；聚类口径见 chaos/campaign/signature.ts。
+- 本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 6381490317e9，recluster / re-triage / report 用的是 b9a321d9d1ce（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。
 - 1 个 unique failure 是 harness 侧（c3ea4e272）：那是 campaign 自己的 fault 注入打错了，不是产品发现；修在 harness 里，回归用例进 tests/chaos-reify.test.ts。
 

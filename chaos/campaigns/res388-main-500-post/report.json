@@ -1,6 +1,6 @@
 {
   "campaignId": "res388-main-500-post",
-  "createdAt": "2026-09-22T01:45:00.305Z",
+  "createdAt": "2026-09-22T03:37:57.031Z",
   "manifest": {
     "campaignId": "res388-main-500-post",
     "createdAt": "2026-09-21T23:39:41.460Z",
@@ -207,6 +207,6 @@
   "clusters": [],
   "underExplored": [],
   "notes": [
-    "本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 446da8dedcb8，recluster / re-triage / report 用的是 73f9824a857f（triage 规则 v2）；聚类口径见 chaos/campaign/signature.ts。"
+    "本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 446da8dedcb8，recluster / re-triage / report 用的是 b9a321d9d1ce（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。"
   ]
 }

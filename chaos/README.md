@@ -612,6 +612,9 @@ recluster 只复用同一版 triage 规则算出来的旧结论；规则版本�
 （base `5ff3dbbb`）上；RES-389 的修法合进 master（`d40b2e82`）之后，同一份
 `regressions/c41b23f2c-no-orphan-kernel.json` 按序列和按 seed+path 都不再复现：
 这是「campaign 报的问题是真问题、上游修法真的解决它」这两件事的同一个证据。
+它入库的 `clusters.json` 也是在当前 head 上 recluster 过的，所以那 26 次
+`no-orphan-kernel` 现在的结论是 `false-positive`（当前 head 0/2 不复现）；
+原始跑法（`63814903`）和最小复现 artifact 都留着，对照的是轮次和注入分布。
 
 `res388-main-500-post` 是它的同 seed 对照：同样 500 个 seed、同样的 profile 循环、
 同样的 `maxCommands` 和 runtime 比例，跑在 `446da8de`（含 RES-389 `d40b2e82` 和

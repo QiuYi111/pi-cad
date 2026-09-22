@@ -342,26 +342,23 @@
     "commits": [
       "6381490317e911c6d574643fad359ee59285ce1d"
     ],
-    "verdict": "reproducible",
+    "verdict": "false-positive",
     "triage": {
+      "ruleVersion": 3,
       "attempts": 2,
-      "reproductions": 2,
-      "sequenceReplayOk": true,
-      "seedPathReplayOk": true,
-      "shrinkOk": true,
-      "originalLength": 8,
-      "shrunkLength": 6,
-      "numShrinks": 4,
-      "minimalSequence": [
-        "action:startRun",
-        "action:commitPlan",
-        "action:advance",
-        "fault:killAuthorityDuringBuild"
-      ],
+      "reproductions": 0,
+      "sequenceReplayOk": false,
+      "seedPathReplayOk": false,
+      "shrinkOk": false,
+      "originalLength": 0,
+      "shrunkLength": 0,
+      "numShrinks": 0,
+      "minimalSequence": [],
       "notes": [
-        "最小复现 6 步（原始 8 步，numShrinks=4），commit=51626ab89c74"
-      ],
-      "enrichedArtifact": "chaos/campaigns/res388-main-500/regressions/c41b23f2c-no-orphan-kernel.json"
+        "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "按 seed+path 没复现：seed=-1090223884 path=0 没有复现失败"
+      ]
     }
   },
   {
@@ -421,6 +418,7 @@
     ],
     "verdict": "false-positive",
     "triage": {
+      "ruleVersion": 3,
       "attempts": 2,
       "reproductions": 0,
       "sequenceReplayOk": false,
