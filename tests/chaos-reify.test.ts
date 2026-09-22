@@ -12,11 +12,17 @@ import { InvariantViolation } from "../chaos/types.ts";
 import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "../chaos/reify/artifacts.ts";
 import { inspectReifyComponents } from "../chaos/reify/components.ts";
-import { FAULT_BOUNDARIES, providerFaultDefinitions, raceFaultDefinitions, reifyFaultDefinitions } from "../chaos/reify/faults.ts";
+import {
+  credentialAuthRejection,
+  FAULT_BOUNDARIES,
+  providerFaultDefinitions,
+  raceFaultDefinitions,
+  reifyFaultDefinitions,
+} from "../chaos/reify/faults.ts";
 import { inspectDesktopProjection, inspectProviderBoundary, readProviderCredentials, resolvePrimeAgentRepo } from "../chaos/reify/inspect.ts";
 import { checkReifyInvariants } from "../chaos/reify/invariants.ts";
 import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
-import { applyCredentialFault, observeCredential, restoreCredentialSandbox, seedCredentialSandbox } from "../chaos/reify/provider.ts";
+import { applyCredentialFault, observeCredential, restoreCredentialSandbox, runTransportFault, seedCredentialSandbox } from "../chaos/reify/provider.ts";
 import { parseUpstream, ProviderFaultProxy } from "../chaos/reify/provider-proxy.ts";
 import { injectReifyFault, recoverInjectedFaults, replayReifyArtifact, runReifySequence, startReifySession } from "../chaos/reify/runner.ts";
 import { ReifyRuntime } from "../chaos/reify/runtime.ts";
@@ -818,6 +824,62 @@ test("reify chaos: provider fault proxy 不能把 provider 的 base path 吃掉"
     await response.body.dump();
     await proxy.close();
     assert.deepEqual(seen, ["/api/coding/paas/v4/models"], "转发给真 provider 的路径必须带前缀");
+  } finally {
+    upstream.closeAllConnections?.();
+    await new Promise<void>((accept) => upstream.close(() => accept()));
+  }
+});
+
+test("reify chaos: 凭证故障只在真 provider 明确 auth rejection 时才把 transport 失败算 NA", () => {
+  // 已经实际跑过的探针失败，只有 401/403 才是「凭证坏了」这件事的真后果。
+  assert.ok(credentialAuthRejection({ status: 401 }, "providerCredentialExpired"), "401 才允许 NA");
+  assert.ok(credentialAuthRejection({ status: 403 }, "providerCredentialDropped"), "403 才允许 NA");
+  assert.ok(credentialAuthRejection({ status: 401 }, "providerCredentialBlanked"), "清空 secret 后 provider 也会拒");
+
+  // 200 但延迟没生效：真注入失败，旁边的凭证故障不能把它洗成 NA。
+  assert.equal(
+    credentialAuthRejection({ status: 200 }, "providerCredentialBlanked"),
+    null,
+    "200（延迟没生效）必须继续是 InjectionFailed",
+  );
+  assert.equal(credentialAuthRejection({ status: 500, error: "upstream 500" }, "providerCredentialExpired"), null);
+  assert.equal(credentialAuthRejection({ status: null, error: "socket hang up" }, "providerCredentialDropped"), null);
+
+  // 没有凭证故障时，401 同样是真失败，不能自己转成 NA。
+  assert.equal(credentialAuthRejection({ status: 401 }, null), null, "没有凭证故障就不能 NA");
+});
+
+test("reify chaos: 真 provider 用 401 拒掉坏凭证才算 NA，带好凭证的真延迟仍然是真注入", async () => {
+  const upstream = createServer((incoming, outgoing) => {
+    const authorized = incoming.headers.authorization === "Bearer good";
+    outgoing.writeHead(authorized ? 200 : 401, { "content-type": "application/json" });
+    outgoing.end(JSON.stringify({ ok: authorized, auth: incoming.headers.authorization ?? null }));
+  });
+  await new Promise<void>((accept) => upstream.listen(0, "127.0.0.1", () => accept()));
+  const port = (upstream.address() as { port: number }).port;
+  try {
+    // 凭证故障把凭证改坏，探针带着坏 header 打真上游：上游明确 401，
+    // transport 故障就打不上，这个 NA 记在凭证故障头上是对的。
+    const rejected = await runTransportFault({
+      baseUrl: `http://127.0.0.1:${port}`,
+      plan: { mode: "latency", delayMs: 1_500 },
+      authHeaders: { authorization: "Bearer broken" },
+      timeoutMs: 2_000,
+    });
+    assert.equal(rejected.status, 401, "坏凭证必须被真 provider 明确拒掉");
+    assert.ok(credentialAuthRejection(rejected, "providerCredentialBlanked"), "明确 auth rejection 才允许 NA");
+    assert.equal(credentialAuthRejection(rejected, null), null, "没有凭证故障时同样不能 NA");
+
+    // 凭证没被改坏：真延迟真的生效，旁边就算挂着凭证故障也不能动它。
+    const landed = await runTransportFault({
+      baseUrl: `http://127.0.0.1:${port}`,
+      plan: { mode: "latency", delayMs: 300 },
+      authHeaders: { authorization: "Bearer good" },
+      timeoutMs: 2_000,
+    });
+    assert.equal(landed.status, 200, "带好凭证必须拿到真答案");
+    assert.ok(landed.ms >= 300 * 0.8, `延迟必须真生效（${landed.ms}ms）`);
+    assert.equal(credentialAuthRejection(landed, "providerCredentialBlanked"), null, "真打上的探针不能被洗成 NA");
   } finally {
     upstream.closeAllConnections?.();
     await new Promise<void>((accept) => upstream.close(() => accept()));
