@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PrimeRpc, projectRuntimeJournal } from "../electron/main/prime-rpc";
 import type { RuntimeTraceEntry } from "../electron/main/runtime-state";
 import type { RuntimeBridge } from "../electron/main/runtime-bridge";
-import type { RuntimeStatus } from "../src/shared/contracts";
+import type { AppSettings, RuntimeStatus } from "../src/shared/contracts";
 
 /** Minimal stand-in for the Prime sidecar process. */
 function fakeChild() {
@@ -30,6 +30,24 @@ function harness(options: Record<string, unknown> = {}) {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("PrimeRpc runtime state", () => {
+  it("applies saved provider/model changes before reusing an idle worker", async () => {
+    const { runtime, request } = harness();
+    request.mockResolvedValue({ model: { provider: "openai-codex", id: "old" }, thinkingLevel: "low" });
+    await runtime.start({ provider: "zai", model: "glm-5.3-flash", thinking: "off" } as AppSettings);
+    expect(request.mock.calls.map(([type, payload]) => [type, payload])).toEqual([
+      ["get_state", undefined],
+      ["set_model", { provider: "zai", modelId: "glm-5.3-flash" }],
+      ["set_thinking_level", { level: "off" }],
+    ]);
+  });
+
+  it("does not change a worker's model in the middle of an active turn", async () => {
+    const { runtime, request, send } = harness();
+    send({ type: "agent_start" });
+    await runtime.start({ provider: "zai", model: "glm-5.3-flash", thinking: "off" } as AppSettings);
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("publishes retry, provider wait and terminal phases from Prime events", async () => {
     const { runtime, request, statuses, send } = harness();
     await runtime.prompt("start");

@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { AppSettings, ModelChoice, RuntimeStatus, ThinkingLevel } from "../../src/shared/contracts.js";
-import { asThinkingLevel } from "../../src/shared/contracts.js";
+import { asThinkingLevel, runtimeTurnActive } from "../../src/shared/contracts.js";
 import { runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
 import { MODEL_WAIT_PHASES, PrimeRuntimeState, type RuntimeTraceEntry } from "./runtime-state.js";
 
@@ -61,7 +61,18 @@ export class PrimeRpc extends EventEmitter {
   get status(): RuntimeStatus { return this.runtime.status; }
 
   async start(settings: AppSettings, resumePath?: string): Promise<RuntimeStatus> {
-    if (this.child && !this.child.killed) return this.status;
+    if (this.child && !this.child.killed) {
+      // Settings can change while an idle/failed conversation keeps its worker.
+      // Apply them before the next prompt instead of reusing its stale provider.
+      if (!runtimeTurnActive(this.status)) {
+        const state = await this.request("get_state");
+        if (state?.model?.provider !== settings.provider || state?.model?.id !== settings.model) {
+          await this.setModel(settings.provider, settings.model);
+        }
+        if (state?.thinkingLevel !== settings.thinking) await this.setThinking(settings.thinking);
+      }
+      return this.status;
+    }
     await ensureRuntimeReady(this.bridge, settings, (status) => this.merge(status));
     const paths = await this.bridge.resolveRuntimePaths(settings);
     if (!paths.projectPath) throw new Error("Choose a project folder before starting Prime.");
