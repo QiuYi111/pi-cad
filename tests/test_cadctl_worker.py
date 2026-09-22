@@ -273,6 +273,21 @@ class CadctlWorkerOwnerTests(unittest.TestCase):
             time.sleep(0.05)
         return []
 
+    def wait_for_all_gone(self, pids: list[int], timeout: float = 15.0) -> list[int]:
+        """Wait until those pids are really gone (a zombie already counts).
+
+        The worker sends the kill and exits; the children die right after it,
+        so checking the instant the worker is reaped races with the kernel
+        delivering those signals on a loaded machine.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            alive = [pid for pid in pids if owner.owner_alive(owner.OwnerIdentity(pid, None))]
+            if not alive:
+                return []
+            time.sleep(0.05)
+        return [pid for pid in pids if owner.owner_alive(owner.OwnerIdentity(pid, None))]
+
     def start_slow_build(self) -> None:
         """One real build that stays inside the forked child for a long time."""
         source = Path(self.tmp.name) / "slow.py"
@@ -317,8 +332,7 @@ class CadctlWorkerOwnerTests(unittest.TestCase):
 
         os.kill(self.owner.pid, signal.SIGKILL)
         self.assertIsNotNone(self.wait_for_exit(worker), "owner 被 SIGKILL 后 worker 必须自己退出")
-        for pid in children:
-            self.assertFalse(owner.owner_alive(owner.OwnerIdentity(pid, None)), f"{pid} 还在")
+        self.assertEqual(self.wait_for_all_gone(children), [], "owner 死后 build 子进程必须跟着退")
 
     def test_sigterm_stop_takes_the_forked_build_child_with_it(self) -> None:
         worker = self.start_worker(self.owned_env(self.start_owner()))
@@ -328,8 +342,7 @@ class CadctlWorkerOwnerTests(unittest.TestCase):
 
         worker.send_signal(signal.SIGTERM)
         self.assertIsNotNone(self.wait_for_exit(worker), "正常 stop 后 worker 必须退出")
-        for pid in children:
-            self.assertFalse(owner.owner_alive(owner.OwnerIdentity(pid, None)), f"{pid} 还在")
+        self.assertEqual(self.wait_for_all_gone(children), [], "正常 stop 也必须带走 build 子进程")
 
     def test_worker_without_owner_identity_keeps_its_old_behaviour(self) -> None:
         env = os.environ.copy()
