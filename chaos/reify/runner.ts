@@ -298,6 +298,13 @@ export interface ReifyRunOptions {
    */
   faultScope?: string[];
   /**
+   * Real commands that really prepare the state this round wants, prepended to
+   * every generated sequence. A multi-conversation race needs two working
+   * conversations; that preparation is an action in the sequence (and in the
+   * artifact), never something a fault does to itself.
+   */
+  preparation?: Command[];
+  /**
    * `false` stops at the first failure without shrinking. A campaign round
    * wants the raw counterexample fast; the shrink belongs to triage, on the
    * unique failures only.
@@ -324,6 +331,8 @@ export interface ReifyRunResult {
   replayOk?: boolean;
   /** The fault pool this run generated from; absent means the full space. */
   faultScope?: string[];
+  /** The real preparation commands this run prepended; absent means none. */
+  preparation?: Command[];
   /**
    * The first generated round: what the generator produced, what the real
    * system actually executed, and the fault outcomes of that round alone.
@@ -354,13 +363,14 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
   const maxCommands = options.maxCommands ?? DEFAULT_MAX_COMMANDS;
   const runtimeMode = options.runtime ?? session.attachedRuntime !== null;
   const faultScope = options.faultScope?.length ? [...options.faultScope] : undefined;
+  const preparation = options.preparation?.length ? options.preparation.map((command) => ({ ...command, params: { ...command.params } })) : [];
   const shrink = options.shrink !== false;
   const verify = shrink && options.verify !== false;
   // Outcomes are cleared by `reset()` at the start of every iteration, so the
   // whole run's results have to be collected as the iterations go.
   const allFaultOutcomes: FaultOutcome[] = [];
   try {
-    const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, selectReifyFaults(faultScope), maxCommands);
+    const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, selectReifyFaults(faultScope), maxCommands, preparation);
     let firstFailure: RecordedFailure | null = null;
     let firstRound: { generated: Command[]; executed: Command[]; faultOutcomes: FaultOutcome[] } | null = null;
 
@@ -407,6 +417,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
         shrunkLength: 0,
         numShrinks: 0,
         ...(faultScope ? { faultScope } : {}),
+        ...(preparation.length ? { preparation } : {}),
         ...(firstRound ? { firstRound } : {}),
         invariants: reifyInvariantDefinitions.map((definition) => definition.name),
         recoveries: session.history.recoveries,
@@ -422,6 +433,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       maxCommands,
       runtimeMode,
       faultScope,
+      preparation,
       sequence: shrunk,
       fallback: original,
       expected: details.errorInstance instanceof InvariantViolation ? details.errorInstance : null,
@@ -454,6 +466,7 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       artifactPath,
       replayOk: artifact.reproducible,
       ...(faultScope ? { faultScope } : {}),
+      ...(preparation.length ? { preparation } : {}),
       ...(firstRound ? { firstRound } : {}),
       invariants: reifyInvariantDefinitions.map((definition) => definition.name),
       recoveries: session.history.recoveries,
@@ -473,6 +486,8 @@ async function captureFailure(
     maxCommands: number;
     runtimeMode: boolean;
     faultScope?: string[];
+    /** Real commands prepended to the sequence, recorded so replay rebuilds them. */
+    preparation?: Command[];
     sequence: Command[];
     fallback: Command[];
     expected: InvariantViolation | null;
@@ -540,6 +555,7 @@ async function captureFailure(
     maxCommands: input.maxCommands,
     runtimeMode: input.runtimeMode,
     ...(input.faultScope?.length ? { faultScope: input.faultScope } : {}),
+    ...(input.preparation?.length ? { preparation: input.preparation } : {}),
     originalSequence: input.fallback,
     shrunkSequence: input.sequence,
     replaySequence: usedSequence,
@@ -586,6 +602,8 @@ function rawFailureArtifact(
     maxCommands: number;
     runtimeMode: boolean;
     faultScope?: string[];
+    /** Real commands prepended to the sequence, recorded so replay rebuilds them. */
+    preparation?: Command[];
     sequence: Command[];
     fallback: Command[];
     expected: InvariantViolation | null;
@@ -606,6 +624,7 @@ function rawFailureArtifact(
     maxCommands: input.maxCommands,
     runtimeMode: input.runtimeMode,
     ...(input.faultScope?.length ? { faultScope: input.faultScope } : {}),
+    ...(input.preparation?.length ? { preparation: input.preparation } : {}),
     originalSequence: input.fallback,
     shrunkSequence: input.sequence,
     replaySequence: executed,
@@ -680,6 +699,7 @@ async function replayBySeedAndPath(session: ReifySession, artifact: ReifyFailure
     reifyActionDefinitions,
     selectReifyFaults(artifact.faultScope),
     artifact.maxCommands,
+    artifact.preparation ?? [],
   );
   let observed: InvariantViolation | null = null;
   let other: unknown = null;
@@ -735,6 +755,7 @@ export async function shrinkReifyArtifact(file: string): Promise<ReifyShrinkResu
     maxCommands: artifact.maxCommands,
     runtime: artifact.runtimeMode ?? false,
     faultScope: artifact.faultScope,
+    preparation: artifact.preparation,
     quiet: true,
     save: false,
   });

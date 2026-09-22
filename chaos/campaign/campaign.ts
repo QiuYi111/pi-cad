@@ -191,6 +191,7 @@ async function runRound(planned: PlannedRound): Promise<{ round: CampaignRound; 
       maxCommands: planned.maxCommands,
       runtime: planned.runtimeMode,
       faultScope: planned.faultScope ?? undefined,
+      preparation: planned.preparation,
       quiet: true,
       // A campaign round is a sample: save the raw failure, skip the expensive
       // shrink and component probe. Triage does that for unique failures only.
@@ -234,6 +235,7 @@ async function runRound(planned: PlannedRound): Promise<{ round: CampaignRound; 
     runtimeMode: planned.runtimeMode,
     maxCommands: planned.maxCommands,
     faultScope: planned.faultScope,
+    preparation: planned.preparation,
     startedAt,
     durationMs: Date.now() - started,
     status,

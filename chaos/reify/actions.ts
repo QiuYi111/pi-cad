@@ -387,12 +387,13 @@ export const multiConversationBuild: ReifyActionDefinition = {
   arbitrary: fc.constant<Params>({}),
   describe: () => "multiConversationBuild",
   run: guarded("multiConversationBuild", async (ctx) => {
-    // "Two conversations build at once" needs two conversations that may
-    // really build. With only one open, this used to build the same run twice
-    // and call it multi-conversation pressure.
-    if (ctx.session.conversations.length < 2) await openWorkingConversation(ctx);
+    // Two conversations that may really build come from the round's own
+    // preparation (`REIFY_MULTI_CONVERSATION_SETUP`), not from this action
+    // quietly opening one. With a single conversation it degrades to a
+    // single-conversation build and the trace says so.
+    if (ctx.session.conversations.length < 2) ctx.trace.note("multiConversationBuild 只有一个会话，退化成单会话 build");
     const conversations = [ctx.session.conversation(0)];
-    conversations.push(ctx.session.conversation(1));
+    if (ctx.session.conversations.length > 1) conversations.push(ctx.session.conversation(1));
     const results = await Promise.all(
       conversations.map(async (conversation) => {
         try {

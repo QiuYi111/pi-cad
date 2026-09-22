@@ -444,10 +444,23 @@ RecoveryFailed   恢复没成 —— 也是失败
 `openConversation` 起第二个真会话，并且用真 `commit` + 真 `plan_ready` transition
 把它自己的 run 送到 `cook`——只 `workflow-start` 的话新 run 停在 `plan`，那里根本不给
 `model.build`，多会话 race 就永远只能报 NotApplicable，多会话压力也是假的。
-送到 `cook` 之后：`multiConversationBuild` 两个会话同时真 build，
+
+多会话 race 的 precondition 保持严格：两个真会话、各自 run active、该 build 的会话真的
+允许 `model.build`。要打这两个 fault 的轮次靠 **preparation** 把状态准备好：profile 声明
+`preparation: "multi-conversation"`（`race` 和 `session-isolation`），轮次就在生成序列最前面
+真的跑一遍 `openConversation`。准备动作是序列里的真命令，写进 artifact 的 `preparation`、
+`originalSequence` / `replaySequence`，`replay` / `shrink` 按同一份准备重建，
+fault 自己绝不造状态。
+
+准备好之后：`multiConversationBuild` 两个会话同时真 build，
 `raceTwoConversationsBuild` 在两边都 build 的时候杀其中一个 kernel，
 `raceCrossConversationFault` 一边被打故障、另一边继续做真操作。
 `run-ownership` 盯着归属不串。
+
+`missingDesktopProjection` 只认常驻 runtime 写回来的投影：runner 按注入逆序回收，如果同一轮
+另一个故障刚把 runtime SIGKILL 掉还没回收，`session.call` 会静默退化成一次性控制面，
+而它本来就不写 `.pi-cad/status.json`。所以这个 fault 的 recover 会先把 runtime 起来，
+再对真正的 Desktop 后端要这份投影。
 
 ### replay / shrink 跟着一起对
 

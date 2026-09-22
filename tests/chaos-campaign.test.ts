@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import fc from "fast-check";
+
 import { resolveCampaign } from "../chaos/campaign/campaign.ts";
 import { aggregateCoverage } from "../chaos/campaign/coverage.ts";
 import { buildRoundPlan, deriveRoundSeed } from "../chaos/campaign/plan.ts";
@@ -14,8 +16,10 @@ import { assessClusterStability, classifyFailureVerdict, triageCluster } from ".
 import type { CampaignReport, CampaignRound, FailureCluster } from "../chaos/campaign/types.ts";
 import type { ReifyReplayResult, ReifyRunResult } from "../chaos/reify/runner.ts";
 import { FAULT_BOUNDARIES } from "../chaos/reify/faults.ts";
+import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import type { ReifyFailureArtifact } from "../chaos/reify/artifacts.ts";
-import type { Command } from "../chaos/reify/model.ts";
+import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, buildReifySequenceArbitrary, type Command } from "../chaos/reify/model.ts";
+import { selectReifyFaults } from "../chaos/reify/runner.ts";
 
 const command = (kind: "action" | "fault", name: string): Command => ({ kind, name, params: {} });
 
@@ -147,6 +151,24 @@ test("campaign: targeted 模式必须点明 profile", () => {
   assert.deepEqual(resolved.manifest.profiles, ["kernel-lifecycle"]);
   assert.equal(resolved.plan.length, 3);
   assert.deepEqual(resolved.plan[0]!.faultScope, CAMPAIGN_PROFILES["kernel-lifecycle"]!.faults);
+});
+
+test("campaign: 多会话 profile 的准备动作真的进生成序列", () => {
+  const prepared = resolveCampaign({ mode: "targeted", profiles: ["session-isolation"], rounds: 2 });
+  assert.deepEqual(prepared.plan[0]!.preparation, REIFY_MULTI_CONVERSATION_SETUP, "多会话 profile 必须带准备序列");
+  const plain = resolveCampaign({ mode: "targeted", profiles: ["kernel-lifecycle"], rounds: 1 });
+  assert.deepEqual(plain.plan[0]!.preparation, [], "不需要准备的 profile 不能凭空加动作");
+
+  const arbitrary = buildReifySequenceArbitrary(
+    reifyActionDefinitions,
+    selectReifyFaults(prepared.plan[0]!.faultScope ?? undefined),
+    4,
+    prepared.plan[0]!.preparation,
+  );
+  const prefix = [...REIFY_SETUP, ...REIFY_MULTI_CONVERSATION_SETUP];
+  for (const sequence of fc.sample(arbitrary, { numRuns: 5, seed: 11 })) {
+    assert.deepEqual(sequence.slice(0, prefix.length), prefix, "准备动作必须在每条生成序列最前面，replay/shrink 才看得到");
+  }
 });
 
 test("campaign: nightly 默认就是 ≥500 轮", () => {

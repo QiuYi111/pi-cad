@@ -83,11 +83,40 @@ export const REIFY_SETUP: Command[] = [
   { kind: "action", name: "advance", params: { event: "plan_ready", conversationIndex: 0 } },
 ];
 
+/**
+ * Really prepare a second working conversation, as explicit commands.
+ *
+ * The multi-conversation races (two builds at once, one conversation faulted
+ * while the other works) need two conversations that really may build. Their
+ * preconditions stay strict — two real conversations, active runs, and
+ * `model.build` really granted — so a round that wants those faults has to
+ * bring the state with it. Preparation is a real action the artifact records,
+ * not something a fault does to itself: replay and shrink see the same
+ * `openConversation` a user would run, and the minimal sequence still says how
+ * the system really got there.
+ */
+export const REIFY_MULTI_CONVERSATION_SETUP: Command[] = [
+  { kind: "action", name: "openConversation", params: {} },
+];
+
+/** The named preparations a profile (or a single run) can ask for. */
+export const REIFY_PREPARATIONS: Record<string, Command[]> = {
+  "multi-conversation": REIFY_MULTI_CONVERSATION_SETUP,
+};
+
+export function resolvePreparation(name: string | undefined): Command[] {
+  if (!name) return [];
+  const commands = REIFY_PREPARATIONS[name];
+  if (!commands) throw new Error(`未知的 preparation "${name}"，可选：${Object.keys(REIFY_PREPARATIONS).join(", ")}`);
+  return commands.map((command) => ({ ...command, params: { ...command.params } }));
+}
+
 /** One fast-check command list: real Reify actions mixed with real faults. */
 export function buildReifySequenceArbitrary(
   actions: ReifyActionDefinition[],
   faults: ReifyFaultDefinition[],
   maxLength = 10,
+  preparation: Command[] = [],
 ): fc.Arbitrary<Command[]> {
   const choices = [
     ...actions.map((definition) => ({
@@ -99,7 +128,9 @@ export function buildReifySequenceArbitrary(
       weight: WEIGHTS[definition.name] ?? 1,
     })),
   ];
-  return fc.array(fc.oneof(...choices), { minLength: 2, maxLength }).map((rest) => [...REIFY_SETUP, ...rest]);
+  return fc
+    .array(fc.oneof(...choices), { minLength: 2, maxLength })
+    .map((rest) => [...REIFY_SETUP, ...preparation, ...rest]);
 }
 
 export function describeCommand(command: Command): string {

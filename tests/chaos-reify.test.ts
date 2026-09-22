@@ -15,7 +15,7 @@ import { inspectReifyComponents } from "../chaos/reify/components.ts";
 import { FAULT_BOUNDARIES, providerFaultDefinitions, raceFaultDefinitions, reifyFaultDefinitions } from "../chaos/reify/faults.ts";
 import { inspectDesktopProjection, inspectProviderBoundary, readProviderCredentials, resolvePrimeAgentRepo } from "../chaos/reify/inspect.ts";
 import { checkReifyInvariants } from "../chaos/reify/invariants.ts";
-import { REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
+import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, buildReifySequenceArbitrary } from "../chaos/reify/model.ts";
 import { applyCredentialFault, observeCredential, restoreCredentialSandbox, seedCredentialSandbox } from "../chaos/reify/provider.ts";
 import { ProviderFaultProxy } from "../chaos/reify/provider-proxy.ts";
 import { injectReifyFault, recoverInjectedFaults, replayReifyArtifact, runReifySequence, startReifySession } from "../chaos/reify/runner.ts";
@@ -938,23 +938,66 @@ test("reify chaos: openConversation 起的新会话真的能 build，不是停�
   });
 });
 
-test("reify chaos: 只有一个会话时多会话 race 也真注入，不再只是 NotApplicable", async () => {
+test("reify chaos: 多会话 race 严格要两个能 build 的会话，准备动作是序列里的真命令", async () => {
+  const races = [
+    ["raceTwoConversationsBuild", {}],
+    ["raceCrossConversationFault", { faultedIndex: 1 }],
+  ] as const;
+
+  // No second conversation: the fault says so instead of producing one.
   await withRealSession(async (session, trace) => {
     await runReifySequence(session, REIFY_SETUP, trace);
     assert.equal(session.conversations.length, 1, "这段序列只开了一个会话");
-
-    for (const [name, params] of [
-      ["raceTwoConversationsBuild", {}],
-      ["raceCrossConversationFault", { faultedIndex: 1 }],
-    ] as const) {
+    for (const [name, params] of races) {
       const definition = reifyFaultDefinitions.find((fault) => fault.name === name)!;
       const outcome = await injectReifyFault(session, definition, { kind: "fault", name, params }, trace);
-      assert.equal(outcome.status, "Injected", `${name} 必须真的注入：${JSON.stringify(outcome)}`);
+      assert.equal(outcome.status, "NotApplicable", `${name} 只有一个会话时必须如实不适用：${JSON.stringify(outcome)}`);
+      assert.equal(session.conversations.length, 1, `${name} 不能自己造第二个会话`);
+    }
+  });
+
+  // With the explicit preparation the round really asks for, both inject.
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(session, REIFY_SETUP, trace);
+    await runReifySequence(session, REIFY_MULTI_CONVERSATION_SETUP, trace);
+    assert.equal(session.conversations.length, 2, "准备序列必须真的开出第二个会话");
+    for (const [name, params] of races) {
+      const definition = reifyFaultDefinitions.find((fault) => fault.name === name)!;
+      const outcome = await injectReifyFault(session, definition, { kind: "fault", name, params }, trace);
+      assert.equal(outcome.status, "Injected", `${name} 准备好两会话后必须真的注入：${JSON.stringify(outcome)}`);
       await recoverInjectedFaults(session, [{ definition, params }], trace);
       await checkReifyInvariants({ session, snapshot: await session.snapshot(), now: Date.now() });
     }
-    assert.ok(session.conversations.length >= 2, "多会话 race 必须真的摆出第二个会话");
   });
+});
+
+test("reify chaos: 别的故障杀掉 runtime 时，投影 recover 不会把 harness 的降级算成产品", async () => {
+  // A session that really drives the resident runtime, the way a campaign
+  // round does (`--runtime`), because the projection belongs to that backend.
+  const session = await startReifySession(true);
+  const trace = new ReifyTrace();
+  try {
+    await runReifySequence(session, REIFY_SETUP, trace);
+    const kill = reifyFaultDefinitions.find((fault) => fault.name === "killRuntimeDuringBuild")!;
+    const missing = reifyFaultDefinitions.find((fault) => fault.name === "missingDesktopProjection")!;
+    const injected = [
+      { definition: kill, params: {} },
+      { definition: missing, params: {} },
+    ];
+    for (const { definition, params } of injected) {
+      const outcome = await injectReifyFault(session, definition, { kind: "fault", name: definition.name, params }, trace);
+      assert.equal(outcome.status, "Injected", `${definition.name} 必须真的注入：${JSON.stringify(outcome)}`);
+    }
+    // Hand them over in injection order: the runner recovers in reverse, so
+    // the projection check runs while the runtime the other fault SIGKILLed is
+    // still down. `session.call` would silently fall back to a one-shot
+    // authority, which never owns the Desktop projection.
+    await recoverInjectedFaults(session, injected, trace);
+    const failed = session.faultOutcomes.filter((outcome) => outcome.status === "RecoveryFailed");
+    assert.deepEqual(failed, [], `回收不能有失败：${JSON.stringify(failed)}`);
+  } finally {
+    await session.close().catch(() => undefined);
+  }
 });
 
 test("reify chaos: 真状态读不出来时 precondition 直接失败，不会被当成不适用", async () => {

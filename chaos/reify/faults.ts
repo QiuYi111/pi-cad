@@ -6,7 +6,6 @@ import { promisify } from "node:util";
 import fc from "fast-check";
 
 import { InvariantViolation } from "../types.ts";
-import { openWorkingConversation } from "./actions.ts";
 import { ReifyPrimeRuntime } from "./prime.ts";
 import { resolveProviderSelection } from "./inspect.ts";
 import {
@@ -812,6 +811,21 @@ export const missingDesktopProjection: ReifyFaultDefinition = {
     const armed = ctx.session.armedFaults.get("missingDesktopProjection") as { file: string } | undefined;
     ctx.session.disarmFault("missingDesktopProjection");
     ctx.session.unmarkDamagedProjection();
+    // The projection belongs to the long-lived runtime, the backend the Desktop
+    // talks to. The runner recovers faults in reverse injection order, so a
+    // round where another fault SIGKILLed that runtime recovers *this* fault
+    // while it is still down; `session.call` then silently falls back to a
+    // one-shot authority, which never owns `.pi-cad/status.json`, and the check
+    // below would blame the product for a projection the harness never asked
+    // the right process to write. Bring the runtime back first — the same real
+    // restart the runtime faults do in their own recover — and keep the check
+    // on the surface that really owns it.
+    const runtime = ctx.session.attachedRuntime;
+    if (runtime && !runtime.alive) {
+      const info = await runtime.start();
+      ctx.session.registerAuthorityPid(info.pid, "runtime");
+      ctx.trace.note(`Desktop 投影要常驻 runtime 才算数：先把它重新起来 pid=${info.pid}`);
+    }
     // One real request makes the real authority rewrite its own projection.
     await ctx.session.call("workflow-current", { sessionId: conversationOf(ctx) });
     if (!existsSync(armed?.file ?? "")) {
@@ -1069,30 +1083,25 @@ export const raceTwoConversationsBuild: ReifyFaultDefinition = {
   arbitrary: fc.constant<Params>({}),
   describe: () => "raceTwoConversationsBuild",
   precondition: async (ctx) => {
-    // Two conversations, not the same conversation twice. A round where the
-    // generator never opened a second conversation is not "this fault does not
-    // apply" — the inject below really opens one, the same way a user would, so
-    // the multi-conversation race really happens. Only a conversation that is
-    // already there and cannot build is a real "not applicable".
+    // Two conversations, not the same conversation twice: without a second
+    // real conversation this is not the multi-conversation race at all. A
+    // round that wants this fault prepares the second working conversation up
+    // front (`REIFY_MULTI_CONVERSATION_SETUP`), so the preparation is a real
+    // command in the sequence this fault ran in, not state the fault invents.
+    if (ctx.session.conversations.length < 2) {
+      return { applicable: false, reason: "只有一个会话；多会话 race 要先 openConversation" };
+    }
     const first = ctx.session.conversation(0);
+    const second = ctx.session.conversation(1);
     const firstView = await runViewOrThrow(ctx, first);
     if (firstView.status !== "active") return { applicable: false, reason: `会话 ${first} 还没有 active run` };
+    const secondView = await runViewOrThrow(ctx, second);
+    if (secondView.status !== "active") return { applicable: false, reason: `第二个会话 ${second} 还没有 active run（先 openConversation）` };
     if (!(await buildAllowed(ctx, first))) return { applicable: false, reason: `会话 ${first} 当前阶段不允许 model.build` };
-    if (ctx.session.conversations.length > 1) {
-      const second = ctx.session.conversation(1);
-      const secondView = await runViewOrThrow(ctx, second);
-      if (secondView.status !== "active") return { applicable: false, reason: `第二个会话 ${second} 还没有 active run` };
-      if (!(await buildAllowed(ctx, second))) return { applicable: false, reason: `会话 ${second} 当前阶段不允许 model.build` };
-    }
-    return { applicable: true, evidence: { first, runs: [firstView.runId] } };
+    if (!(await buildAllowed(ctx, second))) return { applicable: false, reason: `会话 ${second} 当前阶段不允许 model.build` };
+    return { applicable: true, evidence: { first, second, runs: [firstView.runId, secondView.runId] } };
   },
   inject: async (ctx) => {
-    // The second working conversation is part of the scenario: without it this
-    // is not the multi-conversation race at all.
-    if (ctx.session.conversations.length < 2) {
-      const opened = await openWorkingConversation(ctx);
-      ctx.trace.note(`两个会话同时 build 前先开真会话 ${opened}，并把它推到能 build 的阶段`);
-    }
     const first = await startFaultBuild(ctx, "raceTwoConversationsBuild", 0);
     const second = await startFaultBuild(ctx, "raceTwoConversationsBuild", 1);
     ctx.session.killKernel(first.kernelPid, "SIGKILL");
@@ -1288,34 +1297,26 @@ export const raceCrossConversationFault: ReifyFaultDefinition = {
   }),
   describe: (params) => `raceCrossConversationFault(conv#${params.faultedIndex})`,
   precondition: async (ctx) => {
+    // Strict on purpose: the fault only runs when the second real conversation
+    // and its active run are already there. The round prepares that up front
+    // (`REIFY_MULTI_CONVERSATION_SETUP`), so "how the system got here" stays in
+    // the recorded sequence instead of inside the fault.
+    if (ctx.session.conversations.length < 2) {
+      return { applicable: false, reason: "只有一个会话；跨会话 race 要先 openConversation" };
+    }
     const faulted = Number(ctx.params.faultedIndex ?? 0);
-    // The conversation that keeps working has to be a real one. If the
-    // generator never opened it, the inject opens it (the real workflow-start
-    // + commit + plan_ready path) instead of calling the fault inapplicable.
-    const otherIndex = faulted === 0 ? 1 : 0;
-    if (ctx.session.conversations.length > otherIndex) {
-      const other = ctx.session.conversation(otherIndex);
-      const view = await runViewOrThrow(ctx, other);
-      if (view.status !== "active") return { applicable: false, reason: `另一个会话 ${other} 还没有 active run` };
+    const faultedConversation = ctx.session.conversation(faulted);
+    const other = ctx.session.conversation(faulted === 0 ? 1 : 0);
+    const view = await runViewOrThrow(ctx, other);
+    if (view.status !== "active") return { applicable: false, reason: `另一个会话 ${other} 还没有 active run` };
+    if (!(await buildAllowed(ctx, faultedConversation))) {
+      return { applicable: false, reason: `会话 ${faultedConversation} 当前阶段不允许 model.build` };
     }
-    // Same for the conversation that is about to be faulted: an index that is
-    // already open must really be able to build, otherwise the fault would hit
-    // a conversation whose build the product has no reason to serve.
-    if (ctx.session.conversations.length > faulted) {
-      const faultedConversation = ctx.session.conversation(faulted);
-      if (!(await buildAllowed(ctx, faultedConversation))) {
-        return { applicable: false, reason: `会话 ${faultedConversation} 当前阶段不允许 model.build` };
-      }
-    }
-    return { applicable: true, evidence: { faultedIndex: faulted } };
+    return { applicable: true, evidence: { faulted: faultedConversation, other, otherRunId: view.runId } };
   },
   inject: async (ctx) => {
     const faulted = Number(ctx.params.faultedIndex ?? 0);
     const other = faulted === 0 ? 1 : 0;
-    while (ctx.session.conversations.length <= Math.max(faulted, other)) {
-      const opened = await openWorkingConversation(ctx);
-      ctx.trace.note(`跨会话 race 前先开真会话 ${opened}，并把它推到能 build 的阶段`);
-    }
     const build = await startFaultBuild(ctx, "raceCrossConversationFault", faulted);
     ctx.session.killKernel(build.kernelPid, "SIGKILL");
     await concurrently([

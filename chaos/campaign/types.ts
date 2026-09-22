@@ -1,3 +1,4 @@
+import type { Command } from "../reify/model.ts";
 import type { FaultOutcome } from "../reify/types.ts";
 
 /** The real boundaries the fault space is grouped by. */
@@ -33,6 +34,8 @@ export interface CampaignRound {
   runtimeMode: boolean;
   maxCommands: number;
   faultScope: string[] | null;
+  /** Real preparation commands this round starts from (`[]` when it needs none). */
+  preparation: Command[];
   startedAt: string;
   durationMs: number;
   status: RoundStatus;
@@ -91,6 +94,7 @@ export interface PlannedRound {
   runtimeMode: boolean;
   maxCommands: number;
   faultScope: string[] | null;
+  preparation: Command[];
 }
 
 /** What replaying a unique failure really showed. */
