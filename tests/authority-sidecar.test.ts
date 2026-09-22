@@ -341,7 +341,11 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /--ro-bind\n\/run\/private\/author\n\/run\/pi-cad\/author/);
   assert.doesNotMatch(joined, /reviewer/);
   assert.doesNotMatch(joined, /PI_CAD_CANONICAL_PROJECT_DIR/);
-  assert.doesNotMatch(joined, /\/host\/agent/);
+  // The whole durable agent directory is the shared credential namespace, so
+  // auth.json, its lock directory and Prime's atomic temp files live together.
+  assert.match(joined, /--bind\n\/host\/agent\n\/home\/prime\/\.prime\/agent/);
+  assert.doesNotMatch(joined, /--bind\n\/host\/agent\/auth\.json\n/);
+  assert.match(joined, /--bind\n\/run\/private\/prime-agent\/settings\.json\n\/home\/prime\/\.prime\/agent\/settings\.json/);
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);

@@ -1,0 +1,73 @@
+# Reify chaos campaign res390-postmerge-kernel-targeted
+
+跑完 160 轮真 Reify：通过 160、失败 0、harness 报错 0。失败里 unique 0 个：稳定 0、偶发 0、假阳性 0、未验 0；其中产品侧 0 个、harness 侧 0 个。
+
+起点 commit `6518fd89c1d9`（labrunner/res-390-chaos-05），node v22.23.2，package 0.9.0。
+
+## 1. 跑了多少轮 / 多少状态组合
+
+- 轮数 160，独立 seed 160，真实状态观测 ≥2726 次
+- 常驻 runtime 轮 160，一次性控制面轮 0
+- generator：maxCommands=8，runtimeRatio=1，concurrency=3
+- profile 轮数：process=96, kernel-lifecycle=32, runtime-recovery=32
+
+## 2. 命中了哪些 action / fault / invariant
+
+- action：startRun=213, commitPlan=205, advance=204, build=64, openConversation=40, refresh=32, retryBuild=32, desktopRestart=23, multiConversationBuild=22, concurrentBuild=21, resumeRun=18, duplicateCommit=16, switchConversation=14, burstRefresh=13, history=13, listWorkflows=12, phaseCard=10, phaseContract=9, authorize=9, stopRun=7, completionGate=6
+- fault 真注入：killKernelDuringBuild=36, killKernelChild=20, killRuntimeDuringBuild=19, restartRuntimeDuringBuild=18, pauseKernelDuringBuild=16, killPrimeRuntime=14, pauseRuntimeDuringBuild=7, killIdleKernel=5
+- fault 不适用：killAuthorityDuringBuild=28, pauseAuthorityDuringBuild=14, killIdleKernel=7, killRuntimeDuringBuild=5, cpuPressure=4, killKernelChild=3, restartRuntimeDuringBuild=1
+- invariant 每轮都查：no-orphan-kernel, run-ownership, terminal-state-stable, artifact-integrity, recovery-convergence, fault-outcome-honest
+- 真实组件：authority=756, kernel=238, run-store=88, runtime=67, prime=14
+
+| 边界 | 轮数 | 真注入次数 | 注入/轮 |
+| --- | --- | --- | --- |
+| process | 93 | 135 | 84.4% |
+| file-state | 0 | 0 | 0.0% |
+| provider-oauth | 0 | 0 | 0.0% |
+| race | 0 | 0 | 0.0% |
+
+## 3. 发现多少 failure，多少 unique
+
+失败轮 0 轮 → unique 0 个。归并维度：坏掉哪个 invariant + 归一化后的失败原因（pid、run id、临时目录、hash、出现次数、哪一步收场都不算身份）；每个 cluster 另外留下失败边界、出错步骤、序列形状和日志签名。
+
+产品侧 0 个是真产品发现；harness 侧 0 个是 harness 自己的 fault 注入出问题（比如故障之间互相踩到），要修 harness，不能当产品 bug 报。
+
+| cluster | invariant | 边界 | 哪一侧 | 出错步骤 | 次数 | 结论 | 最小复现 | 原因 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+
+## 4. 哪些可以稳定 replay
+
+- 没有 failure，没有 replay 结论
+
+## 5. shrink 后最小路径
+
+- 没有 shrink 成功的最小路径
+
+## 6. 高频 failure 集中在哪些边界
+
+- 没有 failure
+
+## 7. 哪些区域探索不足
+
+- file-state：0 次真注入
+- provider-oauth：0 次真注入
+- race：0 次真注入
+
+## 每个 unique failure 的序列形状
+
+
+## 复现信息
+
+- campaign id：`res390-postmerge-kernel-targeted`，mode=targeted
+- seed 基数：391500，轮数 160，maxCommands 8
+- profiles：process, kernel-lifecycle, runtime-recovery
+- provider 传输故障：关（opt-in）
+- fault 池大小：24
+- 环境：全默认
+
+重跑同一条 campaign：
+
+```bash
+npm run chaos:reify -- campaign rerun chaos/campaigns/res390-postmerge-kernel-targeted
+```
+

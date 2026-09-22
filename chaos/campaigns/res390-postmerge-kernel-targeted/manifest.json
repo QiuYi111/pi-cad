@@ -1,0 +1,62 @@
+{
+  "campaignId": "res390-postmerge-kernel-targeted",
+  "createdAt": "2026-09-22T11:12:02.329Z",
+  "mode": "targeted",
+  "seed": 391500,
+  "rounds": 160,
+  "maxCommands": 8,
+  "runtimeRatio": 1,
+  "providerFaults": false,
+  "profiles": [
+    "process",
+    "kernel-lifecycle",
+    "runtime-recovery"
+  ],
+  "concurrency": 3,
+  "triageReplays": 2,
+  "faultPool": [
+    "killKernelDuringBuild",
+    "pauseKernelDuringBuild",
+    "killAuthorityDuringBuild",
+    "pauseAuthorityDuringBuild",
+    "killIdleKernel",
+    "killKernelChild",
+    "killRuntimeDuringBuild",
+    "pauseRuntimeDuringBuild",
+    "restartRuntimeDuringBuild",
+    "killPrimeRuntime",
+    "cpuPressure",
+    "missingRunStateFile",
+    "unreadableRunStateFile",
+    "partialStateWrite",
+    "missingDesktopProjection",
+    "providerCredentialExpired",
+    "providerCredentialDropped",
+    "providerCredentialBlanked",
+    "raceUserActionDuringKernelFault",
+    "raceTwoConversationsBuild",
+    "raceRestartDuringTransition",
+    "raceLegalOrderSwap",
+    "raceRepeatSubmitDuringFault",
+    "raceCrossConversationFault"
+  ],
+  "version": {
+    "package": "0.9.0",
+    "node": "v22.23.2",
+    "gitCommit": "6518fd89c1d9be0d258d13b7dfc2f45e2ca0cfe0",
+    "gitBranch": "labrunner/res-390-chaos-05",
+    "gitDirty": false
+  },
+  "environment": {
+    "CHAOS_REIFY_PROVIDER_FAULTS": null,
+    "CHAOS_REIFY_PROVIDER_PROBE": null,
+    "CHAOS_REIFY_PROVIDER": null,
+    "CHAOS_REIFY_MODEL": null,
+    "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+    "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+    "CHAOS_REIFY_PAUSE_MS": null,
+    "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+    "CHAOS_REIFY_CPU_WORKERS": null,
+    "PI_CAD_KERNEL": null
+  }
+}

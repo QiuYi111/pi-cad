@@ -1,0 +1,694 @@
+{
+  "schema": 1,
+  "sut": "reify",
+  "createdAt": "2026-09-22T06:38:11.068Z",
+  "invariant": "no-orphan-kernel",
+  "detail": "1 个 kernel 的父控制面已经死了，进程还在：2398399(owner=2398284)",
+  "evidence": {
+    "orphans": [
+      {
+        "pid": 2398399,
+        "ownerPid": 2398284,
+        "sinceMs": 6445
+      }
+    ]
+  },
+  "seed": 1959249991,
+  "replayPath": "0",
+  "maxCommands": 8,
+  "runtimeMode": true,
+  "faultScope": [
+    "killKernelDuringBuild",
+    "pauseKernelDuringBuild",
+    "killAuthorityDuringBuild",
+    "pauseAuthorityDuringBuild",
+    "killIdleKernel",
+    "killKernelChild",
+    "killRuntimeDuringBuild",
+    "pauseRuntimeDuringBuild",
+    "restartRuntimeDuringBuild",
+    "killPrimeRuntime",
+    "cpuPressure"
+  ],
+  "originalSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "pauseKernelDuringBuild",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "restartRuntimeDuringBuild",
+      "params": {}
+    }
+  ],
+  "shrunkSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "pauseKernelDuringBuild",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "restartRuntimeDuringBuild",
+      "params": {}
+    }
+  ],
+  "replaySequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "pauseKernelDuringBuild",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "restartRuntimeDuringBuild",
+      "params": {}
+    }
+  ],
+  "reproducible": false,
+  "actionSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    }
+  ],
+  "faultSequence": [
+    {
+      "kind": "fault",
+      "name": "pauseKernelDuringBuild",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "restartRuntimeDuringBuild",
+      "params": {}
+    }
+  ],
+  "requests": [
+    {
+      "at": 1790059073129,
+      "op": "workflow-start",
+      "ok": true,
+      "ms": 273,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059073718,
+      "op": "commit",
+      "ok": true,
+      "ms": 232,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059074265,
+      "op": "workflow-advance",
+      "ok": true,
+      "ms": 235,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059074823,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 25,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059074848,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 26,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059074874,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 28,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059074902,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 30,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059078974,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 30,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059079004,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 33,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059074932,
+      "op": "model-build",
+      "ok": false,
+      "ms": 7149,
+      "conversation": "conv-a",
+      "error": "Reify runtime closed without a response"
+    },
+    {
+      "at": 1790059079037,
+      "op": "model-build",
+      "ok": false,
+      "ms": 3044,
+      "conversation": "conv-a",
+      "error": "Reify runtime closed without a response"
+    },
+    {
+      "at": 1790059086091,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 69,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059086160,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 42,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790059086202,
+      "op": "model-build",
+      "ok": true,
+      "ms": 4844,
+      "conversation": "conv-a"
+    }
+  ],
+  "ids": {
+    "conversations": [
+      "conv-a"
+    ],
+    "runs": [
+      "v7-1790059073210-56fee167"
+    ],
+    "kernels": [
+      "1263050",
+      "2397038",
+      "2397852",
+      "2398399",
+      "2398555",
+      "2398671"
+    ]
+  },
+  "stateTimeline": [
+    {
+      "at": 1790059073402,
+      "step": 1,
+      "command": "action:startRun(conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790059073210-56fee167",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790059073210-56fee167",
+          "phase": "plan",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397038,
+          "ppid": 2396934,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397852,
+          "ppid": 2397759,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2398284
+      ]
+    },
+    {
+      "at": 1790059073950,
+      "step": 2,
+      "command": "action:commitPlan(conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790059073210-56fee167",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790059073210-56fee167",
+          "phase": "plan",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397038,
+          "ppid": 2396934,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397852,
+          "ppid": 2397759,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2398284
+      ]
+    },
+    {
+      "at": 1790059074500,
+      "step": 3,
+      "command": "action:advance(event=plan_ready,conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790059073210-56fee167",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790059073210-56fee167",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397038,
+          "ppid": 2396934,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397852,
+          "ppid": 2397759,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2398284
+      ]
+    },
+    {
+      "at": 1790059078041,
+      "step": 4,
+      "command": "fault:pauseKernelDuringBuild",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790059073210-56fee167",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790059073210-56fee167",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397038,
+          "ppid": 2396934,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397852,
+          "ppid": 2397759,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2398399,
+          "ppid": 2398284,
+          "ownerPid": 2398284,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2398284
+      ]
+    },
+    {
+      "at": 1790059084618,
+      "step": 5,
+      "command": "fault:restartRuntimeDuringBuild",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790059073210-56fee167",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790059073210-56fee167",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397038,
+          "ppid": 2396934,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397852,
+          "ppid": 2397759,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2398399,
+          "ppid": 565039,
+          "ownerPid": 2398284,
+          "orphan": true
+        },
+        {
+          "pid": 2398555,
+          "ppid": 2398495,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2398560
+      ]
+    },
+    {
+      "at": 1790059084860,
+      "step": 6,
+      "command": "final-settle",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790059073210-56fee167",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790059073210-56fee167",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397038,
+          "ppid": 2396934,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397852,
+          "ppid": 2397759,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2398399,
+          "ppid": 565039,
+          "ownerPid": 2398284,
+          "orphan": true
+        },
+        {
+          "pid": 2398555,
+          "ppid": 2398495,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2398560
+      ]
+    },
+    {
+      "at": 1790059091051,
+      "step": 7,
+      "command": "post-recovery",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790059073210-56fee167",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790059073210-56fee167",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 2,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397038,
+          "ppid": 2396934,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2397852,
+          "ppid": 2397759,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2398399,
+          "ppid": 565039,
+          "ownerPid": 2398284,
+          "orphan": true
+        },
+        {
+          "pid": 2398555,
+          "ppid": 2398495,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 2398671,
+          "ppid": 2398560,
+          "ownerPid": 2398560,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2398560
+      ]
+    }
+  ],
+  "logs": [
+    "kernel 暂停 3052ms 期间控制面 没有任何反应（run 继续显示 active）",
+    "重启后原请求结束：Reify runtime closed without a response",
+    "恢复验证通过：restartRuntimeDuringBuild 之后真 build 成功（77ms，cache=miss）",
+    "kernel 恢复运行后请求结束（signal=1）",
+    "campaign 快跑模式：这轮只落原始失败序列，replay / shrink 交给 triage 阶段"
+  ],
+  "recoveries": [
+    {
+      "at": 1790059091046,
+      "after": "restartRuntimeDuringBuild",
+      "buildMs": 77
+    }
+  ],
+  "faultOutcomes": [
+    {
+      "name": "pauseKernelDuringBuild",
+      "phase": "inject",
+      "status": "Injected",
+      "at": 1790059078041
+    },
+    {
+      "name": "restartRuntimeDuringBuild",
+      "phase": "inject",
+      "status": "Injected",
+      "at": 1790059084617
+    },
+    {
+      "name": "restartRuntimeDuringBuild",
+      "phase": "recover",
+      "status": "Recovered",
+      "at": 1790059091046
+    },
+    {
+      "name": "pauseKernelDuringBuild",
+      "phase": "recover",
+      "status": "Recovered",
+      "at": 1790059091051
+    }
+  ],
+  "project": {
+    "root": "/var/tmp/res390-chaos/reify-chaos-MllcxJ",
+    "project": "/var/tmp/res390-chaos/reify-chaos-MllcxJ/project",
+    "canonical": "/var/tmp/res390-chaos/reify-chaos-MllcxJ/canonical",
+    "workflowHome": "/var/tmp/res390-chaos/reify-chaos-MllcxJ/workflow-home"
+  }
+}
