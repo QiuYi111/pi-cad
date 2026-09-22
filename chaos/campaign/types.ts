@@ -95,6 +95,8 @@ export interface PlannedRound {
 
 /** What replaying a unique failure really showed. */
 export interface TriageResult {
+  /** Which triage rule produced this verdict; older ones are not reused. */
+  ruleVersion?: number;
   attempts: number;
   reproductions: number;
   sequenceReplayOk: boolean;

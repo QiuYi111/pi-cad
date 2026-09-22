@@ -33,7 +33,9 @@ const USAGE = `真 Reify chaos slice
                                        跑大规模真 campaign，落 artifact + dedupe + report
   chaos reify campaign rerun <dir> [--json]   用 manifest 原样重跑一条 campaign
   chaos reify campaign report <dir> [--json]  用已落盘的数据重出 report
-  chaos reify campaign recluster <dir> [--json]  不重跑轮次，只重算 dedupe / triage / report
+  chaos reify campaign recluster <dir> [--retriage] [--json]
+                                       不重跑轮次，只重算 dedupe / triage / report
+                                       （--retriage 不看缓存结论，全部重判）
   chaos reify campaign profiles        列出 campaign profile
   chaos reify campaign list            列出本地 campaign
   chaos reify invariants
@@ -519,6 +521,7 @@ async function campaign(argv: string[]): Promise<number> {
       const summary = await reclusterCampaign(dir, {
         triageReplays: flags["triage-replays"] ? Number(flags["triage-replays"]) : undefined,
         skipTriage: boolFlag(flags, "skip-triage"),
+        retriage: boolFlag(flags, "retriage"),
         quiet: boolFlag(flags, "json"),
       });
       if (boolFlag(flags, "json")) process.stdout.write(`${JSON.stringify(summary.report, null, 2)}\n`);

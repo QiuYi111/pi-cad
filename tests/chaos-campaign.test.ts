@@ -7,7 +7,9 @@ import { buildRoundPlan, deriveRoundSeed } from "../chaos/campaign/plan.ts";
 import { CAMPAIGN_PROFILES, NETWORK_PROVIDER_FAULTS, campaignFaultPool, profileFaultScope, resolveProfiles } from "../chaos/campaign/profiles.ts";
 import { renderCampaignReport } from "../chaos/campaign/report.ts";
 import { clusterFailures, failureSignature, normalizeText } from "../chaos/campaign/signature.ts";
-import type { CampaignReport, CampaignRound } from "../chaos/campaign/types.ts";
+import { assessClusterStability, classifyFailureVerdict } from "../chaos/campaign/triage.ts";
+import type { CampaignReport, CampaignRound, FailureCluster } from "../chaos/campaign/types.ts";
+import type { ReifyReplayResult, ReifyRunResult } from "../chaos/reify/runner.ts";
 import { FAULT_BOUNDARIES } from "../chaos/reify/faults.ts";
 import type { ReifyFailureArtifact } from "../chaos/reify/artifacts.ts";
 import type { Command } from "../chaos/reify/model.ts";
@@ -49,6 +51,55 @@ const failure = (path: string, roundIndex: number, seed: number, value: ReifyFai
   commit: "abc123",
   runtimeMode: false,
   artifact: value,
+});
+
+/** A cluster with just the fields triage reads. */
+function clusterWith(overrides: Partial<FailureCluster> = {}): FailureCluster {
+  return {
+    id: "c1",
+    signature: "sig",
+    invariant: "no-orphan-kernel",
+    boundary: "process",
+    boundaries: ["process"],
+    nature: "product",
+    failingSteps: ["fault:killAuthorityDuringBuild"],
+    reason: "N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)",
+    logSignatures: [],
+    shapes: [],
+    occurrences: 1,
+    roundIndexes: [0],
+    seeds: [1],
+    artifactPaths: ["/tmp/a.json"],
+    representative: "/tmp/a.json",
+    firstSeenAt: "2026-09-22T00:00:00.000Z",
+    lastSeenAt: "2026-09-22T00:00:00.000Z",
+    runtimeModes: [false],
+    commits: ["abc123"],
+    verdict: "unverified",
+    ...overrides,
+  };
+}
+
+/** A run result that reproduced the cluster's invariant, shrunk to 4 steps. */
+const reproducedRun: ReifyRunResult = {
+  failed: true,
+  seed: 1,
+  numRuns: 1,
+  invariant: "no-orphan-kernel",
+  originalLength: 6,
+  shrunkLength: 4,
+  numShrinks: 2,
+  invariants: ["no-orphan-kernel"],
+  recoveries: [],
+  faultOutcomes: [],
+};
+
+const replayResult = (ok: boolean, mode: ReifyReplayResult["mode"], detail?: string): ReifyReplayResult => ({
+  ok,
+  mode,
+  expectedInvariant: "no-orphan-kernel",
+  detail,
+  steps: 4,
 });
 
 test("campaign plan: seed 可复现且不重复", () => {
@@ -259,4 +310,73 @@ test("campaign: normalizeText 抹掉 pid / 端口 / hash", () => {
     "产品生成的真 id 每轮都不一样，不能算身份",
   );
   assert.equal(normalizeText("/tmp/reify-chaos-b8kVeQ/canonical/runs/v7-1790020333353-04333c50/state.json").startsWith("/tmp/#"), true);
+});
+
+test("campaign triage: 三类结论只由 replay 决定", () => {
+  assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 2, seedPathReplayOk: true }), "reproducible");
+  assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 2, seedPathReplayOk: false }), "reproducible");
+  assert.equal(classifyFailureVerdict({ attempts: 3, reproductions: 2, seedPathReplayOk: true }), "flaky");
+  assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 1, seedPathReplayOk: false }), "flaky");
+  assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 0, seedPathReplayOk: true }), "flaky");
+  assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 0, seedPathReplayOk: false }), "false-positive");
+});
+
+test("campaign triage: shrink 单次成功不能把 flaky 提升成 reproducible", async () => {
+  // 预审点名的场景：2 次按序列 replay 只中 1 次，seed+path 复现，
+  // 后面的 shrink / enriched 重跑再成功一次 —— 旧实现会在最后无条件返回
+  // reproducible，把真实偶发失败升级成稳定复现。
+  let sequenceReplays = 0;
+  const stability = await assessClusterStability(clusterWith(), {
+    replays: 2,
+    regressionDir: "/tmp/unused",
+    deps: {
+      replay: async (_file: string, options: { seed?: boolean } = {}) => {
+        if (options.seed) return replayResult(true, "seed+path");
+        sequenceReplays += 1;
+        return sequenceReplays === 1
+          ? replayResult(true, "sequence")
+          : replayResult(false, "sequence", "序列跑完但没有复现失败");
+      },
+      run: async () => reproducedRun,
+      load: () => artifact({ detail: "控制面死了 kernel 还在", sequence: [command("action", "startRun")] }),
+    },
+  });
+  assert.equal(stability.verdict, "flaky", "2 次只中 1 次就是偶发，shrink 成功也不能改这个结论");
+  assert.equal(stability.reproductions, 2, "1 次序列 replay + 1 次 shrink 重跑命中");
+  assert.equal(stability.attempts, 3, "2 次序列 replay + 1 次 shrink 重跑都算数");
+  assert.ok(stability.enriched, "shrink 重跑复现了，证据要留下来");
+});
+
+test("campaign triage: 每次都复现才算 stable", async () => {
+  const stability = await assessClusterStability(clusterWith(), {
+    replays: 2,
+    regressionDir: "/tmp/unused",
+    deps: {
+      replay: async (_file: string, options: { seed?: boolean } = {}) => replayResult(true, options.seed ? "seed+path" : "sequence"),
+      run: async () => reproducedRun,
+      load: () => artifact({ detail: "控制面死了 kernel 还在", sequence: [command("action", "startRun")] }),
+    },
+  });
+  assert.equal(stability.verdict, "reproducible");
+  assert.equal(stability.reproductions, 3);
+  assert.equal(stability.attempts, 3);
+});
+
+test("campaign triage: 一次都没复现算假阳性，不去 shrink", async () => {
+  let ran = false;
+  const stability = await assessClusterStability(clusterWith(), {
+    replays: 2,
+    regressionDir: "/tmp/unused",
+    deps: {
+      replay: async (_file: string, options: { seed?: boolean } = {}) =>
+        options.seed ? replayResult(false, "seed+path", "没有 fast-check path") : replayResult(false, "sequence", "没复现"),
+      run: async () => {
+        ran = true;
+        return reproducedRun;
+      },
+      load: () => artifact({ detail: "控制面死了 kernel 还在", sequence: [command("action", "startRun")] }),
+    },
+  });
+  assert.equal(stability.verdict, "false-positive");
+  assert.equal(ran, false, "假阳性没有可 shrink 的证据，不该再跑一轮真 shrink");
 });

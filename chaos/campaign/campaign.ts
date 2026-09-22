@@ -14,7 +14,7 @@ import { buildRoundPlan, type RoundPlanInput } from "./plan.ts";
 import { campaignFaultPool, resolveProfiles, type CampaignProfile } from "./profiles.ts";
 import { renderCampaignReport } from "./report.ts";
 import { clusterFailures, type FailureInput } from "./signature.ts";
-import { triageClusters } from "./triage.ts";
+import { TRIAGE_RULES_VERSION, triageClusters } from "./triage.ts";
 import type {
   CampaignManifest,
   CampaignMode,
@@ -452,7 +452,10 @@ export interface LoadedCampaign {
  * exactly as they ran — only the analysis is redone, and the report says which
  * commit did it.
  */
-export async function reclusterCampaign(dir: string, options: { triageReplays?: number; skipTriage?: boolean; quiet?: boolean } = {}): Promise<CampaignRunSummary> {
+export async function reclusterCampaign(
+  dir: string,
+  options: { triageReplays?: number; skipTriage?: boolean; quiet?: boolean; retriage?: boolean } = {},
+): Promise<CampaignRunSummary> {
   const loaded = loadCampaign(dir);
   const failureInputs: FailureInput[] = [];
   for (const round of loaded.rounds) {
@@ -471,12 +474,15 @@ export async function reclusterCampaign(dir: string, options: { triageReplays?: 
     }
   }
   let clusters = clusterFailures(failureInputs);
-  // A cluster whose signature did not change already has a verdict: reuse it
-  // instead of replaying the same real sequences again.
+  // A cluster whose signature did not change already has a verdict, so the
+  // same real sequences do not have to be replayed again — but only when that
+  // verdict came from the current triage rule. A rule change means the old
+  // conclusion has to be recomputed, otherwise the report would keep an answer
+  // the current code no longer stands behind.
   const previous = new Map(loaded.clusters.map((cluster) => [cluster.signature, cluster]));
   for (const cluster of clusters) {
     const old = previous.get(cluster.signature);
-    if (old?.triage) {
+    if (!options.retriage && old?.triage && old.triage.ruleVersion === TRIAGE_RULES_VERSION) {
       cluster.triage = old.triage;
       cluster.verdict = old.verdict;
     }
@@ -496,8 +502,10 @@ export async function reclusterCampaign(dir: string, options: { triageReplays?: 
     loaded.manifest.profiles,
   );
   const report = buildReport(loaded.manifest, coverage, clusters, loaded.rounds);
+  const postCommit = gitInfo().commit.slice(0, 12);
   report.notes.unshift(
-    `本轮报告由 campaign recluster 在已落盘的轮次上重算（轮次跑在 ${loaded.manifest.version.gitCommit.slice(0, 12)}）；` +
+    `本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 ${loaded.manifest.version.gitCommit.slice(0, 12)}，` +
+      `recluster / re-triage / report 用的是 ${postCommit}（triage 规则 v${TRIAGE_RULES_VERSION}）；` +
       "聚类口径见 chaos/campaign/signature.ts。",
   );
   writeFileSync(join(dir, "report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");

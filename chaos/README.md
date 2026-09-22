@@ -554,8 +554,13 @@ triage 会真的再跑一遍，不靠第一轮自己声称：
 | `flaky` | 有的复现有的没复现 |
 | `false-positive` | 一次都没复现 |
 
-稳定复现的会被重新 `shrink`，最小序列和完整组件证据落在
-`chaos/campaigns/<id>/regressions/` 下，可以直接当回归输入。
+结论只看 replay，不看 shrink：后面那趟开了 shrink 的重跑本身也算一次 replay，
+所以它只能让结论更保守，不会把已经判成 `flaky` 的失败升成 `reproducible`。
+（预审抓到过旧的写法：shrink 单次成功会无条件返回 `reproducible`。）
+
+复现过的会被重新 `shrink`，最小序列和完整组件证据落在
+`chaos/campaigns/<id>/regressions/` 下，可以直接当回归输入；偶发失败的 shrink
+结果只当最小证据，报告里会标出来。
 
 ### 落盘的东西
 
@@ -597,6 +602,10 @@ setsid nohup node chaos/campaigns/progress-sync.mjs --dir chaos/campaigns/<id> \
 ```bash
 npm run chaos:reify -- campaign recluster chaos/campaigns/<id>
 ```
+
+recluster 只复用同一版 triage 规则算出来的旧结论；规则版本变了（改了三类判定
+口径）就自动重判，report 里同时写明原始轮次跑在哪个 commit、post-processing
+用的是哪个 commit。要强制全部重判加 `--retriage`。
 
 `res388-main-500` 这一条的唯一产品发现是 `no-orphan-kernel`（26 次，最小复现
 `startRun → commitPlan → advance → killAuthorityDuringBuild`）。它跑在 `63814903`
