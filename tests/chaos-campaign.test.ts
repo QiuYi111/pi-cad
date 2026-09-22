@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import fc from "fast-check";
+
 import { resolveCampaign } from "../chaos/campaign/campaign.ts";
 import { aggregateCoverage } from "../chaos/campaign/coverage.ts";
 import { buildRoundPlan, deriveRoundSeed } from "../chaos/campaign/plan.ts";
@@ -14,8 +16,10 @@ import { assessClusterStability, classifyFailureVerdict, triageCluster } from ".
 import type { CampaignReport, CampaignRound, FailureCluster } from "../chaos/campaign/types.ts";
 import type { ReifyReplayResult, ReifyRunResult } from "../chaos/reify/runner.ts";
 import { FAULT_BOUNDARIES } from "../chaos/reify/faults.ts";
+import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import type { ReifyFailureArtifact } from "../chaos/reify/artifacts.ts";
-import type { Command } from "../chaos/reify/model.ts";
+import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, buildReifySequenceArbitrary, type Command } from "../chaos/reify/model.ts";
+import { selectReifyFaults } from "../chaos/reify/runner.ts";
 
 const command = (kind: "action" | "fault", name: string): Command => ({ kind, name, params: {} });
 
@@ -147,6 +151,107 @@ test("campaign: targeted 模式必须点明 profile", () => {
   assert.deepEqual(resolved.manifest.profiles, ["kernel-lifecycle"]);
   assert.equal(resolved.plan.length, 3);
   assert.deepEqual(resolved.plan[0]!.faultScope, CAMPAIGN_PROFILES["kernel-lifecycle"]!.faults);
+});
+
+test("campaign: 多会话 profile 的准备动作真的进生成序列", () => {
+  const prepared = resolveCampaign({ mode: "targeted", profiles: ["session-isolation"], rounds: 2 });
+  assert.deepEqual(prepared.plan[0]!.preparation, REIFY_MULTI_CONVERSATION_SETUP, "多会话 profile 必须带准备序列");
+  const plain = resolveCampaign({ mode: "targeted", profiles: ["kernel-lifecycle"], rounds: 1 });
+  assert.deepEqual(plain.plan[0]!.preparation, [], "不需要准备的 profile 不能凭空加动作");
+
+  const arbitrary = buildReifySequenceArbitrary(
+    reifyActionDefinitions,
+    selectReifyFaults(prepared.plan[0]!.faultScope ?? undefined),
+    4,
+    prepared.plan[0]!.preparation,
+  );
+  const prefix = [...REIFY_SETUP, ...REIFY_MULTI_CONVERSATION_SETUP];
+  for (const sequence of fc.sample(arbitrary, { numRuns: 5, seed: 11 })) {
+    assert.deepEqual(sequence.slice(0, prefix.length), prefix, "准备动作必须在每条生成序列最前面，replay/shrink 才看得到");
+  }
+});
+
+test("campaign: shrink 能删掉 failure 用不上的 preparation", async () => {
+  const arbitrary = buildReifySequenceArbitrary(
+    // 生成池里去掉 openConversation，序列里出现的 openConversation 就只可能是 preparation。
+    reifyActionDefinitions.filter((definition) => definition.name !== "openConversation"),
+    selectReifyFaults(CAMPAIGN_PROFILES["session-isolation"]!.faults),
+    4,
+    REIFY_MULTI_CONVERSATION_SETUP,
+  );
+  const property = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
+    if (commands.some((command) => command.name === "build")) throw new Error("这条失败跟第二会话没关系");
+  });
+
+  // 没 shrink 的原始失败带着准备动作。
+  const raw = await fc.check(property, { numRuns: 120, seed: 390, endOnFailure: true });
+  assert.ok(raw.failed, "必须先真找到一条失败序列");
+  assert.ok(
+    raw.counterexample![0]!.some((command) => command.name === "openConversation"),
+    `原始失败序列带着 preparation：${raw.counterexample![0]!.map((command) => command.name).join(" → ")}`,
+  );
+
+  const details = await fc.check(property, { numRuns: 120, seed: 390 });
+  const shrunk = details.counterexample![0]!;
+  assert.ok(shrunk.some((command) => command.name === "build"), "最小序列还得带着那条真失败");
+  assert.ok(
+    !shrunk.some((command) => command.name === "openConversation"),
+    `用不上的 preparation 必须被缩掉：${shrunk.map((command) => command.name).join(" → ")}`,
+  );
+  assert.deepEqual(shrunk.slice(0, REIFY_SETUP.length), REIFY_SETUP, "setup 还得在最前面");
+});
+
+test("campaign: preparation 只是前缀，不改变同一 seed 生成的尾部", () => {
+  const scope = CAMPAIGN_PROFILES["session-isolation"]!.faults;
+  const prepared = buildReifySequenceArbitrary(reifyActionDefinitions, selectReifyFaults(scope), 4, REIFY_MULTI_CONVERSATION_SETUP);
+  const plain = buildReifySequenceArbitrary(reifyActionDefinitions, selectReifyFaults(scope), 4);
+  for (let seed = 1; seed <= 20; seed += 1) {
+    const withPreparation = fc.sample(prepared, { numRuns: 3, seed });
+    const withoutPreparation = fc.sample(plain, { numRuns: 3, seed });
+    assert.deepEqual(
+      withPreparation.map((sequence) => sequence.slice(REIFY_SETUP.length + REIFY_MULTI_CONVERSATION_SETUP.length)),
+      withoutPreparation.map((sequence) => sequence.slice(REIFY_SETUP.length)),
+      `seed=${seed} 时准备动作只能改前缀，不能改生成的尾部（老 artifact 的 seed/path 才不会变意思）`,
+    );
+  }
+});
+
+test("campaign: shrink 必须保留 failure 真依赖的 preparation", async () => {
+  const arbitrary = buildReifySequenceArbitrary(
+    reifyActionDefinitions.filter((definition) => definition.name !== "openConversation"),
+    selectReifyFaults(CAMPAIGN_PROFILES["session-isolation"]!.faults),
+    4,
+    REIFY_MULTI_CONVERSATION_SETUP,
+  );
+  // 第二个会话准备好之后，双会话 race 才打得上：这条失败真依赖 preparation。
+  const failure = (commands: Command[]): string | null => {
+    let prepared = false;
+    for (const command of commands) {
+      if (command.name === "openConversation") prepared = true;
+      if (command.name === "raceTwoConversationsBuild" && prepared) return "第二个会话在，双会话 race 才打得进去";
+    }
+    return null;
+  };
+  const property = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
+    const detail = failure(commands);
+    if (detail) throw new Error(detail);
+  });
+
+  const raw = await fc.check(property, { numRuns: 200, seed: 390, endOnFailure: true });
+  assert.ok(raw.failed, "必须先真找到一条失败序列");
+
+  const details = await fc.check(property, { numRuns: 200, seed: 390 });
+  const shrunk = details.counterexample![0]!;
+  assert.ok(shrunk.some((command) => command.name === "raceTwoConversationsBuild"), "最小序列还带着那条 race");
+  assert.deepEqual(shrunk.slice(0, REIFY_SETUP.length), REIFY_SETUP, "setup 还得在最前面");
+  assert.equal(
+    shrunk[REIFY_SETUP.length]!.name,
+    "openConversation",
+    `真依赖第二会话的 failure，shrink 后 preparation 必须留下：${shrunk.map((command) => command.name).join(" → ")}`,
+  );
+  // 反证：去掉 preparation，这条失败就不复现了，说明留下它不是因为 shrink 删不掉。
+  const withoutPreparation = [...shrunk.slice(0, REIFY_SETUP.length), ...shrunk.slice(REIFY_SETUP.length + 1)];
+  assert.equal(failure(withoutPreparation), null, "去掉 preparation 就不再复现");
 });
 
 test("campaign: nightly 默认就是 ≥500 轮", () => {

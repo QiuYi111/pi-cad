@@ -40,6 +40,14 @@ export interface ReifyFailureArtifact {
    * Absent means the full fault space.
    */
   faultScope?: string[];
+  /**
+   * Real commands that really prepared the state before the generated part of
+   * the sequence, e.g. opening the second working conversation a
+   * multi-conversation race needs. They are part of the sequence (the same
+   * commands a user would run), so replay/shrink rebuild them from here.
+   * Absent means the round needed no preparation.
+   */
+  preparation?: Command[];
   originalSequence: Command[];
   shrunkSequence: Command[];
   replaySequence: Command[];

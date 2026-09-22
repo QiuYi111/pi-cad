@@ -1,3 +1,4 @@
+import { resolvePreparation } from "../reify/model.ts";
 import { profileFaultScope, type CampaignProfile } from "./profiles.ts";
 import type { PlannedRound } from "./types.ts";
 
@@ -55,6 +56,9 @@ export function buildRoundPlan(input: RoundPlanInput): PlannedRound[] {
       runtimeMode: every === 0 ? false : every === 1 ? true : index % every === 0,
       maxCommands: input.maxCommands,
       faultScope: profileFaultScope(profile, input.faultPool),
+      // Preparation is part of the sequence, so a round that wants the
+      // multi-conversation races really starts from two working conversations.
+      preparation: resolvePreparation(profile.preparation),
     });
   }
   return plan;

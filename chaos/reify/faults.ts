@@ -828,6 +828,21 @@ export const missingDesktopProjection: ReifyFaultDefinition = {
     const armed = ctx.session.armedFaults.get("missingDesktopProjection") as { file: string } | undefined;
     ctx.session.disarmFault("missingDesktopProjection");
     ctx.session.unmarkDamagedProjection();
+    // The projection belongs to the long-lived runtime, the backend the Desktop
+    // talks to. The runner recovers faults in reverse injection order, so a
+    // round where another fault SIGKILLed that runtime recovers *this* fault
+    // while it is still down; `session.call` then silently falls back to a
+    // one-shot authority, which never owns `.pi-cad/status.json`, and the check
+    // below would blame the product for a projection the harness never asked
+    // the right process to write. Bring the runtime back first — the same real
+    // restart the runtime faults do in their own recover — and keep the check
+    // on the surface that really owns it.
+    const runtime = ctx.session.attachedRuntime;
+    if (runtime && !runtime.alive) {
+      const info = await runtime.start();
+      ctx.session.registerAuthorityPid(info.pid, "runtime");
+      ctx.trace.note(`Desktop 投影要常驻 runtime 才算数：先把它重新起来 pid=${info.pid}`);
+    }
     // One real request makes the real authority rewrite its own projection.
     await ctx.session.call("workflow-current", { sessionId: conversationOf(ctx) });
     if (!existsSync(armed?.file ?? "")) {
@@ -1086,7 +1101,10 @@ export const raceTwoConversationsBuild: ReifyFaultDefinition = {
   describe: () => "raceTwoConversationsBuild",
   precondition: async (ctx) => {
     // Two conversations, not the same conversation twice: without a second
-    // real conversation this is not the multi-conversation race at all.
+    // real conversation this is not the multi-conversation race at all. A
+    // round that wants this fault prepares the second working conversation up
+    // front (`REIFY_MULTI_CONVERSATION_SETUP`), so the preparation is a real
+    // command in the sequence this fault ran in, not state the fault invents.
     if (ctx.session.conversations.length < 2) {
       return { applicable: false, reason: "只有一个会话；多会话 race 要先 openConversation" };
     }
@@ -1296,6 +1314,10 @@ export const raceCrossConversationFault: ReifyFaultDefinition = {
   }),
   describe: (params) => `raceCrossConversationFault(conv#${params.faultedIndex})`,
   precondition: async (ctx) => {
+    // Strict on purpose: the fault only runs when the second real conversation
+    // and its active run are already there. The round prepares that up front
+    // (`REIFY_MULTI_CONVERSATION_SETUP`), so "how the system got here" stays in
+    // the recorded sequence instead of inside the fault.
     if (ctx.session.conversations.length < 2) {
       return { applicable: false, reason: "只有一个会话；跨会话 race 要先 openConversation" };
     }

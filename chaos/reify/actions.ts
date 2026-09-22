@@ -76,21 +76,67 @@ export const startRun: ReifyActionDefinition = {
   }),
 };
 
-/** A second real Prime conversation, which must keep its own run binding. */
+/**
+ * Walk a run from `plan` to `cook` the way the workflow really allows it:
+ * commit the `plan` the phase obligation asks for, then run the `plan_ready`
+ * transition. These are the same two real operations `REIFY_SETUP` uses, so a
+ * conversation this harness drives is in the phase a user really works in.
+ */
+async function commitPlanAndAdvance(ctx: ReifyContext, conversation: string): Promise<{ commit?: string; phase?: string }> {
+  const manifest = (await ctx.session.call("commit", { name: "plan", sessionId: conversation })) as { id?: string };
+  const advanced = (await ctx.session.call("workflow-advance", {
+    event: "plan_ready",
+    sessionId: conversation,
+  })) as { phase?: string; status?: string };
+  return { commit: manifest?.id, phase: advanced?.phase };
+}
+
+/**
+ * A real second Prime conversation that a user can really work in: its own
+ * run, its plan committed, its run advanced to `cook`.
+ *
+ * Driving only `workflow-start` leaves the new run in `plan`, where
+ * `model.build` is not granted at all. A conversation like that is not a
+ * working conversation, so every multi-conversation scenario (two builds at
+ * once, one conversation faulted while the other works) silently degraded to
+ * the single-conversation case and reported NotApplicable forever. This walks
+ * the two real operations that actually get a run to `cook`.
+ */
+export async function openWorkingConversation(ctx: ReifyContext): Promise<string> {
+  const conversation = ctx.session.addConversation();
+  const view = (await ctx.session.call("workflow-start", {
+    id: "mechanical.default",
+    sessionId: conversation,
+  })) as { runId?: string; status?: string };
+  if (typeof view.runId !== "string") throw new Error("workflow-start 没有返回 runId");
+  ctx.session.history.runsByConversation.set(conversation, [view.runId]);
+  const ready = await commitPlanAndAdvance(ctx, conversation);
+  ctx.trace.record({
+    kind: "command",
+    name: "openConversation",
+    detail: { conversation, runId: view.runId, commit: ready.commit, phase: ready.phase },
+  });
+  return conversation;
+}
+
+/**
+ * A second real Prime conversation, which must keep its own run binding.
+ *
+ * The conversation is driven to `cook` on purpose. A run that stops at
+ * `workflow-start` sits in `plan`, where `model.build` is simply not granted;
+ * a second conversation like that is not a working conversation, and the
+ * multi-conversation races (two builds at once, one conversation faulted
+ * while the other works) could never really be injected — they reported
+ * NotApplicable forever. Opening a conversation a user can work in means
+ * committing its plan and advancing it, exactly like the round's own setup.
+ */
 export const openConversation: ReifyActionDefinition = {
   name: "openConversation",
-  description: "开一个新 Prime 会话并起它自己的 run",
+  description: "开一个新 Prime 会话，并让它自己的 run 走到能真干活的阶段",
   arbitrary: fc.constant<Params>({}),
   describe: () => "openConversation",
   run: guarded("openConversation", async (ctx) => {
-    const conversation = ctx.session.addConversation();
-    const view = (await ctx.session.call("workflow-start", {
-      id: "mechanical.default",
-      sessionId: conversation,
-    })) as { runId?: string; status?: string };
-    if (typeof view.runId !== "string") throw new Error("workflow-start 没有返回 runId");
-    ctx.session.history.runsByConversation.set(conversation, [view.runId]);
-    ctx.trace.record({ kind: "command", name: "openConversation", detail: { conversation, runId: view.runId } });
+    await openWorkingConversation(ctx);
   }),
 };
 
@@ -341,6 +387,11 @@ export const multiConversationBuild: ReifyActionDefinition = {
   arbitrary: fc.constant<Params>({}),
   describe: () => "multiConversationBuild",
   run: guarded("multiConversationBuild", async (ctx) => {
+    // Two conversations that may really build come from the round's own
+    // preparation (`REIFY_MULTI_CONVERSATION_SETUP`), not from this action
+    // quietly opening one. With a single conversation it degrades to a
+    // single-conversation build and the trace says so.
+    if (ctx.session.conversations.length < 2) ctx.trace.note("multiConversationBuild 只有一个会话，退化成单会话 build");
     const conversations = [ctx.session.conversation(0)];
     if (ctx.session.conversations.length > 1) conversations.push(ctx.session.conversation(1));
     const results = await Promise.all(

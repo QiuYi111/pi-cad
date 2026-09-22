@@ -465,10 +465,31 @@ RecoveryFailed   恢复没成 —— 也是失败
 
 ### 多 conversation / 多 run
 
-`openConversation` 起第二个真会话，`multiConversationBuild` 两个会话同时真 build，
+`openConversation` 起第二个真会话，并且用真 `commit` + 真 `plan_ready` transition
+把它自己的 run 送到 `cook`——只 `workflow-start` 的话新 run 停在 `plan`，那里根本不给
+`model.build`，多会话 race 就永远只能报 NotApplicable，多会话压力也是假的。
+
+多会话 race 的 precondition 保持严格：两个真会话、各自 run active、该 build 的会话真的
+允许 `model.build`。要打这两个 fault 的轮次靠 **preparation** 把状态准备好：profile 声明
+`preparation: "multi-conversation"`（`race` 和 `session-isolation`），轮次就在生成序列最前面
+真的跑一遍 `openConversation`。准备动作是序列里的真命令，写进 artifact 的 `preparation`、
+`originalSequence` / `replaySequence`，`replay` / `shrink` 按同一份准备重建，
+fault 自己绝不造状态。
+
+准备动作也在 shrink 的空间里。`shrink` 先像以前那样缩生成的尾部，最后再试一步「把
+preparation 去掉」：failure 不靠第二个会话时，最小序列里就没有 `openConversation` 了；
+failure 真靠它时，去掉后不再复现，这一步会被拒，准备留在最小序列里。生成跟以前完全
+一样（同一个 seed 画出的还是同一条序列），所以以前记下的 seed / path 意思不变。
+
+准备好之后：`multiConversationBuild` 两个会话同时真 build，
 `raceTwoConversationsBuild` 在两边都 build 的时候杀其中一个 kernel，
 `raceCrossConversationFault` 一边被打故障、另一边继续做真操作。
 `run-ownership` 盯着归属不串。
+
+`missingDesktopProjection` 只认常驻 runtime 写回来的投影：runner 按注入逆序回收，如果同一轮
+另一个故障刚把 runtime SIGKILL 掉还没回收，`session.call` 会静默退化成一次性控制面，
+而它本来就不写 `.pi-cad/status.json`。所以这个 fault 的 recover 会先把 runtime 起来，
+再对真正的 Desktop 后端要这份投影。
 
 ### replay / shrink 跟着一起对
 
@@ -537,7 +558,9 @@ npm run chaos:campaign -- list                                     # 看本地�
 
 轮数不是"跑 N 次同一个 seed"。第 i 轮的 seed 由 `(seed 基数, i)` 确定性散列出来，
 profile 按权重铺成一个固定循环（`mixed` 2 槽、`process` 3 槽、`file-state` 3 槽、
-`provider-oauth` 2 槽、`race` 3 槽，加 4 个定向 profile 各 1 槽），
+`provider-oauth` 2 槽、`race` 3 槽，加 5 个定向 profile 各 1 槽：
+`kernel-lifecycle`、`runtime-recovery`、`session-isolation`、`lifecycle-action-race`、
+`desktop-consistency`），
 runtime 模式按 `--runtime-ratio` 隔轮切换。所以"覆盖了哪些边界"是排出来的，不是碰运气：
 500 轮的 nightly 里每个 profile 至少几十轮。
 

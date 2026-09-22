@@ -1,0 +1,313 @@
+[
+  {
+    "id": "c41b23f2c",
+    "signature": "no-orphan-kernel | N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)",
+    "invariant": "no-orphan-kernel",
+    "boundary": "process",
+    "boundaries": [
+      "process"
+    ],
+    "nature": "product",
+    "failingSteps": [
+      "action:advance",
+      "fault:restartRuntimeDuringBuild"
+    ],
+    "reason": "N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)",
+    "logSignatures": [
+      "advance 被拒",
+      "kernel 恢复运行后请求结束（signal=#）",
+      "重启后原请求结束：Reify runtime closed without a response"
+    ],
+    "shapes": [
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:restartRuntimeDuringBuild",
+        "action:advance",
+        "fault:pauseRuntimeDuringBuild",
+        "fault:pauseRuntimeDuringBuild",
+        "action:refresh",
+        "fault:killKernelDuringBuild",
+        "fault:killRuntimeDuringBuild",
+        "action:advance"
+      ],
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:pauseKernelDuringBuild",
+        "fault:restartRuntimeDuringBuild"
+      ],
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:pauseAuthorityDuringBuild",
+        "action:resumeRun",
+        "action:refresh",
+        "action:refresh",
+        "fault:pauseKernelDuringBuild",
+        "action:retryBuild",
+        "action:desktopRestart",
+        "fault:restartRuntimeDuringBuild"
+      ]
+    ],
+    "occurrences": 3,
+    "roundIndexes": [
+      38,
+      92,
+      868
+    ],
+    "seeds": [
+      2095886532,
+      1959249991,
+      28520918
+    ],
+    "artifactPaths": [
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-28-36-137Z-reify-no-orphan-kernel.json",
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-38-11-069Z-reify-no-orphan-kernel.json",
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T08-31-08-688Z-reify-no-orphan-kernel.json"
+    ],
+    "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-38-11-069Z-reify-no-orphan-kernel.json",
+    "firstSeenAt": "2026-09-22T06:28:36.137Z",
+    "lastSeenAt": "2026-09-22T08:31:08.688Z",
+    "runtimeModes": [
+      true
+    ],
+    "commits": [
+      "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+    ],
+    "verdict": "reproducible",
+    "triage": {
+      "ruleVersion": 3,
+      "attempts": 3,
+      "reproductions": 3,
+      "sequenceReplayOk": true,
+      "seedPathReplayOk": true,
+      "shrinkOk": true,
+      "originalLength": 5,
+      "shrunkLength": 5,
+      "numShrinks": 0,
+      "minimalSequence": [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:pauseKernelDuringBuild",
+        "fault:restartRuntimeDuringBuild"
+      ],
+      "notes": [
+        "最小复现 5 步（原始 5 步，numShrinks=0），commit=7f234667e128"
+      ],
+      "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/campaigns/res390-main-1000/regressions/c41b23f2c-no-orphan-kernel.json"
+    }
+  },
+  {
+    "id": "c61f9d95e",
+    "signature": "recovery-convergence | pauseAuthorityDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+    "invariant": "recovery-convergence",
+    "boundary": "process",
+    "boundaries": [
+      "process"
+    ],
+    "nature": "product",
+    "failingSteps": [
+      "fault:pauseAuthorityDuringBuild"
+    ],
+    "reason": "pauseAuthorityDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+    "logSignatures": [
+      "控制面恢复运行后请求结束（signal=#）"
+    ],
+    "shapes": [
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "action:advance",
+        "fault:pauseAuthorityDuringBuild"
+      ]
+    ],
+    "occurrences": 1,
+    "roundIndexes": [
+      37
+    ],
+    "seeds": [
+      1088643780
+    ],
+    "artifactPaths": [
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-29-49-981Z-reify-recovery-convergence.json"
+    ],
+    "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-29-49-981Z-reify-recovery-convergence.json",
+    "firstSeenAt": "2026-09-22T06:29:49.981Z",
+    "lastSeenAt": "2026-09-22T06:29:49.981Z",
+    "runtimeModes": [
+      false
+    ],
+    "commits": [
+      "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+    ],
+    "verdict": "false-positive",
+    "triage": {
+      "ruleVersion": 3,
+      "attempts": 2,
+      "reproductions": 0,
+      "sequenceReplayOk": false,
+      "seedPathReplayOk": false,
+      "shrinkOk": false,
+      "originalLength": 0,
+      "shrunkLength": 0,
+      "numShrinks": 0,
+      "minimalSequence": [],
+      "notes": [
+        "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "按 seed+path 没复现：seed=1088643780 path=0 没有复现失败"
+      ]
+    }
+  },
+  {
+    "id": "c0c99ebdb",
+    "signature": "recovery-convergence | pauseRuntimeDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+    "invariant": "recovery-convergence",
+    "boundary": "process",
+    "boundaries": [
+      "process"
+    ],
+    "nature": "product",
+    "failingSteps": [
+      "action:build"
+    ],
+    "reason": "pauseRuntimeDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+    "logSignatures": [
+      "phaseCard 被拒"
+    ],
+    "shapes": [
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "action:startRun",
+        "action:refresh",
+        "fault:killRuntimeDuringBuild",
+        "fault:pauseRuntimeDuringBuild",
+        "action:phaseCard",
+        "action:build"
+      ]
+    ],
+    "occurrences": 1,
+    "roundIndexes": [
+      104
+    ],
+    "seeds": [
+      2879171463
+    ],
+    "artifactPaths": [
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-42-57-813Z-reify-recovery-convergence.json"
+    ],
+    "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-42-57-813Z-reify-recovery-convergence.json",
+    "firstSeenAt": "2026-09-22T06:42:57.813Z",
+    "lastSeenAt": "2026-09-22T06:42:57.813Z",
+    "runtimeModes": [
+      true
+    ],
+    "commits": [
+      "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+    ],
+    "verdict": "false-positive",
+    "triage": {
+      "ruleVersion": 3,
+      "attempts": 2,
+      "reproductions": 0,
+      "sequenceReplayOk": false,
+      "seedPathReplayOk": false,
+      "shrinkOk": false,
+      "originalLength": 0,
+      "shrunkLength": 0,
+      "numShrinks": 0,
+      "minimalSequence": [],
+      "notes": [
+        "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "按 seed+path 没复现：seed=-1415795833 path=0 没有复现失败"
+      ]
+    }
+  },
+  {
+    "id": "ca17c3c29",
+    "signature": "recovery-convergence | restartRuntimeDuringBuild 之后系统没能恢复：Reify runtime socket timed out",
+    "invariant": "recovery-convergence",
+    "boundary": "process",
+    "boundaries": [
+      "process"
+    ],
+    "nature": "product",
+    "failingSteps": [
+      "fault:pauseAuthorityDuringBuild"
+    ],
+    "reason": "restartRuntimeDuringBuild 之后系统没能恢复：Reify runtime socket timed out",
+    "logSignatures": [
+      "重启后原请求还挂着"
+    ],
+    "shapes": [
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:killAuthorityDuringBuild",
+        "fault:killRuntimeDuringBuild",
+        "action:build",
+        "fault:raceTwoConversationsBuild",
+        "fault:pauseKernelDuringBuild",
+        "fault:restartRuntimeDuringBuild",
+        "fault:pauseAuthorityDuringBuild"
+      ]
+    ],
+    "occurrences": 1,
+    "roundIndexes": [
+      36
+    ],
+    "seeds": [
+      624507661
+    ],
+    "artifactPaths": [
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-30-07-116Z-reify-recovery-convergence.json"
+    ],
+    "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-30-07-116Z-reify-recovery-convergence.json",
+    "firstSeenAt": "2026-09-22T06:30:07.116Z",
+    "lastSeenAt": "2026-09-22T06:30:07.116Z",
+    "runtimeModes": [
+      true
+    ],
+    "commits": [
+      "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+    ],
+    "verdict": "flaky",
+    "triage": {
+      "ruleVersion": 3,
+      "attempts": 3,
+      "reproductions": 1,
+      "sequenceReplayOk": false,
+      "seedPathReplayOk": true,
+      "shrinkOk": true,
+      "originalLength": 11,
+      "shrunkLength": 7,
+      "numShrinks": 6,
+      "minimalSequence": [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:missingDesktopProjection",
+        "fault:missingDesktopProjection",
+        "action:advance",
+        "fault:missingRunStateFile"
+      ],
+      "notes": [
+        "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+        "最小复现 7 步（原始 11 步，numShrinks=6），commit=7f234667e128",
+        "这是偶发失败的 shrink 结果，只作最小证据，不代表稳定复现"
+      ],
+      "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/campaigns/res390-main-1000/regressions/ca17c3c29-recovery-convergence.json"
+    }
+  }
+]

@@ -23,6 +23,13 @@ export interface CampaignProfile {
   boundaries: FaultBoundary[];
   /** `null` means every fault available in the campaign pool. */
   faults: string[] | null;
+  /**
+   * Real preparation commands this profile's rounds start from. A profile that
+   * wants the multi-conversation races has to bring two working conversations
+   * with it: the faults' preconditions stay strict, and the preparation is a
+   * real action in the sequence the artifact records.
+   */
+  preparation?: string;
 }
 
 const byBoundary = (boundary: FaultBoundary): string[] =>
@@ -71,6 +78,9 @@ export const CAMPAIGN_PROFILES: Record<string, CampaignProfile> = {
     weight: 3,
     boundaries: ["race"],
     faults: byBoundary("race"),
+    // Half of this pool is the multi-conversation races; the round brings the
+    // second working conversation instead of leaving them NotApplicable.
+    preparation: "multi-conversation",
   },
   "kernel-lifecycle": {
     name: "kernel-lifecycle",
@@ -98,6 +108,23 @@ export const CAMPAIGN_PROFILES: Record<string, CampaignProfile> = {
     weight: 1,
     boundaries: ["race"],
     faults: ["raceTwoConversationsBuild", "raceCrossConversationFault", "raceRepeatSubmitDuringFault"],
+    preparation: "multi-conversation",
+  },
+  "lifecycle-action-race": {
+    name: "lifecycle-action-race",
+    description: "定向：kernel / runtime 的 kill、restart 与用户 action 交错",
+    // Both boundaries: the kill / restart is a real process fault, and the
+    // point of the profile is that a real user action overlaps it.
+    weight: 1,
+    boundaries: ["process", "race"],
+    faults: [
+      "raceUserActionDuringKernelFault",
+      "raceRestartDuringTransition",
+      "killRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killAuthorityDuringBuild",
+      "killKernelDuringBuild",
+    ],
   },
   "desktop-consistency": {
     name: "desktop-consistency",
