@@ -441,7 +441,10 @@ RecoveryFailed   恢复没成 —— 也是失败
 
 ### 多 conversation / 多 run
 
-`openConversation` 起第二个真会话，`multiConversationBuild` 两个会话同时真 build，
+`openConversation` 起第二个真会话，并且用真 `commit` + 真 `plan_ready` transition
+把它自己的 run 送到 `cook`——只 `workflow-start` 的话新 run 停在 `plan`，那里根本不给
+`model.build`，多会话 race 就永远只能报 NotApplicable，多会话压力也是假的。
+送到 `cook` 之后：`multiConversationBuild` 两个会话同时真 build，
 `raceTwoConversationsBuild` 在两边都 build 的时候杀其中一个 kernel，
 `raceCrossConversationFault` 一边被打故障、另一边继续做真操作。
 `run-ownership` 盯着归属不串。
@@ -513,7 +516,9 @@ npm run chaos:campaign -- list                                     # 看本地�
 
 轮数不是"跑 N 次同一个 seed"。第 i 轮的 seed 由 `(seed 基数, i)` 确定性散列出来，
 profile 按权重铺成一个固定循环（`mixed` 2 槽、`process` 3 槽、`file-state` 3 槽、
-`provider-oauth` 2 槽、`race` 3 槽，加 4 个定向 profile 各 1 槽），
+`provider-oauth` 2 槽、`race` 3 槽，加 5 个定向 profile 各 1 槽：
+`kernel-lifecycle`、`runtime-recovery`、`session-isolation`、`lifecycle-action-race`、
+`desktop-consistency`），
 runtime 模式按 `--runtime-ratio` 隔轮切换。所以"覆盖了哪些边界"是排出来的，不是碰运气：
 500 轮的 nightly 里每个 profile 至少几十轮。
 

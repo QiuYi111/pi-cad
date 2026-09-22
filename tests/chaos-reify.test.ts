@@ -902,6 +902,61 @@ test("reify chaos: 带 conversationIndex 的 fault 真打对会话，conv#1 不�
   });
 });
 
+/** The product's own capability list, asked the way the harness asks it. */
+async function buildCapable(session: ReifySession, conversation: string): Promise<boolean> {
+  const view = (await session.call("workflow-current", { sessionId: conversation })) as
+    | { operations?: { capability?: string }[]; can?: string[] }
+    | null;
+  if ((view?.operations ?? []).some((operation) => operation.capability === "cad_build_step")) return true;
+  return (view?.can ?? []).some((entry) => entry.startsWith("cad_build_step"));
+}
+
+test("reify chaos: openConversation 起的新会话真的能 build，不是停在 plan", async () => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(session, REIFY_SETUP, trace);
+    await runReifySequence(session, [{ kind: "action", name: "openConversation", params: {} }], trace);
+
+    const second = session.conversation(1);
+    assert.notEqual(second, session.conversation(0), "必须真的有第二个会话");
+    // Only `workflow-start` left the new run in `plan`, where `model.build` is
+    // not granted. A round like that is not a working conversation, and every
+    // multi-conversation race silently degraded to the single-conversation
+    // case and reported NotApplicable forever.
+    assert.ok(await buildCapable(session, second), `新会话 ${second} 必须真的能 build`);
+
+    // And the build really happens in the second conversation, not twice in
+    // the first one.
+    const before = session.requests.length;
+    await runReifySequence(session, [{ kind: "action", name: "multiConversationBuild", params: {} }], trace);
+    const built = session.requests.slice(before).filter((entry) => entry.op === "model-build");
+    assert.deepEqual(
+      [...new Set(built.map((entry) => entry.conversation))].sort(),
+      [session.conversation(0), second].sort(),
+      `两个会话必须各自真 build 一次：${built.map((entry) => entry.conversation).join(",")}`,
+    );
+    assert.ok(built.every((entry) => entry.ok), `两个会话的 build 都要成功：${JSON.stringify(built)}`);
+  });
+});
+
+test("reify chaos: 只有一个会话时多会话 race 也真注入，不再只是 NotApplicable", async () => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(session, REIFY_SETUP, trace);
+    assert.equal(session.conversations.length, 1, "这段序列只开了一个会话");
+
+    for (const [name, params] of [
+      ["raceTwoConversationsBuild", {}],
+      ["raceCrossConversationFault", { faultedIndex: 1 }],
+    ] as const) {
+      const definition = reifyFaultDefinitions.find((fault) => fault.name === name)!;
+      const outcome = await injectReifyFault(session, definition, { kind: "fault", name, params }, trace);
+      assert.equal(outcome.status, "Injected", `${name} 必须真的注入：${JSON.stringify(outcome)}`);
+      await recoverInjectedFaults(session, [{ definition, params }], trace);
+      await checkReifyInvariants({ session, snapshot: await session.snapshot(), now: Date.now() });
+    }
+    assert.ok(session.conversations.length >= 2, "多会话 race 必须真的摆出第二个会话");
+  });
+});
+
 test("reify chaos: 真状态读不出来时 precondition 直接失败，不会被当成不适用", async () => {
   const session = await ReifySession.start();
   const trace = new ReifyTrace();

@@ -99,6 +99,22 @@ export const CAMPAIGN_PROFILES: Record<string, CampaignProfile> = {
     boundaries: ["race"],
     faults: ["raceTwoConversationsBuild", "raceCrossConversationFault", "raceRepeatSubmitDuringFault"],
   },
+  "lifecycle-action-race": {
+    name: "lifecycle-action-race",
+    description: "定向：kernel / runtime 的 kill、restart 与用户 action 交错",
+    // Both boundaries: the kill / restart is a real process fault, and the
+    // point of the profile is that a real user action overlaps it.
+    weight: 1,
+    boundaries: ["process", "race"],
+    faults: [
+      "raceUserActionDuringKernelFault",
+      "raceRestartDuringTransition",
+      "killRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killAuthorityDuringBuild",
+      "killKernelDuringBuild",
+    ],
+  },
   "desktop-consistency": {
     name: "desktop-consistency",
     description: "定向：Desktop ↔ backend 一致性",
