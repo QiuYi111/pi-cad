@@ -30,18 +30,34 @@ import type { ReifyFaultDefinition } from "../chaos/reify/types.ts";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Wait until the kernel has really forked a build child. A kernel that was just
- * found is still warming up; the fault has to land mid-build to be the fault
- * this issue is about.
+ * Wait until the kernel is really inside a build: the warm worker forks one
+ * child per request, and a kernel that was just found is still importing
+ * build123d/OCC. Faults and regressions about "during a build" have to land on
+ * the real thing.
  */
-async function waitForKernelTree(rootPid: number, minPids: number, timeoutMs: number): Promise<number[]> {
-  const deadline = Date.now() + timeoutMs;
-  let tree = processTree(rootPid);
-  while (tree.length < minPids && Date.now() < deadline) {
-    await sleep(100);
-    tree = processTree(rootPid);
+async function waitForBuildChild(session: ReifySession, kernelPid: number, timeoutMs = 30_000): Promise<number | null> {
+  return await session.waitForBuildChild(kernelPid, timeoutMs);
+}
+
+/** The process state from `/proc/<pid>/stat` -- `T` means really stopped. */
+function processState(pid: number): string | null {
+  try {
+    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
+    return fields[0] ?? null;
+  } catch {
+    return null;
   }
-  return tree;
+}
+
+/** Wait until every pid in the list has really stopped (SIGSTOP landed). */
+async function waitForStopped(pids: number[], timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (pids.every((pid) => processState(pid) === "T")) return true;
+    if (Date.now() > deadline) return false;
+    await sleep(50);
+  }
 }
 
 /** Every pid of the tree that is still alive when the budget runs out. */
@@ -110,10 +126,11 @@ test("reify chaos: 控制面被 SIGKILL 后 kernel 跟着退，不留孤儿", as
     });
     const kernel = await Promise.race([session.waitForOwnedKernel(live.pid, 30_000), live.done.then(() => null)]);
     assert.ok(kernel, "真 model-build 必须起一个真 cadctl kernel");
-    // uv wrapper + warm worker + the forked build child: the fault has to land
-    // while a real build is in flight, not while the worker is warming up.
-    const tree = await waitForKernelTree(kernel.pid, 3, 30_000);
-    assert.ok(tree.length >= 3, `真 build 途中 kernel 树至少要 3 个进程，实际 ${tree.join(", ")}`);
+    // The worker is the kernel's own process here; the forked child is what
+    // proves the fault lands while a real build is in flight.
+    const buildChild = await waitForBuildChild(session, kernel.pid);
+    assert.ok(buildChild, "真 model-build 必须在 warm kernel 里 fork 出一个 build 子进程");
+    const tree = processTree(kernel.pid);
 
     process.kill(live.pid, "SIGKILL");
     await live.done;
@@ -140,8 +157,9 @@ test("reify chaos: 正常 stop 也带走 kernel 和 fork 出来的 build 子进�
     }).catch(() => undefined);
     const kernel = await waitForRuntimeKernel(session, runtime.pid);
     assert.ok(kernel, "真 runtime 必须起一个真 cadctl kernel");
-    const tree = await waitForKernelTree(kernel!.pid, 3, 30_000);
-    assert.ok(tree.length >= 3, `真 build 途中 kernel 树至少要 3 个进程，实际 ${tree.join(", ")}`);
+    const buildChild = await waitForBuildChild(session, kernel!.pid);
+    assert.ok(buildChild, "真 build 必须在 warm kernel 里 fork 出一个 build 子进程");
+    const tree = processTree(kernel!.pid);
 
     await runtime.stop();
     await pending;
@@ -163,7 +181,9 @@ test("reify chaos: runtime 重启后旧 kernel 退干净，run 还在", async ()
     }).catch(() => undefined);
     const kernel = await waitForRuntimeKernel(session, runtime.pid);
     assert.ok(kernel, "真 runtime 必须起一个真 cadctl kernel");
-    const tree = await waitForKernelTree(kernel!.pid, 3, 30_000);
+    const buildChild = await waitForBuildChild(session, kernel!.pid);
+    assert.ok(buildChild, "真 build 必须在 warm kernel 里 fork 出一个 build 子进程");
+    const tree = processTree(kernel!.pid);
 
     const previousPid = runtime.pid;
     const restarted = await runtime.restart();
@@ -213,8 +233,11 @@ test("reify chaos: 杀一个 runtime 不会带走别的 run 的 kernel", async (
     const kernelFirst = await waitForRuntimeKernel(first, runtimeFirst.pid);
     const kernelSecond = await waitForRuntimeKernel(second, runtimeSecond.pid);
     assert.ok(kernelFirst && kernelSecond, "两个 run 必须各有自己的真 kernel");
-    const treeFirst = await waitForKernelTree(kernelFirst!.pid, 3, 30_000);
-    const treeSecond = await waitForKernelTree(kernelSecond!.pid, 3, 30_000);
+    const buildFirst = await waitForBuildChild(first, kernelFirst!.pid);
+    const buildSecond = await waitForBuildChild(second, kernelSecond!.pid);
+    assert.ok(buildFirst && buildSecond, "两个 run 都必须在真 build 途中");
+    const treeFirst = processTree(kernelFirst!.pid);
+    const treeSecond = processTree(kernelSecond!.pid);
 
     // SIGKILL one owner. Only its own kernel may converge.
     process.kill(runtimeFirst.pid, "SIGKILL");
@@ -237,6 +260,67 @@ test("reify chaos: 杀一个 runtime 不会带走别的 run 的 kernel", async (
     await first.close().catch(() => undefined);
     await second.close().catch(() => undefined);
   }
+});
+
+test("reify chaos: 被 SIGSTOP 的 warm kernel 在 owner 被杀后不用 SIGCONT 也自己退", async () => {
+  // RES-390 round #92 的形态：真 build 途中把整个 kernel 树 SIGSTOP，然后把
+  // owner（这里是一次性控制面）SIGKILL。Python watchdog 线程跟进程一起停住，
+  // 所以只有内核级 owner-death 信号能救场：worker 必须自己退，且不用 SIGCONT。
+  await withRealSession(async (session) => {
+    await runReifySequence(session, REIFY_SETUP, new ReifyTrace());
+    const conversation = session.conversation(0);
+
+    const live = session.spawnCall("model-build", {
+      source: "slow_part.py",
+      output: "build/slow-paused.step",
+      validation: "fast",
+      sessionId: conversation,
+    });
+    const kernel = await Promise.race([session.waitForOwnedKernel(live.pid, 30_000), live.done.then(() => null)]);
+    assert.ok(kernel, "真 model-build 必须起一个真 cadctl kernel");
+    const buildChild = await waitForBuildChild(session, kernel.pid);
+    assert.ok(buildChild, "真 model-build 必须在 warm kernel 里 fork 出一个 build 子进程");
+    const tree = processTree(kernel.pid);
+    assert.ok(tree.includes(buildChild), "build 子进程必须在 kernel 树里");
+
+    // Exactly what pauseKernelDuringBuild does: the process group and every
+    // pid in the tree. The whole kernel is stopped, threads included.
+    session.killKernel(kernel.pid, "SIGSTOP");
+    assert.ok(await waitForStopped(tree, 5_000), `kernel 树必须真停住：${tree.map((pid) => `${pid}=${processState(pid)}`).join(", ")}`);
+
+    process.kill(live.pid, "SIGKILL");
+    await live.done;
+
+    const stubborn = await waitForProcessesGone(tree, 15_000);
+    assert.deepEqual(stubborn, [], `owner 死后被暂停的 kernel 树必须自己退干净，还活着：${stubborn.join(", ")}`);
+    assert.deepEqual(session.orphanKernels(), [], "不该留下孤儿 kernel");
+    const snapshot = await session.snapshot();
+    await checkReifyInvariants({ session, snapshot, now: Date.now() });
+  });
+});
+
+test("reify chaos: RES-390 round #92 的 no-orphan-kernel artifact 重放后不再复现", async () => {
+  // RES-390 主 soak round #92 的原 artifact（seed 1959249991，常驻 runtime
+  // 模式，startRun→commitPlan→advance→pauseKernelDuringBuild→
+  // restartRuntimeDuringBuild）。产品修好之后，同一段序列必须跑完，不再触发
+  // no-orphan-kernel。
+  const artifactFile = resolve("tests/fixtures/chaos/2026-09-22T05-24-59-068Z-reify-no-orphan-kernel.json");
+  assert.ok(existsSync(artifactFile), "RES-390 round #92 的原始 artifact 必须留在仓库里");
+  const artifact = loadReifyArtifact(artifactFile);
+  assert.equal(artifact.invariant, "no-orphan-kernel");
+  assert.equal(artifact.runtimeMode, true, "这条 artifact 记的是常驻 runtime 模式下的失败");
+  assert.deepEqual(
+    artifact.replaySequence.map((command) => command.name),
+    ["startRun", "commitPlan", "advance", "pauseKernelDuringBuild", "restartRuntimeDuringBuild"],
+    "重放的是原 artifact 记下的序列",
+  );
+
+  const replayed = await replayReifyArtifact(artifactFile);
+  assert.equal(
+    replayed.observedInvariant,
+    undefined,
+    `这条 artifact 记的失败不该再出现：${replayed.detail ?? ""}`,
+  );
 });
 
 test("reify chaos: 原 no-orphan-kernel artifact 重放后不再复现", async () => {

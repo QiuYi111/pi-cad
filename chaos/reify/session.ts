@@ -88,19 +88,21 @@ export interface ReifyBuildHandle {
 const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
 /** Read one `/proc/<pid>/stat` line without tripping over `comm` parentheses. */
-function procStat(pid: number): { ppid: number; state: string } | null {
+function procStat(pid: number): { ppid: number; state: string; pgrp: number } | null {
   try {
     const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
     const fields = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
-    return { state: fields[0] ?? "", ppid: Number(fields[1]) };
+    return { state: fields[0] ?? "", ppid: Number(fields[1]), pgrp: Number(fields[2]) };
   } catch {
     return null;
   }
 }
 
 /**
- * Every live CAD kernel process on the machine: the `uv run … cadctl.worker`
- * wrapper and the forked worker/build children underneath it.
+ * Every live CAD kernel process on the machine: the warm `cadctl.worker` the
+ * owner spawned and the forked build children underneath it. A runtime that
+ * still starts the kernel through `uv run … cadctl.worker` shows that wrapper
+ * as the root with the worker below it.
  */
 export function listKernelProcesses(): { pid: number; ppid: number }[] {
   const found: { pid: number; ppid: number }[] = [];
@@ -124,8 +126,8 @@ export function listKernelProcesses(): { pid: number; ppid: number }[] {
 
 /**
  * Every pid in the process tree rooted at `pid`, children before the root.
- * The warm kernel is `uv run … cadctl.worker` with a forked python child, and
- * that child calls `setsid()`, so a single-pid kill can leave it stranded.
+ * The warm kernel forks one build child per request, and that child calls
+ * `setsid()`, so a single-pid kill can leave it stranded.
  */
 export function processTree(pid: number): number[] {
   const children = new Map<number, number[]>();
@@ -143,6 +145,24 @@ export function processTree(pid: number): number[] {
   };
   walk(pid);
   return ordered;
+}
+
+/**
+ * The forked build child of a warm kernel, or `null` while the kernel has not
+ * entered a build yet.
+ *
+ * A kernel that has just started is still importing build123d/OCC and has no
+ * child at all; the child of a real build leaves the kernel's process group
+ * with `setsid()`, so it is the tree member that leads its own group. A
+ * "mid-build" fault has to land on that state, not on a warming kernel.
+ */
+export function kernelBuildChild(kernelPid: number): number | null {
+  for (const pid of processTree(kernelPid)) {
+    if (pid === kernelPid) continue;
+    const stat = procStat(pid);
+    if (stat && stat.pgrp === pid) return pid;
+  }
+  return null;
 }
 
 function sha256File(path: string): string | null {
@@ -504,6 +524,21 @@ export class ReifySession {
     for (;;) {
       const kernel = this.kernels().find((process) => process.ownerPid === authorityPid && !process.orphan);
       if (kernel) return kernel;
+      if (Date.now() > deadline) return null;
+      await sleep(50);
+    }
+  }
+
+  /**
+   * Wait until the kernel is really inside a build: the worker forks a child
+   * per request, and only then is the kernel past its warm-up. A fault that
+   * says "during a build" must not stop a kernel that is still importing.
+   */
+  async waitForBuildChild(kernelPid: number, timeoutMs = 30_000): Promise<number | null> {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const child = kernelBuildChild(kernelPid);
+      if (child !== null) return child;
       if (Date.now() > deadline) return null;
       await sleep(50);
     }

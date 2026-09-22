@@ -23,6 +23,69 @@ def process_start_time(pid: int) -> str:
     return raw[raw.rfind(b")") + 2 :].split()[19].decode()
 
 
+def process_state(pid: int) -> str | None:
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_bytes()
+    except OSError:
+        return None
+    return raw[raw.rfind(b")") + 2 :].split()[0].decode()
+
+
+def wait_for_state(pid: int, state: str, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process_state(pid) == state:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def wait_for_gone(pid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process_state(pid) is None:
+            return True
+        time.sleep(0.05)
+    return process_state(pid) is None
+
+
+def pdeathsig_supported() -> bool:
+    """`PR_SET_PDEATHSIG` is Linux-only; 0 clears the calling process's own."""
+    return owner.set_parent_death_signal(0)
+
+
+# An owner that spawns the worker as its own child -- the way the runtime does
+# it -- hands over its own identity, waits for the worker to answer a real
+# request (so the worker is warm) and then stays alive until the test kills it.
+OWNER_HOST_SOURCE = """
+import json
+import os
+import subprocess
+import sys
+import time
+
+raw = open(f"/proc/{os.getpid()}/stat", "rb").read()
+start = raw[raw.rfind(b")") + 2:].split()[19].decode()
+env = dict(os.environ)
+env["PI_CAD_OWNER_PID"] = str(os.getpid())
+env["PI_CAD_OWNER_START"] = start
+worker = subprocess.Popen(
+    [sys.executable, "-m", "cadctl.worker"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+    env=env,
+)
+assert worker.stdin and worker.stdout
+worker.stdin.write(json.dumps({"id": 1, "args": ["capability"], "cwd": os.getcwd()}) + "\\n")
+worker.stdin.flush()
+worker.stdout.readline()
+print(worker.pid, flush=True)
+time.sleep(600)
+"""
+
+
 class CadctlWorkerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -280,6 +343,112 @@ class CadctlWorkerOwnerTests(unittest.TestCase):
         self.assertEqual(json.loads(worker.stdout.readline())["exitCode"], 0)
         time.sleep(1.0)
         self.assertIsNone(worker.poll(), "没有 owner 身份的 worker 不该自己退出")
+
+
+@unittest.skipUnless(pdeathsig_supported(), "PR_SET_PDEATHSIG 只在 Linux 上有")
+class CadctlStoppedWorkerOwnerDeathTests(unittest.TestCase):
+    """A stopped kernel must still die with its owner.
+
+    The Python watchdog is a thread, so `SIGSTOP` freezes it with the rest of
+    the process: the worker cannot notice anything by itself. The only
+    owner-death signal the kernel still delivers to a stopped process is
+    `PR_SET_PDEATHSIG`, and it watches the parent -- which is why the runtime
+    spawns the managed interpreter directly instead of through a launcher.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.host: subprocess.Popen | None = None
+        self.worker_pid: int | None = None
+
+    def tearDown(self) -> None:
+        if self.worker_pid is not None:
+            self.kill_worker(self.worker_pid)
+        if self.host is not None and self.host.poll() is None:
+            try:
+                self.host.kill()
+            except OSError:
+                pass
+            self.host.wait(timeout=10)
+        for stream in (self.host.stdin, self.host.stdout, self.host.stderr) if self.host else ():
+            if stream is not None:
+                stream.close()
+        self.tmp.cleanup()
+
+    def kill_worker(self, pid: int) -> None:
+        """Only ever signal a pid that is still that worker, never a reused one."""
+        try:
+            cmdline = Path(f"/proc/{pid}/cmdline").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return
+        if "cadctl.worker" not in cmdline:
+            return
+        for signal_number in (signal.SIGCONT, signal.SIGKILL):
+            try:
+                os.kill(pid, signal_number)
+            except OSError:
+                pass
+
+    def start_owned_worker(self) -> tuple[int, subprocess.Popen]:
+        """A warm worker whose owner really is its parent, as in production."""
+        env = os.environ.copy()
+        env["PYTHONPATH"] = python_path()
+        host = subprocess.Popen(
+            [sys.executable, "-c", OWNER_HOST_SOURCE],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        self.host = host
+        assert host.stdout is not None
+        reported = host.stdout.readline().strip()
+        self.assertTrue(reported.isdigit(), f"owner host 没报出 worker pid：{reported!r}")
+        self.worker_pid = int(reported)
+        return self.worker_pid, host
+
+    def arm_result(self, env: dict[str, str]) -> bool:
+        script = "from cadctl import owner; print(int(bool(owner.arm_owner_death_signal())))"
+        done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=60)
+        return done.stdout.strip() == "1"
+
+    def test_the_signal_is_armed_only_when_the_spawner_is_the_owner(self) -> None:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = python_path()
+        # A worker nobody handed an owner identity to is never armed.
+        env.pop(owner.OWNER_PID_ENV, None)
+        env.pop(owner.OWNER_START_ENV, None)
+        self.assertFalse(self.arm_result(env), "没有 owner 身份时不该 arm")
+
+        # The owner really is our parent: armed.
+        env[owner.OWNER_PID_ENV] = str(os.getpid())
+        self.assertTrue(self.arm_result(env), "owner 就是父进程时必须 arm")
+
+        # Someone else owns us: a launcher sits in between, so the kernel-level
+        # signal cannot be armed and the spawner has to drop the launcher.
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            env[owner.OWNER_PID_ENV] = str(other.pid)
+            self.assertFalse(self.arm_result(env), "owner 不是父进程时不能乱 arm")
+        finally:
+            other.kill()
+            other.wait(timeout=10)
+
+    def test_a_stopped_warm_worker_dies_with_its_owner_without_sigcont(self) -> None:
+        worker_pid, host = self.start_owned_worker()
+        # The owner host waited for a real request, so the worker is warm and
+        # its owner-death signal is armed.
+        os.kill(worker_pid, signal.SIGSTOP)
+        self.assertTrue(wait_for_state(worker_pid, "T", 5.0), "worker 必须先真的停下来")
+
+        os.kill(host.pid, signal.SIGKILL)
+        host.wait(timeout=10)
+
+        self.assertTrue(
+            wait_for_gone(worker_pid, 15.0),
+            "owner 被 SIGKILL 后，被 SIGSTOP 的 worker 也必须自己退，不需要 SIGCONT",
+        )
 
 
 class CadctlOwnerIdentityTests(unittest.TestCase):

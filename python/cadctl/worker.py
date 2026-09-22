@@ -19,14 +19,22 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from .cli import main
 from . import owner as _owner
 
 # Bind the kernel to its owner before the CAD preheat below. A worker whose
 # owner dies while it is still warming up has to leave no process behind
 # either, and the preheat is the longest part of startup.
 _owner.watch_signals()
+# `SIGSTOP` stops the watchdog thread with the rest of the process, so the
+# owner-death signal has to come from the kernel: `PR_SET_PDEATHSIG` is
+# delivered even to a stopped worker. It only works while the spawner is our
+# parent, which is why the runtime starts the managed interpreter directly.
+# Nothing heavier than the binding itself is imported before this point, so
+# the window where a stopped worker has no kernel-level signal stays minimal.
+_owner.arm_owner_death_signal()
 _owner.start_watchdog()
+
+from .cli import main  # noqa: E402
 
 # Preload build123d/OCC once. Forked build children inherit these read-only
 # module pages and exit after one request.
