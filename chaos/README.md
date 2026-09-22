@@ -455,6 +455,11 @@ RecoveryFailed   恢复没成 —— 也是失败
 
 这一段不发真 LLM turn：真端点、真凭证、真字节在线上都是真的，只有 agent 回合本身没跑。
 
+**同一轮里凭证故障和传输故障一起挂**时，只有真 provider 明确拒了凭证（401 / 403）才算
+传输故障不适用：探针带的是被凭证故障改坏的凭证，上游给的 auth rejection 是凭证故障
+自己的后果。其它探针失败（200 但延迟没生效、状态码不对、该 hang 没 hang）照旧是真
+`InjectionFailed`——旁边挂着凭证故障不能把真的传输注入失败洗成「不适用」。
+
 ### 文件 / 状态故障与「harness 自己弄坏的东西」
 
 `missingRunStateFile`、`unreadableRunStateFile`、`partialStateWrite` 会真的动
