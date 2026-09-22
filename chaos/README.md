@@ -476,6 +476,11 @@ RecoveryFailed   恢复没成 —— 也是失败
 `originalSequence` / `replaySequence`，`replay` / `shrink` 按同一份准备重建，
 fault 自己绝不造状态。
 
+准备动作也在 shrink 的空间里。`shrink` 先像以前那样缩生成的尾部，最后再试一步「把
+preparation 去掉」：failure 不靠第二个会话时，最小序列里就没有 `openConversation` 了；
+failure 真靠它时，去掉后不再复现，这一步会被拒，准备留在最小序列里。生成跟以前完全
+一样（同一个 seed 画出的还是同一条序列），所以以前记下的 seed / path 意思不变。
+
 准备好之后：`multiConversationBuild` 两个会话同时真 build，
 `raceTwoConversationsBuild` 在两边都 build 的时候杀其中一个 kernel，
 `raceCrossConversationFault` 一边被打故障、另一边继续做真操作。
