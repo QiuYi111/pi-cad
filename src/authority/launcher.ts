@@ -6,7 +6,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { createConnection, createServer } from "node:net";
 
 import { assertUnixRuntime } from "../shared/platform.ts";
-import { completionGate, startAuthoritySidecar } from "./sidecar.ts";
+import { startAuthoritySidecar } from "./sidecar.ts";
 import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
 import { experienceRoot, finalizeExperience } from "../experience/store.ts";
 
@@ -719,6 +719,14 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const primeRoot = resolvePrimeRepository(repository, primeAgentDir);
   process.env.PRIME_AGENT_REPO = primeRoot;
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
+  // Prepare the matching Python runtime before constructing its sandbox mounts.
+  // A fresh installation has no kernel venv; an upgrade may still have the old protocol.
+  const prepared = await childExit(process.execPath, [join(repository, "scripts/prepare-prime-kernel.mjs"), primeRoot], {
+    ...process.env,
+    PRIME_AGENT_CODING_AGENT_DIR: primeAgentDir,
+    PRIME_AGENT_KERNEL_VENV: primeKernelVenv,
+  });
+  if (prepared.code !== 0) throw new Error("Prime Python runtime setup failed; retry installation while online.");
   const cadPythonRoot = resolveVenvPythonRoot(join(repository, "python", ".venv", "bin", "python"));
   const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
   const kernelPythonRoot = dirname(dirname(kernelPython));
@@ -810,7 +818,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     // the per-launch copy, so persist /login there before the runtime directory
     // is removed in finally.
     if (process.platform === "darwin") await persistPrimeCredentials(ephemeralAgentDir, primeAgentDir);
-    const gate = await completionGate(project);
+    const gate = await sidecar.completion();
     await archivePrimeExperience(project, gate, currentAuthorModel);
     if (result.signal) return 128;
     if (!isOneShot(primeArgs)) return result.code;

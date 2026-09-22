@@ -262,6 +262,15 @@ class CadPackageTests(unittest.TestCase):
                 },
             )
 
+    def test_model_build_emits_repl_images_without_ipython(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        emit = Mock()
+        image = {"data": base64.b64encode(b"view").decode(), "mimeType": "image/png"}
+        with patch.dict(sys.modules, {"rlm": SimpleNamespace(emit=emit), "IPython.display": None}):
+            asyncio.run(model_module._attach_images([image], cad.ArtifactRef(Path("part.step"), "a" * 64)))
+        emit.assert_called_once()
+        self.assertEqual(emit.call_args.args[0]["application/vnd.prime-agent.attachment+json"]["data"], image["data"])
+
     def test_model_build_emits_prime_rich_image_output(self) -> None:
         model_module = importlib.import_module("cad.model")
         attach = Mock()

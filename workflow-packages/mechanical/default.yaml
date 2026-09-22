@@ -2,11 +2,11 @@ schema: 1
 id: mechanical.default
 description: Reason from physics and whole-system form, recurse only when complexity warrants, then integrate and verify the real design.
 tags: [cad, mechanical, default, recursive-design]
-version: 4.0.0
+version: 4.0.1
 workflow:
   schema: 1
   id: mechanical.default
-  version: 4.0.0
+  version: 4.0.1
   parametersSchema: {type: object, additionalProperties: false}
   initialPhase: plan
   versionControl:
@@ -26,7 +26,7 @@ workflow:
         Start from the governing physics. Identify loads, constraints, motion, power
         flow, fluid paths, heat paths, electromagnetic effects, contact, friction,
         tolerances, manufacturing limits, or other first-order mechanisms that can
-        determine the design. Use the persistent IPython kernel as an engineering
+        determine the design. Use the persistent Python REPL kernel as an engineering
         notebook: calculate quantities, compare options, search references when useful,
         and keep compact Python variables for requirements, assumptions, estimates,
         architecture, interfaces, and unresolved questions. Prefer calculations and
@@ -119,7 +119,7 @@ workflow:
       guidance: >-
         Execute the engineering task autonomously, not the workflow. Continue from the Plan,
         but treat design as an iterative closed loop rather than a one-way sequence.
-        Use the persistent IPython kernel as the shared working notebook for the parent:
+        Use the persistent Python REPL kernel as the shared working notebook for the parent:
         keep the current requirements, calculations, whole-system layout, subsystem
         budgets, interfaces, estimates, child handles and returned measurements in
         ordinary Python variables when useful. Do not invent a second orchestration
@@ -132,21 +132,21 @@ workflow:
         fake final solids, fake transforms and scaling tricks are not.
 
         Keep the parent agent responsible for architecture and integration. The parent
-        decides what to delegate and prepares each delegation from its current IPython
+        decides what to delegate and prepares each delegation from its current Python REPL
         state. Pass only the context the child needs, but make that context sufficient:
         objective, relevant calculations, envelope, coordinate frame, fixed datums,
         mating interfaces, loads, motion, clearances, neighbors, manufacturing
         assumptions, freedoms, and expected artifacts or measurements.
 
-        Use Prime's native rlm(...) calls directly from IPython for independent bounded
+        Use Prime's native rlm.spawn(...) calls directly from Python REPL for independent bounded
         engineering work. Spawn independent children without waiting for each one
         serially when the tasks can proceed in parallel. Retained children may be
-        messaged again for targeted rework. A child may recursively call rlm(...) when
+        messaged again for targeted rework. A child may recursively call rlm.spawn(...) when
         its own assignment is still a complex system. Do not impose a fixed recursion
         depth or artificial subsystem/part taxonomy.
 
         A useful delegation shape is conceptually:
-        child = await rlm(
+        child = await rlm.spawn(
             "Design this bounded part or subsystem. Overall system: ... Your envelope:"
             " ... Fixed interfaces: ... Loads and motion: ... Neighbors: ..."
             " Manufacturing: ... Return actual design artifacts, measured properties,"

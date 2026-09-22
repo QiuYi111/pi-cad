@@ -18,10 +18,6 @@ async def _attach_images(images: list[dict[str, str]], artifact: ArtifactRef | N
     if not images:
         raise CadApiError("Pi-CAD model build produced no mandatory visual observations", error_type="ModelBuildError")
     try:
-        import IPython.display  # noqa: F401 -- fail clearly when the Prime kernel display channel is unavailable
-    except Exception as error:
-        raise CadApiError("Prime image attachment capability is unavailable", error_type="ModelBuildError") from error
-    try:
         for index, image in enumerate(images):
             if image.get("mimeType") != "image/png" or not image.get("data"):
                 raise ValueError("mandatory build image is not an inline PNG")

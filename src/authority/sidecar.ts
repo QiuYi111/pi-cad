@@ -162,11 +162,12 @@ async function scopeForRequest(role: SidecarRole, cwd: string, value: Record<str
   return resolveRequestScope(cwd, value as RunScopeRequestV1);
 }
 
-export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
+export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean; onAuthorScope?: (scope: RunScopeV1 | undefined) => void } = {}): Promise<AgentApiResponse> {
   let scope: RunScopeV1 | undefined;
   try {
     validateRequest(value);
     scope = await scopeForRequest(role, cwd, value as unknown as Record<string, unknown>, reviewRuntime);
+    if (role === "author") options.onAuthorScope?.(scope);
     return await runWithRunScope(scope, async () => dispatchAuthorRequest(role, cwd, value, reviewRuntime, onAuthorModelSelection, options));
   } catch (error) {
     await runWithRunScope(scope, () => refreshProjectionSafely(cwd));
@@ -309,7 +310,7 @@ async function captureMission(cwd: string, requested: string): Promise<{ capture
   return { captured: true };
 }
 
-async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<void> {
+async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean; onAuthorScope?: (scope: RunScopeV1 | undefined) => void } = {}): Promise<void> {
   const chunks: Buffer[] = [];
   let size = 0;
   socket.setTimeout(SIDECAR_REQUEST_TIMEOUT_MS, () => socket.destroy(new Error("sidecar request timeout")));
@@ -346,6 +347,7 @@ async function listen(server: Server, path: string): Promise<void> {
 export interface AuthoritySidecar {
   authorSocket: string;
   reviewerSocket: string;
+  completion(): Promise<CompletionGateResult>;
   close(): Promise<void>;
 }
 
@@ -361,7 +363,8 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
   const authorSocket = join(authorDirectory, "authority.sock");
   const reviewerSocket = join(reviewerDirectory, "authority.sock");
   const reviewRuntime = new ReviewRuntime(cwd, input.reviewerExecutor ?? (async () => { throw new Error("reviewer executor is not configured"); }));
-  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection, { authorReadOnly: input.authorReadOnly }); });
+  let authorScope: RunScopeV1 | undefined;
+  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection, { authorReadOnly: input.authorReadOnly, onAuthorScope: (scope) => { authorScope = scope; } }); });
   const reviewerServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "reviewer", cwd, reviewRuntime); });
   try {
     await listen(authorServer, authorSocket);
@@ -375,6 +378,14 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
   return {
     authorSocket,
     reviewerSocket,
+    async completion() {
+      // Resolve this launch's conversation again: workflow.start may have bound
+      // it after its first request. Never substitute another project's run.
+      const scope = authorScope?.sessionId
+        ? await resolveRequestScope(cwd, { sessionId: authorScope.sessionId })
+        : authorScope;
+      return runWithRunScope(scope, () => completionGate(cwd));
+    },
     async close() {
       reviewRuntime.shutdown();
       await Promise.all([authorServer, reviewerServer].map((server) => new Promise<void>((accept) => server.close(() => accept()))));

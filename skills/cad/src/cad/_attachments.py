@@ -16,9 +16,15 @@ def display_inline_image(image: dict[str, Any], *, label: str) -> None:
     if mime_type not in {"image/png", "image/jpeg", "image/webp", "image/gif"} or not isinstance(data, str) or not data:
         raise ValueError("managed image is not a supported inline image")
     base64.b64decode(data, validate=True)
-    from IPython.display import display
-
     payload = {"mime_type": mime_type, "data": data}
     if isinstance(image.get("path"), str):
         payload["path"] = image["path"]
-    display({_ATTACHMENT_DISPLAY_MIME: payload, "text/plain": label}, raw=True)
+    bundle = {_ATTACHMENT_DISPLAY_MIME: payload, "text/plain": label}
+    try:
+        from rlm import emit
+    except ImportError:
+        # Older Prime releases used IPython's display channel.
+        from IPython.display import display
+        display(bundle, raw=True)
+    else:
+        emit(bundle)

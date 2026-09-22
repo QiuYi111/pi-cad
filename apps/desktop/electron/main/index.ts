@@ -13,6 +13,7 @@ import { WslBridge } from "./wsl.js";
 import { NativeBridge } from "./native.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
 import { PrimeRpc } from "./prime-rpc.js";
+import { updateManagedRuntime } from "./managed-runtime.js";
 import { WorkflowStore } from "./workflows.js";
 import { ViewerBackend } from "./viewer.js";
 import { TraceStore } from "./traces.js";
@@ -140,24 +141,7 @@ async function syncManagedRuntime() {
   if (desktopE2E) return;
   const settings = await settingsStore.get();
   const currentBridge = await bridge();
-  const status = await currentBridge.check(settings);
-  const wslReady = status.checks.find((item) => item.id === "wsl")?.status === "ready";
-  const managedRuntimeStale = status.checks.some((item) => (item.id === "prime" || item.id === "picad") && item.status !== "ready");
-  if (wslReady && managedRuntimeStale && currentBridge.bundledRuntimePath) {
-    await new Promise<void>((resolve, reject) => {
-      let filesReady = false;
-      void currentBridge.install(settings, (value) => {
-        send(IPC.runtimeStatus, value);
-        if (!filesReady && (value.progress ?? 0) >= 0.78) {
-          filesReady = true;
-          resolve();
-        }
-      }).then(() => resolve(), (error) => {
-        if (filesReady) send(IPC.runtimeEvent, { type: "runtime_diagnostic", message: `Managed dependency update failed: ${String(error)}` });
-        else reject(error);
-      });
-    });
-  }
+  await updateManagedRuntime(currentBridge, settings, (value) => send(IPC.runtimeStatus, value));
 }
 
 function createWindow() {
@@ -212,6 +196,7 @@ async function bridge(): Promise<RuntimeBridge> {
 }
 
 async function ensureRuntime() {
+  await managedRuntimeBootstrap;
   if (runtime) return runtime;
   runtime = desktopE2E
     ? new DemoRuntime({
@@ -228,6 +213,7 @@ async function ensureRuntime() {
 }
 
 async function ensureAuth() {
+  await managedRuntimeBootstrap;
   if (authController) return authController;
   authController = new AuthController(await bridge(), async () => {
     const current = runtime;
@@ -239,6 +225,7 @@ async function ensureAuth() {
 }
 
 async function ensurePrimeConfig() {
+  await managedRuntimeBootstrap;
   const current = await bridge();
   if (!primeConfig || primeConfigBridge !== current) {
     primeConfig = new PrimeConfigService(current);

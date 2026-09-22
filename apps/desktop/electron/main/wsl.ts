@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
-import { engineeringKnowledgeProbe, managedPythonProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
+import { engineeringKnowledgeProbe, managedPrimeProbe, managedPythonProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
 
 export { runtimeChecksReady } from "./runtime-bridge.js";
 
@@ -294,7 +294,7 @@ export class WslBridge implements RuntimeBridge {
       "printf 'uv=%s\\n' \"$(command -v uv || true)\"",
       "printf 'bwrap=%s\\n' \"$(command -v bwrap || true)\"",
       "printf 'paraview=%s\\n' \"$(command -v paraview || true)\"",
-      `test -f ${JSON.stringify(paths.primeAgentRepo)}/prime-agent.sh && printf 'prime=ready\\n' || printf 'prime=missing\\n'`,
+      managedPrimeProbe(paths.piCadRepo, paths.primeAgentRepo),
       `test -f ${JSON.stringify(paths.piCadRepo)}/package.json && printf 'picad=ready\\n' || printf 'picad=missing\\n'`,
       knowledge.command,
       managedPythonProbe(paths.piCadRepo),
@@ -354,6 +354,14 @@ export class WslBridge implements RuntimeBridge {
   }
 
   async install(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
+    if (this.installation) return this.installation;
+    this.installation = this.installRuntime(settings, onStatus).finally(() => { this.installation = undefined; });
+    return this.installation;
+  }
+
+  private installation?: Promise<RuntimeStatus>;
+
+  private async installRuntime(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
     let status = await this.check(settings);
     const startedAt = Date.now();
     const report = (message: string, progress: number) => onStatus?.({
@@ -386,22 +394,17 @@ export class WslBridge implements RuntimeBridge {
         () => this.pipe(["bash", "-s"], nodeInstallScript(), 10 * 60_000));
     }
     let paths = await this.resolveRuntimePaths(settings);
-    if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath) {
-      const source = await this.toLinuxPath(this.bundledRuntimePath);
+    const managed = !settings.piCadRepo && !settings.primeAgentRepo && Boolean(this.bundledRuntimePath);
+    let bundleInstalled = false;
+    if ((missing.has("prime") || missing.has("picad")) && managed) {
+      const source = await this.toLinuxPath(this.bundledRuntimePath!);
       const home = await this.homeDirectory();
       const destination = process.env.PI_CAD_DESKTOP_RUNTIME_ROOT
         ? await this.toLinuxPath(process.env.PI_CAD_DESKTOP_RUNTIME_ROOT)
         : `${home}/.local/share/pi-cad-desktop/runtime`;
-      const archive = `${source}/runtime-bundle.tar.gz`;
-      const installBundled = [
-        "set -e",
-        `mkdir -p ${JSON.stringify(destination)}`,
-        `if test -f ${JSON.stringify(archive)}; then tar -xzf ${JSON.stringify(archive)} -C ${JSON.stringify(destination)}; else cp -a ${JSON.stringify(source)}/. ${JSON.stringify(destination)}/; fi`,
-        `cp ${JSON.stringify(source)}/manifest.json ${JSON.stringify(destination)}/manifest.json`,
-        `chmod +x ${JSON.stringify(destination)}/prime-agent/prime-agent.sh`,
-      ].join("; ");
       await runStep("Unpacking the bundled engineering runtime…", 0.62,
-        () => this.pipe(["bash", "-s"], installBundled, 15 * 60_000));
+        async () => this.exec([await this.commandPath("node"), `${source}/install-runtime-bundle.mjs`, source, destination], { timeout: 15 * 60_000 }));
+      bundleInstalled = true;
       paths = await this.resolveRuntimePaths(settings);
     }
     try {
@@ -425,6 +428,11 @@ export class WslBridge implements RuntimeBridge {
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/coding-agent ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-coding-agent`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/ai ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-ai`,
     ].join("\n"), 30_000).then(() => undefined));
+    await runStep("Preparing Prime's Python runtime…", 0.96,
+      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nnode ${JSON.stringify(`${paths.piCadRepo}/scripts/prepare-prime-kernel.mjs`)} ${JSON.stringify(paths.primeAgentRepo)}\n`, 15 * 60_000));
+    if (bundleInstalled) {
+      await this.exec(["mv", `${paths.piCadRepo}/../manifest.pending.json`, `${paths.piCadRepo}/../manifest.json`]);
+    }
     report("Verifying the installation…", 0.97);
     status = await this.check(settings);
     onStatus?.(status);

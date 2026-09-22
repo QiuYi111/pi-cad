@@ -36,6 +36,10 @@ export function managedPythonProbe(piCadRoot: string): string {
   return `if ${JSON.stringify(python)} -c 'import build123d, cadctl' >/dev/null 2>&1; then printf 'cadpython=ready\\n'; else printf 'cadpython=missing\\n'; fi`;
 }
 
+export function managedPrimeProbe(piCadRoot: string, primeRoot: string): string {
+  return `if test -f ${JSON.stringify(primeRoot)}/prime-agent.sh && node ${JSON.stringify(`${piCadRoot}/scripts/prepare-prime-kernel.mjs`)} ${JSON.stringify(primeRoot)} --check >/dev/null 2>&1; then printf 'prime=ready\\n'; else printf 'prime=missing\\n'; fi`;
+}
+
 export async function withCanonicalProjectEnvironment(
   bridge: RuntimeBridge,
   projectPath: string,

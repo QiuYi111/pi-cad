@@ -265,6 +265,7 @@ describe("WSL first-install status", () => {
     });
     vi.spyOn(bridge, "toLinuxPath").mockResolvedValue("/bundle");
     vi.spyOn(bridge, "homeDirectory").mockResolvedValue("/home/tester");
+    vi.spyOn(bridge, "commandPath").mockResolvedValue("/usr/bin/node");
     const exec = vi.spyOn(bridge, "exec").mockResolvedValue({ stdout: "", stderr: "" });
     const pipe = vi.spyOn(bridge, "pipe").mockResolvedValue({ stdout: "", stderr: "" });
 
@@ -272,6 +273,10 @@ describe("WSL first-install status", () => {
     expect(exec).toHaveBeenCalled();
     expect(pipe.mock.calls.some(([, input]) => input.includes("setup:python"))).toBe(true);
     expect(pipe.mock.calls.some(([, input]) => input.includes("! test -x python/.venv/bin/python") && input.includes("rm -rf python/.venv"))).toBe(true);
+    expect(exec.mock.calls.some(([args]) => args.includes("/bundle/install-runtime-bundle.mjs"))).toBe(true);
+    const kernel = pipe.mock.invocationCallOrder[pipe.mock.calls.findIndex(([, input]) => input.includes("prepare-prime-kernel.mjs"))];
+    const publish = exec.mock.invocationCallOrder[exec.mock.calls.findIndex(([args]) => args[0] === "mv" && args[1].endsWith("manifest.pending.json"))];
+    expect(kernel).toBeLessThan(publish);
   });
 
   it("streams shell programs over stdin instead of placing them on the Windows command line", async () => {

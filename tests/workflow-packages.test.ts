@@ -20,7 +20,7 @@ test("installed Mechanical packages expose only default and naked modes", async 
     assert.deepEqual(listed.map((item) => item.id), ["mechanical.default", "mechanical.naked"]);
     for (const item of listed) assert.deepEqual(Object.keys(item).sort(), ["description", "id", "tags", "version"]);
     const standard = await resolveWorkflowPackage(cwd, "mechanical.default", mechanicalRegistries);
-    assert.equal(standard.version, "4.0.0");
+    assert.equal(standard.version, "4.0.1");
     assert.equal(standard.workflow.initialPhase, "plan");
     assert.deepEqual(Object.keys(standard.workflow.phases), ["cook", "done", "plan"]);
     assert.deepEqual(standard.workflow.phases.plan!.recordObligations.map((item) => item.ref), ["plan"]);
@@ -34,8 +34,8 @@ test("installed Mechanical packages expose only default and naked modes", async 
     assert.match(standard.workflow.phases.plan!.guidance, /Example C — complete six-axis robot arm/);
     assert.deepEqual(standard.workflow.phases.cook!.recordObligations, []);
     assert.deepEqual(standard.workflow.phases.cook!.evidenceObligations, []);
-    assert.match(standard.workflow.phases.cook!.guidance, /Use Prime's native rlm\(\.\.\.\) calls directly from IPython/);
-    assert.match(standard.workflow.phases.cook!.guidance, /A child may recursively call rlm\(\.\.\.\)/);
+    assert.match(standard.workflow.phases.cook!.guidance, /Use Prime's native rlm\.spawn\(\.\.\.\) calls directly from Python REPL/);
+    assert.match(standard.workflow.phases.cook!.guidance, /A child may recursively call rlm\.spawn\(\.\.\.\)/);
     assert.match(standard.workflow.phases.cook!.guidance, /Do not accept child output as system truth/);
     assert.match(standard.workflow.phases.cook!.guidance, /recompute the governing engineering model with measured mass, dimensions, inertia/);
     assert.deepEqual(Object.keys(standard.workflow.phases.cook!.transitions), ["finished"]);
@@ -49,6 +49,8 @@ test("installed Mechanical packages expose only default and naked modes", async 
     assert.deepEqual(naked.workflow.phases.work!.evidenceObligations, []);
     assert.equal(naked.workflow.phases.work!.actions.includes("cad_build_step"), true);
     assert.equal(naked.workflow.phases.work!.actions.includes("cad_simulate"), true);
+    assert.equal(naked.workflow.phases.work!.actions.includes("transition"), true);
+    assert.equal(naked.workflow.phases.work!.grants.includes("transition"), true);
     const started = await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" }) as any;
     assert.equal(started.phase, "plan");
     assert.deepEqual(started.unmet, ["plan"]);

@@ -4,7 +4,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
-import { engineeringKnowledgeProbe, type RuntimeBridge, type RuntimePaths } from "./runtime-bridge.js";
+import { engineeringKnowledgeProbe, managedPrimeProbe, type RuntimeBridge, type RuntimePaths } from "./runtime-bridge.js";
 
 export class NativeBridge implements RuntimeBridge {
   readonly kind = "native" as const;
@@ -144,7 +144,7 @@ export class NativeBridge implements RuntimeBridge {
       "printf 'uv=%s\\n' \"$(command -v uv || true)\"",
       `printf 'sandbox=%s\\n' \"$(command -v ${sandbox} || true)\"`,
       "printf 'paraview=%s\\n' \"$(command -v paraview || true)\"",
-      `test -f ${JSON.stringify(paths.primeAgentRepo)}/prime-agent.sh && printf 'prime=ready\\n' || printf 'prime=missing\\n'`,
+      managedPrimeProbe(paths.piCadRepo, paths.primeAgentRepo),
       `test -f ${JSON.stringify(paths.piCadRepo)}/package.json && printf 'picad=ready\\n' || printf 'picad=missing\\n'`,
       knowledge.command,
       usesBundledRuntime
@@ -169,6 +169,14 @@ export class NativeBridge implements RuntimeBridge {
   async installWsl(_onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> { throw new Error("WSL installation is available only on Windows."); }
 
   async install(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
+    if (this.installation) return this.installation;
+    this.installation = this.installRuntime(settings, onStatus).finally(() => { this.installation = undefined; });
+    return this.installation;
+  }
+
+  private installation?: Promise<RuntimeStatus>;
+
+  private async installRuntime(settings: AppSettings, onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
     let status = await this.check(settings);
     onStatus?.({ ...status, state: "installing", message: "Preparing the native engineering runtime…" });
     const missing = new Set(status.checks.filter((item) => item.status !== "ready").map((item) => item.id));
@@ -181,14 +189,13 @@ export class NativeBridge implements RuntimeBridge {
       await this.exec(["bash", "-lc", "curl -LsSf https://astral.sh/uv/install.sh | sh"], { timeout: 5 * 60_000 });
     }
     const paths = await this.resolveRuntimePaths(settings);
-    if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath) {
+    let bundleInstalled = false;
+    if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath && !settings.piCadRepo && !settings.primeAgentRepo) {
       const destination = process.env.PI_CAD_DESKTOP_RUNTIME_ROOT
         ? resolve(process.env.PI_CAD_DESKTOP_RUNTIME_ROOT)
         : `${homedir()}/.local/share/pi-cad-desktop/runtime`;
-      await mkdir(destination, { recursive: true });
-      await this.exec(["tar", "-xzf", `${this.bundledRuntimePath}/runtime-bundle.tar.gz`, "-C", destination], { timeout: 15 * 60_000 });
-      await this.exec(["cp", `${this.bundledRuntimePath}/manifest.json`, `${destination}/manifest.json`]);
-      await chmod(`${destination}/prime-agent/prime-agent.sh`, 0o755);
+      await this.exec([await this.commandPath("node"), `${this.bundledRuntimePath}/install-runtime-bundle.mjs`, this.bundledRuntimePath, destination], { timeout: 15 * 60_000 });
+      bundleInstalled = true;
     }
     const updated = await this.resolveRuntimePaths(settings);
     const node = await this.commandPath("node");
@@ -196,6 +203,10 @@ export class NativeBridge implements RuntimeBridge {
     await mkdir(`${updated.piCadRepo}/node_modules/@earendil-works`, { recursive: true });
     for (const [name, directory] of [["pi-coding-agent", "coding-agent"], ["pi-ai", "ai"]] as const) {
       await this.exec(["ln", "-sfn", `${updated.primeAgentRepo}/packages/${directory}`, `${updated.piCadRepo}/node_modules/@earendil-works/${name}`]);
+    }
+    await this.exec([node, `${updated.piCadRepo}/scripts/prepare-prime-kernel.mjs`, updated.primeAgentRepo], { timeout: 15 * 60_000 });
+    if (bundleInstalled) {
+      await this.exec(["mv", `${updated.piCadRepo}/../manifest.pending.json`, `${updated.piCadRepo}/../manifest.json`]);
     }
     status = await this.check(settings);
     onStatus?.(status);

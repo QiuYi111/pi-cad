@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { createConnection } from "node:net";
 
 import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, resolvePrimeRepository, resolveReviewerLaunchOptions, resolveVenvPythonRoot, reviewerModelArgs, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
 import { completionGate, dispatchSidecarRequest, SIDECAR_REQUEST_TIMEOUT_MS, startAuthoritySidecar } from "../src/authority/sidecar.ts";
@@ -15,6 +16,31 @@ import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
 
 test("sidecar allows the complete model build and observation pipeline to finish", () => {
   assert.ok(SIDECAR_REQUEST_TIMEOUT_MS > DEFAULT_CADCTL_TIMEOUT_MS * 2 + FULL_GEOMETRY_VALIDATION_TIMEOUT_MS);
+});
+
+test("launch completion follows its conversation rather than a project pointer", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "scope-"));
+  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: join(cwd, "runtime") });
+  const request = (sessionId: string, op: string, fields = {}) => new Promise<any>((accept, reject) => {
+    const socket = createConnection(sidecar.authorSocket);
+    let body = "";
+    socket.on("connect", () => socket.end(JSON.stringify({ schema: 1, sessionId, op, ...fields })));
+    socket.on("data", (chunk) => { body += chunk; });
+    socket.on("end", () => accept(JSON.parse(body)));
+    socket.on("error", reject);
+  });
+  try {
+    const session = "01a0c224-e93e-7189-b0bc-4fb9859b6e16";
+    assert.equal((await request(session, "workflow-start", { id: "mechanical.naked" })).ok, true);
+    assert.equal((await sidecar.completion()).complete, false);
+    assert.equal((await request(session, "workflow-advance", { event: "finished" })).ok, true);
+    assert.equal((await sidecar.completion()).complete, true);
+    await request("01a0c224-e93e-7189-b0bc-4fb9859b6e17", "workflow-current");
+    assert.equal((await sidecar.completion()).complete, false, "an unbound conversation must not inherit success");
+  } finally {
+    await sidecar.close();
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 
 test("Prime repository resolution persists custom setup paths and fails with an actionable error", async () => {

@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { installBlender } from "./install-blender.mjs";
 import { removeBrokenPythonEnvironment } from "./python-environment.mjs";
+import { installDefaultWorkflow } from "./install-default-workflow.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const pythonProject = join(root, "python");
 const userWorkflowRoot = join(process.env.PI_CAD_WORKFLOW_HOME ?? homedir(), ".pi-cad", "workflows");
 const defaultWorkflow = join(userWorkflowRoot, "mechanical-default.yaml");
 mkdirSync(userWorkflowRoot, { recursive: true });
-if (!existsSync(defaultWorkflow)) copyFileSync(join(root, "workflow-packages", "mechanical", "default.yaml"), defaultWorkflow);
+installDefaultWorkflow(join(root, "workflow-packages", "mechanical", "default.yaml"), defaultWorkflow);
 function uv(args, options = {}) {
   return execFileSync(process.env.PI_CAD_UV ?? "uv", args, { cwd: root, ...options });
 }
