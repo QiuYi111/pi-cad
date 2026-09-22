@@ -18,7 +18,7 @@ import type { FailureCluster, FailureVerdict, TriageResult } from "./types.ts";
  * rule is not trusted by `campaign recluster`: re-running is supposed to apply
  * the new rule to the same raw rounds, not to parrot the old conclusion.
  */
-export const TRIAGE_RULES_VERSION = 2;
+export const TRIAGE_RULES_VERSION = 3;
 
 /** The real replay / run / load, swappable so the verdict rule is unit-testable. */
 export interface TriageDeps {
@@ -50,9 +50,10 @@ const gitCommit = (): string => {
 /**
  * How stably a failure reproduces, and nothing else.
  *
- * `reproducible` is reserved for "every replay hit it again". If any replay
- * missed, the honest answer is `flaky`; if none hit and the seed+path did not
- * either, it is a `false-positive`. Shrinking is deliberately not part of this
+ * `reproducible` is reserved for "every sequence replay hit it again, and the
+ * seed+path hit the same invariant too". A run where every sequence replay hit
+ * but seed+path missed is a real `flaky`, not a stable failure. If nothing hit
+ * anywhere it is a `false-positive`. Shrinking is deliberately not part of this
  * decision — it only minimizes the evidence afterwards.
  */
 export function classifyFailureVerdict(input: {
@@ -60,7 +61,7 @@ export function classifyFailureVerdict(input: {
   reproductions: number;
   seedPathReplayOk: boolean;
 }): FailureVerdict {
-  if (input.attempts > 0 && input.reproductions === input.attempts) return "reproducible";
+  if (input.attempts > 0 && input.reproductions === input.attempts && input.seedPathReplayOk) return "reproducible";
   if (input.reproductions > 0 || input.seedPathReplayOk) return "flaky";
   return "false-positive";
 }
@@ -88,7 +89,9 @@ export interface ClusterTriage {
  * The round that first found the failure is only a claim; every replay here is
  * real. The shrink-enabled rerun of the same path is counted as one more
  * replay, so it can lower the verdict but can never promote a `flaky` failure
- * to `reproducible`.
+ * to `reproducible`. A `reproducible` verdict also needs the seed+path replay
+ * to hit the same invariant: sequence replays all hitting while seed+path
+ * misses is a flaky failure, not a stable one.
  */
 export async function assessClusterStability(cluster: FailureCluster, options: TriageOptions): Promise<ClusterStability> {
   const deps: TriageDeps = { ...DEFAULT_DEPS, ...options.deps };

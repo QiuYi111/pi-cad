@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { resolveCampaign } from "../chaos/campaign/campaign.ts";
@@ -7,7 +10,7 @@ import { buildRoundPlan, deriveRoundSeed } from "../chaos/campaign/plan.ts";
 import { CAMPAIGN_PROFILES, NETWORK_PROVIDER_FAULTS, campaignFaultPool, profileFaultScope, resolveProfiles } from "../chaos/campaign/profiles.ts";
 import { renderCampaignReport } from "../chaos/campaign/report.ts";
 import { clusterFailures, failureSignature, normalizeText } from "../chaos/campaign/signature.ts";
-import { assessClusterStability, classifyFailureVerdict } from "../chaos/campaign/triage.ts";
+import { assessClusterStability, classifyFailureVerdict, triageCluster } from "../chaos/campaign/triage.ts";
 import type { CampaignReport, CampaignRound, FailureCluster } from "../chaos/campaign/types.ts";
 import type { ReifyReplayResult, ReifyRunResult } from "../chaos/reify/runner.ts";
 import { FAULT_BOUNDARIES } from "../chaos/reify/faults.ts";
@@ -314,11 +317,64 @@ test("campaign: normalizeText 抹掉 pid / 端口 / hash", () => {
 
 test("campaign triage: 三类结论只由 replay 决定", () => {
   assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 2, seedPathReplayOk: true }), "reproducible");
-  assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 2, seedPathReplayOk: false }), "reproducible");
+  assert.equal(
+    classifyFailureVerdict({ attempts: 2, reproductions: 2, seedPathReplayOk: false }),
+    "flaky",
+    "序列每次都中但 seed+path 没中同一 invariant，只能算偶发",
+  );
   assert.equal(classifyFailureVerdict({ attempts: 3, reproductions: 2, seedPathReplayOk: true }), "flaky");
   assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 1, seedPathReplayOk: false }), "flaky");
   assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 0, seedPathReplayOk: true }), "flaky");
   assert.equal(classifyFailureVerdict({ attempts: 2, reproductions: 0, seedPathReplayOk: false }), "false-positive");
+  // 只有「序列全中 + seed+path 也中」才配叫稳定复现；缺 seed+path 一律退回偶发。
+  assert.equal(classifyFailureVerdict({ attempts: 1, reproductions: 1, seedPathReplayOk: false }), "flaky");
+});
+
+test("campaign triage: 序列 replay 全中但 seed+path 没中，shrink 成功也不能判稳定", async () => {
+  // 预审点名的第二条：序列 replay 2/2 命中、后面的 shrink / enriched 也命中，
+  // 但 seed+path 一次都没复现同一个 invariant —— 这不是 stable，必须仍是 flaky。
+  const stability = await assessClusterStability(clusterWith(), {
+    replays: 2,
+    regressionDir: "/tmp/unused",
+    deps: {
+      replay: async (_file: string, options: { seed?: boolean } = {}) =>
+        options.seed ? replayResult(false, "seed+path", "按 seed+path 没复现") : replayResult(true, "sequence"),
+      run: async () => reproducedRun,
+      load: () => artifact({ detail: "控制面死了 kernel 还在", sequence: [command("action", "startRun")] }),
+    },
+  });
+  assert.equal(stability.verdict, "flaky", "seed+path 没复现，序列再稳也只能算偶发");
+  assert.equal(stability.attempts, 3, "2 次序列 replay + 1 次 shrink 重跑");
+  assert.equal(stability.reproductions, 3, "3 次都命中了");
+  assert.equal(stability.seedPathReplayOk, false);
+  assert.ok(stability.enriched, "shrink 命中了，最小证据还是要留");
+});
+
+test("campaign triage: triageCluster 在这条规则下仍把「序列+shrink 中、seed+path 不中」判 flaky", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "chaos-triage-"));
+  const enrichedArtifact = join(dir, "enriched.json");
+  writeFileSync(
+    enrichedArtifact,
+    JSON.stringify(artifact({ detail: "控制面死了 kernel 还在", sequence: [command("action", "startRun")] })),
+    "utf8",
+  );
+  const result = await triageCluster(clusterWith(), {
+    replays: 2,
+    regressionDir: join(dir, "regressions"),
+    quiet: true,
+    deps: {
+      replay: async (_file: string, options: { seed?: boolean } = {}) =>
+        options.seed ? replayResult(false, "seed+path", "按 seed+path 没复现") : replayResult(true, "sequence"),
+      run: async () => ({ ...reproducedRun, artifactPath: enrichedArtifact }),
+      load: () => artifact({ detail: "控制面死了 kernel 还在", sequence: [command("action", "startRun")] }),
+    },
+  });
+  assert.equal(result.verdict, "flaky", "最终结论由 triageCluster 给出，也必须遵守这条规则");
+  assert.equal(result.triage.ruleVersion, 3, "结论要带当前规则版本");
+  assert.equal(result.triage.attempts, 3);
+  assert.equal(result.triage.reproductions, 3);
+  assert.equal(result.triage.seedPathReplayOk, false);
+  assert.equal(result.triage.shrinkOk, true, "shrink 命中了，最小复现仍要落盘");
 });
 
 test("campaign triage: shrink 单次成功不能把 flaky 提升成 reproducible", async () => {
