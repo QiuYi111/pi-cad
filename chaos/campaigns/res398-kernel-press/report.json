@@ -1,0 +1,164 @@
+{
+  "campaignId": "res398-kernel-press",
+  "createdAt": "2026-09-22T17:02:10.651Z",
+  "manifest": {
+    "campaignId": "res398-kernel-press",
+    "createdAt": "2026-09-22T16:26:13.471Z",
+    "mode": "targeted",
+    "seed": 399300,
+    "rounds": 100,
+    "maxCommands": 10,
+    "runtimeRatio": 0.5,
+    "providerFaults": false,
+    "profiles": [
+      "idle-kernel"
+    ],
+    "concurrency": 2,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "1be42b5386476b6f19d45eba42c336b78c46ad62",
+      "gitBranch": "labrunner/res-398-chaos-06",
+      "gitDirty": true
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 100,
+    "roundsPassed": 100,
+    "roundsFailed": 0,
+    "roundsErrored": 0,
+    "distinctSeeds": 100,
+    "stateObservations": 2090,
+    "actions": {
+      "startRun": 150,
+      "commitPlan": 144,
+      "advance": 137,
+      "build": 139,
+      "retryBuild": 28,
+      "openConversation": 38,
+      "refresh": 22,
+      "burstRefresh": 18,
+      "phaseContract": 9,
+      "resumeRun": 24,
+      "switchConversation": 11,
+      "concurrentBuild": 14,
+      "desktopRestart": 18,
+      "history": 6,
+      "completionGate": 10,
+      "duplicateCommit": 17,
+      "multiConversationBuild": 19,
+      "authorize": 7,
+      "listWorkflows": 7,
+      "phaseCard": 4,
+      "stopRun": 3
+    },
+    "faultsInjected": {
+      "killKernelDuringBuild": 45,
+      "killKernelChild": 16,
+      "pauseKernelDuringBuild": 16,
+      "killIdleKernel": 7
+    },
+    "faultsNotApplicable": {
+      "killKernelDuringBuild": 5,
+      "killKernelChild": 3,
+      "killIdleKernel": 10,
+      "pauseKernelDuringBuild": 3
+    },
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {},
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 59,
+        "injected": 84
+      },
+      "file-state": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "provider-oauth": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "race": {
+        "rounds": 0,
+        "injected": 0
+      }
+    },
+    "components": {
+      "authority": 548,
+      "kernel": 320,
+      "run-store": 77
+    },
+    "profiles": {
+      "idle-kernel": 100
+    },
+    "runtimeRounds": 50,
+    "oneShotRounds": 50
+  },
+  "failures": {
+    "rounds": 0,
+    "unique": 0,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 0,
+    "unverified": 0,
+    "product": 0,
+    "harness": 0
+  },
+  "clusters": [],
+  "underExplored": [
+    "file-state：0 次真注入",
+    "provider-oauth：0 次真注入",
+    "race：0 次真注入"
+  ],
+  "notes": [
+    "campaign 起点工作区不干净，结论要对着 gitCommit 看"
+  ]
+}

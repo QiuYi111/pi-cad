@@ -539,5 +539,18 @@ export function loadCampaign(dir: string): LoadedCampaign {
   } catch {
     report = undefined;
   }
+  // A committed campaign was written by an older harness, so its coverage has
+  // no four-state buckets yet. Backfill them on load instead of making every
+  // reader of an old report handle a missing key.
+  if (report) {
+    report = {
+      ...report,
+      coverage: {
+        ...report.coverage,
+        faultsInjectionFailed: report.coverage?.faultsInjectionFailed ?? {},
+        faultsRecoveryFailed: report.coverage?.faultsRecoveryFailed ?? {},
+      },
+    };
+  }
   return { dir, manifest, rounds, clusters, report };
 }

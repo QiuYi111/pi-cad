@@ -958,6 +958,40 @@ function credentialFault(name: string, fault: "expire" | "drop" | "blank"): Reif
  * thing we meant to inject. "Returned 200 anyway" is a failed injection, not a
  * passing step.
  */
+const CREDENTIAL_FAULT_NAMES = ["providerCredentialExpired", "providerCredentialDropped", "providerCredentialBlanked"];
+
+/** The credential fault this round is still holding, if any. */
+function credentialFaultArmed(ctx: ReifyContext): string | null {
+  return ctx.session.activeFaults.find((name) => CREDENTIAL_FAULT_NAMES.includes(name)) ?? null;
+}
+
+/**
+ * A real provider refusing the credential: 401 / 403. This is the only
+ * transport-probe answer a credential fault is allowed to explain away.
+ */
+const AUTH_REJECTION_STATUSES = new Set([401, 403]);
+
+/**
+ * Does an already-executed transport probe failure really belong to the
+ * credential fault armed in this round?
+ *
+ * Only when the real provider answered with an explicit auth rejection
+ * (401/403) does the probe failure say "the credential is broken", which is
+ * exactly what the credential fault did -- and never a transport finding.
+ * Then, and only then, it is honestly NotApplicable. Everything else the
+ * probe really saw (a 200 that arrived too fast, a wrong status code, a hang
+ * that never hung) stays a real InjectionFailed, so a credential fault armed
+ * nearby can never launder a real transport failure into "did not apply".
+ */
+export function credentialAuthRejection(
+  result: { status: number | null; error?: string },
+  credentialFault: string | null,
+): string | null {
+  if (!credentialFault) return null;
+  if (result.status === null || !AUTH_REJECTION_STATUSES.has(result.status)) return null;
+  return `本轮挂着凭证故障 ${credentialFault}，真 provider 明确拒了这个凭证（status=${result.status}），传输探针打不实；这是凭证故障自己的后果，不是传输故障`;
+}
+
 function assertTransportFaultLanded(
   name: string,
   plan: { mode: "latency" | "hang" | "reset" | "truncate" | "status"; delayMs?: number; status?: number },
@@ -1018,10 +1052,27 @@ function transportFault(
         authHeaders: target.authHeaders,
         timeoutMs: Number(process.env.CHAOS_REIFY_PROVIDER_TIMEOUT_MS ?? 2_500),
       });
+      try {
+        assertTransportFaultLanded(name, plan, result);
+      } catch (error) {
+        // A credential fault armed in the same round really can make the real
+        // provider reject the probe: with the credential expired / blanked /
+        // dropped the endpoint answers 401 (or 403), and the transport fault
+        // then "did not land" because the harness itself broke the credential.
+        // That one answer is the credential fault talking, not a transport
+        // failure, so it is honestly NotApplicable. Every other probe failure
+        // stays a real InjectionFailed -- a credential fault armed nearby must
+        // never turn a real transport-injection failure into "did not apply".
+        const credential = credentialFaultArmed(ctx);
+        const rejection = credentialAuthRejection(result, credential);
+        if (rejection) {
+          throw new FaultNotApplicable(rejection, { credential, status: result.status, mode: plan.mode });
+        }
+        throw error;
+      }
       ctx.session.armFault(name);
       ctx.session.armedFaults.set(name, { result });
       ctx.trace.record({ kind: "note", name, detail: result });
-      assertTransportFaultLanded(name, plan, result);
     },
     recover: async (ctx) => {
       ctx.session.disarmFault(name);

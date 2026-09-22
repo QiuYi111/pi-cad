@@ -6,7 +6,7 @@ import { test } from "node:test";
 
 import fc from "fast-check";
 
-import { resolveCampaign } from "../chaos/campaign/campaign.ts";
+import { loadCampaign, resolveCampaign } from "../chaos/campaign/campaign.ts";
 import { aggregateCoverage } from "../chaos/campaign/coverage.ts";
 import { buildRoundPlan, deriveRoundSeed } from "../chaos/campaign/plan.ts";
 import { CAMPAIGN_PROFILES, NETWORK_PROVIDER_FAULTS, campaignFaultPool, profileFaultScope, resolveProfiles } from "../chaos/campaign/profiles.ts";
@@ -18,7 +18,7 @@ import type { ReifyReplayResult, ReifyRunResult } from "../chaos/reify/runner.ts
 import { FAULT_BOUNDARIES } from "../chaos/reify/faults.ts";
 import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import type { ReifyFailureArtifact } from "../chaos/reify/artifacts.ts";
-import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, buildReifySequenceArbitrary, type Command } from "../chaos/reify/model.ts";
+import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, REIFY_WARM_KERNEL_SETUP, buildReifySequenceArbitrary, type Command } from "../chaos/reify/model.ts";
 import { selectReifyFaults } from "../chaos/reify/runner.ts";
 
 const command = (kind: "action" | "fault", name: string): Command => ({ kind, name, params: {} });
@@ -168,6 +168,33 @@ test("campaign: 多会话 profile 的准备动作真的进生成序列", () => {
   const prefix = [...REIFY_SETUP, ...REIFY_MULTI_CONVERSATION_SETUP];
   for (const sequence of fc.sample(arbitrary, { numRuns: 5, seed: 11 })) {
     assert.deepEqual(sequence.slice(0, prefix.length), prefix, "准备动作必须在每条生成序列最前面，replay/shrink 才看得到");
+  }
+});
+
+test("campaign: idle-kernel profile 先用真 build 摆出 warm kernel", () => {
+  // `killIdleKernel` 的 precondition 是「有活着的 warm kernel」，而 warm kernel
+  // 只有真 build 过才会有。低命中就补真实 preparation，不是放宽 precondition。
+  const prepared = resolveCampaign({ mode: "targeted", profiles: ["idle-kernel"], rounds: 2 });
+  assert.deepEqual(prepared.plan[0]!.preparation, REIFY_WARM_KERNEL_SETUP, "idle-kernel profile 必须带真 build 准备");
+  assert.deepEqual(
+    prepared.plan[0]!.preparation.map((command) => command.name),
+    ["build"],
+    "准备动作必须是真的 build，不是直接摆一个假的 kernel",
+  );
+  assert.ok(
+    CAMPAIGN_PROFILES["idle-kernel"]!.faults!.includes("killIdleKernel"),
+    "准备就是为了这条 fault 能真注入",
+  );
+
+  const arbitrary = buildReifySequenceArbitrary(
+    reifyActionDefinitions,
+    selectReifyFaults(prepared.plan[0]!.faultScope ?? undefined),
+    4,
+    prepared.plan[0]!.preparation,
+  );
+  const prefix = [...REIFY_SETUP, ...REIFY_WARM_KERNEL_SETUP];
+  for (const sequence of fc.sample(arbitrary, { numRuns: 5, seed: 13 })) {
+    assert.deepEqual(sequence.slice(0, prefix.length), prefix, "真 build 必须排在 run 准备好之后、生成序列之前");
   }
 });
 
@@ -350,7 +377,11 @@ test("campaign report: 七个问题都有答案", () => {
       startedAt: "2026-09-22T00:00:00.000Z",
       durationMs: 1000,
       status: "failed",
-      faultOutcomes: [],
+      faultOutcomes: [
+        { name: "killKernelDuringBuild", phase: "inject", status: "Injected", at: 1 },
+        { name: "partialStateWrite", phase: "inject", status: "InjectionFailed", at: 2, reason: "EACCES" },
+        { name: "killKernelDuringBuild", phase: "recover", status: "RecoveryFailed", at: 3, reason: "没恢复" },
+      ],
       commands: ["action:startRun", "fault:killKernelDuringBuild"],
       injectedFaults: ["killKernelDuringBuild"],
       notApplicableFaults: [],
@@ -400,7 +431,64 @@ test("campaign report: 七个问题都有答案", () => {
   }
   assert.ok(markdown.includes("campaign rerun"), "report 要给出重跑方式");
   assert.equal(coverage.faultsInjected.killKernelDuringBuild, 1);
+  assert.equal(coverage.faultsInjectionFailed.partialStateWrite, 1, "注入失败要单独计数，不能混进 NotApplicable");
+  assert.equal(coverage.faultsRecoveryFailed.killKernelDuringBuild, 1, "恢复失败也要单独计数");
   assert.equal(coverage.boundaries.process!.injected, 1);
+  assert.ok(markdown.includes("### 每个 fault 的注入结果"), "report 要给每个 fault 的三态统计");
+  assert.ok(markdown.includes("InjectionFailed"), "report 要看得见 InjectionFailed");
+});
+
+test("campaign report: 老 report.json 没有四态字段也要能渲染", () => {
+  // 已经入库的 campaign 是旧 harness 写的，coverage 里没有 InjectionFailed /
+  // RecoveryFailed 两个桶。渲染这些老数据不能崩：读回来要补成空桶。
+  const dir = mkdtempSync(join(tmpdir(), "pi-cad-campaign-legacy-"));
+  const manifest = {
+    campaignId: "legacy",
+    createdAt: "2026-09-22T00:00:00.000Z",
+    mode: "short",
+    seed: 1,
+    rounds: 1,
+    maxCommands: 4,
+    runtimeRatio: 0,
+    providerFaults: false,
+    profiles: ["process"],
+    concurrency: 1,
+    triageReplays: 1,
+    faultPool: ["killKernelDuringBuild"],
+    version: { package: "0.9.0", node: "v22", gitCommit: "abc123", gitBranch: "main", gitDirty: false },
+    environment: {},
+  };
+  const legacyCoverage = {
+    rounds: 1,
+    runtimeRounds: 0,
+    oneShotRounds: 1,
+    profiles: { process: 1 },
+    actions: { startRun: 1 },
+    faultsInjected: { killKernelDuringBuild: 1 },
+    faultsNotApplicable: {},
+    invariantsChecked: ["no-orphan-kernel"],
+    boundaries: { process: { rounds: 1, injected: 1 }, "file-state": { rounds: 0, injected: 0 }, "provider-oauth": { rounds: 0, injected: 0 }, race: { rounds: 0, injected: 0 } },
+    components: { kernel: 1 },
+  };
+  const legacyReport = {
+    campaignId: "legacy",
+    createdAt: "2026-09-22T00:00:00.000Z",
+    manifest,
+    coverage: legacyCoverage,
+    failures: { rounds: 0, unique: 0, reproducible: 0, flaky: 0, falsePositive: 0, unverified: 0, product: 0, harness: 0 },
+    clusters: [],
+    underExplored: [],
+    notes: [],
+  };
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest));
+  writeFileSync(join(dir, "report.json"), JSON.stringify(legacyReport));
+
+  const loaded = loadCampaign(dir);
+  assert.deepEqual(loaded.report?.coverage.faultsInjectionFailed, {}, "老 report 读回来要补空的 InjectionFailed 桶");
+  assert.deepEqual(loaded.report?.coverage.faultsRecoveryFailed, {}, "老 report 读回来要补空的 RecoveryFailed 桶");
+  const markdown = renderCampaignReport(loaded.report!);
+  assert.ok(markdown.includes("### 每个 fault 的注入结果"), "老 report 也要渲染出每个 fault 的注入结果表");
+  assert.ok(markdown.includes("| killKernelDuringBuild | 1 | 0 | 0 | 0 |"), "老 report 没有的两种状态显示 0，不虚构数据");
 });
 
 test("campaign: normalizeText 抹掉 pid / 端口 / hash", () => {

@@ -1,0 +1,259 @@
+{
+  "campaignId": "res398-targeted-lowhit",
+  "createdAt": "2026-09-22T18:53:04.148Z",
+  "manifest": {
+    "campaignId": "res398-targeted-lowhit",
+    "createdAt": "2026-09-22T14:28:43.827Z",
+    "mode": "targeted",
+    "seed": 398700,
+    "rounds": 200,
+    "maxCommands": 12,
+    "runtimeRatio": 0.5,
+    "providerFaults": false,
+    "profiles": [
+      "session-isolation",
+      "lifecycle-action-race",
+      "desktop-consistency",
+      "runtime-recovery"
+    ],
+    "concurrency": 2,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "e184332ef9b148a8f811ddac98bd1304c2d1a686",
+      "gitBranch": "labrunner/res-398-chaos-06",
+      "gitDirty": true
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 200,
+    "roundsPassed": 199,
+    "roundsFailed": 1,
+    "roundsErrored": 0,
+    "distinctSeeds": 200,
+    "stateObservations": 4202,
+    "actions": {
+      "startRun": 321,
+      "commitPlan": 305,
+      "advance": 271,
+      "openConversation": 127,
+      "build": 94,
+      "multiConversationBuild": 61,
+      "retryBuild": 54,
+      "burstRefresh": 32,
+      "desktopRestart": 37,
+      "stopRun": 29,
+      "refresh": 66,
+      "phaseCard": 17,
+      "completionGate": 18,
+      "duplicateCommit": 36,
+      "concurrentBuild": 57,
+      "resumeRun": 34,
+      "phaseContract": 10,
+      "switchConversation": 44,
+      "listWorkflows": 24,
+      "authorize": 17,
+      "history": 21
+    },
+    "faultsInjected": {
+      "killKernelDuringBuild": 15,
+      "raceUserActionDuringKernelFault": 15,
+      "raceTwoConversationsBuild": 10,
+      "killAuthorityDuringBuild": 14,
+      "killPrimeRuntime": 10,
+      "missingDesktopProjection": 12,
+      "raceRestartDuringTransition": 9,
+      "raceRepeatSubmitDuringFault": 7,
+      "raceCrossConversationFault": 4
+    },
+    "faultsNotApplicable": {
+      "killRuntimeDuringBuild": 31,
+      "raceTwoConversationsBuild": 3,
+      "restartRuntimeDuringBuild": 30,
+      "raceRestartDuringTransition": 19,
+      "killAuthorityDuringBuild": 3,
+      "raceCrossConversationFault": 4,
+      "killKernelDuringBuild": 3,
+      "pauseRuntimeDuringBuild": 6,
+      "raceUserActionDuringKernelFault": 2,
+      "raceRepeatSubmitDuringFault": 1
+    },
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {
+      "missingDesktopProjection": 1
+    },
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 34,
+        "injected": 39
+      },
+      "file-state": {
+        "rounds": 12,
+        "injected": 12
+      },
+      "provider-oauth": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "race": {
+        "rounds": 41,
+        "injected": 45
+      }
+    },
+    "components": {
+      "authority": 1232,
+      "kernel": 308,
+      "run-store": 177,
+      "runtime": 88,
+      "prime": 10,
+      "desktop-projection": 13
+    },
+    "profiles": {
+      "session-isolation": 50,
+      "lifecycle-action-race": 50,
+      "desktop-consistency": 50,
+      "runtime-recovery": 50
+    },
+    "runtimeRounds": 100,
+    "oneShotRounds": 100
+  },
+  "failures": {
+    "rounds": 1,
+    "unique": 1,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 1,
+    "unverified": 0,
+    "product": 1,
+    "harness": 0
+  },
+  "clusters": [
+    {
+      "id": "cc1cac0ed",
+      "signature": "recovery-convergence | 真 authority 没有把 .pi-cad/status.json 写回来",
+      "invariant": "recovery-convergence",
+      "boundary": "file-state",
+      "boundaries": [
+        "file-state"
+      ],
+      "nature": "product",
+      "failingSteps": [
+        "action:multiConversationBuild"
+      ],
+      "reason": "真 authority 没有把 .pi-cad/status.json 写回来",
+      "logSignatures": [
+        "raceRestartDuringTransition 之后 run 在 plan 阶段，不允许 model.build，不要求重建"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:commitPlan",
+          "action:build",
+          "action:multiConversationBuild",
+          "fault:missingDesktopProjection",
+          "fault:raceRestartDuringTransition",
+          "action:startRun",
+          "fault:missingDesktopProjection",
+          "action:build",
+          "action:build",
+          "action:retryBuild",
+          "action:openConversation",
+          "action:multiConversationBuild"
+        ]
+      ],
+      "occurrences": 1,
+      "roundIndexes": [
+        98
+      ],
+      "seeds": [
+        1147211961
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T14-58-17-729Z-reify-recovery-convergence.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T14-58-17-729Z-reify-recovery-convergence.json",
+      "firstSeenAt": "2026-09-22T14:58:17.729Z",
+      "lastSeenAt": "2026-09-22T14:58:17.729Z",
+      "runtimeModes": [
+        true
+      ],
+      "commits": [
+        "e184332ef9b148a8f811ddac98bd1304c2d1a686"
+      ],
+      "verdict": "false-positive",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 2,
+        "reproductions": 0,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": false,
+        "shrinkOk": false,
+        "originalLength": 0,
+        "shrunkLength": 0,
+        "numShrinks": 0,
+        "minimalSequence": [],
+        "notes": [
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "按 seed+path 没复现：seed=1147211961 path=0 没有复现失败"
+        ]
+      }
+    }
+  ],
+  "underExplored": [
+    "provider-oauth：0 次真注入"
+  ],
+  "notes": [
+    "本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 e184332ef9b1，recluster / re-triage / report 用的是 1188beb8b241（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。",
+    "campaign 起点工作区不干净，结论要对着 gitCommit 看"
+  ]
+}

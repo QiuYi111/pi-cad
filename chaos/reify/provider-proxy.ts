@@ -25,6 +25,16 @@ export interface ProviderUpstream {
   protocol: "http" | "https";
   host: string;
   port: number;
+  /**
+   * The base path of the real provider endpoint, if it has one.
+   *
+   * Real providers mount their API under a path (`https://api.z.ai/api/coding/paas/v4`).
+   * Keeping only host/port made the proxy forward `/models` to
+   * `https://api.z.ai/models`, which answers 404 — so a `latency` fault could
+   * never land (it needs the real upstream answer) and every round that picked
+   * it honestly reported an injection failure.
+   */
+  basePath?: string;
 }
 
 export interface ProviderFaultPlan {
@@ -57,6 +67,8 @@ export function parseUpstream(baseUrl: string): ProviderUpstream {
     protocol: url.protocol === "https:" ? "https" : "http",
     host: url.hostname,
     port: url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80,
+    // `/` means "no prefix": mounting `/` again would produce `//models`.
+    basePath: url.pathname.replace(/\/+$/, ""),
   };
 }
 
@@ -145,7 +157,17 @@ export class ProviderFaultProxy {
       if (outgoing.writableEnded || outgoing.destroyed) return;
       const send = this.upstream.protocol === "https" ? httpsRequest : httpRequest;
       const upstreamRequest = send(
-        { protocol: `${this.upstream.protocol}:`, host: this.upstream.host, port: this.upstream.port, method: incoming.method, path: `${target.pathname}${target.search}`, headers },
+        {
+          protocol: `${this.upstream.protocol}:`,
+          host: this.upstream.host,
+          port: this.upstream.port,
+          method: incoming.method,
+          // The real provider path prefix belongs in front of the request path:
+          // the client asks the loopback proxy for `/models`, the provider
+          // really serves `<basePath>/models`.
+          path: `${this.upstream.basePath ?? ""}${target.pathname}${target.search}`,
+          headers,
+        },
         (upstreamResponse) => {
           outgoing.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers as Record<string, string | string[]>);
           if (plan.mode !== "truncate") {

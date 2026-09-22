@@ -156,6 +156,14 @@ export interface CampaignCoverage {
   actions: Record<string, number>;
   faultsInjected: Record<string, number>;
   faultsNotApplicable: Record<string, number>;
+  /**
+   * Precondition held, injection really threw. This is a failure signal, not
+   * "we skipped it", so it must be visible per fault next to Injected /
+   * NotApplicable instead of only existing inside the round's faultOutcomes.
+   */
+  faultsInjectionFailed: Record<string, number>;
+  /** Faults whose recovery did not prove the system can work again. */
+  faultsRecoveryFailed: Record<string, number>;
   invariantsChecked: string[];
   boundaries: Record<string, { rounds: number; injected: number }>;
   components: Record<string, number>;

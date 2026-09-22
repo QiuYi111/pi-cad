@@ -99,9 +99,23 @@ export const REIFY_MULTI_CONVERSATION_SETUP: Command[] = [
   { kind: "action", name: "openConversation", params: {} },
 ];
 
+/**
+ * Really build once first, so a warm kernel exists to be killed while idle.
+ *
+ * `killIdleKernel` needs an owned, non-orphan warm kernel, which only a real
+ * build creates; in the mixed soak that fault reported NotApplicable more often
+ * than it injected ("这一轮还没真 build 过"). The preparation is the same real
+ * `build` a user runs, recorded in the sequence, so the fault's precondition
+ * stays strict and replay/shrink see how the state was really reached.
+ */
+export const REIFY_WARM_KERNEL_SETUP: Command[] = [
+  { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } },
+];
+
 /** The named preparations a profile (or a single run) can ask for. */
 export const REIFY_PREPARATIONS: Record<string, Command[]> = {
   "multi-conversation": REIFY_MULTI_CONVERSATION_SETUP,
+  "warm-kernel": REIFY_WARM_KERNEL_SETUP,
 };
 
 export function resolvePreparation(name: string | undefined): Command[] {
