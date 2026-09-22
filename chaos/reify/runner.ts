@@ -16,6 +16,22 @@ import { FaultNotApplicable, type FaultOutcome, type FaultPrecondition, type Rei
 export const REIFY_ACTIONS = new Map(reifyActionDefinitions.map((definition) => [definition.name, definition]));
 export const REIFY_FAULTS = new Map(reifyFaultDefinitions.map((definition) => [definition.name, definition]));
 
+/**
+ * The fault pool a run may generate from.
+ *
+ * A campaign profile narrows this so a targeted run really explores one
+ * boundary instead of hoping the weighted mixed space picks it. The pool is
+ * part of the generator shape: a fast-check path only resolves against the
+ * same pool, so it is stored in the artifact next to seed and path.
+ */
+export function selectReifyFaults(scope?: string[]): ReifyFaultDefinition[] {
+  if (!scope?.length) return reifyFaultDefinitions;
+  const allowed = new Set(scope);
+  const selected = reifyFaultDefinitions.filter((definition) => allowed.has(definition.name));
+  if (!selected.length) throw new Error(`fault scope 里没有任何已知 fault：${scope.join(", ")}`);
+  return selected;
+}
+
 /** How long to keep reading real state after each command. */
 const SETTLE_MS: Record<string, number> = {
   startRun: 300,
@@ -209,6 +225,9 @@ export async function recoverInjectedFaults(
   const normalized: InjectedFault[] = injected.map((entry) =>
     "definition" in entry ? entry : { definition: entry, params: {} },
   );
+  // The convergence clock starts here, not at injection: until now the faults
+  // were supposed to stay armed while the sequence kept driving the system.
+  if (normalized.length) session.history.recoveryStartedAt = Date.now();
   for (const { definition, params } of [...normalized].reverse()) {
     try {
       // Recovery must see the same params the injection used: a race that hit
@@ -272,6 +291,23 @@ export interface ReifyRunOptions {
   quiet?: boolean;
   session?: ReifySession;
   save?: boolean;
+  /**
+   * Restrict generation to these faults (a campaign profile). The pool is part
+   * of the generator shape and is recorded in the artifact so replay/shrink
+   * rebuild the exact same arbitrary.
+   */
+  faultScope?: string[];
+  /**
+   * `false` stops at the first failure without shrinking. A campaign round
+   * wants the raw counterexample fast; the shrink belongs to triage, on the
+   * unique failures only.
+   */
+  shrink?: boolean;
+  /**
+   * `false` saves the raw failure without the extra replay and component
+   * probe. The artifact says so instead of pretending it was verified.
+   */
+  verify?: boolean;
 }
 
 export interface ReifyRunResult {
@@ -286,6 +322,15 @@ export interface ReifyRunResult {
   replayPath?: string;
   artifactPath?: string;
   replayOk?: boolean;
+  /** The fault pool this run generated from; absent means the full space. */
+  faultScope?: string[];
+  /**
+   * The first generated round: what the generator produced, what the real
+   * system actually executed, and the fault outcomes of that round alone.
+   * Shrink attempts run the property again, so this is deliberately the first
+   * one instead of "whatever ran last".
+   */
+  firstRound?: { generated: Command[]; executed: Command[]; faultOutcomes: FaultOutcome[] };
   invariants: string[];
   recoveries: { at: number; after: string; buildMs: number }[];
   /** Explicit fault results: NotApplicable / Injected / InjectionFailed / Recovered / RecoveryFailed. */
@@ -295,6 +340,8 @@ export interface ReifyRunResult {
 interface RecordedFailure {
   commands: Command[];
   error: unknown;
+  /** The real trace of the failing round, so a raw artifact still carries evidence. */
+  trace: ReifyTrace;
 }
 
 /**
@@ -306,12 +353,16 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
   const session = options.session ?? (await startReifySession(options.runtime ?? false));
   const maxCommands = options.maxCommands ?? DEFAULT_MAX_COMMANDS;
   const runtimeMode = options.runtime ?? session.attachedRuntime !== null;
+  const faultScope = options.faultScope?.length ? [...options.faultScope] : undefined;
+  const shrink = options.shrink !== false;
+  const verify = shrink && options.verify !== false;
   // Outcomes are cleared by `reset()` at the start of every iteration, so the
   // whole run's results have to be collected as the iterations go.
   const allFaultOutcomes: FaultOutcome[] = [];
   try {
-    const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, maxCommands);
+    const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, selectReifyFaults(faultScope), maxCommands);
     let firstFailure: RecordedFailure | null = null;
+    let firstRound: { generated: Command[]; executed: Command[]; faultOutcomes: FaultOutcome[] } | null = null;
 
     const property = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
       const trace = new ReifyTrace();
@@ -319,10 +370,15 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       try {
         await runReifySequence(session, commands, trace);
       } catch (error) {
-        if (!firstFailure) firstFailure = { commands: [...commands], error };
+        if (!firstFailure) firstFailure = { commands: [...commands], error, trace };
         throw error;
       } finally {
         allFaultOutcomes.push(...session.faultOutcomes);
+        firstRound ??= {
+          generated: [...commands],
+          executed: [...trace.executed],
+          faultOutcomes: [...session.faultOutcomes],
+        };
       }
     });
 
@@ -332,6 +388,10 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       numRuns: options.numRuns ?? 3,
       seed: options.seed,
       path: options.replayPath ?? "",
+      // A campaign round is a cheap sample: stop at the first failure and keep
+      // the raw sequence. Shrinking many candidates is the expensive part and
+      // only the unique failures are worth it.
+      ...(shrink ? {} : { endOnFailure: true }),
     });
     if (!details.failed) {
       if (!options.quiet) {
@@ -346,6 +406,8 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
         originalLength: 0,
         shrunkLength: 0,
         numShrinks: 0,
+        ...(faultScope ? { faultScope } : {}),
+        ...(firstRound ? { firstRound } : {}),
         invariants: reifyInvariantDefinitions.map((definition) => definition.name),
         recoveries: session.history.recoveries,
         faultOutcomes: [...allFaultOutcomes],
@@ -359,10 +421,13 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       replayPath: details.counterexamplePath ?? "",
       maxCommands,
       runtimeMode,
+      faultScope,
       sequence: shrunk,
       fallback: original,
       expected: details.errorInstance instanceof InvariantViolation ? details.errorInstance : null,
-      inspect: options.save !== false,
+      trace: firstFailure?.trace,
+      verify,
+      inspect: verify && options.save !== false,
     });
     const artifactPath = options.save === false ? undefined : saveReifyArtifact(artifact);
 
@@ -388,6 +453,8 @@ export async function reifyChaosRun(options: ReifyRunOptions = {}): Promise<Reif
       replayPath: artifact.replayPath,
       artifactPath,
       replayOk: artifact.reproducible,
+      ...(faultScope ? { faultScope } : {}),
+      ...(firstRound ? { firstRound } : {}),
       invariants: reifyInvariantDefinitions.map((definition) => definition.name),
       recoveries: session.history.recoveries,
       faultOutcomes: [...allFaultOutcomes],
@@ -405,13 +472,19 @@ async function captureFailure(
     replayPath: string;
     maxCommands: number;
     runtimeMode: boolean;
+    faultScope?: string[];
     sequence: Command[];
     fallback: Command[];
     expected: InvariantViolation | null;
+    /** The trace of the round that first failed, for the unverified fast path. */
+    trace?: ReifyTrace;
+    /** When false, the artifact is saved raw and marked as not yet verified. */
+    verify: boolean;
     /** Attach real component observations; disabled for cheap in-process shrinks. */
     inspect: boolean;
   },
 ): Promise<ReifyFailureArtifact> {
+  if (!input.verify) return rawFailureArtifact(session, input);
   const attempt = async (sequence: Command[]) => {
     const trace = new ReifyTrace();
     await session.reset();
@@ -466,6 +539,7 @@ async function captureFailure(
     replayPath: input.replayPath,
     maxCommands: input.maxCommands,
     runtimeMode: input.runtimeMode,
+    ...(input.faultScope?.length ? { faultScope: input.faultScope } : {}),
     originalSequence: input.fallback,
     shrunkSequence: input.sequence,
     replaySequence: usedSequence,
@@ -494,6 +568,66 @@ export interface ReifyReplayResult {
   observedInvariant?: string;
   detail?: string;
   steps: number;
+}
+
+/**
+ * The fast, honest failure record a campaign round writes.
+ *
+ * Nothing here is invented: the sequence is the raw counterexample fast-check
+ * produced, the timeline comes from the real trace of that round, and the
+ * missing pieces (replay result, shrink result, component probe) are simply
+ * absent rather than faked. Triage fills them in for the unique failures.
+ */
+function rawFailureArtifact(
+  session: ReifySession,
+  input: {
+    seed: number;
+    replayPath: string;
+    maxCommands: number;
+    runtimeMode: boolean;
+    faultScope?: string[];
+    sequence: Command[];
+    fallback: Command[];
+    expected: InvariantViolation | null;
+    trace?: ReifyTrace;
+  },
+): ReifyFailureArtifact {
+  const trace = input.trace;
+  const executed = trace ? [...trace.executed] : input.sequence;
+  return {
+    schema: 1,
+    sut: "reify",
+    createdAt: new Date().toISOString(),
+    invariant: input.expected?.invariant ?? "unknown",
+    detail: input.expected?.detail ?? "只有原始失败序列，没拿到 invariant 细节",
+    ...(input.expected?.evidence === undefined ? {} : { evidence: input.expected.evidence }),
+    seed: input.seed,
+    replayPath: input.replayPath,
+    maxCommands: input.maxCommands,
+    runtimeMode: input.runtimeMode,
+    ...(input.faultScope?.length ? { faultScope: input.faultScope } : {}),
+    originalSequence: input.fallback,
+    shrunkSequence: input.sequence,
+    replaySequence: executed,
+    // Not verified yet, and it says so: triage replays and shrinks it.
+    reproducible: false,
+    actionSequence: executed.filter((command) => command.kind === "action"),
+    faultSequence: executed.filter((command) => command.kind === "fault"),
+    requests: [...session.requests],
+    ids: {
+      conversations: [...(trace?.ids.conversations ?? [])],
+      runs: [...(trace?.ids.runs ?? [])],
+      kernels: [...(trace?.ids.kernels ?? [])],
+    },
+    stateTimeline: trace ? [...trace.timeline] : [],
+    logs: [
+      ...(trace?.notes ?? []),
+      "campaign 快跑模式：这轮只落原始失败序列，replay / shrink 交给 triage 阶段",
+    ],
+    recoveries: [...session.history.recoveries],
+    faultOutcomes: [...session.faultOutcomes],
+    project: { root: session.root, project: session.project, canonical: session.canonical, workflowHome: session.workflowHome },
+  };
 }
 
 /** Re-run a recorded sequence (or the recorded seed+path) and confirm it. */
@@ -542,7 +676,11 @@ async function replayBySeedAndPath(session: ReifySession, artifact: ReifyFailure
     steps: 0,
   });
   if (!artifact.replayPath) return missing("artifact 里没有 fast-check path，没法按原路径重放");
-  const arbitrary = buildReifySequenceArbitrary(reifyActionDefinitions, reifyFaultDefinitions, artifact.maxCommands);
+  const arbitrary = buildReifySequenceArbitrary(
+    reifyActionDefinitions,
+    selectReifyFaults(artifact.faultScope),
+    artifact.maxCommands,
+  );
   let observed: InvariantViolation | null = null;
   let other: unknown = null;
   const property = fc.asyncProperty(arbitrary, async (commands: Command[]) => {
@@ -596,6 +734,7 @@ export async function shrinkReifyArtifact(file: string): Promise<ReifyShrinkResu
     replayPath: artifact.replayPath,
     maxCommands: artifact.maxCommands,
     runtime: artifact.runtimeMode ?? false,
+    faultScope: artifact.faultScope,
     quiet: true,
     save: false,
   });

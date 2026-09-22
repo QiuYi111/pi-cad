@@ -42,3 +42,8 @@ apps/desktop/playwright-report/
 .chaos-cache/
 chaos/artifacts/*
 !chaos/artifacts/.gitkeep
+# Chaos campaigns: the report and manifest are committed, the bulky raw data is not
+chaos/campaigns/*/rounds.jsonl
+chaos/campaigns/*/status.json
+chaos/campaigns/*/artifacts/
+chaos/campaigns/progress-sync.mjs

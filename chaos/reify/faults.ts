@@ -1,4 +1,4 @@
-import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -736,12 +736,35 @@ export const partialStateWrite: ReifyFaultDefinition = {
   description: "把真 run 的 state.json 截成半截（模拟写一半断电）",
   arbitrary: fc.constant<Params>({}),
   describe: () => "partialStateWrite",
-  precondition: (ctx) => buildableRunPrecondition(ctx, 0),
+  precondition: async (ctx) => {
+    const base = await buildableRunPrecondition(ctx, 0);
+    if (!base.applicable) return base;
+    const view = await runView(ctx, conversationOf(ctx));
+    if (view.status !== "active" || !view.runId) {
+      return { applicable: false, reason: `会话没有 active run（${view.status ?? "无"}）` };
+    }
+    const file = join(ctx.session.runDir(view.runId), "state.json");
+    if (!existsSync(file)) return { applicable: false, reason: "run state.json 本来就不在" };
+    // "写一半断电"要求这个文件本来就能读写。另一个 fault（比如
+    // unreadableRunStateFile）刚把它改成读不到时，硬写只会造出 harness 自己的
+    // EACCES，再被记成一次假的产品失败。这里明说「不适用」。
+    try {
+      accessSync(file, constants.R_OK | constants.W_OK);
+    } catch {
+      return { applicable: false, reason: "run state.json 现在读不了或写不了（多半是 unreadableRunStateFile 还挂着）" };
+    }
+    return base;
+  },
   inject: async (ctx) => {
     const view = await runView(ctx, conversationOf(ctx));
     if (view.status !== "active" || !view.runId) throw new FaultNotApplicable(`会话没有 active run（${view.status ?? "无"}）`);
     const file = join(ctx.session.runDir(view.runId), "state.json");
     if (!existsSync(file)) throw new FaultNotApplicable("run state.json 本来就不在");
+    // 截两次会把第一次留下的完整原件覆盖成半截，recover 之后文件再也回不去，
+    // 那是 harness 自己造的损坏，不是产品问题。
+    if (existsSync(`${file}.chaos-original`)) {
+      throw new FaultNotApplicable("这个 run 的 state.json 已经截过一次，原件还在 .chaos-original");
+    }
     const original = readFileSync(file);
     writeFileSync(`${file}.chaos-original`, original);
     writeFileSync(file, original.subarray(0, Math.max(1, Math.floor(original.length / 2))));
@@ -998,9 +1021,23 @@ export const raceUserActionDuringKernelFault: ReifyFaultDefinition = {
     conversationIndex: fc.integer({ min: 0, max: 1 }),
   }),
   describe: (params) => `raceUserActionDuringKernelFault(${params.action},conv#${params.conversationIndex})`,
-  precondition: (ctx) => buildableRunPrecondition(ctx),
+  precondition: async (ctx) => {
+    // The authority sidecar (the long-lived runtime Desktop and Prime talk to)
+    // does not expose `viewer-catalog`; only the one-shot CLI authority does.
+    // Asking for it on the runtime threw "author endpoint does not expose
+    // operation: viewer-catalog" and the runner honestly reported an injection
+    // failure — a harness fault, not a product one. Say "not applicable"
+    // instead, the same way the sidecar-only actions do it the other way round.
+    if (String(ctx.params.action) === "viewerCatalog" && ctx.session.attachedRuntime) {
+      return { applicable: false, reason: "常驻 runtime 面不暴露 viewer-catalog，只有一次性 CLI 控制面才有" };
+    }
+    return buildableRunPrecondition(ctx);
+  },
   inject: async (ctx) => {
     const index = faultConversationIndex(ctx);
+    if (String(ctx.params.action) === "viewerCatalog" && ctx.session.attachedRuntime) {
+      throw new FaultNotApplicable("常驻 runtime 面不暴露 viewer-catalog，只有一次性 CLI 控制面才有");
+    }
     // The faulted kernel and the user action must be the same conversation.
     const build = await startFaultBuild(ctx, "raceUserActionDuringKernelFault", index);
     ctx.session.killKernel(build.kernelPid, "SIGKILL");

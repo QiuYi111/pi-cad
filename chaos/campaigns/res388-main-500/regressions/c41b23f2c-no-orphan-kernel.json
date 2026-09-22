@@ -1,0 +1,611 @@
+{
+  "schema": 1,
+  "sut": "reify",
+  "createdAt": "2026-09-21T22:47:03.506Z",
+  "invariant": "no-orphan-kernel",
+  "detail": "1 个 kernel 的父控制面已经死了，进程还在：1824807(owner=1824783)",
+  "evidence": {
+    "orphans": [
+      {
+        "pid": 1824807,
+        "ownerPid": 1824783,
+        "sinceMs": 2042
+      }
+    ]
+  },
+  "seed": -1090223884,
+  "replayPath": "0:1:0:1:1",
+  "maxCommands": 8,
+  "runtimeMode": false,
+  "faultScope": [
+    "killKernelDuringBuild",
+    "pauseKernelDuringBuild",
+    "killAuthorityDuringBuild",
+    "pauseAuthorityDuringBuild",
+    "killIdleKernel",
+    "killKernelChild",
+    "killRuntimeDuringBuild",
+    "pauseRuntimeDuringBuild",
+    "restartRuntimeDuringBuild",
+    "killPrimeRuntime",
+    "cpuPressure",
+    "missingRunStateFile",
+    "unreadableRunStateFile",
+    "partialStateWrite",
+    "missingDesktopProjection",
+    "providerCredentialExpired",
+    "providerCredentialDropped",
+    "providerCredentialBlanked",
+    "raceUserActionDuringKernelFault",
+    "raceTwoConversationsBuild",
+    "raceRestartDuringTransition",
+    "raceLegalOrderSwap",
+    "raceRepeatSubmitDuringFault",
+    "raceCrossConversationFault"
+  ],
+  "originalSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "killAuthorityDuringBuild",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "killKernelDuringBuild",
+      "params": {
+        "conversationIndex": 1
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "killAuthorityDuringBuild",
+      "params": {}
+    },
+    {
+      "kind": "action",
+      "name": "resumeRun",
+      "params": {
+        "conversationIndex": 2
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "providerCredentialDropped",
+      "params": {}
+    }
+  ],
+  "shrunkSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "killAuthorityDuringBuild",
+      "params": {}
+    },
+    {
+      "kind": "action",
+      "name": "resumeRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "providerCredentialDropped",
+      "params": {}
+    }
+  ],
+  "replaySequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "killAuthorityDuringBuild",
+      "params": {}
+    }
+  ],
+  "reproducible": true,
+  "actionSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    }
+  ],
+  "faultSequence": [
+    {
+      "kind": "fault",
+      "name": "killAuthorityDuringBuild",
+      "params": {}
+    }
+  ],
+  "requests": [
+    {
+      "at": 1790030814606,
+      "op": "workflow-start",
+      "ok": true,
+      "ms": 1045,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790030815965,
+      "op": "commit",
+      "ok": true,
+      "ms": 997,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790030817275,
+      "op": "workflow-advance",
+      "ok": true,
+      "ms": 991,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790030818590,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 901,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790030819493,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 889,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790030820383,
+      "op": "model-build",
+      "ok": false,
+      "ms": 884,
+      "conversation": "conv-a",
+      "error": "SIGKILL"
+    }
+  ],
+  "ids": {
+    "conversations": [
+      "conv-a"
+    ],
+    "runs": [
+      "v7-1790030815587-e37c52e4"
+    ],
+    "kernels": [
+      "1263050",
+      "1824807"
+    ]
+  },
+  "stateTimeline": [
+    {
+      "at": 1790030815651,
+      "step": 1,
+      "command": "action:startRun(conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790030815587-e37c52e4",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790030815587-e37c52e4",
+          "phase": "plan",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": []
+    },
+    {
+      "at": 1790030816962,
+      "step": 2,
+      "command": "action:commitPlan(conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790030815587-e37c52e4",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790030815587-e37c52e4",
+          "phase": "plan",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": []
+    },
+    {
+      "at": 1790030818266,
+      "step": 3,
+      "command": "action:advance(event=plan_ready,conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790030815587-e37c52e4",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790030815587-e37c52e4",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": []
+    },
+    {
+      "at": 1790030823308,
+      "step": 4,
+      "command": "fault:killAuthorityDuringBuild",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790030815587-e37c52e4",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790030815587-e37c52e4",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        },
+        {
+          "pid": 1824807,
+          "ppid": 565039,
+          "ownerPid": 1824783,
+          "orphan": true
+        }
+      ],
+      "liveAuthorities": []
+    }
+  ],
+  "logs": [
+    "控制面死后 kernel 1824807 还在跑（孤儿进程）"
+  ],
+  "recoveries": [],
+  "faultOutcomes": [
+    {
+      "name": "killAuthorityDuringBuild",
+      "phase": "inject",
+      "status": "Injected",
+      "at": 1790030823308
+    }
+  ],
+  "project": {
+    "root": "/tmp/reify-chaos-PJBNtH",
+    "project": "/tmp/reify-chaos-PJBNtH/project",
+    "canonical": "/tmp/reify-chaos-PJBNtH/canonical",
+    "workflowHome": "/tmp/reify-chaos-PJBNtH/workflow-home"
+  },
+  "components": {
+    "provider": {
+      "agentDir": "/home/jingyi/.prime/agent",
+      "agentDirPresent": true,
+      "primeAgentRepo": "/home/jingyi/.local/share/pi-cad-desktop/runtime/prime-agent",
+      "credentials": [
+        {
+          "id": "zai",
+          "type": "api_key",
+          "hasCredentials": true,
+          "expiresAt": null,
+          "expired": null
+        },
+        {
+          "id": "openai-codex",
+          "type": "oauth",
+          "hasCredentials": true,
+          "expiresAt": 1789733742424,
+          "expired": true
+        }
+      ],
+      "selection": {
+        "provider": "zai",
+        "model": "glm-5.3-flash",
+        "thinking": "medium",
+        "source": "prime settings.json"
+      },
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "api": "openai-completions",
+      "registrySource": "prime models.generated.js",
+      "probe": {
+        "url": "https://api.z.ai/api/coding/paas/v4/models",
+        "status": null,
+        "ok": false,
+        "ms": 0,
+        "authenticated": true,
+        "skipped": "provider probe is opt-in (--provider-probe / CHAOS_REIFY_PROVIDER_PROBE=1)"
+      }
+    },
+    "desktop": {
+      "projection": {
+        "path": "/tmp/reify-chaos-PJBNtH/project/.pi-cad/status.json",
+        "present": false,
+        "runId": null,
+        "phase": null,
+        "status": null,
+        "workflowHash": null,
+        "updatedAt": null
+      },
+      "backend": null,
+      "consistent": false,
+      "mismatch": "Desktop projection .pi-cad/status.json is missing"
+    },
+    "prime": {
+      "available": true,
+      "processes": [
+        {
+          "pid": 1249950,
+          "role": "prime-runtime",
+          "provider": "zai",
+          "model": "glm-5.3-flash",
+          "sessionPath": null
+        },
+        {
+          "pid": 1250065,
+          "role": "prime-agent",
+          "provider": "zai",
+          "model": "glm-5.3-flash",
+          "sessionPath": null
+        },
+        {
+          "pid": 1250066,
+          "role": "prime-agent",
+          "provider": "zai",
+          "model": "glm-5.3-flash",
+          "sessionPath": null
+        }
+      ],
+      "runtime": null,
+      "journal": []
+    },
+    "wsl": {
+      "host": "linux",
+      "boundary": "wsl-linux",
+      "distro": "Ubuntu",
+      "windows": {
+        "reachable": true,
+        "wslExe": "/mnt/c/Windows/System32/wsl.exe",
+        "distros": [
+          "Ubuntu"
+        ],
+        "version": "WSL 版本: 2.7.8.0"
+      },
+      "probes": [
+        {
+          "id": "node",
+          "ready": true,
+          "detail": "/home/jingyi/.local/bin/node"
+        },
+        {
+          "id": "uv",
+          "ready": true,
+          "detail": "/home/jingyi/.local/bin/uv"
+        },
+        {
+          "id": "python",
+          "ready": true,
+          "detail": "/usr/bin/python3"
+        },
+        {
+          "id": "bwrap",
+          "ready": true,
+          "detail": "/usr/bin/bwrap"
+        },
+        {
+          "id": "windows-wsl",
+          "ready": true,
+          "detail": "wsl.exe sees Ubuntu"
+        }
+      ],
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; printf \"node=%s\\n\" \"$(command -v node || true)\"; printf \"uv=%s\\n\" \"$(command -v uv || true)\"; printf \"python=%s\\n\" \"$(command -v python3 || true)\"; printf \"bwrap=%s\\n\" \"$(command -v bwrap || true)\"; printf \"prime=%s\\n\" \"$(test -f \"$HOME/prime-agent.sh\" -o -f \"$PRIME_AGENT_REPO/prime-agent.sh\" 2>/dev/null && echo ready || echo unknown)\"",
+      "note": "Inside the WSL Linux side; the Windows side is really observed through wsl.exe."
+    },
+    "identities": {
+      "project": "project",
+      "nodes": [
+        {
+          "id": "project:project",
+          "kind": "project",
+          "label": "project",
+          "state": {
+            "root": "/tmp/reify-chaos-PJBNtH/project",
+            "canonical": "/tmp/reify-chaos-PJBNtH/canonical"
+          }
+        },
+        {
+          "id": "run:v7-1790030815587-e37c52e4",
+          "kind": "run",
+          "label": "v7-1790030815587-e37c52e4",
+          "state": {
+            "phase": "cook",
+            "status": "active"
+          }
+        },
+        {
+          "id": "conversation:conv-a",
+          "kind": "conversation",
+          "label": "conv-a",
+          "state": {
+            "runId": "v7-1790030815587-e37c52e4",
+            "runStatus": "active"
+          }
+        },
+        {
+          "id": "kernel:1824807",
+          "kind": "kernel",
+          "label": "cadctl.worker#1824807",
+          "state": {
+            "pid": 1824807,
+            "ppid": 565039,
+            "ownerPid": 1824783,
+            "orphan": true
+          }
+        },
+        {
+          "id": "provider:zai:glm-5.3-flash",
+          "kind": "provider",
+          "label": "https://api.z.ai/api/coding/paas/v4/models",
+          "state": {
+            "provider": "zai",
+            "model": "glm-5.3-flash",
+            "ok": false
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "run:v7-1790030815587-e37c52e4",
+          "to": "project:project",
+          "kind": "run->project",
+          "evidence": "canonical v7 run store"
+        },
+        {
+          "from": "conversation:conv-a",
+          "to": "run:v7-1790030815587-e37c52e4",
+          "kind": "conversation->run",
+          "evidence": "v7-project conversation binding"
+        },
+        {
+          "from": "kernel:1824807",
+          "to": "project:project",
+          "kind": "kernel->authority",
+          "evidence": "/proc ppid points at an authority process observed by the session"
+        },
+        {
+          "from": "provider:zai:glm-5.3-flash",
+          "to": "project:project",
+          "kind": "provider->project",
+          "evidence": "provider boundary request made for this project"
+        }
+      ]
+    },
+    "machine": {
+      "kernels": 2,
+      "foreignKernels": 1
+    }
+  }
+}

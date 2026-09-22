@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
@@ -759,6 +759,29 @@ test("reify chaos: 凭证副本里没有选中的 provider 时，凭证故障明
   else process.env.CHAOS_REIFY_MODEL = previous.model;
 });
 
+test("reify chaos: 没有显式 override 时，凭证故障也认得机器自己的真选择", async () => {
+  const source = mkdtempSync(join(tmpdir(), "chaos-reify-cred-select-"));
+  const session = await ReifySession.start();
+  try {
+    writeFileSync(join(source, "auth.json"), JSON.stringify({ zai: { type: "api_key", key: "real-api-key-value" } }));
+    writeFileSync(join(source, "settings.json"), JSON.stringify({ defaultProvider: "zai", defaultModel: "glm-5.3-flash" }));
+
+    // An empty override is what a campaign round really passes. Looking the
+    // credential up by the *input* selection instead of the resolved one
+    // returned `undefined`, so every credential fault quietly reported
+    // "凭证副本里没有可打的 provider" and the whole provider/OAuth boundary
+    // was never really exercised.
+    const sandbox = seedCredentialSandbox(session, source);
+    const observed = await observeCredential(sandbox, {});
+    assert.equal(observed.boundary.selection.provider, "zai", "必须用机器自己的选择");
+    assert.equal(observed.described.present, true, "机器自己的凭证必须被认出来");
+    assert.equal(observed.described.hasCredentials, true);
+  } finally {
+    await session.close().catch(() => undefined);
+    rmSync(source, { recursive: true, force: true });
+  }
+});
+
 test("reify chaos: 真状态文件少了 / 坏了，harness 的破坏不会被算成产品缺陷，恢复后系统还能真 build", async (t) => {
   await withRealSession(async (session, trace) => {
     await runReifySequence(
@@ -994,4 +1017,166 @@ test("reify chaos: runtime 暂停的时间窗收在 inject 里，后续真请求
   } finally {
     await session.close().catch(() => undefined);
   }
+});
+
+test("reify chaos: 常驻 runtime 面不暴露 viewer-catalog，race 明说不适用", async () => {
+  const session = await startReifySession(true);
+  const trace = new ReifyTrace();
+  try {
+    await runReifySequence(session, REIFY_SETUP, trace);
+    const definition = reifyFaultDefinitions.find((fault) => fault.name === "raceUserActionDuringKernelFault")!;
+    const outcome = await injectReifyFault(
+      session,
+      definition,
+      { kind: "fault", name: definition.name, params: { action: "viewerCatalog", conversationIndex: 0 } },
+      trace,
+    );
+    // 常驻 runtime（authority sidecar）不暴露 viewer-catalog，只有一次性 CLI
+    // 控制面才有。以前这里会抛 "author endpoint does not expose operation:
+    // viewer-catalog"，再被记成 fault-outcome-honest —— 那是 harness 自己的
+    // 问题，不是产品失败。
+    assert.equal(outcome.status, "NotApplicable", JSON.stringify(outcome));
+    assert.match(outcome.reason ?? "", /viewer-catalog/);
+    assert.ok(!session.activeFaults.includes(definition.name));
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+});
+
+test("reify chaos: 一个 run 做完后新开 run，旧 run 是历史，不算归属串了", async (t) => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const first = ((await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string }).runId;
+    assert.ok(first, "setup 之后必须有真 run");
+
+    await runReifySequence(session, [{ kind: "action", name: "stopRun", params: { conversationIndex: 0 } }], trace);
+    const afterStop = (await session.call("workflow-current", { sessionId: session.conversation(0) })) as { status?: string };
+    if (afterStop.status !== "done") {
+      t.skip(`stopRun 之后状态是 ${afterStop.status}，这一轮走不到历史 run 的场景`);
+      return;
+    }
+
+    // 真产品允许做完的 run 被新 run 取代（active 的会被拒）。旧 run 这时没人绑着，
+    // 它是历史，不是归属错误；只有「active run 没人绑」才是问题。
+    await runReifySequence(session, [{ kind: "action", name: "startRun", params: { conversationIndex: 0 } }], trace);
+    const snapshot = await session.snapshot();
+    const second = snapshot.conversations.find((conversation) => conversation.id === session.conversation(0))?.runId;
+    assert.ok(second && second !== first, `新 run 必须真的换了会话绑的 run：${second}`);
+    assert.ok(snapshot.runs.some((run) => run.id === first), "旧 run 还得留在 run store 里当历史");
+  });
+});
+
+test("reify chaos: harness 自己占着坏的 state 文件时，terminal-state-stable 不判产品", async () => {
+  await withRealSession(async (session, trace) => {
+    // 这条序列在 state 文件完好时是干净的；只有在 harness 把 state.json 截半之后
+    // 才会看到「到过 done 现在又 active」。那是 harness 弄坏的东西，不是产品问题。
+    const sequence: Command[] = [
+      { kind: "action", name: "startRun", params: { conversationIndex: 0 } },
+      { kind: "action", name: "commitPlan", params: { conversationIndex: 0 } },
+      { kind: "action", name: "advance", params: { event: "plan_ready", conversationIndex: 0 } },
+      { kind: "action", name: "commitPlan", params: { conversationIndex: 0 } },
+      { kind: "action", name: "concurrentBuild", params: { conversationIndex: 0 } },
+      { kind: "fault", name: "partialStateWrite", params: {} },
+      { kind: "action", name: "stopRun", params: { conversationIndex: 0 } },
+      { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } },
+    ];
+    await runReifySequence(session, sequence, trace);
+    assert.ok(
+      session.faultOutcomes.some((outcome) => outcome.name === "partialStateWrite" && outcome.status === "Injected"),
+      "这一条要真的把 state 文件截半，才测得到「harness 占着坏文件」这件事",
+    );
+  });
+});
+
+test("reify chaos: 一轮跑得久不算没恢复，只有要求恢复后还挂着才算", async () => {
+  const session = await ReifySession.start();
+  try {
+    const snapshot = await session.snapshot();
+    session.armFault("killKernelDuringBuild");
+    session.history.armedSince.set("killKernelDuringBuild", Date.now() - 30 * 60_000);
+    // 故障故意挂着跟完整条序列：跑得久不是失败信号。
+    await checkReifyInvariants({ session, snapshot, now: Date.now() });
+
+    // 已经要求恢复、过了预算还挂着，才是真的没收敛。
+    session.history.recoveryStartedAt = Date.now() - 30 * 60_000;
+    await assert.rejects(
+      () => checkReifyInvariants({ session, snapshot, now: Date.now() }),
+      /recovery-convergence/,
+    );
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+});
+
+test("reify chaos: 两个 file-state 故障叠在一起，harness 不会造出假的 fault-outcome-honest", async (t) => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const runId = ((await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string }).runId;
+    assert.ok(runId, "setup 之后必须有真 run");
+    const stateFile = join(session.runDir(runId!), "state.json");
+    assert.ok(existsSync(stateFile), "真 run state 文件必须在");
+    const artifactCount = (await session.snapshot()).runs.find((run) => run.id === runId)?.artifacts.length ?? 0;
+    assert.ok(artifactCount > 0, "setup 的真 build 必须留下 artifact");
+
+    const unreadable = reifyFaultDefinitions.find((fault) => fault.name === "unreadableRunStateFile")!;
+    const partial = reifyFaultDefinitions.find((fault) => fault.name === "partialStateWrite")!;
+
+    const first = await injectReifyFault(session, unreadable, { kind: "fault", name: "unreadableRunStateFile", params: {} }, trace);
+    if (first.status === "NotApplicable") {
+      t.skip(`这一轮造不出「读不到」：${first.reason}`);
+      return;
+    }
+    assert.equal(first.status, "Injected");
+
+    // The composite case the campaign really generated: a previous fault made
+    // the state file unreadable, so a partially-written state file is not a
+    // scenario that exists. It must be "not applicable", never an injection
+    // failure that then reads as a product bug.
+    const second = await injectReifyFault(session, partial, { kind: "fault", name: "partialStateWrite", params: {} }, trace);
+    assert.equal(second.status, "NotApplicable", "读不到的文件上加「写一半」必须明说不适用");
+    assert.match(second.reason ?? "", /读不了或写不了/);
+
+    await unreadable.recover({ session, trace, params: {} });
+    assert.ok(JSON.parse(readFileSync(stateFile, "utf8")), "恢复之后 state.json 必须还是能读的 JSON");
+
+    // The fault itself still works when nothing else is holding the file.
+    const intact = readFileSync(stateFile);
+    const alone = await injectReifyFault(session, partial, { kind: "fault", name: "partialStateWrite", params: {} }, trace);
+    assert.equal(alone.status, "Injected", "没有别的故障时「写一半」要真的注入");
+    assert.ok(readFileSync(stateFile).length < intact.length, "state.json 必须真的被截短");
+
+    // Truncating a second time would overwrite the only intact copy, so the
+    // second injection must refuse instead of silently destroying the original.
+    const twice = await injectReifyFault(session, partial, { kind: "fault", name: "partialStateWrite", params: {} }, trace);
+    assert.equal(twice.status, "NotApplicable", "已经截过一次就不能再截，否则原件就没了");
+
+    await partial.recover({ session, trace, params: {} });
+    // A second truncation would have overwritten the only intact copy, so the
+    // recovered state must still describe the same run with the same artifacts.
+    await checkReifyInvariants({ session, snapshot: await session.snapshot(), now: Date.now() });
+    const recovered = (await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string };
+    assert.equal(recovered.runId, runId, "恢复之后同一个 run 还得在");
+    const restored = (await session.snapshot()).runs.find((run) => run.id === runId);
+    assert.equal(restored?.artifacts.length, artifactCount, "恢复之后 run 上的 artifact 不能少");
+    assert.ok(!session.harnessDamage.runs.has(runId!), "恢复之后 damage 必须清掉");
+  });
+});
+
+test("reify chaos: campaign 落盘的最小复现能直接当回归输入", async () => {
+  // chaos/campaigns/<id>/regressions/ 是 campaign 自己 verify + shrink 出来的
+  // 最小复现。res388-main-500 那条 no-orphan-kernel 跑在 63814903（RES-389 修
+  // 之前），所以现在按序列和按 seed+path 都不该再复现；孤儿真漏回来这条会红。
+  const artifact = resolve("chaos/campaigns/res388-main-500/regressions/c41b23f2c-no-orphan-kernel.json");
+  const bySequence = await replayReifyArtifact(artifact, {});
+  assert.equal(bySequence.ok, false, `RES-389 修完之后不该再复现：${bySequence.detail ?? ""}`);
+  const bySeed = await replayReifyArtifact(artifact, { seed: true });
+  assert.equal(bySeed.ok, false, `按 seed+path 也不该再复现：${bySeed.detail ?? ""}`);
 });

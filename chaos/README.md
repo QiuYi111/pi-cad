@@ -472,3 +472,161 @@ seed=5、path=2，原始 5 步、shrink 后仍是 5 步。`replay`、`replay --s
 | `CHAOS_REIFY_CPU_WORKERS` | 2 | `cpuPressure` 用几个 CPU worker（上限 4） |
 
 `recovery-convergence` 的预算、`CHAOS_REIFY_PAUSE_MS` 等沿用上面那张表。
+
+## 大规模 campaign：`chaos reify campaign`
+
+`chaos reify run` 是单次 fast-check：撞上第一个失败就停，一轮最多产出一个 artifact。
+`campaign` 是它的外层，把"偶尔发现一个 bug"变成一份能查的数据集：
+
+```
+多轮独立采样 → 每轮落 artifact → 去重聚类 → replay / shrink → 报告
+```
+
+### 一条命令
+
+```bash
+npm run chaos:campaign -- run --mode nightly                       # 500 轮，全边界
+npm run chaos:campaign -- run --mode short                         # 几分钟级，PR / CI 用
+npm run chaos:campaign -- run --mode targeted --profiles kernel-lifecycle,runtime-recovery
+npm run chaos:campaign -- rerun chaos/campaigns/<id>               # 用 manifest 原样重跑
+npm run chaos:campaign -- report chaos/campaigns/<id>              # 重出 report.md
+npm run chaos:campaign -- profiles                                 # 看 profile 和权重
+npm run chaos:campaign -- list                                     # 看本地所有 campaign
+```
+
+常用参数：
+
+| 参数 | 默认 | 作用 |
+| --- | --- | --- |
+| `--mode` | `short` | `short`（6 轮）/ `nightly`（500 轮）/ `targeted`（必须给 profile） |
+| `--rounds` | 按 mode | 覆盖轮数 |
+| `--seed` | 7000 | seed 基数；每轮 seed 由它确定性推出来 |
+| `--max-commands` | 按 mode | 每轮 fast-check 的序列长度上限 |
+| `--profiles` | 全部 | 只跑这些 profile，顺序即权重槽位 |
+| `--runtime-ratio` | 0.5 | 多少比例的轮次把请求打到常驻 runtime |
+| `--provider-faults` | 关 | 真的开 provider 传输故障（联网），显式 opt-in |
+| `--concurrency` | 1 | 同时跑几轮；每轮自己一个 session |
+| `--triage-replays` | 2 | 每个 unique failure 按序列 replay 几次 |
+| `--skip-triage` | 关 | 跳过 replay / shrink，只出统计 |
+
+### 轮次怎么排
+
+轮数不是"跑 N 次同一个 seed"。第 i 轮的 seed 由 `(seed 基数, i)` 确定性散列出来，
+profile 按权重铺成一个固定循环（`mixed` 2 槽、`process` 3 槽、`file-state` 3 槽、
+`provider-oauth` 2 槽、`race` 3 槽，加 4 个定向 profile 各 1 槽），
+runtime 模式按 `--runtime-ratio` 隔轮切换。所以"覆盖了哪些边界"是排出来的，不是碰运气：
+500 轮的 nightly 里每个 profile 至少几十轮。
+
+profile 决定这一轮的 fault 池。fault 池是生成器形状的一部分，所以它跟 seed、path、
+`maxCommands` 一起写进 artifact —— `replay --seed` 和 `shrink` 会按同一份池重建生成器。
+
+注意 profile 只换 fault 池，不动 action 的权重。池子越窄，序列里出现 fault 的比例越低：
+跑满整个空间时大约 55% 的生成步骤是 fault，只留 3 个凭证 fault 时只有 9%。
+所以定向 campaign 要多给轮数（`--profiles provider-oauth --rounds 50`），
+不能指望几轮就打到。
+
+### 一轮打什么
+
+每轮独立 session，一轮最多一个 artifact，跑完立刻收掉自己的进程和 kernel。
+
+轮内不做 shrink，也不做组件探测：shrink 一次要跑很多条真序列，把它放在 triage 上、
+只对 unique failure 做。这样 500 轮才跑得完，invariant 一条都没放松。
+
+### 去重：一次随机失败 ≠ 一个 issue
+
+失败先算签名，签名相同的算同一个 unique failure：
+
+```
+invariant + 失败边界 + 出错的那一步 + 归一化后的原因 + 日志签名
+```
+
+归一化会把 pid / 端口 / 毫秒 / hash 抹成 `#`，所以"控制面死了、kernel 还在"这种
+同一个 bug 不论换哪个 pid 都落在同一个 cluster。不同边界、出错步骤不同则分成两个。
+cluster 里保留所有出现过的序列形状，供人确认是不是同一个根因。
+
+### 三类结论
+
+triage 会真的再跑一遍，不靠第一轮自己声称：
+
+| 结论 | 判定 |
+| --- | --- |
+| `reproducible` | 按序列 replay 每次都复现，且按 seed+path 也能复现同一个 invariant |
+| `flaky` | 有的复现有的没复现 |
+| `false-positive` | 一次都没复现 |
+
+结论只看 replay，不看 shrink：后面那趟开了 shrink 的重跑本身也算一次 replay，
+所以它只能让结论更保守，不会把已经判成 `flaky` 的失败升成 `reproducible`。
+（预审抓到过旧的写法：shrink 单次成功会无条件返回 `reproducible`。）
+
+复现过的会被重新 `shrink`，最小序列和完整组件证据落在
+`chaos/campaigns/<id>/regressions/` 下，可以直接当回归输入；偶发失败的 shrink
+结果只当最小证据，报告里会标出来。
+
+### 落盘的东西
+
+```
+chaos/campaigns/<id>/
+  manifest.json     seed / profile / maxCommands / runtimeRatio / commit / 环境变量
+  rounds.jsonl      每轮：seed / profile / 状态 / 真注入的 fault / 边界 / 组件 / 耗时
+  artifacts/        每轮失败的原始 artifact
+  clusters.json     unique failure 和各自证据
+  regressions/      验证过、shrink 过的最小复现 artifact
+  report.md         人看的报告
+  report.json       机器读的同一份报告
+  status.json       长跑期间的实时进度（progress-sync.mjs 读它）
+```
+
+`report.md` 直接回答七个问题：跑了多少轮 / 命中哪些 action、fault、invariant /
+多少失败多少 unique / 哪些能稳定 replay / 最小路径是什么 / 高频失败集中在哪个边界 /
+哪些区域探索不足该加权重。
+
+### 长跑期间的进度同步
+
+超过 5 分钟的 campaign 先用 `chaos/campaigns/progress-sync.mjs` 起一个后台同步，
+每 5 分钟把 `status.json` 写进 Linear 的 Codex Workpad；阶段边界、阻塞和交付前停掉：
+
+```bash
+setsid nohup node chaos/campaigns/progress-sync.mjs --dir chaos/campaigns/<id> \
+  > /tmp/campaign-sync.log 2>&1 < /dev/null &
+```
+
+### 已经跑过的 campaign
+
+`chaos/campaigns/<id>/` 里提交了三样东西：`manifest.json`（跑法）、
+`clusters.json`（unique failure 和证据）、`report.md` / `report.json`（结论），
+以及验证过的 `regressions/` 最小复现（可以直接当回归输入）。原始
+`rounds.jsonl` / `status.json` / `artifacts/` 不进 git。
+
+改了去重口径或 product/harness 判定，不用重跑 500 轮：
+
+```bash
+npm run chaos:reify -- campaign recluster chaos/campaigns/<id>
+```
+
+recluster 只复用同一版 triage 规则算出来的旧结论；规则版本变了（改了三类判定
+口径）就自动重判，report 里同时写明原始轮次跑在哪个 commit、post-processing
+用的是哪个 commit。要强制全部重判加 `--retriage`。
+
+`res388-main-500` 这一条的唯一产品发现是 `no-orphan-kernel`（26 次，最小复现
+`startRun → commitPlan → advance → killAuthorityDuringBuild`）。它跑在 `63814903`
+（base `5ff3dbbb`）上；RES-389 的修法合进 master（`d40b2e82`）之后，同一份
+`regressions/c41b23f2c-no-orphan-kernel.json` 按序列和按 seed+path 都不再复现：
+这是「campaign 报的问题是真问题、上游修法真的解决它」这两件事的同一个证据。
+它入库的 `clusters.json` 也是在当前 head 上 recluster 过的，所以那 26 次
+`no-orphan-kernel` 现在的结论是 `false-positive`（当前 head 0/2 不复现）；
+原始跑法（`63814903`）和最小复现 artifact 都留着，对照的是轮次和注入分布。
+
+`res388-main-500-post` 是它的同 seed 对照：同样 500 个 seed、同样的 profile 循环、
+同样的 `maxCommands` 和 runtime 比例，跑在 `446da8de`（含 RES-389 `d40b2e82` 和
+RES-383 `6b944fc6`）上。两边逐轮计划完全一致，真注入次数也基本一样
+（process 141 / file-state 54 / provider-oauth 51 / race 52），结果从 28 轮失败 /
+2 个 unique 变成 0 失败 —— 差别来自修好的产品行为，不是探索强度变了。
+
+`res388-provider-targeted` 是显式开传输故障的定向 campaign（`--provider-faults`）：
+60 轮全过，provider-oauth 边界真注入 52 次，凭证侧（expired / dropped / blanked）
+和传输侧（timeout / reset / rateLimited / serverError / streamCut）8 个 fault 都真的
+`Injected` 过，没有「只排进计划没真打」的轮次。
+
+多 sandbox 共用凭证 / refresh 这条路不在这套 fault 里 —— campaign 打的是真
+agent-api，不起 bwrap 沙箱。它由 `tests/prime-credentials.test.ts` 覆盖：两个真
+bwrap 沙箱抢同一把 AuthStorage 锁，谁的写都不丢。
