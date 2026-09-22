@@ -828,6 +828,14 @@ export const missingDesktopProjection: ReifyFaultDefinition = {
     const armed = ctx.session.armedFaults.get("missingDesktopProjection") as { file: string } | undefined;
     ctx.session.disarmFault("missingDesktopProjection");
     ctx.session.unmarkDamagedProjection();
+    if (!armed) {
+      // Nothing was deleted in this round (or it was already put back): there
+      // is no write-back to prove. Never fall through with an empty path --
+      // `existsSync("")` is false for reasons that have nothing to do with the
+      // product, and the harness would blame the product for it.
+      ctx.trace.note("missingDesktopProjection 没挂上，跳过 Desktop 投影写回检查");
+      return;
+    }
     // The projection belongs to the long-lived runtime, the backend the Desktop
     // talks to. The runner recovers faults in reverse injection order, so a
     // round where another fault SIGKILLed that runtime recovers *this* fault
@@ -845,8 +853,8 @@ export const missingDesktopProjection: ReifyFaultDefinition = {
     }
     // One real request makes the real authority rewrite its own projection.
     await ctx.session.call("workflow-current", { sessionId: conversationOf(ctx) });
-    if (!existsSync(armed?.file ?? "")) {
-      throw new InvariantViolation("recovery-convergence", "真 authority 没有把 .pi-cad/status.json 写回来", { file: armed?.file });
+    if (!existsSync(armed.file)) {
+      throw new InvariantViolation("recovery-convergence", "真 authority 没有把 .pi-cad/status.json 写回来", { file: armed.file });
     }
     ctx.trace.note("真 authority 已把 Desktop 投影写回来");
   },

@@ -166,21 +166,31 @@ export async function injectReifyFault(
   }
 }
 
-/** Run one real command. Rejected requests are notes; invariants judge state. */
-export async function executeReifyCommand(session: ReifySession, command: Command, trace: ReifyTrace): Promise<void> {
+/**
+ * Run one real command. Rejected requests are notes; invariants judge state.
+ *
+ * A fault step hands back the outcome it really got, so the caller can tell
+ * "this step injected" from the injection result instead of guessing it from
+ * session state that also remembers earlier steps.
+ */
+export async function executeReifyCommand(
+  session: ReifySession,
+  command: Command,
+  trace: ReifyTrace,
+): Promise<FaultOutcome | undefined> {
   if (command.kind === "action") {
     const definition = REIFY_ACTIONS.get(command.name);
     if (!definition) {
       trace.note(`未知 action ${command.name}`);
-      return;
+      return undefined;
     }
     await definition.run({ session, trace, params: command.params });
-    return;
+    return undefined;
   }
   const definition = REIFY_FAULTS.get(command.name);
   if (!definition) {
     trace.note(`未知 fault ${command.name}`);
-    return;
+    return undefined;
   }
   const outcome = await injectReifyFault(session, definition, command, trace);
   if (outcome.status === "InjectionFailed") {
@@ -193,6 +203,7 @@ export async function executeReifyCommand(session: ReifySession, command: Comman
       { fault: definition.name, reason: outcome.reason },
     );
   }
+  return outcome;
 }
 
 async function observeUntil(session: ReifySession, trace: ReifyTrace, label: string, windowMs: number): Promise<void> {
@@ -258,8 +269,13 @@ export async function runReifySequence(session: ReifySession, commands: Command[
   const injected: InjectedFault[] = [];
   for (const command of commands) {
     trace.executed.push(command);
-    await executeReifyCommand(session, command, trace);
-    if (command.kind === "fault" && REIFY_FAULTS.has(command.name) && session.activeFaults.includes(command.name)) {
+    const outcome = await executeReifyCommand(session, command, trace);
+    // Only a step whose injection really happened gets recovered later.
+    // `session.activeFaults` is not that answer: it also holds the fault an
+    // earlier step armed, so a repeated step that honestly came back
+    // NotApplicable (the same fault twice in one round) was counted as
+    // injected and recovered a second time.
+    if (command.kind === "fault" && outcome?.status === "Injected") {
       injected.push({ definition: REIFY_FAULTS.get(command.name)!, params: command.params });
     }
     await observeUntil(session, trace, describeCommand(command), reifySettleWindowFor(command));

@@ -338,6 +338,24 @@ SIGCONT 也自己退，以及上面那条 artifact 重放不再复现。
 `setsid()` 过）出现才注入，否则可能停在一个还在 import build123d 的 kernel 上——那不
 是这些故障声称的形态，worker 那时也还没绑好 owner。
 
+### 同一轮里同一条 fault 出现两次（已修，RES-399）
+
+runner 原来按 `session.activeFaults` 判断「这一步真的注入成功没有」，而它只是「现在
+arm 着」，还记着前面那一步 arm 的。同一轮里 `missingDesktopProjection` 出现两次时，
+第一次真删掉投影（`Injected`），第二次没东西可删、如实报 `NotApplicable`，但名字还
+留在 `activeFaults` 里，于是第二次也被算成注入过、多回收一次：那次没有 arm 记录，
+`recover` 只能拿空路径去 `existsSync`，必然 false，误报 `recovery-convergence`。
+
+证据：`chaos/campaigns/res390-main-1000/regressions/ca17c3c29-recovery-convergence.json`
+（seed 624507661，path `1:2:2:3:2:2:2`，常驻 runtime）。
+
+修法：`executeReifyCommand` 返回本步的 `FaultOutcome`，`runReifySequence` 只把
+`Injected` 的那一步记进待回收列表；`missingDesktopProjection.recover` 再兜一层，
+没有 arm 记录就直接跳过。`Injected` / `NotApplicable` 的记账口径没变。
+
+`tests/chaos-reify.test.ts` 覆盖：这条 artifact 按序列和按 seed+path 重放都不再复现，
+并且同一条序列跑完只回收真注入过的那一次。
+
 ### 这一段的环境变量
 
 | 变量 | 默认 | 作用 |
