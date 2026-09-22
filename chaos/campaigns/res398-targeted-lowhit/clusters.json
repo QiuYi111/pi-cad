@@ -1,0 +1,82 @@
+[
+  {
+    "id": "cc1cac0ed",
+    "signature": "recovery-convergence | 真 authority 没有把 .pi-cad/status.json 写回来",
+    "invariant": "recovery-convergence",
+    "boundary": "file-state",
+    "boundaries": [
+      "file-state"
+    ],
+    "nature": "product",
+    "failingSteps": [
+      "action:multiConversationBuild"
+    ],
+    "reason": "真 authority 没有把 .pi-cad/status.json 写回来",
+    "logSignatures": [
+      "raceRestartDuringTransition 之后 run 在 plan 阶段，不允许 model.build，不要求重建"
+    ],
+    "shapes": [
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "action:commitPlan",
+        "action:build",
+        "action:multiConversationBuild",
+        "fault:missingDesktopProjection",
+        "fault:raceRestartDuringTransition",
+        "action:startRun",
+        "fault:missingDesktopProjection",
+        "action:build",
+        "action:build",
+        "action:retryBuild",
+        "action:openConversation",
+        "action:multiConversationBuild"
+      ]
+    ],
+    "occurrences": 1,
+    "roundIndexes": [
+      98
+    ],
+    "seeds": [
+      1147211961
+    ],
+    "artifactPaths": [
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T14-58-17-729Z-reify-recovery-convergence.json"
+    ],
+    "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T14-58-17-729Z-reify-recovery-convergence.json",
+    "firstSeenAt": "2026-09-22T14:58:17.729Z",
+    "lastSeenAt": "2026-09-22T14:58:17.729Z",
+    "runtimeModes": [
+      true
+    ],
+    "commits": [
+      "e184332ef9b148a8f811ddac98bd1304c2d1a686"
+    ],
+    "verdict": "reproducible",
+    "triage": {
+      "ruleVersion": 3,
+      "attempts": 3,
+      "reproductions": 3,
+      "sequenceReplayOk": true,
+      "seedPathReplayOk": true,
+      "shrinkOk": true,
+      "originalLength": 15,
+      "shrunkLength": 7,
+      "numShrinks": 5,
+      "minimalSequence": [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:missingDesktopProjection",
+        "fault:missingDesktopProjection",
+        "action:openConversation",
+        "action:multiConversationBuild"
+      ],
+      "notes": [
+        "最小复现 7 步（原始 15 步，numShrinks=5），commit=1be42b538647"
+      ],
+      "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/campaigns/res398-targeted-lowhit/regressions/cc1cac0ed-recovery-convergence.json"
+    }
+  }
+]

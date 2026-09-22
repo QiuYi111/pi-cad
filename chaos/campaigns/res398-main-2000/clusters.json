@@ -1,0 +1,130 @@
+[
+  {
+    "id": "cc1cac0ed",
+    "signature": "recovery-convergence | 真 authority 没有把 .pi-cad/status.json 写回来",
+    "invariant": "recovery-convergence",
+    "boundary": "process",
+    "boundaries": [
+      "process",
+      "file-state"
+    ],
+    "nature": "product",
+    "failingSteps": [
+      "fault:pauseAuthorityDuringBuild",
+      "action:multiConversationBuild",
+      "action:concurrentBuild",
+      "action:commitPlan"
+    ],
+    "reason": "真 authority 没有把 .pi-cad/status.json 写回来",
+    "logSignatures": [
+      "真 authority 已把 Desktop 投影写回来"
+    ],
+    "shapes": [
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:raceUserActionDuringKernelFault",
+        "action:concurrentBuild",
+        "action:history",
+        "fault:restartRuntimeDuringBuild",
+        "action:advance",
+        "fault:missingDesktopProjection",
+        "fault:missingDesktopProjection",
+        "action:multiConversationBuild",
+        "fault:pauseAuthorityDuringBuild"
+      ],
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:missingDesktopProjection",
+        "fault:missingDesktopProjection",
+        "action:startRun",
+        "action:listWorkflows",
+        "action:multiConversationBuild"
+      ],
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:missingDesktopProjection",
+        "fault:missingDesktopProjection",
+        "action:switchConversation",
+        "action:stopRun",
+        "action:burstRefresh",
+        "action:concurrentBuild",
+        "action:commitPlan",
+        "action:concurrentBuild"
+      ],
+      [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "action:commitPlan",
+        "fault:missingRunStateFile",
+        "action:build",
+        "fault:missingDesktopProjection",
+        "action:startRun",
+        "fault:missingDesktopProjection",
+        "action:authorize",
+        "action:retryBuild",
+        "action:build",
+        "action:commitPlan"
+      ]
+    ],
+    "occurrences": 4,
+    "roundIndexes": [
+      468,
+      816,
+      978,
+      1896
+    ],
+    "seeds": [
+      634439893,
+      742519939,
+      1996207347,
+      3361425121
+    ],
+    "artifactPaths": [
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T14-56-54-648Z-reify-recovery-convergence.json",
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T15-58-36-992Z-reify-recovery-convergence.json",
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T16-19-34-480Z-reify-recovery-convergence.json",
+      "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T18-29-31-470Z-reify-recovery-convergence.json"
+    ],
+    "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T15-58-36-992Z-reify-recovery-convergence.json",
+    "firstSeenAt": "2026-09-22T14:56:54.648Z",
+    "lastSeenAt": "2026-09-22T18:29:31.470Z",
+    "runtimeModes": [
+      true
+    ],
+    "commits": [
+      "e184332ef9b148a8f811ddac98bd1304c2d1a686"
+    ],
+    "verdict": "reproducible",
+    "triage": {
+      "ruleVersion": 3,
+      "attempts": 3,
+      "reproductions": 3,
+      "sequenceReplayOk": true,
+      "seedPathReplayOk": true,
+      "shrinkOk": true,
+      "originalLength": 8,
+      "shrunkLength": 7,
+      "numShrinks": 1,
+      "minimalSequence": [
+        "action:startRun",
+        "action:commitPlan",
+        "action:advance",
+        "fault:missingDesktopProjection",
+        "fault:missingDesktopProjection",
+        "action:listWorkflows",
+        "action:multiConversationBuild"
+      ],
+      "notes": [
+        "最小复现 7 步（原始 8 步，numShrinks=1），commit=5e191b9894bc"
+      ],
+      "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/campaigns/res398-main-2000/regressions/cc1cac0ed-recovery-convergence.json"
+    }
+  }
+]
