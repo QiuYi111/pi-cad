@@ -160,6 +160,27 @@ class ExportIdentityTests(unittest.TestCase):
             restored = json.loads(Path(str(output) + ".identity.json").read_text(encoding="utf-8"))
             self.assertEqual(restored["artifact"]["sha256"], old_hash)
 
+    def test_prepublication_copy_failure_keeps_existing_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old_step, new_step = root / "old.step", root / "new.step"
+            output = root / "delivery.step"
+            old_step.write_bytes(b"old revision")
+            new_step.write_bytes(b"new revision")
+            old_hash = hashlib.sha256(old_step.read_bytes()).hexdigest()
+            new_hash = hashlib.sha256(new_step.read_bytes()).hexdigest()
+            output.write_bytes(old_step.read_bytes())
+            self.write_identity_sidecar(output, old_hash)
+            self.write_identity_sidecar(new_step, new_hash)
+
+            with patch("cadctl.export.shutil.copyfile", side_effect=OSError("simulated staging failure")):
+                with self.assertRaisesRegex(OSError, "simulated staging failure"):
+                    export_artifact(new_step, output, "step")
+
+            self.assertEqual(output.read_bytes(), old_step.read_bytes())
+            restored = json.loads(Path(str(output) + ".identity.json").read_text(encoding="utf-8"))
+            self.assertEqual(restored["artifact"]["sha256"], old_hash)
+
 
 if __name__ == "__main__":
     unittest.main()

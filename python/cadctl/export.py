@@ -38,6 +38,8 @@ def _copy_step_bundle(source: Path, output: Path, source_hash: str) -> tuple[str
         temp_step = _temporary_path(output, "step")
         staged = [(target, kind, _temporary_path(target, kind), payload) for target, kind, payload in bundles if payload is not None]
         backups: dict[Path, Path] = {}
+        backup_temps: list[Path] = []
+        published_targets: set[Path] = set()
         try:
             shutil.copyfile(source, temp_step)
             shutil.copystat(source, temp_step)
@@ -51,12 +53,15 @@ def _copy_step_bundle(source: Path, output: Path, source_hash: str) -> tuple[str
             for target in (sidecars[0][1], sidecars[1][1], output):
                 if target.exists():
                     backup = _temporary_path(target, "backup")
+                    backup_temps.append(backup)
                     os.replace(target, backup)
                     backups[target] = backup
 
             os.replace(temp_step, output)
+            published_targets.add(output)
             for target, _, temp, _ in staged:
                 os.replace(temp, target)
+                published_targets.add(target)
 
             if sha256_file(source) != source_hash or sha256_file(output) != source_hash:
                 raise ValueError("source or published STEP changed during export")
@@ -71,14 +76,14 @@ def _copy_step_bundle(source: Path, output: Path, source_hash: str) -> tuple[str
                 _validate_sidecar(published, kind, source_hash)
                 hashes.append(sha256_file(target))
 
-            for backup in backups.values():
+            for backup in backup_temps:
                 backup.unlink(missing_ok=True)
             return hashes[0], hashes[1]
         except BaseException:
             # Fail closed if publication or rollback is interrupted. Restore
             # the previous matching bundle when possible; otherwise leave no
             # STEP/identity pair that could be mistaken for a valid revision.
-            for target in (sidecars[0][1], sidecars[1][1], output):
+            for target in (*backups, *published_targets):
                 target.unlink(missing_ok=True)
             try:
                 for target in (sidecars[0][1], sidecars[1][1], output):
@@ -94,7 +99,7 @@ def _copy_step_bundle(source: Path, output: Path, source_hash: str) -> tuple[str
             temp_step.unlink(missing_ok=True)
             for _, _, temp, _ in staged:
                 temp.unlink(missing_ok=True)
-            for backup in backups.values():
+            for backup in backup_temps:
                 backup.unlink(missing_ok=True)
 
 
@@ -148,6 +153,7 @@ def export_artifact(
     expected_source_sha256: str | None = None,
 ) -> dict[str, Any]:
     output = Path(os.path.abspath(output))
+    output = output.parent.resolve() / output.name
     output.parent.mkdir(parents=True, exist_ok=True)
     cwd_path = Path(cwd) if cwd else Path.cwd()
     source_path = Path(source)

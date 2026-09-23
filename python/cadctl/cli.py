@@ -621,7 +621,6 @@ def _cmd_export(args: argparse.Namespace) -> int:
     source = Path(args.source)
     try:
         payload = export_artifact(source, args.output, args.format, expected_source_sha256=args.source_sha256)
-        output = Path(args.output)
         artifacts = [{"path": args.output, "kind": args.format, "sha256": payload["outputSha256"]}]
         if payload.get("identityManifest") and payload.get("identityManifestSha256"):
             artifacts.append({"path": payload["identityManifest"], "kind": "assembly_identity_manifest", "sha256": payload["identityManifestSha256"]})
