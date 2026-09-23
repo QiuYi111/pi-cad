@@ -69,7 +69,7 @@
     },
     "cad_export": {
       "version": "1.0.0",
-      "schemaDigest": "e9fa5b70f3357847cb14572ae4d8266803cf6e3ac171f276f2f404c5a4b5c7b4",
+      "schemaDigest": "1a2c40d0ed4694f48ca053e09494adb1726a2bc3f94d8e920a5a87afd4a912db",
       "semanticsDigest": "d3b7efb28623d5e84354d83b65ba2b7ca0dde2c3ecc6f1f9f1bd71a1258571cd"
     },
     "cad_finish": {
@@ -544,5 +544,5 @@
       "semanticsDigest": "02525446a26fbb81f4c4150c9df36e86a536fc4148fe956f7766f0503c23e966"
     }
   },
-  "hash": "0e80579e1a18fef1a1b7b09fe69780afdb995c9e141e71f111b4d75c06ee8788"
+  "hash": "f01ed647a78ad7f283767ddb04d0ec342450d89aef4e46dfc9888ee89cbf62ee"
 }

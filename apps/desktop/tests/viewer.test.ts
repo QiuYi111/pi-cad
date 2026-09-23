@@ -70,6 +70,18 @@ describe("desktop viewer bridge", () => {
     expect(scene.bb).toMatchObject({ xmin: 0, ymax: 1, zmax: 0 });
   });
 
+  it("keeps each multi-solid occurrence geometrically selectable by its own solid identity", () => {
+    const scene = toThreeCadShapes({
+      source: "/project/bracket.step",
+      parts: [
+        { partId: "bracket", occurrenceId: "assy/bracket", solidId: "bracket:solid-1", name: "Bracket", positions: [0,0,0, 1,0,0, 0,1,0], indices: [0,1,2], color: "#ffffff" },
+        { partId: "bracket", occurrenceId: "assy/bracket", solidId: "bracket:solid-2", name: "Bracket", positions: [0,0,0, 1,0,0, 0,1,0], indices: [0,1,2], color: "#ffffff" },
+      ],
+      bounds: { min: [0,0,0], max: [1,1,0] },
+    });
+    expect(scene.parts?.map((part) => part.id)).toEqual(["/Model/bracket%3Asolid-1", "/Model/bracket%3Asolid-2"]);
+  });
+
   it("maps sandbox artifacts back into the active project", async () => {
     let command: string[] = [];
     const bridge = {
@@ -105,24 +117,57 @@ describe("desktop viewer bridge", () => {
   });
 
   it("exports the open STEP to the user-selected destination", async () => {
-    let command: string[] = [];
+    const commands: string[][] = [];
     const bridge = {
       resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
       toRuntimePath: async (path: string) => path === "C:\\Users\\Jordan\\Downloads\\bracket.step"
         ? "/mnt/c/Users/Jordan/Downloads/bracket.step"
         : path,
-      exec: async (args: string[]) => { command = args; return { stdout: "", stderr: "" }; },
+      exec: async (args: string[]) => {
+        commands.push(args);
+        if (args[0] === "sha256sum") return { stdout: `abc  ${args.at(-1)}`, stderr: "" };
+        return { stdout: JSON.stringify({ ok: true, payload: { outputSha256: "abc" } }), stderr: "" };
+      },
     };
 
     await new ViewerBackend(bridge as never).exportStep(
       {} as never,
       "/workspace/build/bracket.step",
       "C:\\Users\\Jordan\\Downloads\\bracket.step",
+      "abc",
     );
 
-    expect(command).toEqual([
-      "cp", "--", "/projects/bracket/build/bracket.step", "/mnt/c/Users/Jordan/Downloads/bracket.step",
+    expect(commands).toContainEqual([
+      "/runtime/pi-cad/python/.venv/bin/cadctl", "export",
+      "--source", "/projects/bracket/build/bracket.step",
+      "--source-sha256", "abc",
+      "--output", "/mnt/c/Users/Jordan/Downloads/bracket.step",
+      "--format", "step",
     ]);
+  });
+
+  it("reports a transactional STEP export failure from cadctl", async () => {
+    const bridge = {
+      resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
+      toRuntimePath: async (path: string) => path,
+      exec: async (args: string[]) => args[0] === "sha256sum"
+        ? { stdout: `abc  ${args.at(-1)}`, stderr: "" }
+        : { stdout: JSON.stringify({ ok: false, payload: { error: "bundle publish failed and previous revision was restored" } }), stderr: "" },
+    };
+    await expect(new ViewerBackend(bridge as never).exportStep({} as never, "/workspace/build/bracket.step", "/project/export.step", "abc"))
+      .rejects.toThrow(/previous revision was restored/);
+  });
+
+  it("refuses to export when the selected STEP hash has changed", async () => {
+    const bridge = {
+      resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
+      toRuntimePath: async (path: string) => path,
+      exec: async (args: string[]) => args[0] === "sha256sum"
+        ? { stdout: `new-hash  ${args.at(-1)}`, stderr: "" }
+        : { stdout: "", stderr: "" },
+    };
+    await expect(new ViewerBackend(bridge as never).exportStep({} as never, "/workspace/build/bracket.step", "/project/export.step", "old-hash"))
+      .rejects.toThrow(/changed before export/);
   });
 
   it("reads the artifact catalog of the conversation the window shows", async () => {

@@ -3508,6 +3508,10 @@
           "source": {
             "type": "string"
           },
+          "sourceSha256": {
+            "type": "string",
+            "description": "SHA-256 from the selected ArtifactRef; export refuses if the file has changed."
+          },
           "output": {
             "type": "string"
           },

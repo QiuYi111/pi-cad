@@ -387,6 +387,7 @@ export async function inspectInterference(
 
 export interface ExportOptions {
   source: string;
+  sourceSha256?: string;
   output: string;
   format: string;
 }
@@ -396,8 +397,7 @@ export async function exportArtifact(
   options: ExportOptions,
   timeoutMs?: number,
 ): Promise<CadEventEnvelope> {
-  return runCadctl(
-    [
+  const args = [
       "export",
       "--source",
       resolve(cwd, options.source),
@@ -405,9 +405,9 @@ export async function exportArtifact(
       resolve(cwd, options.output),
       "--format",
       options.format,
-    ],
-    { cwd, timeoutMs },
-  );
+    ];
+  if (options.sourceSha256) args.push("--source-sha256", options.sourceSha256);
+  return runCadctl(args, { cwd, timeoutMs });
 }
 
 export async function cadctlCapabilities(cwd: string, timeoutMs?: number): Promise<CadEventEnvelope> {

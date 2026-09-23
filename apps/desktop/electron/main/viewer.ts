@@ -75,11 +75,27 @@ export class ViewerBackend {
     return JSON.parse(stdout) as MeshDocument;
   }
 
-  async exportStep(settings: AppSettings, source: string, destination: string): Promise<void> {
+  async exportStep(settings: AppSettings, source: string, destination: string, expectedSha?: string): Promise<void> {
+    const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);
     const sourcePath = await this.resolveProjectPath(settings, source);
     const destinationPath = await this.bridge.toRuntimePath(destination);
     if (normalizePath(sourcePath) === normalizePath(destinationPath)) return;
-    await this.bridge.exec(["cp", "--", sourcePath, destinationPath], { timeout: 120_000 });
+    const sourceHash = await hashRuntimeFile(this.bridge, sourcePath);
+    if (expectedSha && sourceHash !== expectedSha) throw new Error(`Selected STEP changed before export: expected ${expectedSha}, found ${sourceHash}.`);
+    const result = await this.bridge.exec([
+      `${piCadRepo}/python/.venv/bin/cadctl`, "export",
+      "--source", sourcePath,
+      "--source-sha256", sourceHash,
+      "--output", destinationPath,
+      "--format", "step",
+    ], { timeout: 120_000 });
+    let envelope: { ok?: boolean; payload?: { error?: string } };
+    try {
+      envelope = JSON.parse(result.stdout) as typeof envelope;
+    } catch {
+      throw new Error("STEP export returned an invalid cadctl response.");
+    }
+    if (!envelope.ok) throw new Error(envelope.payload?.error || "STEP export failed.");
   }
 
   /**

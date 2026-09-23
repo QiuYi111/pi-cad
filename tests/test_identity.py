@@ -29,6 +29,7 @@ from cadctl.identity import (
 )
 from cadctl.identity.artifact import ArtifactModel
 from cadctl.mesh import mesh_document
+from cadctl.render import _resolve_parts, _selection_index
 from cadctl.model import run_source
 
 FIXTURES = Path(__file__).parent / "fixtures" / "identity"
@@ -569,9 +570,21 @@ class CompatibilityTests(unittest.TestCase):
             path, _ = _build(SIMPLE, Path(directory) / "plate.step")
             document = mesh_document(path)
             self.assertEqual(document["identity"]["source"], "identity")
+            self.assertTrue(document["identityBound"])
+            self.assertEqual(document["identitySource"], "identity")
             self.assertEqual([part["partId"] for part in document["parts"]], ["plate/base"])
+            self.assertEqual([part["occurrenceId"] for part in document["parts"]], ["plate/base"])
             self.assertEqual(document["parts"][0]["name"], "底板")
             self.assertEqual(document["parts"][0]["id"], "plate/base:solid-1")
+            self.assertEqual([item["path"] for item in document["parts"][0]["features"]], ["plate/mount_holes", "plate/bearing_seat", "plate/top_face", "plate/bottom_face"])
+            self.assertEqual([item["path"] for item in document["parts"][0]["datums"]], ["plate/boss_axis", "plate/top_frame"])
+
+    def test_render_selection_uses_shared_identity_resolver_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path, _ = _build(SIMPLE, Path(directory) / "plate.step")
+            lookup, _ambiguous, _occurrences = _selection_index(path, len(mesh_document(path)["parts"]))
+            self.assertEqual(_resolve_parts(["plate/base"], lookup, {}, "focus"), {0})
+            self.assertEqual(_resolve_parts(["plate/mount_holes"], lookup, {}, "focus"), {0})
 
 
 class ChineseAndEscapingTests(unittest.TestCase):

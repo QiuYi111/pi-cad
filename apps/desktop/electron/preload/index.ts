@@ -68,7 +68,7 @@ const api: DesktopApi = {
   viewer: {
     loadStep: (path) => ipcRenderer.invoke(IPC.viewerLoadStep, path),
     chooseStep: () => ipcRenderer.invoke(IPC.viewerChooseStep),
-    exportStep: (path) => ipcRenderer.invoke(IPC.viewerExportStep, path),
+    exportStep: (path, expectedSha) => ipcRenderer.invoke(IPC.viewerExportStep, path, expectedSha),
     catalog: () => ipcRenderer.invoke(IPC.viewerCatalog),
     previewParameters: (manifestPath, values) => ipcRenderer.invoke(IPC.viewerPreviewParameters, manifestPath, values),
     applyParameters: (manifestPath, values) => ipcRenderer.invoke(IPC.viewerApplyParameters, manifestPath, values),

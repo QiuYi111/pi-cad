@@ -71,6 +71,9 @@ def mesh_document(path: str | Path) -> dict:
     tolerance = max(0.05, min(0.75, diagonal / 350))
     solids = _children(shape, TopAbs_ShapeEnum.TopAbs_SOLID) or [shape]
     identities, identity = _solid_identities(source, artifact_hash, len(solids))
+    semantic = _semantic_solid_details(source, identity, len(solids))
+    identity_manifest = Path(str(identity["manifest"])) if identity.get("manifest") else None
+    identity_manifest_hash = sha256_file(identity_manifest) if identity_manifest and identity_manifest.is_file() else None
     BRepMesh_IncrementalMesh(shape, tolerance, False, 0.22, True).Perform()
     palette = ["#d7d9dc", "#bfc5cc", "#929aa4", "#e6e7e9", "#aab3be", "#cfd4da"]
     parts = []
@@ -79,8 +82,21 @@ def mesh_document(path: str | Path) -> dict:
         vertices, triangles = _tessellate(solid)
         positions = [coordinate for vertex in vertices for coordinate in _vec(vertex)]
         indices = [coordinate for triangle in triangles for coordinate in triangle]
-        if index in identities:
+        if index in semantic:
+            item = semantic[index]
+            part_id = item["partId"]
+            name = item["name"]
+            solid_id = item["solidId"]
+            occurrence_id = item["occurrenceId"]
+            semantic_id = item["semanticId"]
+            features = item["features"]
+            datums = item["datums"]
+        elif index in identities:
             part_id, name, solid_id = identities[index]
+            occurrence_id = part_id
+            semantic_id = None
+            features = []
+            datums = []
         else:
             geometry = json.dumps(
                 {"bounds": _shape_bounds(solid), "positions": positions, "indices": indices},
@@ -91,10 +107,18 @@ def mesh_document(path: str | Path) -> dict:
             geometry_occurrences[digest] = occurrence
             solid_id = f"geometry:{digest}:{occurrence}"
             part_id, name = solid_id, f"Unbound solid {index + 1}"
+            occurrence_id = solid_id
+            semantic_id = None
+            features = []
+            datums = []
         parts.append({
             "id": solid_id,
             "partId": part_id,
+            "occurrenceId": occurrence_id,
             "solidId": solid_id,
+            "semanticId": semantic_id,
+            "features": features,
+            "datums": datums,
             "name": name,
             "positions": positions,
             "indices": indices,
@@ -103,6 +127,9 @@ def mesh_document(path: str | Path) -> dict:
     return {
         "source": str(source),
         "sha256": artifact_hash,
+        "identityManifestSha256": identity_manifest_hash,
+        "identityBound": identity.get("source") == "identity" or identity.get("artifactHash") == artifact_hash,
+        "identitySource": identity.get("source"),
         "parts": parts,
         "identity": identity,
         "bounds": {
@@ -149,7 +176,7 @@ def _solid_identities(
         manifest = json.loads(legacy_file.read_text(encoding="utf-8"))
         if not isinstance(manifest.get("parts"), list):
             raise ValueError(f"Invalid assembly identity manifest: {legacy_file}")
-        declared = manifest.get("artifactHash")
+        declared = manifest.get("artifactHash") or manifest.get("stepSha256")
         if isinstance(declared, str) and declared and declared != artifact_hash:
             raise ValueError(
                 f"Legacy assembly manifest {legacy_file} belongs to artifact "
@@ -165,6 +192,72 @@ def _solid_identities(
         )
 
     return {}, {"source": "anonymous", "artifactHash": None, "manifest": None}
+
+
+def _semantic_solid_details(source: Path, identity: dict[str, object], solid_count: int) -> dict[int, dict[str, object]]:
+    """Project the shared resolver's identities onto its hash-bound solid indices."""
+    if identity.get("source") != "identity":
+        return {}
+    from .identity import IdentityIndex
+
+    index = IdentityIndex(source)
+    records = {entry["path"]: entry for entry in (index.manifest or {}).get("entities", [])}
+    resolutions = index.entities()
+    instances: dict[int, dict[str, object]] = {}
+    solids: dict[int, dict[str, object]] = {}
+    features: dict[int, list[dict[str, object]]] = {}
+    datums: dict[int, list[dict[str, object]]] = {}
+
+    for resolution in resolutions:
+        record = records.get(resolution.path or "", {})
+        details = {
+            "path": resolution.path,
+            "kind": resolution.feature_kind or resolution.kind,
+            "owner": resolution.owner,
+            "label": resolution.label,
+            "display": resolution.display,
+            "bindings": resolution.bindings,
+        }
+        if resolution.kind == "instance":
+            for solid_index in resolution.solid_indices:
+                if not 0 <= solid_index < solid_count:
+                    raise ValueError(f"Invalid solid index {solid_index} in identity manifest")
+                instances[solid_index] = {
+                    "path": resolution.path,
+                    "partId": record.get("part") or resolution.path,
+                    "name": _display_name(record),
+                }
+        elif resolution.kind == "solid":
+            for solid_index in resolution.solid_indices:
+                if not 0 <= solid_index < solid_count:
+                    raise ValueError(f"Invalid solid index {solid_index} in identity manifest")
+                solids[solid_index] = {"path": resolution.path, "name": _display_name(record)}
+        elif resolution.kind in {"feature", "faces", "edges"}:
+            for solid_index in resolution.solid_indices:
+                features.setdefault(solid_index, []).append(details)
+        elif resolution.kind in {"axis", "datum"} and resolution.owner:
+            owner = next((item for item in resolutions if item.path == resolution.owner), None)
+            for solid_index in owner.solid_indices if owner else []:
+                datums.setdefault(solid_index, []).append(details)
+
+    projected: dict[int, dict[str, object]] = {}
+    per_occurrence: dict[str, int] = {}
+    for solid_index in range(solid_count):
+        instance = instances.get(solid_index)
+        solid = solids.get(solid_index)
+        occurrence_id = str((instance or {}).get("path") or (solid or {}).get("path") or f"artifact:{solid_index}")
+        per_occurrence[occurrence_id] = per_occurrence.get(occurrence_id, 0) + 1
+        solid_id = str((solid or {}).get("path") or f"{occurrence_id}:solid-{per_occurrence[occurrence_id]}")
+        projected[solid_index] = {
+            "partId": str((instance or {}).get("partId") or occurrence_id),
+            "occurrenceId": occurrence_id,
+            "solidId": solid_id,
+            "semanticId": str((solid or {}).get("path") or occurrence_id),
+            "name": str((instance or {}).get("name") or (solid or {}).get("name") or occurrence_id),
+            "features": features.get(solid_index, []),
+            "datums": datums.get(solid_index, []),
+        }
+    return projected
 
 
 def _identity_solids(
