@@ -76,43 +76,26 @@ export class ViewerBackend {
   }
 
   async exportStep(settings: AppSettings, source: string, destination: string, expectedSha?: string): Promise<void> {
+    const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);
     const sourcePath = await this.resolveProjectPath(settings, source);
     const destinationPath = await this.bridge.toRuntimePath(destination);
     if (normalizePath(sourcePath) === normalizePath(destinationPath)) return;
     const sourceHash = await hashRuntimeFile(this.bridge, sourcePath);
     if (expectedSha && sourceHash !== expectedSha) throw new Error(`Selected STEP changed before export: expected ${expectedSha}, found ${sourceHash}.`);
-    const sidecars = [
-      { suffix: ".identity.json", kind: "identity" as const },
-      { suffix: ".assembly.json", kind: "legacy" as const },
-    ];
-    const manifests: Array<{ destination: string; temp: string; body: string }> = [];
-    for (const sidecar of sidecars) {
-      const manifestPath = `${sourcePath}${sidecar.suffix}`;
-      const exists = await this.bridge.exec(["test", "-f", manifestPath]).then(() => true).catch(() => false);
-      if (!exists) continue;
-      const body = (await this.bridge.exec(["cat", "--", manifestPath])).stdout;
-      const manifest = JSON.parse(body) as { stepSha256?: string; artifactHash?: string; artifact?: { sha256?: string } };
-      const declared = sidecar.kind === "identity" ? manifest.artifact?.sha256 : manifest.artifactHash ?? manifest.stepSha256;
-      if (declared && declared !== sourceHash) throw new Error("Selected STEP has an identity manifest from another build; export was refused.");
-      manifests.push({ destination: `${destinationPath}${sidecar.suffix}`, temp: `${destinationPath}${sidecar.suffix}.reify-${process.pid}-${Date.now()}.tmp`, body });
-    }
-    const nonce = `${process.pid}-${Date.now()}`;
-    const tempStep = `${destinationPath}.reify-${nonce}.tmp`;
+    const result = await this.bridge.exec([
+      `${piCadRepo}/python/.venv/bin/cadctl`, "export",
+      "--source", sourcePath,
+      "--source-sha256", sourceHash,
+      "--output", destinationPath,
+      "--format", "step",
+    ], { timeout: 120_000 });
+    let envelope: { ok?: boolean; payload?: { error?: string } };
     try {
-      await this.bridge.exec(["cp", "--", sourcePath, tempStep], { timeout: 120_000 });
-      const [afterCopy, copiedHash] = await Promise.all([
-        hashRuntimeFile(this.bridge, sourcePath), hashRuntimeFile(this.bridge, tempStep),
-      ]);
-      if (afterCopy !== sourceHash || copiedHash !== sourceHash) throw new Error("Selected STEP changed while it was being exported; retry with the current artifact.");
-      for (const manifest of manifests) await this.bridge.exec(["tee", manifest.temp], { input: manifest.body });
-      await this.bridge.exec(["rm", "-f", "--", `${destinationPath}.identity.json`, `${destinationPath}.assembly.json`]);
-      await this.bridge.exec(["mv", "--", tempStep, destinationPath], { timeout: 120_000 });
-      for (const manifest of manifests) await this.bridge.exec(["mv", "--", manifest.temp, manifest.destination]);
-      const finalHash = await hashRuntimeFile(this.bridge, destinationPath);
-      if (finalHash !== sourceHash) throw new Error("Exported STEP does not match the selected artifact revision.");
-    } finally {
-      await this.bridge.exec(["rm", "-f", "--", tempStep, ...manifests.map((manifest) => manifest.temp)]).catch(() => {});
+      envelope = JSON.parse(result.stdout) as typeof envelope;
+    } catch {
+      throw new Error("STEP export returned an invalid cadctl response.");
     }
+    if (!envelope.ok) throw new Error(envelope.payload?.error || "STEP export failed.");
   }
 
   /**

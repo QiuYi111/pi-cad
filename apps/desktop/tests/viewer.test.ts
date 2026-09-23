@@ -126,8 +126,7 @@ describe("desktop viewer bridge", () => {
       exec: async (args: string[]) => {
         commands.push(args);
         if (args[0] === "sha256sum") return { stdout: `abc  ${args.at(-1)}`, stderr: "" };
-        if (args[0] === "test") throw new Error("missing");
-        return { stdout: "", stderr: "" };
+        return { stdout: JSON.stringify({ ok: true, payload: { outputSha256: "abc" } }), stderr: "" };
       },
     };
 
@@ -138,9 +137,25 @@ describe("desktop viewer bridge", () => {
       "abc",
     );
 
-    expect(commands).toContainEqual(["cp", "--", "/projects/bracket/build/bracket.step", expect.stringMatching(/bracket\.step\.reify-.*\.tmp$/)]);
-    expect(commands).toContainEqual(["mv", "--", expect.stringMatching(/bracket\.step\.reify-.*\.tmp$/), "/mnt/c/Users/Jordan/Downloads/bracket.step"]);
-    expect(commands).toContainEqual(["rm", "-f", "--", "/mnt/c/Users/Jordan/Downloads/bracket.step.identity.json", "/mnt/c/Users/Jordan/Downloads/bracket.step.assembly.json"]);
+    expect(commands).toContainEqual([
+      "/runtime/pi-cad/python/.venv/bin/cadctl", "export",
+      "--source", "/projects/bracket/build/bracket.step",
+      "--source-sha256", "abc",
+      "--output", "/mnt/c/Users/Jordan/Downloads/bracket.step",
+      "--format", "step",
+    ]);
+  });
+
+  it("reports a transactional STEP export failure from cadctl", async () => {
+    const bridge = {
+      resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
+      toRuntimePath: async (path: string) => path,
+      exec: async (args: string[]) => args[0] === "sha256sum"
+        ? { stdout: `abc  ${args.at(-1)}`, stderr: "" }
+        : { stdout: JSON.stringify({ ok: false, payload: { error: "bundle publish failed and previous revision was restored" } }), stderr: "" },
+    };
+    await expect(new ViewerBackend(bridge as never).exportStep({} as never, "/workspace/build/bracket.step", "/project/export.step", "abc"))
+      .rejects.toThrow(/previous revision was restored/);
   });
 
   it("refuses to export when the selected STEP hash has changed", async () => {
