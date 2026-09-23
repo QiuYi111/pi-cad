@@ -331,6 +331,11 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /--skill\n\/opt\/pi-cad\/cad\/SKILL\.md/);
   assert.match(joined, /cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
+  assert.match(joined, /PRIME_AGENT_KERNEL_VENV\n\/opt\/prime-kernel-venv/);
+  assert.match(joined, /PRIME_AGENT_KERNEL_PYTHON\n\/opt\/prime-kernel-venv\/bin\/python/);
+  assert.match(joined, /PRIME_KERNEL_PROVENANCE/);
+  assert.match(joined, /sys\.prefix does not match PRIME_AGENT_KERNEL_VENV/);
+  assert.match(joined, /PRIME_KERNEL_PROVENANCE_FAILURE/);
   assert.doesNotMatch(joined, /cad-skill/);
 
   const readOnly = buildPrimeBwrapArgs(paths, ["--print", "inspect it"], "read-only").join("\n");
