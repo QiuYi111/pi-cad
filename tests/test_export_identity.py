@@ -4,6 +4,8 @@ import hashlib
 import json
 import multiprocessing
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -180,6 +182,26 @@ class ExportIdentityTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), old_step.read_bytes())
             restored = json.loads(Path(str(output) + ".identity.json").read_text(encoding="utf-8"))
             self.assertEqual(restored["artifact"]["sha256"], old_hash)
+
+    def test_cli_reports_the_revision_verified_by_the_locked_publisher(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source.step", root / "delivery.step"
+            source.write_bytes(b"locked revision")
+            source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+            self.write_identity_sidecar(source, source_hash)
+
+            result = subprocess.run([
+                sys.executable, "-m", "cadctl", "export",
+                "--source", str(source), "--source-sha256", source_hash,
+                "--output", str(output), "--format", "step",
+            ], check=True, capture_output=True, text=True)
+            envelope = json.loads(result.stdout)
+
+            self.assertTrue(envelope["ok"])
+            self.assertEqual(envelope["inputHashes"]["source"], source_hash)
+            self.assertEqual(envelope["payload"]["outputSha256"], source_hash)
+            self.assertEqual(envelope["artifacts"][0]["sha256"], source_hash)
 
 
 if __name__ == "__main__":
