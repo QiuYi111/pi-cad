@@ -1510,3 +1510,63 @@ test("reify chaos: 同一轮重复出现的 fault 第二次不适用时，只 re
     await session.close().catch(() => undefined);
   }
 });
+
+test("reify chaos: partialStateWrite recovery 不覆盖故障期间已经写回的有效新状态", async () => {
+  await withRealSession(async (session, trace) => {
+    await runReifySequence(
+      session,
+      [...REIFY_SETUP, { kind: "action", name: "build", params: { source: "part.py", conversationIndex: 0 } }],
+      trace,
+    );
+    const view = (await session.call("workflow-current", { sessionId: session.conversation(0) })) as { runId?: string };
+    assert.ok(view.runId, "setup 之后必须有真 run");
+    const stateFile = join(session.runDir(view.runId!), "state.json");
+    const partial = reifyFaultDefinitions.find((fault) => fault.name === "partialStateWrite")!;
+
+    const outcome = await injectReifyFault(
+      session,
+      partial,
+      { kind: "fault", name: "partialStateWrite", params: {} },
+      trace,
+    );
+    assert.equal(outcome.status, "Injected", `partialStateWrite 必须真的注入：${JSON.stringify(outcome)}`);
+
+    const backup = `${stateFile}.chaos-original`;
+    assert.ok(existsSync(backup), "注入后必须保留完整备份");
+    const newer = JSON.parse(readFileSync(backup, "utf8")) as { updatedAt?: string };
+    newer.updatedAt = "2099-01-01T00:00:00.000Z";
+    writeFileSync(stateFile, JSON.stringify(newer, null, 2));
+
+    await partial.recover({ session, trace, params: {} });
+
+    const recovered = JSON.parse(readFileSync(stateFile, "utf8")) as { updatedAt?: string };
+    assert.equal(
+      recovered.updatedAt,
+      "2099-01-01T00:00:00.000Z",
+      "产品已经写回有效 state 时，recovery 不能拿注入前备份把它回滚",
+    );
+    assert.ok(!existsSync(backup), "恢复后旧备份必须清掉");
+    assert.ok(!session.harnessDamage.runs.has(view.runId!), "恢复后 harness damage 标记必须清掉");
+  });
+});
+
+test("reify chaos: one-shot authority 下 missingDesktopProjection 明确 NotApplicable", async () => {
+  const session = await startReifySession(false);
+  const trace = new ReifyTrace();
+  try {
+    await runReifySequence(session, REIFY_SETUP, trace);
+    const missing = reifyFaultDefinitions.find((fault) => fault.name === "missingDesktopProjection")!;
+    const outcome = await injectReifyFault(
+      session,
+      missing,
+      { kind: "fault", name: "missingDesktopProjection", params: {} },
+      trace,
+    );
+    assert.equal(outcome.status, "NotApplicable", JSON.stringify(outcome));
+    assert.match(outcome.reason ?? "", /Desktop runtime|one-shot authority/);
+    assert.ok(!session.activeFaults.includes("missingDesktopProjection"), "不适用时不能留下 armed fault");
+  } finally {
+    await session.close().catch(() => undefined);
+  }
+});
+
