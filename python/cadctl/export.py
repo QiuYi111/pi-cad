@@ -170,10 +170,17 @@ def export_artifact(
         if source_path.resolve() != output.resolve():
             copied_identity_manifest_hash, copied_legacy_manifest_hash = _copy_step_bundle(source_path, output, source_hash)
         else:
-            identity_manifest = output.with_suffix(output.suffix + ".identity.json")
-            legacy_manifest = output.with_suffix(output.suffix + ".assembly.json")
-            copied_identity_manifest_hash = sha256_file(identity_manifest) if identity_manifest.is_file() else None
-            copied_legacy_manifest_hash = sha256_file(legacy_manifest) if legacy_manifest.is_file() else None
+            with _destination_lock(output):
+                if sha256_file(source_path) != source_hash:
+                    raise ValueError("selected STEP changed during export")
+                identity_manifest = output.with_suffix(output.suffix + ".identity.json")
+                legacy_manifest = output.with_suffix(output.suffix + ".assembly.json")
+                if identity_manifest.is_file():
+                    _validate_sidecar(identity_manifest.read_bytes(), "identity", source_hash)
+                    copied_identity_manifest_hash = sha256_file(identity_manifest)
+                if legacy_manifest.is_file():
+                    _validate_sidecar(legacy_manifest.read_bytes(), "legacy", source_hash)
+                    copied_legacy_manifest_hash = sha256_file(legacy_manifest)
         source_info = {"kind": "step", "exitCode": 0, "byteCopy": True}
     elif fmt in {"step", "stp"}:
         shape, source_info = _load_shape(source, cwd_path)
