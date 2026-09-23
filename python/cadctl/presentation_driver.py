@@ -16,7 +16,7 @@ Never imported by cadctl itself. Deterministic by construction:
     sequence address the right occurrences
   - the assembly ANIMATION follows the declared install sequence: step 1
     parts assemble first, unlisted leftovers last
-  - CYCLES on CPU with a fixed seed and fixed sample count
+  - CYCLES on the first available GPU, with a CPU fallback and fixed settings
 
 The driver renders what the spec says, records how it interpreted the
 spec's vocabulary in the render report, and never judges aesthetic
@@ -26,6 +26,7 @@ quality.
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import re
 import sys
@@ -133,6 +134,26 @@ def material_params(material: dict) -> tuple[tuple[float, float, float, float], 
     return (*color, 1.0), metallic, roughness
 
 
+def configure_cycles_device(scene, preferences) -> dict:
+    """Select an available Cycles GPU without making rendering fail closed."""
+    for backend in ("CUDA", "OPTIX", "HIP", "ONEAPI", "METAL"):
+        try:
+            preferences.compute_device_type = backend
+            preferences.get_devices()
+        except (TypeError, ValueError, RuntimeError):
+            continue
+        devices = list(preferences.devices)
+        gpu_devices = [device for device in devices if device.type != "CPU"]
+        if not gpu_devices:
+            continue
+        for device in devices:
+            device.use = device in gpu_devices
+        scene.cycles.device = "GPU"
+        return {"backend": backend, "device": ", ".join(device.name for device in gpu_devices)}
+    scene.cycles.device = "CPU"
+    return {"backend": "CPU", "device": "CPU"}
+
+
 def _scene_bbox(objects):
     from mathutils import Vector
 
@@ -171,7 +192,26 @@ def main() -> int:
         bpy.ops.import_scene.gltf(filepath=artifact)
     elif args.get("meshBundle"):
         bundle = Path(args["meshBundle"])
-        stl_files = sorted(bundle.glob("part-*.stl"))
+        bundle_manifest_path = bundle / "manifest.json"
+        if not bundle_manifest_path.is_file():
+            raise ValueError("Blender mesh bundle has no identity manifest")
+        bundle_manifest = json.loads(bundle_manifest_path.read_text(encoding="utf-8"))
+        def file_hash(path: Path) -> str:
+            digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+        if bundle_manifest.get("schema") != 2 or bundle_manifest.get("stepSha256") != file_hash(Path(artifact)):
+            raise ValueError("Blender bundle does not match the selected STEP revision")
+        parts = bundle_manifest.get("parts", [])
+        if (len({item.get("meshPath") for item in parts}) != len(parts)
+                or len({item.get("solidId") for item in parts}) != len(parts)
+                or bundle_manifest.get("partCount") != len(parts)):
+            raise ValueError("Blender bundle contains duplicate or incomplete identity entries")
+        stl_files = [bundle / item["meshPath"] for item in parts]
+        if any(not path.is_file() or file_hash(path) != item.get("meshSha256") for path, item in zip(stl_files, parts)):
+            raise ValueError("Blender bundle mesh hash mismatch")
         if not stl_files:
             report["notes"].append("mesh bundle is empty")
             Path(args["reportPath"]).write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -180,20 +220,32 @@ def main() -> int:
         # Rename imported meshes to their occurrence labels from the
         # bundle manifest, so module identity survives: "part-0000"
         # becomes the assembly's own occurrence key.
-        bundle_manifest_path = bundle / "manifest.json"
-        label_by_stem: dict[str, str] = {}
-        if bundle_manifest_path.exists():
-            bundle_manifest = json.loads(bundle_manifest_path.read_text(encoding="utf-8"))
-            for part in bundle_manifest.get("parts", []):
-                stem = Path(part["meshPath"]).stem.lower()
-                label_by_stem[stem] = part.get("occurrenceKey") or stem
+        label_by_stem = {Path(item["meshPath"]).stem.lower(): item for item in parts}
+        imported: set[str] = set()
         for obj in bpy.context.scene.objects:
             if obj.type != "MESH":
                 continue
             data_stem = (obj.data.name or "").lower()
             name_stem = (obj.name or "").lower()
-            label = label_by_stem.get(data_stem) or label_by_stem.get(name_stem)
-            obj.name = f"pi-cad::{label or name_stem}"
+            identity = label_by_stem.get(data_stem) or label_by_stem.get(name_stem)
+            if identity is None:
+                raise ValueError(f"Imported Blender mesh has no identity mapping: {obj.name}")
+            imported.add(identity["meshPath"])
+            obj.name = f"pi-cad::{identity['occurrenceId']}::{identity['solidId']}"
+            for key in ("partId", "occurrenceId", "solidId", "semanticId", "name", "identityQuality"):
+                value = identity.get(key)
+                if value is not None:
+                    obj[key] = value
+            for key in ("features", "datums"):
+                obj[key] = json.dumps(identity.get(key, []), ensure_ascii=False, sort_keys=True)
+            collection_name = f"pi-cad-occurrence::{identity['occurrenceId']}"
+            collection = bpy.data.collections.get(collection_name) or bpy.data.collections.new(collection_name)
+            if collection.name not in {item.name for item in bpy.context.scene.collection.children}:
+                bpy.context.scene.collection.children.link(collection)
+            if collection not in obj.users_collection:
+                collection.objects.link(obj)
+        if imported != {item["meshPath"] for item in parts}:
+            raise ValueError("Blender import did not produce one object for every manifest entry")
     else:
         report["notes"].append(f"unsupported artifact suffix: {suffix}")
         Path(args["reportPath"]).write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -204,6 +256,23 @@ def main() -> int:
         report["notes"].append("artifact imported with no mesh objects")
         Path(args["reportPath"]).write_text(json.dumps(report, indent=2), encoding="utf-8")
         return 1
+    if args.get("meshBundle"):
+        report["bridge"] = {
+            "stepSha256": bundle_manifest["stepSha256"],
+            "identityManifestSha256": bundle_manifest.get("identityManifestSha256"),
+            "identityBound": bundle_manifest.get("identityBound", False),
+            "objectCount": len(solids),
+            "objects": [
+                {key: obj.get(key) for key in ("partId", "occurrenceId", "solidId", "semanticId", "identityQuality")}
+                for obj in solids
+            ],
+        }
+        if args.get("operation") == "bridge-inspect":
+            report["status"] = "bridged"
+            report["objectCount"] = len(solids)
+            Path(args["reportPath"]).write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print("REIFY_JSON:" + json.dumps(report["bridge"], ensure_ascii=False))
+            return 0
 
     # --- Materials: the spec's family/pattern vocabulary drives the BSDF.
     materials_spec = args.get("materials") or []
@@ -315,7 +384,8 @@ def main() -> int:
 
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
-    scene.cycles.device = "CPU"
+    cycles_preferences = bpy.context.preferences.addons["cycles"].preferences
+    report["renderer"] = configure_cycles_device(scene, cycles_preferences)
     scene.cycles.samples = args["samples"]
     # The manifest declares seed 0; set it explicitly (the refactor that
     # added denoising handling dropped this line, leaving the manifest
@@ -358,7 +428,7 @@ def main() -> int:
     sequence = args.get("sequence") or []
 
     def module_key(obj) -> str | None:
-        name = obj.name.split("::", 1)[-1] if "::" in obj.name else obj.name
+        name = obj.get("occurrenceId") or (obj.name.split("::", 1)[-1] if "::" in obj.name else obj.name)
         normalized = _normalize_key(name)
         if normalized in explode_directions:
             return normalized
@@ -384,7 +454,7 @@ def main() -> int:
 
     def install_step_of(obj) -> int:
         """Sequence step that installs this object; unlisted parts go last."""
-        name = obj.name.split("::", 1)[-1] if "::" in obj.name else obj.name
+        name = obj.get("occurrenceId") or (obj.name.split("::", 1)[-1] if "::" in obj.name else obj.name)
         normalized = _normalize_key(name)
         for index, step in enumerate(sequence):
             if any(_normalize_key(installed) == normalized for installed in step.get("installs", [])):

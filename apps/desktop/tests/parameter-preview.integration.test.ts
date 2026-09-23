@@ -90,7 +90,7 @@ describe("real parameter preview path", () => {
         "    return plate - hole",
         "",
       ].join("\n"));
-      await handleAgentApi(project, { schema: 1, op: "workflow-start", id: "mechanical.quick-build", interactionMode: "headless" });
+      await handleAgentApi(project, { schema: 1, op: "workflow-start", id: "mechanical.naked", interactionMode: "headless" });
       await handleAgentApi(project, { schema: 1, op: "commit", name: "quick-build", artifacts: ["box.py", "dimensions.py"] });
       const built = await handleAgentApi(project, {
         schema: 1, op: "model-build", source: "box.py", output: "build/box.step",
@@ -143,17 +143,14 @@ describe("real parameter preview path", () => {
         .rejects.toThrow(/fillet radius is too large/);
       const recovered = await viewer.previewParameters(settings, manifestPath, { fillet_radius: 2 });
       expect(recovered.parts.length).toBeGreaterThan(0);
-      await handleAgentApi(project, { schema: 1, op: "workflow-advance", event: "delivered" });
-
       await viewer.applyParameters(settings, manifestPath, { width: 68 });
       const parameterRun = await handleAgentApi(project, { schema: 1, op: "workflow-current" }) as any;
-      expect(parameterRun).toMatchObject({ workflowId: "mechanical.parameter-edit", phase: "done", status: "done" });
+      expect(parameterRun).toMatchObject({ workflowId: "mechanical.naked", phase: "work", status: "active" });
       const catalog = await viewer.catalog(settings);
       const appliedManifest = catalog.parameterManifests[0]?.manifest;
       expect(appliedManifest?.parameters.find((item) => item.id === "width")?.value).toBe(68);
       expect((await viewer.loadStep(settings, appliedManifest!.output.path)).sha256).toBe(appliedManifest!.output.sha256);
 
-      await handleAgentApi(project, { schema: 1, op: "workflow-start", id: "mechanical.analysis", interactionMode: "headless" });
       const promotedCatalog = await viewer.catalog(settings);
       expect(promotedCatalog.parameterManifests[0]?.manifest.parameters.find((item) => item.id === "width")?.value).toBe(68);
     } finally {

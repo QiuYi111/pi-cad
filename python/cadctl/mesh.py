@@ -63,30 +63,17 @@ def _tessellate(shape):
 def mesh_document(path: str | Path) -> dict:
     source = Path(path).resolve()
     shape = _read_step(source)
+    artifact_hash = sha256_file(source)
     box = Bnd_Box()
     BRepBndLib.AddOptimal_s(shape, box)
     xmin, ymin, zmin, xmax, ymax, zmax = box.Get()
     diagonal = math.sqrt((xmax - xmin) ** 2 + (ymax - ymin) ** 2 + (zmax - zmin) ** 2)
     tolerance = max(0.05, min(0.75, diagonal / 350))
     solids = _children(shape, TopAbs_ShapeEnum.TopAbs_SOLID) or [shape]
-    manifest_path = source.with_suffix(source.suffix + ".assembly.json")
-    manifest = None
-    if manifest_path.exists():
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest.get("schema") != 1 or not isinstance(manifest.get("parts"), list):
-            raise ValueError(f"Invalid assembly identity manifest: {manifest_path}")
-    identities = {}
-    if manifest:
-        for part in manifest["parts"]:
-            part_id = str(part.get("id", "")).strip()
-            name = str(part.get("name", part_id)).strip()
-            indices = part.get("solidIndices", [])
-            if not part_id or not isinstance(indices, list):
-                raise ValueError(f"Invalid assembly part identity: {manifest_path}")
-            for local_index, solid_index in enumerate(indices):
-                if not isinstance(solid_index, int) or solid_index < 0 or solid_index >= len(solids) or solid_index in identities:
-                    raise ValueError(f"Invalid or duplicate solid index in assembly manifest: {solid_index}")
-                identities[solid_index] = (part_id, name, f"{part_id}:solid-{local_index + 1}")
+    identities, identity = _solid_identities(source, artifact_hash, len(solids))
+    semantic = _semantic_solid_details(source, identity, len(solids))
+    identity_manifest = Path(str(identity["manifest"])) if identity.get("manifest") else None
+    identity_manifest_hash = sha256_file(identity_manifest) if identity_manifest and identity_manifest.is_file() else None
     BRepMesh_IncrementalMesh(shape, tolerance, False, 0.22, True).Perform()
     palette = ["#d7d9dc", "#bfc5cc", "#929aa4", "#e6e7e9", "#aab3be", "#cfd4da"]
     parts = []
@@ -95,8 +82,21 @@ def mesh_document(path: str | Path) -> dict:
         vertices, triangles = _tessellate(solid)
         positions = [coordinate for vertex in vertices for coordinate in _vec(vertex)]
         indices = [coordinate for triangle in triangles for coordinate in triangle]
-        if index in identities:
+        if index in semantic:
+            item = semantic[index]
+            part_id = item["partId"]
+            name = item["name"]
+            solid_id = item["solidId"]
+            occurrence_id = item["occurrenceId"]
+            semantic_id = item["semanticId"]
+            features = item["features"]
+            datums = item["datums"]
+        elif index in identities:
             part_id, name, solid_id = identities[index]
+            occurrence_id = part_id
+            semantic_id = None
+            features = []
+            datums = []
         else:
             geometry = json.dumps(
                 {"bounds": _shape_bounds(solid), "positions": positions, "indices": indices},
@@ -107,10 +107,18 @@ def mesh_document(path: str | Path) -> dict:
             geometry_occurrences[digest] = occurrence
             solid_id = f"geometry:{digest}:{occurrence}"
             part_id, name = solid_id, f"Unbound solid {index + 1}"
+            occurrence_id = solid_id
+            semantic_id = None
+            features = []
+            datums = []
         parts.append({
             "id": solid_id,
             "partId": part_id,
+            "occurrenceId": occurrence_id,
             "solidId": solid_id,
+            "semanticId": semantic_id,
+            "features": features,
+            "datums": datums,
             "name": name,
             "positions": positions,
             "indices": indices,
@@ -118,13 +126,202 @@ def mesh_document(path: str | Path) -> dict:
         })
     return {
         "source": str(source),
-        "sha256": sha256_file(source),
+        "sha256": artifact_hash,
+        "identityManifestSha256": identity_manifest_hash,
+        "identityBound": identity.get("source") == "identity" or identity.get("artifactHash") == artifact_hash,
+        "identitySource": identity.get("source"),
         "parts": parts,
+        "identity": identity,
         "bounds": {
             "min": [round(xmin, 6), round(ymin, 6), round(zmin, 6)],
             "max": [round(xmax, 6), round(ymax, 6), round(zmax, 6)],
         },
     }
+
+
+def _solid_identities(
+    source: Path,
+    artifact_hash: str,
+    solid_count: int,
+) -> tuple[dict[int, tuple[str, str, str]], dict[str, object]]:
+    """Names for each solid, from the identity manifest, the legacy manifest, or geometry.
+
+    A manifest that does not belong to these exact bytes is refused rather than
+    applied: applying it would name the new model with the old model's parts.
+    """
+    from .identity.manifest import identity_path, legacy_path
+
+    identity_file = identity_path(source)
+    if identity_file.is_file():
+        manifest = json.loads(identity_file.read_text(encoding="utf-8"))
+        if manifest.get("protocol") != "reify-identity":
+            raise ValueError(f"Not a {source.name}.identity.json manifest: {identity_file}")
+        declared = str(manifest.get("artifact", {}).get("sha256", ""))
+        if declared != artifact_hash:
+            raise ValueError(
+                f"Identity manifest {identity_file} belongs to artifact "
+                f"{declared[:12] or 'unknown'}, not {artifact_hash[:12]}"
+            )
+        return (
+            _identity_solids(manifest, solid_count, identity_file),
+            {
+                "source": "identity",
+                "artifactHash": artifact_hash,
+                "manifest": str(identity_file),
+            },
+        )
+
+    legacy_file = legacy_path(source)
+    if legacy_file.is_file():
+        manifest = json.loads(legacy_file.read_text(encoding="utf-8"))
+        if not isinstance(manifest.get("parts"), list):
+            raise ValueError(f"Invalid assembly identity manifest: {legacy_file}")
+        declared = manifest.get("artifactHash") or manifest.get("stepSha256")
+        if isinstance(declared, str) and declared and declared != artifact_hash:
+            raise ValueError(
+                f"Legacy assembly manifest {legacy_file} belongs to artifact "
+                f"{declared[:12]}, not {artifact_hash[:12]}"
+            )
+        return (
+            _legacy_solids(manifest, solid_count, legacy_file),
+            {
+                "source": "legacy",
+                "artifactHash": declared if isinstance(declared, str) else None,
+                "manifest": str(legacy_file),
+            },
+        )
+
+    return {}, {"source": "anonymous", "artifactHash": None, "manifest": None}
+
+
+def _semantic_solid_details(source: Path, identity: dict[str, object], solid_count: int) -> dict[int, dict[str, object]]:
+    """Project the shared resolver's identities onto its hash-bound solid indices."""
+    if identity.get("source") != "identity":
+        return {}
+    from .identity import IdentityIndex
+
+    index = IdentityIndex(source)
+    records = {entry["path"]: entry for entry in (index.manifest or {}).get("entities", [])}
+    resolutions = index.entities()
+    instances: dict[int, dict[str, object]] = {}
+    solids: dict[int, dict[str, object]] = {}
+    features: dict[int, list[dict[str, object]]] = {}
+    datums: dict[int, list[dict[str, object]]] = {}
+
+    for resolution in resolutions:
+        record = records.get(resolution.path or "", {})
+        details = {
+            "path": resolution.path,
+            "kind": resolution.feature_kind or resolution.kind,
+            "owner": resolution.owner,
+            "label": resolution.label,
+            "display": resolution.display,
+            "bindings": resolution.bindings,
+        }
+        if resolution.kind == "instance":
+            for solid_index in resolution.solid_indices:
+                if not 0 <= solid_index < solid_count:
+                    raise ValueError(f"Invalid solid index {solid_index} in identity manifest")
+                instances[solid_index] = {
+                    "path": resolution.path,
+                    "partId": record.get("part") or resolution.path,
+                    "name": _display_name(record),
+                }
+        elif resolution.kind == "solid":
+            for solid_index in resolution.solid_indices:
+                if not 0 <= solid_index < solid_count:
+                    raise ValueError(f"Invalid solid index {solid_index} in identity manifest")
+                solids[solid_index] = {"path": resolution.path, "name": _display_name(record)}
+        elif resolution.kind in {"feature", "faces", "edges"}:
+            for solid_index in resolution.solid_indices:
+                features.setdefault(solid_index, []).append(details)
+        elif resolution.kind in {"axis", "datum"} and resolution.owner:
+            owner = next((item for item in resolutions if item.path == resolution.owner), None)
+            for solid_index in owner.solid_indices if owner else []:
+                datums.setdefault(solid_index, []).append(details)
+
+    projected: dict[int, dict[str, object]] = {}
+    per_occurrence: dict[str, int] = {}
+    for solid_index in range(solid_count):
+        instance = instances.get(solid_index)
+        solid = solids.get(solid_index)
+        occurrence_id = str((instance or {}).get("path") or (solid or {}).get("path") or f"artifact:{solid_index}")
+        per_occurrence[occurrence_id] = per_occurrence.get(occurrence_id, 0) + 1
+        solid_id = str((solid or {}).get("path") or f"{occurrence_id}:solid-{per_occurrence[occurrence_id]}")
+        projected[solid_index] = {
+            "partId": str((instance or {}).get("partId") or occurrence_id),
+            "occurrenceId": occurrence_id,
+            "solidId": solid_id,
+            "semanticId": str((solid or {}).get("path") or occurrence_id),
+            "name": str((instance or {}).get("name") or (solid or {}).get("name") or occurrence_id),
+            "features": features.get(solid_index, []),
+            "datums": datums.get(solid_index, []),
+        }
+    return projected
+
+
+def _identity_solids(
+    manifest: dict,
+    solid_count: int,
+    path: Path,
+) -> dict[int, tuple[str, str, str]]:
+    identities: dict[int, tuple[str, str, str]] = {}
+    ranked = sorted(
+        manifest.get("entities", []),
+        key=lambda entry: {"instance": 0, "solid": 1, "feature": 2}.get(entry.get("kind"), 3),
+    )
+    for entry in ranked:
+        bindings = [binding for binding in entry.get("bindings", []) if binding.get("target") == "solid"]
+        local = 0
+        for binding in bindings:
+            index = binding.get("solidIndex")
+            if index in identities:
+                continue
+            if not isinstance(index, int) or index < 0 or index >= solid_count:
+                raise ValueError(f"Invalid solid index {index} in identity manifest {path}")
+            local += 1
+            identities[index] = (
+                str(entry["path"]),
+                _display_name(entry),
+                f"{entry['path']}:solid-{local}",
+            )
+    return identities
+
+
+def _display_name(entry: dict) -> str:
+    display = entry.get("display") or {}
+    for tag in ("zh", "en"):
+        value = display.get(tag)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    label = entry.get("label")
+    if isinstance(label, str) and label.strip():
+        return label.strip()
+    return str(entry["path"])
+
+
+def _legacy_solids(
+    manifest: dict,
+    solid_count: int,
+    path: Path,
+) -> dict[int, tuple[str, str, str]]:
+    identities: dict[int, tuple[str, str, str]] = {}
+    for part in manifest["parts"]:
+        part_id = str(part.get("id", "")).strip()
+        name = str(part.get("name", part_id)).strip()
+        indices = part.get("solidIndices", [])
+        if not part_id or not isinstance(indices, list):
+            raise ValueError(f"Invalid assembly part identity: {path}")
+        for local_index, solid_index in enumerate(indices):
+            if (
+                not isinstance(solid_index, int)
+                or solid_index < 0
+                or solid_index >= solid_count
+                or solid_index in identities
+            ):
+                raise ValueError(f"Invalid or duplicate solid index in assembly manifest: {solid_index}")
+            identities[solid_index] = (part_id, name, f"{part_id}:solid-{local_index + 1}")
+    return identities
 
 
 def _shape_bounds(shape):

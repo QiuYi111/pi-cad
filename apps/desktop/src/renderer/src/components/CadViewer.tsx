@@ -19,16 +19,16 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
   const [quickError, setQuickError] = useState("");
   const viewerRequired = mesh !== null;
   const assembly = useMemo(() => {
-    const groups = new Map<string, { id: string; name: string; solids: number }>();
+    const groups = new Map<string, { id: string; name: string; solids: number; semanticId?: string | null; solidIds: string[] }>();
     for (const part of mesh?.parts || []) {
-      const id = part.partId || part.id || part.name;
+      const id = part.occurrenceId || part.partId || part.solidId || part.id || part.name;
       const current = groups.get(id);
-      groups.set(id, { id, name: part.name, solids: (current?.solids || 0) + 1 });
+      groups.set(id, { id, name: current?.name || part.name, solids: (current?.solids || 0) + 1, semanticId: current?.semanticId ?? part.semanticId, solidIds: [...(current?.solidIds || []), part.solidId || part.id || id] });
     }
     return [...groups.values()];
   }, [mesh]);
   const visibleMesh = useMemo(() => mesh ? { ...mesh, parts: mesh.parts.filter((part) => {
-    const id = part.partId || part.id || part.name;
+    const id = part.occurrenceId || part.partId || part.solidId || part.id || part.name;
     return isolatedPart ? id === isolatedPart : !hiddenParts.has(id);
   }) } : null, [mesh, hiddenParts, isolatedPart]);
 
@@ -86,7 +86,7 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
     const source = mesh?.source || artifactPath;
     if (!source) return;
     setError("");
-    try { await window.piCad.viewer.exportStep(source); }
+    try { await window.piCad.viewer.exportStep(source, mesh?.sha256); }
     catch (reason) { setError(String(reason)); }
   };
 
@@ -114,12 +114,12 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
   const referenceQuickCheck = (agent = false) => {
     if (!quickCheck || !quickSummary) return;
     const target = targetScope === "current" || targetScope === "head" ? "current model" : `historical ${targetScope} artifact`;
-    onReferencePart?.(`${agent ? "Run workflow mechanical.quick-check and verify this read-only result" : "Reference this measured result"}: ${quickSummary}. Target the ${target} at ${quickCheck.source} with SHA-256 ${quickCheck.sha256}. Do not modify the artifact; verify its hash is unchanged.`);
+    onReferencePart?.(`${agent ? "Inspect and verify this read-only result in the current engineering task" : "Reference this measured result"}: ${quickSummary}. Target the ${target} at ${quickCheck.source} with SHA-256 ${quickCheck.sha256}. Do not modify the artifact; verify its hash is unchanged.`);
   };
 
   return <section className="cad-viewer" data-testid="cad-viewer">
     <div ref={host} className="viewer-canvas cad-viewer-open-source" />
-    {mesh && assembly.length > 0 && <aside className="assembly-tree" aria-label="Assembly tree"><header><strong>Assembly</strong><button onClick={() => { setHiddenParts(new Set()); setIsolatedPart(""); }}>Show all</button></header>{assembly.map((part) => <div key={part.id} className={selectedPart === part.id ? "selected" : ""}><button className="assembly-part" onClick={() => setSelectedPart(part.id)}><strong>{part.name}</strong><small>{part.id} · {part.solids} solid{part.solids === 1 ? "" : "s"}</small></button><button aria-label={`${hiddenParts.has(part.id) ? "Show" : "Hide"} ${part.name} ${part.id}`} onClick={() => setHiddenParts((current) => { const next = new Set(current); if (next.has(part.id)) next.delete(part.id); else next.add(part.id); return next; })}>{hiddenParts.has(part.id) ? "Show" : "Hide"}</button><button aria-label={`Isolate ${part.name} ${part.id}`} onClick={() => setIsolatedPart((current) => current === part.id ? "" : part.id)}>{isolatedPart === part.id ? "Unisolate" : "Isolate"}</button></div>)}{selectedPart && <footer><span>Selected · {selectedPart} · version {mesh.sha256?.slice(0, 10) || "unknown"}</span><button onClick={() => { const part = assembly.find((item) => item.id === selectedPart)!; onReferencePart?.(`Modify assembly part ${part.name} [partId=${part.id}] from model version ${mesh.sha256 || "unknown"}. Preserve this stable part identity and do not change unrelated parts.`); }}>Ask Agent to modify</button></footer>}</aside>}
+    {mesh && assembly.length > 0 && <aside className="assembly-tree" aria-label="Assembly tree"><header><strong>Assembly</strong><button onClick={() => { setHiddenParts(new Set()); setIsolatedPart(""); }}>Show all</button></header>{assembly.map((part) => <div key={part.id} className={selectedPart === part.id ? "selected" : ""}><button className="assembly-part" onClick={() => setSelectedPart(part.id)}><strong>{part.name}</strong><small>{part.id} · {part.solids} solid{part.solids === 1 ? "" : "s"}</small></button><button aria-label={`${hiddenParts.has(part.id) ? "Show" : "Hide"} ${part.name} ${part.id}`} onClick={() => setHiddenParts((current) => { const next = new Set(current); if (next.has(part.id)) next.delete(part.id); else next.add(part.id); return next; })}>{hiddenParts.has(part.id) ? "Show" : "Hide"}</button><button aria-label={`Isolate ${part.name} ${part.id}`} onClick={() => setIsolatedPart((current) => current === part.id ? "" : part.id)}>{isolatedPart === part.id ? "Unisolate" : "Isolate"}</button></div>)}{selectedPart && <footer><span>Selected · {selectedPart} · version {mesh.sha256?.slice(0, 10) || "unknown"}</span><button onClick={() => { const part = assembly.find((item) => item.id === selectedPart)!; onReferencePart?.(`Selected model object: ${part.name}; occurrenceId=${part.id}; semanticId=${part.semanticId || "unknown"}; solidIds=${part.solidIds.join(",")}; artifact=${mesh.source}; stepSha256=${mesh.sha256 || "unknown"}; identityManifestSha256=${mesh.identityManifestSha256 || "unavailable"}; identitySource=${mesh.identitySource || "anonymous"}; semanticIdentityBound=${mesh.identityBound === true}. Keep this exact artifact revision and object identity.`); }}>Ask Agent to modify</button></footer>}</aside>}
     {mesh && <aside className="quick-inspect" aria-label="Quick inspection">
       <header><strong>Inspect</strong><small>{targetScope === "current" || targetScope === "head" ? "Current model" : `Historical · ${targetScope}`}</small></header>
       <div><span>Measure</span>{(["x", "y", "z"] as const).map((axis) => <button key={`measure-${axis}`} disabled={Boolean(quickBusy)} onClick={() => void inspectDimension(axis)}>{axis.toUpperCase()}</button>)}</div>
@@ -130,11 +130,11 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
     </aside>}
     {mesh && <div className="viewer-file-actions">
       <span className="viewer-file-identity" title={mesh.source}>{mesh.source.split(/[\\/]/).at(-1)}{mesh.sha256 && <code>{mesh.sha256.slice(0, 10)}</code>}</span>
-      <button onClick={() => void open()}><FolderOpen size={14} />Open STEP</button>
+      <button onClick={() => void open()}><FolderOpen size={14} />Import STEP</button>
       <button onClick={() => void exportOpenModel()}><Share2 size={14} />Export copy</button>
     </div>}
     {mesh && error && <div className="viewer-load-error" role="alert"><strong>Could not open that STEP.</strong><span>The current model is preserved.</span><small>{error}</small></div>}
-    {(!mesh || viewerError) && <div className="viewer-empty"><span className="viewer-empty-mark"><Box size={28} /></span><strong>{viewerError ? "3D preview unavailable" : loading ? "Preparing model…" : error ? "Model unavailable" : "No model open"}</strong><p>{viewerError || error || "Build a candidate or open a project STEP file."}</p>{!viewerError && <button onClick={() => void open()}><FolderOpen size={15} />Open STEP</button>}</div>}
+    {(!mesh || viewerError) && <div className="viewer-empty"><span className="viewer-empty-mark"><Box size={28} /></span><strong>{viewerError ? "3D preview unavailable" : loading ? "Preparing model…" : error ? "Model unavailable" : "No model open"}</strong><p>{viewerError || error || "Build a candidate or open a project STEP file."}</p>{!viewerError && <button onClick={() => void open()}><FolderOpen size={15} />Import STEP</button>}</div>}
   </section>;
 }
 

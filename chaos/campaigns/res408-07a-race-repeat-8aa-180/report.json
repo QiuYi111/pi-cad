@@ -1,0 +1,176 @@
+{
+  "campaignId": "res408-07a-race-repeat-8aa-180",
+  "createdAt": "2026-09-23T04:05:24.219Z",
+  "manifest": {
+    "campaignId": "res408-07a-race-repeat-8aa-180",
+    "createdAt": "2026-09-23T03:41:43.869Z",
+    "mode": "targeted",
+    "seed": 408700,
+    "rounds": 180,
+    "maxCommands": 14,
+    "runtimeRatio": 1,
+    "providerFaults": false,
+    "profiles": [
+      "race",
+      "session-isolation",
+      "lifecycle-action-race"
+    ],
+    "concurrency": 3,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "8aa12102e39d3f1b0f6d65082c0b0a26936c7e77",
+      "gitBranch": "HEAD",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 180,
+    "roundsPassed": 180,
+    "roundsFailed": 0,
+    "roundsErrored": 0,
+    "distinctSeeds": 180,
+    "stateObservations": 4202,
+    "actions": {
+      "startRun": 281,
+      "commitPlan": 256,
+      "advance": 249,
+      "openConversation": 219,
+      "refresh": 69,
+      "phaseContract": 22,
+      "burstRefresh": 34,
+      "retryBuild": 51,
+      "build": 106,
+      "desktopRestart": 38,
+      "concurrentBuild": 39,
+      "listWorkflows": 21,
+      "completionGate": 21,
+      "authorize": 16,
+      "multiConversationBuild": 55,
+      "duplicateCommit": 34,
+      "resumeRun": 46,
+      "history": 19,
+      "switchConversation": 27,
+      "stopRun": 14,
+      "phaseCard": 16
+    },
+    "faultsInjected": {
+      "raceLegalOrderSwap": 17,
+      "raceTwoConversationsBuild": 27,
+      "killKernelDuringBuild": 14,
+      "killRuntimeDuringBuild": 7,
+      "raceRestartDuringTransition": 19,
+      "raceUserActionDuringKernelFault": 24,
+      "restartRuntimeDuringBuild": 8,
+      "raceCrossConversationFault": 28,
+      "raceRepeatSubmitDuringFault": 16
+    },
+    "faultsNotApplicable": {
+      "raceUserActionDuringKernelFault": 20,
+      "raceRestartDuringTransition": 23,
+      "raceRepeatSubmitDuringFault": 8,
+      "killKernelDuringBuild": 3,
+      "killRuntimeDuringBuild": 5,
+      "raceCrossConversationFault": 9,
+      "killAuthorityDuringBuild": 11,
+      "raceTwoConversationsBuild": 10,
+      "restartRuntimeDuringBuild": 1
+    },
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {},
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 21,
+        "injected": 29
+      },
+      "file-state": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "provider-oauth": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "race": {
+        "rounds": 99,
+        "injected": 131
+      }
+    },
+    "components": {
+      "authority": 1193,
+      "run-store": 189,
+      "kernel": 322,
+      "runtime": 23
+    },
+    "profiles": {
+      "race": 108,
+      "session-isolation": 36,
+      "lifecycle-action-race": 36
+    },
+    "runtimeRounds": 180,
+    "oneShotRounds": 0
+  },
+  "failures": {
+    "rounds": 0,
+    "unique": 0,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 0,
+    "unverified": 0,
+    "product": 0,
+    "harness": 0
+  },
+  "clusters": [],
+  "underExplored": [
+    "file-state：0 次真注入",
+    "provider-oauth：0 次真注入"
+  ],
+  "notes": []
+}

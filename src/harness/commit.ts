@@ -4,7 +4,8 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { canonicalDigest, canonicalJson, jsonValue, type JsonValue } from "./canonical.ts";
 import { commitRecordRef } from "./reducer.ts";
-import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "./run-store.ts";
+import { HarnessRunStoreV7 } from "./run-store.ts";
+import { requireActiveRun, resolveActiveRun } from "./run-scope.ts";
 import type { RegistrySet } from "./registry.ts";
 
 export interface EncodedVariable {
@@ -94,8 +95,7 @@ export async function commitWorkspace(input: {
   acceptance?: AcceptanceSummaryInput;
 }): Promise<WorkspaceCommitManifestV1> {
   const name = safeName(input.name);
-  const project = new HarnessProjectStoreV7(input.cwd);
-  const active = await project.currentRun(input.registries);
+  const active = await resolveActiveRun(input.cwd, input.registries);
   if (!active) throw new Error("cad.commit requires an active Pi-CAD v7 run");
   const variables = Object.fromEntries(
     Object.entries(input.variables ?? {}).map(([key, value]) => [key, normalizeEncodedVariable(key, value)]),
@@ -174,8 +174,7 @@ export async function commitWorkspace(input: {
 }
 
 async function activeRun(cwd: string, registries: RegistrySet) {
-  const loaded = await new HarnessProjectStoreV7(cwd).currentRun(registries);
-  if (!loaded) throw new Error("no active Pi-CAD v7 run");
+  const loaded = await requireActiveRun(cwd, registries);
   return { loaded, store: new HarnessRunStoreV7(cwd, loaded.state.runId) };
 }
 

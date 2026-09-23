@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { canonicalDigest, jsonValue, type JsonValue } from "../../harness/canonical.ts";
 import { commitEvidenceRef, transitionRun, unmetPhaseObligations } from "../../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../../harness/run-store.ts";
+import { resolveActiveRun } from "../../harness/run-scope.ts";
 import type { EvidenceRefV7, HarnessRunStateV7 } from "../../harness/state.ts";
 import type { WorkflowObligationDefinition, WorkflowSnapshotV1 } from "../../harness/workflow/types.ts";
 import { buildProposal, convertProposal, type CandidateProposal } from "../../modules/model/finalizer.ts";
@@ -103,7 +104,7 @@ export async function commitMechanicalCandidateV7(input: {
   format?: string;
   output?: string;
 }) {
-  const loaded = await new HarnessProjectStoreV7(input.cwd).currentRun(mechanicalRegistries);
+  const loaded = await resolveActiveRun(input.cwd, mechanicalRegistries);
   if (!loaded) throw new Error("cad_commit_candidate requires an active v7 run");
   const phase = loaded.workflow.phases[loaded.state.phase]!;
   if (!phase.actions.includes("cad_commit_candidate")) throw new Error(`cad_commit_candidate is not enabled in phase ${loaded.state.phase}`);

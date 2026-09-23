@@ -8,12 +8,16 @@ the unavailable-path are always tested.
 from __future__ import annotations
 
 import json
+import hashlib
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from cadctl.presentation import blender_binary, run_presentation, validate_spec
+from cadctl.presentation_driver import configure_cycles_device
 
 ROOT = Path(__file__).resolve().parent.parent
 HAS_BLENDER = shutil.which("blender") is not None
@@ -40,6 +44,102 @@ def _reference_image(path: Path) -> Path:
 
 
 class PresentationSchema(unittest.TestCase):
+    def test_agent_blender_command_uses_managed_binary(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from cadctl.cli import main
+
+        completed = SimpleNamespace(returncode=7)
+        with patch("cadctl.presentation.blender_binary", return_value=("/managed/blender", "5.1.2/linux-x64")), patch(
+            "cadctl.cli.subprocess.run", return_value=completed
+        ) as run:
+            self.assertEqual(main(["blender", "--", "--background", "--python", "scene.py"]), 7)
+        self.assertEqual(run.call_args.args[0], ["/managed/blender", "--background", "--python", "scene.py"])
+
+    def test_agent_blender_command_rejects_path_fallback(self):
+        from unittest.mock import patch
+
+        from cadctl.cli import main
+
+        with patch("cadctl.presentation.blender_binary", return_value=("/usr/bin/blender", "path-fallback")), patch(
+            "cadctl.cli.subprocess.run"
+        ) as run:
+            self.assertEqual(main(["blender", "--", "--version"]), 2)
+        run.assert_not_called()
+
+    def test_managed_blender_wins_over_path_blender(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            managed = Path(tmp) / "5.1.2" / "linux-x64" / "blender"
+            managed.parent.mkdir(parents=True)
+            managed.write_text("binary")
+            managed.chmod(0o755)
+            with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": tmp}, clear=False), patch(
+                "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
+            ):
+                self.assertEqual(blender_binary(), (str(managed.resolve()), "5.1.2/linux-x64"))
+
+    def test_managed_blender_uses_exact_manifest_version_and_platform(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pinned = root / "runtime" / "5.1.2" / "linux-x64" / "blender"
+            newer = root / "runtime" / "4.6.0" / "linux-x64" / "blender"
+            foreign = root / "runtime" / "9.0.0" / "win32-x64" / "blender"
+            for binary in (pinned, newer, foreign):
+                binary.parent.mkdir(parents=True)
+                binary.write_text("binary")
+                binary.chmod(0o755)
+            manifest = root / "blender-manifest.json"
+            manifest.write_text(json.dumps({
+                "version": "5.1.2",
+                "platforms": {"linux-x64": {"binary": "distribution/blender", "sha256": "pinned"}},
+            }))
+            with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": str(root / "runtime")}, clear=False), patch(
+                "cadctl.presentation._blender_manifest_path", return_value=manifest
+            ), patch("cadctl.presentation._blender_platform_key", return_value="linux-x64"), patch(
+                "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
+            ):
+                self.assertEqual(blender_binary(), (str(pinned.resolve()), "5.1.2/linux-x64"))
+
+    def test_cycles_prefers_available_gpu_and_falls_back_to_cpu(self):
+        class Device:
+            def __init__(self, name, kind):
+                self.name, self.type, self.use = name, kind, False
+
+        class Preferences:
+            def __init__(self, devices):
+                self.devices = devices
+                self.compute_device_type = "NONE"
+
+            def get_devices(self):
+                return None
+
+        class Cycles:
+            device = "CPU"
+
+        class Scene:
+            cycles = Cycles()
+
+        gpu = Device("NVIDIA TITAN Xp", "CUDA")
+        cpu = Device("CPU", "CPU")
+        scene = Scene()
+        selected = configure_cycles_device(scene, Preferences([gpu, cpu]))
+        self.assertEqual(scene.cycles.device, "GPU")
+        self.assertTrue(gpu.use)
+        self.assertFalse(cpu.use)
+        self.assertEqual(selected["device"], "NVIDIA TITAN Xp")
+
+        scene = Scene()
+        selected = configure_cycles_device(scene, Preferences([cpu]))
+        self.assertEqual(scene.cycles.device, "CPU")
+        self.assertEqual(selected["backend"], "CPU")
+
     def spec(self, **overrides):
         spec = {
             "artifact": "model.step",
@@ -161,6 +261,79 @@ class PresentationSchema(unittest.TestCase):
             )
             result = run_presentation(spec, tmp / "out", stage="validate")
             self.assertEqual(result["status"], "validated")
+
+
+class PresentationBridgeBundle(unittest.TestCase):
+    @staticmethod
+    def declare_instances(artifact: Path, left, right) -> None:
+        from cadctl.identity import Assembly, reset, write_manifest
+
+        reset()
+        identity = Assembly("assy")
+        identity.part("assy/bracket-definition", label="Bracket")
+        identity.instance("assy/bracket-a", part="assy/bracket-definition", label="Bracket", shape=left)
+        identity.instance("assy/bracket-b", part="assy/bracket-definition", label="Bracket", shape=right)
+        write_manifest(identity, artifact)
+
+    def test_real_step_bundle_binds_hashes_and_each_identity(self):
+        import build123d as bd
+        from cadctl.presentation import _tessellate_step
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "assembly.step"
+            left = bd.Box(10, 8, 2)
+            right = bd.Pos(14, 0, 0) * bd.Box(10, 8, 2)
+            bd.export_step(bd.Compound([left, right]), artifact)
+            step_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            self.declare_instances(artifact, left, right)
+
+            paths = _tessellate_step(artifact, root / "mesh-bundle")
+            manifest = json.loads((root / "mesh-bundle" / "manifest.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(manifest["stepSha256"], step_hash)
+            self.assertTrue(manifest["identityBound"])
+            self.assertEqual([part["occurrenceId"] for part in manifest["parts"]], ["assy/bracket-a", "assy/bracket-b"])
+            self.assertEqual([part["partId"] for part in manifest["parts"]], ["assy/bracket-a", "assy/bracket-b"])
+            self.assertEqual([part["solidId"] for part in manifest["parts"]], ["assy/bracket-a:solid-1", "assy/bracket-b:solid-1"])
+            self.assertEqual(len(paths), 2)
+            self.assertEqual([hashlib.sha256(path.read_bytes()).hexdigest() for path in paths], [part["meshSha256"] for part in manifest["parts"]])
+
+    @unittest.skipUnless(shutil.which("blender"), "Blender is not installed")
+    def test_headless_blender_import_preserves_manifest_identity(self):
+        import build123d as bd
+        from cadctl.presentation import _tessellate_step
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "assembly.step"
+            left = bd.Box(8, 6, 2)
+            right = bd.Pos(12, 0, 0) * bd.Box(8, 6, 2)
+            bd.export_step(bd.Compound([left, right]), artifact)
+            step_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            self.declare_instances(artifact, left, right)
+            bundle = root / "mesh-bundle"
+            _tessellate_step(artifact, bundle)
+            report_path = root / "bridge-report.json"
+            args_path = root / "bridge-args.json"
+            args_path.write_text(json.dumps({
+                "operation": "bridge-inspect",
+                "artifact": str(artifact),
+                "meshBundle": str(bundle),
+                "reportPath": str(report_path),
+            }), encoding="utf-8")
+
+            blender = shutil.which("blender")
+            assert blender is not None
+            result = subprocess.run([
+                blender, "--background", "--factory-startup", "-P",
+                str(ROOT / "python" / "cadctl" / "presentation_driver.py"), "--", str(args_path),
+            ], capture_output=True, text=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr[-3000:])
+            bridge = json.loads(report_path.read_text(encoding="utf-8"))["bridge"]
+            self.assertEqual(bridge["stepSha256"], step_hash)
+            self.assertEqual(bridge["objectCount"], 2)
+            self.assertEqual([item["occurrenceId"] for item in bridge["objects"]], ["assy/bracket-a", "assy/bracket-b"])
 
 
 @unittest.skipUnless(HAS_BLENDER and HAS_FFMPEG, "blender/ffmpeg not installed")

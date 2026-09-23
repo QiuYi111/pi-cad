@@ -1,0 +1,91 @@
+schema: 1
+id: mechanical.default
+description: Plan the engineering task, execute it freely, and finish when the real work is complete.
+tags: [cad, mechanical, default]
+version: 3.0.0
+workflow:
+  schema: 1
+  id: mechanical.default
+  version: 3.0.0
+  parametersSchema: {type: object, additionalProperties: false}
+  initialPhase: plan
+  versionControl:
+    init: true
+    allowRemote: false
+    phases:
+      plan: {onExit: [commit]}
+  phases:
+    plan:
+      purpose: Understand the real engineering task and make a useful initial plan.
+      guidance: >-
+        Plan the engineering task itself, not the workflow. Capture current
+        requirements and acceptance criteria separately from the current execution
+        strategy. Resolve only questions that materially affect the work.
+
+        Grilling and visual concepts are optional tools. When a concept image is
+        useful, inspect the actual image and translate its silhouette, topology,
+        proportions, interfaces, curvature, and part relationships into a geometry
+        plan. The image is form and layout intent, not dimensional authority.
+
+        Commit the initial plan as `plan`. This plan is a living engineering
+        understanding, not a frozen contract. Later user instructions override it.
+        Advance only when the initial plan is sufficient to begin real work.
+      actions: [cad_commit, codex_generate_image, transition]
+      grants: [file_read, image_generate, transition]
+      writeScopes: [project:deliverable]
+      recordObligations:
+        - {ref: plan, type: workspace_commit, closeWith: cad_commit}
+      evidenceObligations:
+        - {ref: concept-image, type: concept_image, closeWith: codex_generate_image, required: false}
+      contextProviders: [kernel.current-action, mechanical.mission]
+      hooks: []
+      transitions:
+        plan_ready: {target: cook, requiresPhaseObligations: true}
+    cook:
+      purpose: Execute the engineering task autonomously until it is genuinely complete.
+      guidance: >-
+        Execute the user's engineering task, not the workflow. Choose the order of
+        design, prototyping, assembly, analysis, probing, simulation, revision,
+        presentation, and review yourself.
+
+        Treat the latest commit named `plan` as the current Plan. When later user
+        information, evidence, or a material strategy change makes it stale, update
+        it immediately with another `plan` commit. Do this in COOK without returning
+        to PLAN. Preserve prior versions through the normal commit chain. Separate
+        current requirements and acceptance criteria from revisable execution strategy.
+
+        Concept sketches may be rough and CAD may be incomplete, but CAD cannot be
+        fake. Do not use placeholder solids, fake transforms, or scaling tricks merely
+        to show progress. Build real functional geometry.
+
+        Use build as visual observation and probe only for facts you need. A successful
+        build is not proof of correctness. Spawn temporary specialist reviewers only
+        when they are likely to produce new information. Give each the candidate commit,
+        latest Plan commit, and permission to inspect views and run probes. Treat their
+        findings, uncertainties, and suggested checks as advice; verify them and make
+        the final decision yourself. Distinguish candidate defects, a stale Plan, and
+        missing evidence. Do not use the authoritative reviewer in this default workflow.
+
+        Continue while any material requirement, interface, motion, manufacturing
+        issue, visual mismatch, or acceptance criterion remains unresolved. Transition
+        only when the requested engineering result is genuinely complete.
+      actions: [cad_build_step, cad_commit, cad_simulate, transition]
+      grants: [file_read, file_edit_source, model_build, observe, observe_interference, observe_programmable, shell, transition, simulate]
+      writeScopes: [project:deliverable, project:source, run:observation]
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action, mechanical.mission, mechanical.observations]
+      hooks: [mechanical.candidate.observe]
+      transitions:
+        finished: {target: done}
+    done:
+      purpose: Preserve the completed engineering result.
+      actions: []
+      grants: [file_read]
+      writeScopes: []
+      recordObligations: []
+      evidenceObligations: []
+      contextProviders: [kernel.current-action]
+      hooks: []
+      transitions: {}
+      terminal: true

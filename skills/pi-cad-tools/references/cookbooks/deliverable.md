@@ -14,7 +14,11 @@ Export: source artifact and format/output. Drawing: a `kind: drawing` `pi-recipe
 
 ## Complete working example
 
-Verify the current artifact hash, author the Recipe/spec, then call `cad_generate_drawing({recipe, stage, obligationRef, outputs})` or `cad_render_scene({recipe, stage, obligationRef, outputs})`. The one-shot domain action executes, observes, and explicitly commits either the pre-bound Evidence or non-Evidence artifacts. Inspect previews and immutable export hashes before review.
+Use the exact STEP path and SHA-256 returned by the current build or selected `ArtifactRef`; pass both as `source` and `sourceSha256` to `cad_export`. Do not replace it with a remembered default path or choose a file by modification time. A selected old STEP is allowed when named explicitly; report it as that old artifact revision.
+
+For a named assembly, pass occurrence/feature refs from the identity manifest. Display labels are not unique identifiers. Do not use `solids()[n]`, display order, or bounding-box proximity as a stable object mapping. Anonymous external STEP remains viewable, but its geometry-based fallback IDs only identify solids in that exact artifact revision.
+
+Then author the Recipe/spec and call `cad_generate_drawing({recipe, stage, obligationRef, outputs})` or `cad_render_scene({recipe, stage, obligationRef, outputs})`. The one-shot domain action executes, observes, and explicitly commits either the pre-bound Evidence or non-Evidence artifacts. Inspect previews and immutable export hashes before review.
 
 ## Preflight
 

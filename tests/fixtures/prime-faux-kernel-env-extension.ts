@@ -10,7 +10,7 @@ export default async function registerPrimeKernelEnvFaux(pi: any): Promise<void>
   let calls = 0;
   const kernelCode = [
     "import cad, ipykernel, json, pydantic, rlm, sys",
-    "await cad.workflow.start('mechanical.quick-build', interaction_mode='headless')",
+    "await cad.workflow.start('mechanical.default', interaction_mode='headless')",
     "workflow = await cad.workflow.current()",
     "result = {'executable': sys.executable, 'prefix': sys.prefix, 'sys_path': sys.path, 'modules': {'pydantic': pydantic.__file__, 'rlm': rlm.__file__, 'ipykernel': ipykernel.__file__}, 'workflow': workflow}",
     "open('kernel-preflight-result.json', 'w', encoding='utf-8').write(json.dumps(result, default=str))",

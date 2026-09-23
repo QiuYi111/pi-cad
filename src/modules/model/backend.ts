@@ -27,6 +27,7 @@ export interface ModelBuildInput {
 
 export interface ModelExportInput {
   source: string;
+  sourceSha256?: string;
   output: string;
   format: string;
 }

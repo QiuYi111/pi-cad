@@ -146,7 +146,19 @@ export interface HarnessProjectStateV7 {
   runs: Array<{ runId: string; workflowHash: string; createdAt: string }>;
   head: { artifacts: Record<string, { path: string; sha256: string; role: string }>; updatedAt: string };
   promotedRunId?: string;
+  /**
+   * Live conversation → run binding. The Prime transcript keeps the durable
+   * copy; this registry lets stateless socket clients (the Python kernel)
+   * resolve their own conversation without a project-global run pointer.
+   */
+  conversations?: Record<string, ProjectConversationBindingV1>;
   updatedAt: string;
+}
+
+export interface ProjectConversationBindingV1 {
+  runId: string;
+  workflowHash: string;
+  boundAt: string;
 }
 
 export class HarnessProjectStoreV7 {
@@ -177,27 +189,92 @@ export class HarnessProjectStoreV7 {
     parameters?: Record<string, JsonValue>;
     interactionMode?: "interactive" | "headless";
   }): Promise<LoadedHarnessRunV7> {
+    return this.startConversationRun({ ...input, sessionId: null, select: true });
+  }
+
+  /**
+   * Start a run owned by one conversation. The run is registered in the
+   * project run registry, but the project-global current-run pointer is left
+   * alone: conversation lifecycle is not project lifecycle.
+   */
+  async startConversationRun(input: {
+    sessionId: string | null;
+    workflow: WorkflowSnapshotV1;
+    registryContract: RegistryContractV1;
+    parameters?: Record<string, JsonValue>;
+    interactionMode?: "interactive" | "headless";
+    select?: boolean;
+  }): Promise<LoadedHarnessRunV7> {
     const runId = `v7-${Date.now()}-${randomUUID().slice(0, 8)}`;
     const initial = await this.load();
     const state = createHarnessRunState({ runId, projectId: initial.state.projectId, workflow: input.workflow, registryContract: input.registryContract, parameters: input.parameters, interactionMode: input.interactionMode });
     const run = new HarnessRunStoreV7(this.cwd, runId);
     const loaded = await run.initialize({ state, workflow: input.workflow, registryContract: input.registryContract });
+    const boundAt = new Date().toISOString();
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const project = await this.load();
       const next: HarnessProjectStateV7 = {
         ...project.state,
-        currentRunId: runId,
+        currentRunId: input.select ? runId : project.state.currentRunId,
         runs: [...project.state.runs, { runId, workflowHash: input.workflow.hash, createdAt: state.createdAt }],
-        updatedAt: new Date().toISOString(),
+        ...(input.sessionId
+          ? { conversations: { ...project.state.conversations, [input.sessionId]: { runId, workflowHash: input.workflow.hash, boundAt } } }
+          : {}),
+        updatedAt: boundAt,
       };
       try {
-        await this.transactions.commit({ expectedGeneration: project.head?.generation ?? 0, payloads: { "state.json": jsonValue(next) }, event: { type: "ProjectRunSelected", data: { runId } } });
+        await this.transactions.commit({
+          expectedGeneration: project.head?.generation ?? 0,
+          payloads: { "state.json": jsonValue(next) },
+          event: input.select
+            ? { type: "ProjectRunSelected", data: { runId } }
+            : { type: "ConversationRunStarted", data: { runId, sessionId: input.sessionId ?? "" } },
+        });
         return loaded;
       } catch (error) {
         if (!(error instanceof TransactionConflictError) || attempt === 2) throw error;
       }
     }
     throw new Error("unreachable v7 project mutation retry state");
+  }
+
+  async conversationBinding(sessionId: string): Promise<ProjectConversationBindingV1 | null> {
+    const { state } = await this.load();
+    return state.conversations?.[sessionId] ?? null;
+  }
+
+  async bindConversation(sessionId: string, binding: ProjectConversationBindingV1): Promise<HarnessProjectStateV7> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const project = await this.load();
+      const next: HarnessProjectStateV7 = {
+        ...project.state,
+        conversations: { ...project.state.conversations, [sessionId]: binding },
+        updatedAt: new Date().toISOString(),
+      };
+      try {
+        await this.transactions.commit({
+          expectedGeneration: project.head?.generation ?? 0,
+          payloads: { "state.json": jsonValue(next) },
+          event: { type: "ConversationRunBound", data: { sessionId, runId: binding.runId } },
+        });
+        return next;
+      } catch (error) {
+        if (!(error instanceof TransactionConflictError) || attempt === 2) throw error;
+      }
+    }
+    throw new Error("unreachable v7 conversation binding retry state");
+  }
+
+  /** Active runs that some conversation is currently bound to. */
+  async activeConversationRuns(registries?: RegistrySet): Promise<LoadedHarnessRunV7[]> {
+    const { state } = await this.load();
+    const runIds = [...new Set(Object.values(state.conversations ?? {}).map((binding) => binding.runId))];
+    const active: LoadedHarnessRunV7[] = [];
+    for (const runId of runIds) {
+      const run = await new HarnessRunStoreV7(this.cwd, runId).load(registries);
+      if (run && !["done", "aborted", "blocked_user", "blocked_external", "budget_exhausted"].includes(run.state.status)) active.push(run);
+    }
+    return active;
   }
 
   async currentRun(registries?: RegistrySet): Promise<LoadedHarnessRunV7 | null> {
@@ -217,11 +294,15 @@ export class HarnessProjectStoreV7 {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const project = await this.load();
       if (project.state.promotedRunId === runId) return project.state;
-      if (project.state.currentRunId !== runId) throw new Error(`project no longer selects run for promotion: ${runId}`);
+      // A conversation-owned run publishes Project HEAD artifacts without ever
+      // claiming the project-global run pointer.
+      if (project.state.currentRunId !== null && project.state.currentRunId !== runId) {
+        throw new Error(`project no longer selects run for promotion: ${runId}`);
+      }
       const at = new Date().toISOString();
       const next: HarnessProjectStateV7 = {
         ...project.state,
-        currentRunId: null,
+        currentRunId: project.state.currentRunId === runId ? null : project.state.currentRunId,
         promotedRunId: runId,
         head: { artifacts: { ...run.state.artifacts }, updatedAt: at },
         updatedAt: at,

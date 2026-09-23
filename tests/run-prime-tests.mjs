@@ -21,4 +21,16 @@ const smoke = spawnSync(process.execPath, [resolve(project, "tests/prime-cli-smo
   stdio: "inherit",
   env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
 });
-process.exitCode = smoke.status ?? 1;
+if (smoke.status !== 0) process.exit(smoke.status ?? 1);
+const subagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-subagent-smoke.mjs")], {
+  cwd: project,
+  stdio: "inherit",
+  env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
+});
+if (subagentSmoke.status !== 0) process.exit(subagentSmoke.status ?? 1);
+const desktopSubagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-desktop-rpc-subagent-smoke.mjs")], {
+  cwd: project,
+  stdio: "inherit",
+  env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
+});
+process.exitCode = desktopSubagentSmoke.status ?? 1;

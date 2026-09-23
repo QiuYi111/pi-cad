@@ -12,19 +12,14 @@ import type {
 } from "../../src/shared/contracts.js";
 import { createHash } from "node:crypto";
 import { parameterDefinitionsWithValues, validateParameterValues } from "../../src/shared/model-parameters.js";
-import { withCanonicalProjectEnvironment, type RuntimeBridge } from "./runtime-bridge.js";
+import type { RuntimeBridge } from "./runtime-bridge.js";
 import { DesktopCadctlRpc } from "./cadctl-rpc.js";
+import { AgentApiClient, conversationFields, type ConversationScope } from "./agent-api-client.js";
 
 interface CadctlEnvelope {
   ok: boolean;
   payload?: unknown;
   inputHashes?: Record<string, string>;
-}
-
-interface AgentApiEnvelope<T> {
-  ok: boolean;
-  result?: T;
-  error?: { message?: string };
 }
 
 interface WorkflowView {
@@ -49,8 +44,22 @@ export class ViewerBackend {
   private warmKey = "";
   private warmTask: Promise<void> | null = null;
 
-  constructor(private readonly bridge: RuntimeBridge) {
+  /**
+   * `conversation` is the Prime conversation every Desktop call belongs to.
+   * Run work is stored per run, so a version, artifact or approval belongs to
+   * the conversation that owns the run — not to whatever run the project
+   * pointer happens to hold. The Desktop window always answers with its own
+   * scope: a session id, or `null` while its conversation has no session yet.
+   * Only a caller constructed without a scope (headless, packaged smoke) names
+   * no conversation and keeps the legacy project-global pointer.
+   */
+  constructor(private readonly bridge: RuntimeBridge, private readonly conversation: () => ConversationScope = () => undefined) {
     this.cadctl = new DesktopCadctlRpc(bridge);
+  }
+
+  /** The conversation this window shows, or the scope an explicit caller named. */
+  private scope(explicit?: string): ConversationScope {
+    return explicit ?? this.conversation();
   }
 
   stop(): void {
@@ -66,27 +75,43 @@ export class ViewerBackend {
     return JSON.parse(stdout) as MeshDocument;
   }
 
-  async exportStep(settings: AppSettings, source: string, destination: string): Promise<void> {
+  async exportStep(settings: AppSettings, source: string, destination: string, expectedSha?: string): Promise<void> {
+    const { piCadRepo } = await this.bridge.resolveRuntimePaths(settings);
     const sourcePath = await this.resolveProjectPath(settings, source);
     const destinationPath = await this.bridge.toRuntimePath(destination);
     if (normalizePath(sourcePath) === normalizePath(destinationPath)) return;
-    await this.bridge.exec(["cp", "--", sourcePath, destinationPath], { timeout: 120_000 });
+    const sourceHash = await hashRuntimeFile(this.bridge, sourcePath);
+    if (expectedSha && sourceHash !== expectedSha) throw new Error(`Selected STEP changed before export: expected ${expectedSha}, found ${sourceHash}.`);
+    const result = await this.bridge.exec([
+      `${piCadRepo}/python/.venv/bin/cadctl`, "export",
+      "--source", sourcePath,
+      "--source-sha256", sourceHash,
+      "--output", destinationPath,
+      "--format", "step",
+    ], { timeout: 120_000 });
+    let envelope: { ok?: boolean; payload?: { error?: string } };
+    try {
+      envelope = JSON.parse(result.stdout) as typeof envelope;
+    } catch {
+      throw new Error("STEP export returned an invalid cadctl response.");
+    }
+    if (!envelope.ok) throw new Error(envelope.payload?.error || "STEP export failed.");
   }
 
-  async catalog(settings: AppSettings): Promise<ViewerCatalog> {
-    const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
+  /**
+   * `sessionId` scopes the answer to one Prime conversation: its own run and
+   * artifacts are the "current" ones. Version and approval work is stored per
+   * run, so it follows the window's conversation too; a caller with no
+   * conversation at all (a headless or packaged smoke test) reads the
+   * project-global pointer instead.
+   */
+  async catalog(settings: AppSettings, sessionId?: string): Promise<ViewerCatalog> {
+    const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) return { projectId: "", projectHead: { updatedAt: "", artifacts: [] }, currentRun: null, commits: [], simulationRuns: [], parameterManifests: [] };
-    const node = await this.bridge.commandPath("node");
-    const { stdout } = await this.bridge.pipe(
-      await withCanonicalProjectEnvironment(this.bridge, projectPath, [node, `${piCadRepo}/scripts/pi-cad-agent-api.mjs`, "agent-api", projectPath]),
-      JSON.stringify({ schema: 1, op: "viewer-catalog" }),
-      60_000,
-    );
-    const response = JSON.parse(stdout) as { ok: boolean; result?: ViewerCatalog; error?: { message?: string } };
-    if (!response.ok || !response.result) throw new Error(response.error?.message || "Viewer catalog is unavailable.");
-    const result = { ...response.result, parameterManifests: response.result.parameterManifests ?? [] };
+    const result = await new AgentApiClient(this.bridge).request<ViewerCatalog>(settings, { op: "viewer-catalog", ...conversationFields(this.scope(sessionId)) });
+    const catalog = { ...result, parameterManifests: result.parameterManifests ?? [] };
     if (result.parameterManifests.length) void this.prewarm(settings).catch(() => {});
-    return result;
+    return catalog;
   }
 
   async previewParameters(
@@ -122,27 +147,24 @@ export class ViewerBackend {
   ): Promise<void> {
     const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) throw new Error("Choose a project before applying parameters.");
+    const scope = this.conversation();
+    // A window with no Prime session cannot own a run, so it may not start one:
+    // the mutation is refused instead of falling back to the project's run.
+    if (scope === null) throw new Error("This conversation has no workflow yet. Start one in this conversation before changing model parameters.");
     const stored = await this.findManifest(settings, manifestPath);
     const definitions = parameterDefinitionsWithValues(stored.manifest.parameters, updates);
-    const request = async <T>(body: Record<string, unknown>, timeout = 60_000): Promise<T> => {
-      const node = await this.bridge.commandPath("node");
-      const { stdout } = await this.bridge.pipe(
-        await withCanonicalProjectEnvironment(this.bridge, projectPath, [node, `${piCadRepo}/scripts/pi-cad-agent-api.mjs`, "agent-api", projectPath]),
-        JSON.stringify({ schema: 1, ...body }),
-        timeout,
-      );
-      const response = JSON.parse(stdout) as AgentApiEnvelope<T>;
-      if (!response.ok) throw new Error(response.error?.message || "Reify rejected the parameter update.");
-      return response.result as T;
-    };
+    const client = new AgentApiClient(this.bridge);
+    const request = async <T>(body: Record<string, unknown>, timeout = 60_000): Promise<T> => client.request<T>(settings, body, timeout);
+    const fields = conversationFields(scope);
 
-    let current = await request<WorkflowView | null>({ op: "workflow-current" });
+    let current = await request<WorkflowView | null>({ op: "workflow-current", ...fields });
     const replaceable = !current || !["active", "ready"].includes(current.status);
     if (replaceable) {
       current = await request<WorkflowView>({
         op: "workflow-start",
-        id: "mechanical.parameter-edit",
+        id: "mechanical.naked",
         interactionMode: "headless",
+        ...fields,
       });
     }
     if (!current?.operations?.some((operation) => operation.capability === "cad_build_step")) {
@@ -155,8 +177,8 @@ export class ViewerBackend {
       output: stored.manifest.output.path,
       force: true,
       parameters: definitions,
+      ...fields,
     }, 180_000);
-    if (replaceable) await request({ op: "workflow-advance", event: "applied" });
   }
 
   async inspectGeometry(settings: AppSettings, path: string): Promise<QuickGeometryCheck> {
@@ -224,13 +246,9 @@ export class ViewerBackend {
   }
 
   async readEvidence(settings: AppSettings, path: string): Promise<unknown> {
-    const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
+    const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) throw new Error("Choose a project before opening evidence.");
-    const node = await this.bridge.commandPath("node");
-    const { stdout } = await this.bridge.pipe(await withCanonicalProjectEnvironment(this.bridge, projectPath, [node, `${piCadRepo}/scripts/pi-cad-agent-api.mjs`, "agent-api", projectPath]), JSON.stringify({ schema: 1, op: "evidence-read", path }), 60_000);
-    const response = JSON.parse(stdout) as AgentApiEnvelope<unknown>;
-    if (!response.ok) throw new Error(response.error?.message || "Evidence is unavailable.");
-    return response.result;
+    return new AgentApiClient(this.bridge).request<unknown>(settings, { op: "evidence-read", path, ...conversationFields(this.conversation()) });
   }
 
   async releaseCommit(settings: AppSettings, commitId: string, approval: HumanApproval, destination: string, validateApproval: () => Promise<boolean>): Promise<ReleaseResult> {

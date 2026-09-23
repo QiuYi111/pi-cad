@@ -30,6 +30,9 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+
       # Python runtime (venv + build123d/OCP + torch CPU + torch-fem + gmsh)
       # is built by the package postinstall; cache it keyed on the requirement
       # files so routine CI runs do not re-download the heavy wheels.

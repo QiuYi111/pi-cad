@@ -1,0 +1,171 @@
+{
+  "campaignId": "res398-provider-press2",
+  "createdAt": "2026-09-22T16:55:57.048Z",
+  "manifest": {
+    "campaignId": "res398-provider-press2",
+    "createdAt": "2026-09-22T16:38:35.096Z",
+    "mode": "targeted",
+    "seed": 399100,
+    "rounds": 100,
+    "maxCommands": 10,
+    "runtimeRatio": 0.5,
+    "providerFaults": true,
+    "profiles": [
+      "provider-oauth"
+    ],
+    "concurrency": 2,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "providerTimeout",
+      "providerReset",
+      "providerLatency",
+      "providerStreamCut",
+      "providerRateLimited",
+      "providerServerError",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "5e191b9894bc2de50a352ce5ea14c52e7f1f4939",
+      "gitBranch": "labrunner/res-398-chaos-06",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": "1",
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 100,
+    "roundsPassed": 100,
+    "roundsFailed": 0,
+    "roundsErrored": 0,
+    "distinctSeeds": 100,
+    "stateObservations": 1730,
+    "actions": {
+      "startRun": 134,
+      "commitPlan": 127,
+      "advance": 126,
+      "desktopRestart": 15,
+      "retryBuild": 27,
+      "history": 11,
+      "build": 45,
+      "burstRefresh": 14,
+      "openConversation": 23,
+      "switchConversation": 9,
+      "multiConversationBuild": 18,
+      "duplicateCommit": 20,
+      "stopRun": 5,
+      "resumeRun": 17,
+      "concurrentBuild": 19,
+      "listWorkflows": 8,
+      "refresh": 23,
+      "phaseContract": 6,
+      "authorize": 4,
+      "completionGate": 3,
+      "phaseCard": 7
+    },
+    "faultsInjected": {
+      "providerStreamCut": 8,
+      "providerCredentialBlanked": 13,
+      "providerCredentialDropped": 12,
+      "providerCredentialExpired": 20,
+      "providerTimeout": 15,
+      "providerReset": 7,
+      "providerRateLimited": 13,
+      "providerServerError": 6,
+      "providerLatency": 2
+    },
+    "faultsNotApplicable": {
+      "providerLatency": 2
+    },
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {},
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "file-state": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "provider-oauth": {
+        "rounds": 62,
+        "injected": 96
+      },
+      "race": {
+        "rounds": 0,
+        "injected": 0
+      }
+    },
+    "components": {
+      "authority": 479,
+      "provider-oauth": 104,
+      "kernel": 109,
+      "run-store": 73
+    },
+    "profiles": {
+      "provider-oauth": 100
+    },
+    "runtimeRounds": 50,
+    "oneShotRounds": 50
+  },
+  "failures": {
+    "rounds": 0,
+    "unique": 0,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 0,
+    "unverified": 0,
+    "product": 0,
+    "harness": 0
+  },
+  "clusters": [],
+  "underExplored": [
+    "process：0 次真注入",
+    "file-state：0 次真注入",
+    "race：0 次真注入"
+  ],
+  "notes": []
+}

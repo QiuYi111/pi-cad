@@ -69,12 +69,12 @@ test("packaged viewer converts a real project STEP", async () => {
       try { return (await readFile(exported)).equals(await readFile(source)); }
       catch { return false; }
     }).toBe(true);
-    await page.getByTestId("cad-viewer").getByRole("button", { name: "Open STEP" }).click();
+    await page.getByTestId("cad-viewer").getByRole("button", { name: "Import STEP" }).click();
     await expect(page.getByRole("alert")).toContainText("The current model is preserved.");
     await expect(page.locator(".viewer-file-identity")).toContainText("input.step");
     await appendFile(source, "\n");
     const changedHash = createHash("sha256").update(await readFile(source)).digest("hex");
-    await page.getByTestId("cad-viewer").getByRole("button", { name: "Open STEP" }).click();
+    await page.getByTestId("cad-viewer").getByRole("button", { name: "Import STEP" }).click();
     await expect(page.locator(".viewer-file-identity code")).toHaveText(changedHash.slice(0, 10));
     const reopened = await page.evaluate((path) => window.piCad.viewer.loadStep(path), exported);
     expect(reopened.sha256).toBe(mesh.sha256);

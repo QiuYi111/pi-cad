@@ -50,9 +50,9 @@ test("workflow Git refuses remote actions unless explicitly enabled", async () =
 test("workspace commits bind the Git revision created for the phase record", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "reify-git-api-"));
   await writeFile(join(cwd, "design.py"), "size = 1\n");
-  await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.one-shot" });
+  await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
   await writeFile(join(cwd, "design.py"), "size = 2\n");
-  const manifest = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "grill" }) as { sourceRevision?: string };
+  const manifest = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "plan" }) as { sourceRevision?: string };
   assert.match(manifest.sourceRevision ?? "", /^[a-f0-9]{40}$/);
   const { stdout } = await run("git", ["show", `${manifest.sourceRevision}:design.py`], { cwd });
   assert.equal(stdout, "size = 2\n");
@@ -64,7 +64,7 @@ test("workspace commits preserve small parameter manifests needed for isolated r
   await run("git", ["init"], { cwd });
   await run("git", ["add", "design.py"], { cwd });
   await run("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "source"], { cwd });
-  await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.quick-build" });
+  await handleAgentApi(cwd, { schema: 1, op: "workflow-start", id: "mechanical.naked" });
   const manifest = { schema: 1, modelId: "plate", source: { path: "design.py", sha256: "a".repeat(64), entrypoint: "build" }, output: { path: "build/plate.step", sha256: "b".repeat(64) }, parameters: [{ id: "hole", type: "number", default: 8, value: 8, unit: "mm" }] };
   await writeFile(join(cwd, "parameters.json"), JSON.stringify(manifest));
   const committed = await handleAgentApi(cwd, { schema: 1, op: "commit", name: "hole-8", artifacts: [{ path: "parameters.json", role: "model-parameter-manifest" }], acceptance: {

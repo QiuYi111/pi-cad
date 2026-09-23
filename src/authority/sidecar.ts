@@ -9,9 +9,17 @@ import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
 import { handleAgentApi } from "../agent-api/handlers.ts";
 import type { AgentApiRequest, AgentApiResponse } from "../agent-api/protocol.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
-import { compilePhaseCard, workflowCurrentView } from "../harness/card.ts";
+import { compilePhaseCard, compilePhaseContract, workflowCurrentView } from "../harness/card.ts";
 import { renderAuthorizationDenied, type Operation } from "../harness/permissions.ts";
-import { HarnessProjectStoreV7, HarnessRunStoreV7, type LoadedHarnessRunV7 } from "../harness/run-store.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7, type HarnessProjectStateV7, type LoadedHarnessRunV7 } from "../harness/run-store.ts";
+import {
+  activeRunScope,
+  resolveActiveRun,
+  resolveRequestScope,
+  runWithRunScope,
+  type RunScopeRequestV1,
+  type RunScopeV1,
+} from "../harness/run-scope.ts";
 import { writeStatusProjection } from "./storage.ts";
 import { ReviewRuntime, type ReviewerExecutor } from "./review-runtime.ts";
 import { findExperience, getExperience, readExperience, searchExperience } from "../experience/store.ts";
@@ -27,6 +35,7 @@ type AuthorModelSelection = { provider: string; model: string; thinking: "off" |
 
 export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "phase-card" }
+  | { schema: 1; op: "phase-contract" }
   | { schema: 1; op: "completion-gate" }
   | { schema: 1; op: "mission-capture"; mission: string }
   | { schema: 1; op: "author-model"; provider: string; model: string; thinking: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" }
@@ -39,7 +48,7 @@ export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "experience-read"; identifier: { seq?: number; sha?: string }; startLine?: number; endLine?: number };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "phase-contract", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
 const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture", "image-generated"]);
@@ -91,12 +100,28 @@ function validateRequest(value: unknown): asserts value is SidecarRequest {
   if (request.schema !== 1 || typeof request.op !== "string" || !request.op) throw new Error("invalid sidecar protocol request");
 }
 
+const PROJECTION_TERMINAL_STATUSES = new Set(["done", "aborted", "blocked_user", "blocked_external", "budget_exhausted"]);
+
+/**
+ * The projection is not authority. Conversation-scoped requests project their
+ * own run; an unscoped request (desktop viewer/CLI) falls back to the newest
+ * live conversation run so the workspace keeps showing active work while the
+ * project-global pointer stays empty.
+ */
+async function projectionRun(cwd: string, state: HarnessProjectStateV7): Promise<LoadedHarnessRunV7 | null> {
+  const scoped = await resolveActiveRun(cwd, mechanicalRegistries);
+  if (scoped || activeRunScope()) return scoped;
+  for (const entry of [...state.runs].reverse().slice(0, 8)) {
+    const run = await new HarnessRunStoreV7(cwd, entry.runId).load(mechanicalRegistries);
+    if (run && !PROJECTION_TERMINAL_STATUSES.has(run.state.status)) return run;
+  }
+  return null;
+}
+
 async function refreshProjection(cwd: string): Promise<void> {
   const project = new HarnessProjectStoreV7(cwd);
   const loadedProject = await project.load();
-  const run = loadedProject.state.currentRunId
-    ? await new HarnessRunStoreV7(cwd, loadedProject.state.currentRunId).load(mechanicalRegistries)
-    : null;
+  const run = await projectionRun(cwd, loadedProject.state);
   await writeStatusProjection(cwd, loadedProject.state, run ? {
     state: run.state,
     workflow: run.workflow,
@@ -120,88 +145,115 @@ function agentExperienceEntry(entry: Record<string, unknown>): Record<string, un
   return safe;
 }
 
+/**
+ * Every request carries its own run scope. The author side names its Prime
+ * conversation; the reviewer side owns a scoped reviewId that identifies the
+ * run it was admitted against. Requests without either keep the legacy
+ * project-global pointer for headless and benchmark callers.
+ */
+async function scopeForRequest(role: SidecarRole, cwd: string, value: Record<string, unknown>, reviewRuntime?: ReviewRuntime): Promise<RunScopeV1 | undefined> {
+  if (role === "reviewer") {
+    const reviewerRequestId = typeof value.reviewId === "string" ? value.reviewId : null;
+    if (reviewerRequestId && reviewRuntime) {
+      const runId = reviewRuntime.reviewRunId(reviewerRequestId);
+      if (runId) return { sessionId: null, runId };
+    }
+  }
+  return resolveRequestScope(cwd, value as RunScopeRequestV1);
+}
+
 export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
+  let scope: RunScopeV1 | undefined;
   try {
     validateRequest(value);
-    if (role === "reviewer" && !REVIEWER_ALLOWED.has(value.op)) {
-      throw new Error(`reviewer endpoint does not expose operation: ${value.op}`);
-    }
-    if (role === "author" && !AUTHOR_ONLY.has(value.op) && !COMMON_ALLOWED.has(value.op)) {
-      throw new Error(`author endpoint does not expose operation: ${value.op}`);
-    }
-    if (role === "author" && options.authorReadOnly && READ_ONLY_AUTHOR_DENIED.has(value.op)) {
-      throw new Error(`desktop read-only mode denies operation: ${value.op}; switch permission to Workspace to modify the project`);
-    }
-    const reviewerRequestId = role === "reviewer" ? (value as { reviewId?: string }).reviewId : undefined;
-    if (role === "reviewer") {
-      if (!reviewRuntime || !reviewerRequestId) throw new Error("reviewer request is missing its scoped reviewId");
-      const subjectCommit = await reviewRuntime.reviewerSubject(reviewerRequestId);
-      if (value.op === "load" && value.id !== subjectCommit) throw new Error("reviewer may load only its immutable subject commit");
-      if (value.op === "probe") await reviewRuntime.admitProbe(reviewerRequestId);
-      if (value.op === "review-complete" && value.reviewId !== reviewerRequestId) throw new Error("reviewer authority does not match review result");
-    }
-    let result: unknown;
-    if (value.op === "author-model") {
-      if (role !== "author" || !onAuthorModelSelection) throw new Error("author model reporting is unavailable");
-      if (typeof value.provider !== "string" || !value.provider.trim() || typeof value.model !== "string" || !value.model.trim()) throw new Error("author model requires non-empty provider and model");
-      if (!["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value.thinking)) throw new Error("author model has an invalid thinking level");
-      onAuthorModelSelection({ provider: value.provider.trim(), model: value.model.trim(), thinking: value.thinking });
-      result = { recorded: true };
-    } else if (value.op === "review-submit") {
-      if (!reviewRuntime) throw new Error("review runtime is unavailable");
-      const decision = await currentAuthorization(cwd, "review.submit", "author");
-      if (!decision?.allowed) throw new Error(decision && !decision.allowed ? renderAuthorizationDenied(decision) : "review.submit requires an active workflow");
-      result = await reviewRuntime.submit(value.subjectCommit);
-    } else if (value.op === "review-current") {
-      result = reviewRuntime ? await reviewRuntime.current(value.reviewId) : await handleAgentApi(cwd, value, role);
-    } else if (value.op === "review-evidence") {
-      if (role !== "reviewer" || !reviewRuntime || !reviewerRequestId) throw new Error("review evidence requires reviewer authority");
-      result = await reviewRuntime.evidence(reviewerRequestId);
-    } else if (value.op === "review-complete") {
-      if (role !== "reviewer" || !reviewRuntime) throw new Error("review completion requires reviewer authority");
-      result = await reviewRuntime.complete(value.reviewId, value.result);
-    } else if (value.op === "review-watch") {
-      if (role !== "author" || !reviewRuntime) throw new Error("review notification stream is unavailable");
-      result = await reviewRuntime.watch(value.after);
-    } else if (value.op === "mission-capture") {
-      if (role !== "author") throw new Error("mission capture is author-scoped");
-      result = await captureMission(cwd, value.mission);
-    } else if (value.op === "image-generated") {
-      if (role !== "author") throw new Error("generated image evidence is author-scoped");
-      result = await recordGeneratedImage(cwd, value.path);
-    } else if (value.op === "phase-card") {
-      if (role !== "author") throw new Error("phase-card is author-scoped");
-      bootstrapAgentApiContracts();
-      result = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
-    } else if (value.op === "completion-gate") {
-      if (role !== "author") throw new Error("completion-gate is author-scoped");
-      result = await completionGate(cwd);
-    } else if (value.op === "authorize") {
-      if (role !== "author") throw new Error("authorization query is author-scoped");
-      if (options.authorReadOnly && READ_ONLY_OPERATIONS.has(value.operation)) {
-        result = { allowed: false, reason: "Desktop is in read-only mode.", legalNextActions: ["Switch permission to Workspace."] };
-      } else {
-        const decision = await currentAuthorization(cwd, value.operation, "author");
-        result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
-      }
-    } else if (value.op === "experience-search") {
-      result = (await searchExperience(value.options ?? {})).map((entry) => agentExperienceEntry(entry as unknown as Record<string, unknown>));
-    } else if (value.op === "experience-get") {
-      result = agentExperienceEntry(await getExperience(value.identifier) as unknown as Record<string, unknown>);
-    } else if (value.op === "experience-find") {
-      result = await findExperience(value.identifier, value.query, value.context, value.limit);
-    } else if (value.op === "experience-read") {
-      const read = await readExperience(value.identifier, value.startLine, value.endLine);
-      result = { ...read, entry: agentExperienceEntry(read.entry as unknown as Record<string, unknown>) };
-    } else {
-      result = await handleAgentApi(cwd, value, role);
-    }
-    await refreshProjectionSafely(cwd);
-    return { schema: 1, ok: true, result: result as never };
+    scope = await scopeForRequest(role, cwd, value as unknown as Record<string, unknown>, reviewRuntime);
+    return await runWithRunScope(scope, async () => dispatchAuthorRequest(role, cwd, value, reviewRuntime, onAuthorModelSelection, options));
   } catch (error) {
-    await refreshProjectionSafely(cwd);
+    await runWithRunScope(scope, () => refreshProjectionSafely(cwd));
     return errorResponse(error);
   }
+}
+
+async function dispatchAuthorRequest(role: SidecarRole, cwd: string, value: SidecarRequest, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
+  if (role === "reviewer" && !REVIEWER_ALLOWED.has(value.op)) {
+    throw new Error(`reviewer endpoint does not expose operation: ${value.op}`);
+  }
+  if (role === "author" && !AUTHOR_ONLY.has(value.op) && !COMMON_ALLOWED.has(value.op)) {
+    throw new Error(`author endpoint does not expose operation: ${value.op}`);
+  }
+  if (role === "author" && options.authorReadOnly && READ_ONLY_AUTHOR_DENIED.has(value.op)) {
+    throw new Error(`desktop read-only mode denies operation: ${value.op}; switch permission to Workspace to modify the project`);
+  }
+  const reviewerRequestId = role === "reviewer" ? (value as { reviewId?: string }).reviewId : undefined;
+  if (role === "reviewer") {
+    if (!reviewRuntime || !reviewerRequestId) throw new Error("reviewer request is missing its scoped reviewId");
+    const subjectCommit = await reviewRuntime.reviewerSubject(reviewerRequestId);
+    if (value.op === "load" && value.id !== subjectCommit) throw new Error("reviewer may load only its immutable subject commit");
+    if (value.op === "probe") await reviewRuntime.admitProbe(reviewerRequestId);
+    if (value.op === "review-complete" && value.reviewId !== reviewerRequestId) throw new Error("reviewer authority does not match review result");
+  }
+  let result: unknown;
+  if (value.op === "author-model") {
+    if (role !== "author" || !onAuthorModelSelection) throw new Error("author model reporting is unavailable");
+    if (typeof value.provider !== "string" || !value.provider.trim() || typeof value.model !== "string" || !value.model.trim()) throw new Error("author model requires non-empty provider and model");
+    if (!["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(value.thinking)) throw new Error("author model has an invalid thinking level");
+    onAuthorModelSelection({ provider: value.provider.trim(), model: value.model.trim(), thinking: value.thinking });
+    result = { recorded: true };
+  } else if (value.op === "review-submit") {
+    if (!reviewRuntime) throw new Error("review runtime is unavailable");
+    const decision = await currentAuthorization(cwd, "review.submit", "author");
+    if (!decision?.allowed) throw new Error(decision && !decision.allowed ? renderAuthorizationDenied(decision) : "review.submit requires an active workflow");
+    result = await reviewRuntime.submit(value.subjectCommit);
+  } else if (value.op === "review-current") {
+    result = reviewRuntime ? await reviewRuntime.current(value.reviewId) : await handleAgentApi(cwd, value, role);
+  } else if (value.op === "review-evidence") {
+    if (role !== "reviewer" || !reviewRuntime || !reviewerRequestId) throw new Error("review evidence requires reviewer authority");
+    result = await reviewRuntime.evidence(reviewerRequestId);
+  } else if (value.op === "review-complete") {
+    if (role !== "reviewer" || !reviewRuntime) throw new Error("review completion requires reviewer authority");
+    result = await reviewRuntime.complete(value.reviewId, value.result);
+  } else if (value.op === "review-watch") {
+    if (role !== "author" || !reviewRuntime) throw new Error("review notification stream is unavailable");
+    result = await reviewRuntime.watch(value.after);
+  } else if (value.op === "mission-capture") {
+    if (role !== "author") throw new Error("mission capture is author-scoped");
+    result = await captureMission(cwd, value.mission);
+  } else if (value.op === "image-generated") {
+    if (role !== "author") throw new Error("generated image evidence is author-scoped");
+    result = await recordGeneratedImage(cwd, value.path);
+  } else if (value.op === "phase-card") {
+    if (role !== "author") throw new Error("phase-card is author-scoped");
+    bootstrapAgentApiContracts();
+    result = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
+  } else if (value.op === "phase-contract") {
+    if (role !== "author") throw new Error("phase-contract is author-scoped");
+    bootstrapAgentApiContracts();
+    result = await compilePhaseContract(cwd, { registries: mechanicalRegistries });
+  } else if (value.op === "completion-gate") {
+    if (role !== "author") throw new Error("completion-gate is author-scoped");
+    result = await completionGate(cwd);
+  } else if (value.op === "authorize") {
+    if (role !== "author") throw new Error("authorization query is author-scoped");
+    if (options.authorReadOnly && READ_ONLY_OPERATIONS.has(value.operation)) {
+      result = { allowed: false, reason: "Desktop is in read-only mode.", legalNextActions: ["Switch permission to Workspace."] };
+    } else {
+      const decision = await currentAuthorization(cwd, value.operation, "author");
+      result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
+    }
+  } else if (value.op === "experience-search") {
+    result = (await searchExperience(value.options ?? {})).map((entry) => agentExperienceEntry(entry as unknown as Record<string, unknown>));
+  } else if (value.op === "experience-get") {
+    result = agentExperienceEntry(await getExperience(value.identifier) as unknown as Record<string, unknown>);
+  } else if (value.op === "experience-find") {
+    result = await findExperience(value.identifier, value.query, value.context, value.limit);
+  } else if (value.op === "experience-read") {
+    const read = await readExperience(value.identifier, value.startLine, value.endLine);
+    result = { ...read, entry: agentExperienceEntry(read.entry as unknown as Record<string, unknown>) };
+  } else {
+    result = await handleAgentApi(cwd, value, role);
+  }
+  await refreshProjectionSafely(cwd);
+  return { schema: 1, ok: true, result: result as never };
 }
 
 async function recordGeneratedImage(cwd: string, requestedPath: string): Promise<{ recorded: boolean; path: string }> {
@@ -215,7 +267,7 @@ async function recordGeneratedImage(cwd: string, requestedPath: string): Promise
   if (extname(image).toLowerCase() !== ".png") throw new Error("concept image evidence must be a PNG");
   const bytes = await readFile(image);
   assertValidPng(bytes);
-  const active = await new HarnessProjectStoreV7(root).currentRun(mechanicalRegistries);
+  const active = await resolveActiveRun(root, mechanicalRegistries);
   if (!active) throw new Error("generated image evidence requires an active workflow");
   const obligation = active.workflow.phases[active.state.phase]?.evidenceObligations.find((item) => item.closeWith === "codex_generate_image");
   if (!obligation) throw new Error("the current phase does not require generated image evidence");
@@ -243,7 +295,7 @@ async function recordGeneratedImage(cwd: string, requestedPath: string): Promise
 async function captureMission(cwd: string, requested: string): Promise<{ captured: boolean }> {
   const mission = typeof requested === "string" ? requested.trim() : "";
   if (!mission || Buffer.byteLength(mission) > 32 * 1024) throw new Error("original user request must be between 1 and 32768 bytes");
-  const active = await new HarnessProjectStoreV7(cwd).currentRun(mechanicalRegistries);
+  const active = await resolveActiveRun(cwd, mechanicalRegistries);
   if (!active) throw new Error("mission capture requires an active workflow");
   const run = new HarnessRunStoreV7(cwd, active.state.runId);
   const current = await run.transactions.readJson<Record<string, unknown>>("context/frame.json") ?? { schema: 1, fragments: [] };
@@ -340,6 +392,10 @@ export interface CompletionGateResult {
 }
 
 async function selectedCompletionRun(cwd: string): Promise<LoadedHarnessRunV7 | null> {
+  const scope = activeRunScope();
+  // A conversation is complete only through its own bound run. It never
+  // inherits the project pointer or a previously promoted run.
+  if (scope) return scope.runId ? new HarnessRunStoreV7(cwd, scope.runId).load(mechanicalRegistries) : null;
   const { state } = await new HarnessProjectStoreV7(cwd).load();
   const runId = state.currentRunId ?? state.promotedRunId;
   return runId ? new HarnessRunStoreV7(cwd, runId).load(mechanicalRegistries) : null;
@@ -348,7 +404,7 @@ async function selectedCompletionRun(cwd: string): Promise<LoadedHarnessRunV7 | 
 /** One-shot process success is subordinate to durable workflow completion. */
 export async function completionGate(cwd: string): Promise<CompletionGateResult> {
   const loaded = await selectedCompletionRun(cwd);
-  if (!loaded) return { complete: false, reason: "no canonical workflow run exists" };
+  if (!loaded) return { complete: false, reason: activeRunScope() ? "this Prime conversation has no bound workflow run" : "no canonical workflow run exists" };
   const phase = loaded.workflow.phases[loaded.state.phase];
   if (loaded.state.interactionMode === "headless" && loaded.state.status === "waiting_user" && loaded.state.phase === "wait_for_user") {
     const review = loaded.state.latestReview;
@@ -456,6 +512,15 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
     return { complete: false, reason: "required final review authority is missing, stale, not PASS, or bound to another release", runId: loaded.state.runId, workflowId: loaded.workflow.id };
   }
   return { complete: true, outcome: "complete", reason: "terminal workflow, final PASS, and release commit are valid", runId: loaded.state.runId, workflowId: loaded.workflow.id };
+}
+
+/** Check one Prime conversation after its one-shot process has exited. */
+export async function completionGateForConversation(cwd: string, sessionId: string): Promise<CompletionGateResult> {
+  const binding = await new HarnessProjectStoreV7(cwd).conversationBinding(sessionId);
+  return runWithRunScope(
+    { sessionId, runId: binding?.runId ?? null },
+    () => completionGate(cwd),
+  );
 }
 
 function canonicalArtifactContentHash(artifacts: Array<{ path: string; sha256: string }>): string {

@@ -61,35 +61,16 @@ try {
   const toolText = toolEnds.flatMap((event) => event.result?.content ?? []).filter((item) => item.type === "text").map((item) => item.text).join("\n");
   assert.ok(toolEnds.every((event) => event.isError !== true), toolText);
   assert.match(toolText, /CAD_IMPORT/);
+  assert.match(toolText, /CAD_WORKFLOW mechanical\.naked work/);
   assert.match(toolText, /CAD_COMMIT[^\n]*commit-[a-f0-9]{32}/);
   assert.match(toolText, /CAD_LOAD[^\n]*41/);
   assert.match(toolText, /CAD_PERSIST[^\n]*42/);
   assert.ok(events.some((event) => event.type === "message_end" && JSON.stringify(event.message).includes("PRIME_PLAN_C_SMOKE_OK")));
 
   assert.equal(contexts.length, 3);
-  const phaseCardText = (context) => context.messages
-    .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-    .find((item) => item.type === "text" && item.text.startsWith("WHERE\n"))?.text;
-  const firstCard = phaseCardText(contexts[0]);
-  const laterCards = contexts.slice(1).map(phaseCardText);
-  assert.ok(firstCard, "first provider call must contain the ephemeral Phase Card");
-  assert.ok(laterCards.every(Boolean), "every provider call must contain the ephemeral Phase Card");
-  assert.match(firstCard, /MUST[\s\S]*provider-handoff/);
-  assert.doesNotMatch(firstCard, /record provider-handoff@/);
-  for (const card of laterCards) {
-    assert.match(card, /record provider-handoff@/);
-    const must = card.slice(card.indexOf("MUST"), card.indexOf("\n\nCAN"));
-    assert.doesNotMatch(must, /- provider-handoff/);
-  }
-  const imageBase64 = readFileSync(join(fixture, "mandatory.png")).toString("base64");
   for (const context of contexts) {
     const rendered = JSON.stringify(context);
-    assert.match(rendered, /Prime provider boundary/);
-    for (const heading of ["WHERE", "GOAL", "SOP", "MUST", "CAN", "NEXT", "STATE", "WARNINGS"]) assert.match(rendered, new RegExp(heading));
     assert.doesNotMatch(rendered, /PLAN_C_ORDINARY_CANARY_MUST_STAY_OUT/);
-    const images = context.messages.flatMap((message) => Array.isArray(message.content) ? message.content : []).filter((item) => item.type === "image");
-    assert.equal(images.length, 1, JSON.stringify(context.messages.map((message) => ({ role: message.role, content: Array.isArray(message.content) ? message.content.map((item) => item.type) : typeof message.content }))));
-    assert.equal(images[0].data, imageBase64);
   }
 
   const crossCapture = join(fixture, "provider-contexts-cross.jsonl");
@@ -124,7 +105,7 @@ try {
   assert.match(cross.stderr, /WORKFLOW_INCOMPLETE/);
   const crossEvents = cross.stdout.trim().split("\n").map((line) => JSON.parse(line));
   const crossToolText = crossEvents.filter((event) => event.type === "tool_execution_end").flatMap((event) => event.result?.content ?? []).filter((item) => item.type === "text").map((item) => item.text).join("\n");
-  assert.match(crossToolText, /CAD_CROSS_SESSION[^\n]*commit-[a-f0-9]{32}[^\n]*41/);
+  assert.match(crossToolText, /CAD_CROSS_SESSION_BLOCKED[^\n]*this Prime conversation has no bound Pi-CAD workflow run/);
 } finally {
   rmSync(fixture, { recursive: true, force: true });
 }

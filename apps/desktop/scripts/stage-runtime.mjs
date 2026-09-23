@@ -28,7 +28,7 @@ const copy = async (from, to) => cp(from, to, { recursive: true, force: true, fi
 
 const piCadDestination = join(destination, "pi-cad");
 await mkdir(piCadDestination, { recursive: true });
-for (const name of ["src", "scripts", "skills", "packages", "python", "workflow-packages", "assets", "recipes"]) {
+for (const name of ["src", "scripts", "skills", "packages", "python", "workflow-packages", "assets", "recipes", "third_party"]) {
   await copy(join(repository, name), join(piCadDestination, name));
 }
 for (const name of ["package.json", "package-lock.json", "README.md", "README.zh-CN.md", "LICENSE"]) {
@@ -73,7 +73,7 @@ const manifest = {
   stagedAt: new Date().toISOString(),
   piCadVersion: JSON.parse(await readFile(join(repository, "package.json"), "utf8")).version,
   primeVersion: JSON.parse(await readFile(join(prime, "packages/coding-agent/package.json"), "utf8")).version,
-  licenses: ["Reify (pi-cad runtime): MIT", "Prime Agent: MIT", "zeromq: MIT AND MPL-2.0", "photon-node: Apache-2.0"],
+  licenses: ["Reify (pi-cad runtime): MIT", "Prime Agent: MIT", "Blender MCP: GPL-3.0-or-later", "zeromq: MIT AND MPL-2.0", "photon-node: Apache-2.0"],
 };
 await writeFile(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 await rm(piCadDestination, { recursive: true, force: true });

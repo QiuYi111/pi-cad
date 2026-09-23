@@ -1,0 +1,650 @@
+{
+  "campaignId": "res388-main-500",
+  "createdAt": "2026-09-22T03:41:46.356Z",
+  "manifest": {
+    "campaignId": "res388-main-500",
+    "createdAt": "2026-09-21T21:36:05.703Z",
+    "mode": "nightly",
+    "seed": 388000,
+    "rounds": 500,
+    "maxCommands": 8,
+    "runtimeRatio": 0.5,
+    "providerFaults": false,
+    "profiles": [
+      "mixed",
+      "process",
+      "file-state",
+      "provider-oauth",
+      "race",
+      "kernel-lifecycle",
+      "runtime-recovery",
+      "session-isolation",
+      "desktop-consistency"
+    ],
+    "concurrency": 3,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "6381490317e911c6d574643fad359ee59285ce1d",
+      "gitBranch": "labrunner/res-388-chaos-04",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 500,
+    "roundsPassed": 472,
+    "roundsFailed": 28,
+    "roundsErrored": 0,
+    "distinctSeeds": 500,
+    "stateObservations": 8440,
+    "actions": {
+      "startRun": 682,
+      "commitPlan": 644,
+      "advance": 634,
+      "concurrentBuild": 107,
+      "build": 205,
+      "stopRun": 36,
+      "desktopRestart": 58,
+      "phaseContract": 35,
+      "openConversation": 136,
+      "phaseCard": 21,
+      "history": 24,
+      "listWorkflows": 40,
+      "multiConversationBuild": 97,
+      "burstRefresh": 53,
+      "duplicateCommit": 50,
+      "refresh": 75,
+      "retryBuild": 106,
+      "resumeRun": 65,
+      "switchConversation": 62,
+      "completionGate": 31,
+      "authorize": 27
+    },
+    "faultsInjected": {
+      "raceUserActionDuringKernelFault": 14,
+      "providerCredentialDropped": 12,
+      "providerCredentialExpired": 26,
+      "missingDesktopProjection": 15,
+      "missingRunStateFile": 18,
+      "raceLegalOrderSwap": 16,
+      "killKernelDuringBuild": 31,
+      "killKernelChild": 16,
+      "killPrimeRuntime": 16,
+      "pauseKernelDuringBuild": 20,
+      "partialStateWrite": 10,
+      "providerCredentialBlanked": 11,
+      "raceRepeatSubmitDuringFault": 12,
+      "killAuthorityDuringBuild": 10,
+      "killIdleKernel": 6,
+      "pauseAuthorityDuringBuild": 11,
+      "raceRestartDuringTransition": 6,
+      "restartRuntimeDuringBuild": 13,
+      "pauseRuntimeDuringBuild": 7,
+      "unreadableRunStateFile": 11,
+      "killRuntimeDuringBuild": 7,
+      "raceCrossConversationFault": 1
+    },
+    "faultsNotApplicable": {
+      "restartRuntimeDuringBuild": 11,
+      "raceTwoConversationsBuild": 27,
+      "raceCrossConversationFault": 26,
+      "killIdleKernel": 21,
+      "partialStateWrite": 6,
+      "cpuPressure": 8,
+      "killKernelChild": 2,
+      "missingDesktopProjection": 10,
+      "raceLegalOrderSwap": 2,
+      "raceUserActionDuringKernelFault": 6,
+      "killRuntimeDuringBuild": 15,
+      "pauseAuthorityDuringBuild": 12,
+      "raceRestartDuringTransition": 20,
+      "killAuthorityDuringBuild": 20,
+      "unreadableRunStateFile": 3,
+      "killKernelDuringBuild": 3,
+      "pauseKernelDuringBuild": 1,
+      "raceRepeatSubmitDuringFault": 2,
+      "pauseRuntimeDuringBuild": 8,
+      "missingRunStateFile": 4
+    },
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 99,
+        "injected": 137
+      },
+      "file-state": {
+        "rounds": 49,
+        "injected": 54
+      },
+      "provider-oauth": {
+        "rounds": 40,
+        "injected": 49
+      },
+      "race": {
+        "rounds": 42,
+        "injected": 49
+      }
+    },
+    "components": {
+      "authority": 2416,
+      "kernel": 652,
+      "provider-oauth": 51,
+      "runtime": 80,
+      "run-store": 311,
+      "desktop-projection": 25,
+      "prime": 17
+    },
+    "profiles": {
+      "mixed": 60,
+      "process": 90,
+      "file-state": 89,
+      "provider-oauth": 58,
+      "race": 87,
+      "kernel-lifecycle": 29,
+      "runtime-recovery": 29,
+      "session-isolation": 29,
+      "desktop-consistency": 29
+    },
+    "runtimeRounds": 250,
+    "oneShotRounds": 250
+  },
+  "failures": {
+    "rounds": 28,
+    "unique": 2,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 2,
+    "unverified": 0,
+    "product": 1,
+    "harness": 1
+  },
+  "clusters": [
+    {
+      "id": "c41b23f2c",
+      "signature": "no-orphan-kernel | N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)",
+      "invariant": "no-orphan-kernel",
+      "boundary": "process",
+      "boundaries": [
+        "process",
+        "provider-oauth"
+      ],
+      "nature": "product",
+      "failingSteps": [
+        "fault:killAuthorityDuringBuild",
+        "fault:providerCredentialExpired",
+        "fault:killKernelDuringBuild",
+        "fault:killPrimeRuntime",
+        "fault:pauseKernelDuringBuild",
+        "action:concurrentBuild",
+        "action:listWorkflows",
+        "action:retryBuild",
+        "action:build",
+        "fault:killRuntimeDuringBuild",
+        "action:startRun"
+      ],
+      "reason": "N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)",
+      "logSignatures": [
+        "控制面死后 kernel # 还在跑（孤儿进程）",
+        "重启后原请求结束：Reify runtime closed without a response",
+        "kernel 被杀 #s 后控制面还没反应，由 harness 一起停掉 kernel 和控制面",
+        "runtime 被杀后请求结束：Reify runtime closed without a response",
+        "kernel 暂停 #ms 期间控制面 没有任何反应（run 继续显示 active）",
+        "kernel 被杀后控制面报：cadctl worker exited with SIGKILL",
+        "恢复验证通过：killRuntimeDuringBuild 之后真 build 成功（#ms，cache=miss）",
+        "startRun 被拒"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:commitPlan",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:restartRuntimeDuringBuild",
+          "action:advance",
+          "fault:providerCredentialExpired"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:pauseRuntimeDuringBuild",
+          "fault:raceRepeatSubmitDuringFault",
+          "fault:killKernelDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:killRuntimeDuringBuild",
+          "fault:killPrimeRuntime"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:resumeRun",
+          "fault:restartRuntimeDuringBuild",
+          "action:refresh",
+          "action:openConversation",
+          "fault:pauseKernelDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:pauseAuthorityDuringBuild",
+          "action:startRun",
+          "action:duplicateCommit",
+          "action:resumeRun",
+          "action:openConversation",
+          "action:refresh",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:startRun",
+          "fault:pauseRuntimeDuringBuild",
+          "action:history",
+          "action:build",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:openConversation",
+          "fault:pauseAuthorityDuringBuild",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:pauseAuthorityDuringBuild",
+          "action:commitPlan",
+          "action:listWorkflows",
+          "action:refresh",
+          "action:openConversation",
+          "fault:restartRuntimeDuringBuild",
+          "action:concurrentBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:restartRuntimeDuringBuild",
+          "action:advance",
+          "action:burstRefresh",
+          "action:listWorkflows",
+          "action:listWorkflows"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:restartRuntimeDuringBuild",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:burstRefresh",
+          "action:commitPlan",
+          "fault:killRuntimeDuringBuild",
+          "fault:killKernelDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:restartRuntimeDuringBuild",
+          "action:listWorkflows",
+          "action:retryBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:killAuthorityDuringBuild",
+          "fault:restartRuntimeDuringBuild",
+          "action:advance",
+          "action:multiConversationBuild",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:killKernelChild",
+          "fault:pauseKernelDuringBuild",
+          "action:refresh",
+          "action:build",
+          "fault:killIdleKernel",
+          "action:concurrentBuild",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:commitPlan",
+          "fault:restartRuntimeDuringBuild",
+          "fault:killPrimeRuntime"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:pauseKernelDuringBuild",
+          "fault:killIdleKernel",
+          "action:startRun",
+          "action:switchConversation",
+          "fault:killRuntimeDuringBuild",
+          "fault:pauseKernelDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:phaseContract",
+          "fault:killRuntimeDuringBuild",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:openConversation",
+          "fault:pauseRuntimeDuringBuild",
+          "fault:restartRuntimeDuringBuild",
+          "action:build"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:resumeRun",
+          "fault:restartRuntimeDuringBuild",
+          "fault:killAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:openConversation",
+          "fault:killRuntimeDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:killRuntimeDuringBuild",
+          "action:startRun"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:refresh",
+          "action:switchConversation",
+          "action:burstRefresh",
+          "action:multiConversationBuild",
+          "fault:killAuthorityDuringBuild"
+        ]
+      ],
+      "occurrences": 26,
+      "roundIndexes": [
+        35,
+        55,
+        68,
+        85,
+        86,
+        122,
+        154,
+        155,
+        205,
+        223,
+        258,
+        286,
+        306,
+        308,
+        320,
+        340,
+        343,
+        395,
+        410,
+        446,
+        463,
+        478,
+        480,
+        490,
+        494,
+        497
+      ],
+      "seeds": [
+        3204743412,
+        2792227583,
+        254731161,
+        3277605890,
+        1587490910,
+        4191118688,
+        3532318995,
+        2263664444,
+        882396662,
+        2257446408,
+        2299033133,
+        1274265190,
+        729767211,
+        3999184853,
+        2893853564,
+        2850651298,
+        2470914207,
+        3965923530,
+        290224693,
+        1817248930,
+        1541728864,
+        1656358099,
+        2548342220,
+        3436257002,
+        3232010209,
+        1136724026
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-39-55-332Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-42-10-019Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-43-18-847Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-44-53-222Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-47-37-510Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-50-28-531Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-54-19-521Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-54-41-576Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-59-25-787Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-00-55-711Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-04-17-816Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-07-10-356Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-08-43-881Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-08-54-148Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-10-17-811Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-12-40-442Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-12-50-184Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-17-48-714Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-18-38-122Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-23-16-578Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-24-53-640Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-26-27-192Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-26-24-139Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-27-11-480Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-27-29-873Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-27-52-217Z-reify-no-orphan-kernel.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-39-55-332Z-reify-no-orphan-kernel.json",
+      "firstSeenAt": "2026-09-21T21:39:55.332Z",
+      "lastSeenAt": "2026-09-21T22:27:52.217Z",
+      "runtimeModes": [
+        false,
+        true
+      ],
+      "commits": [
+        "6381490317e911c6d574643fad359ee59285ce1d"
+      ],
+      "verdict": "false-positive",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 2,
+        "reproductions": 0,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": false,
+        "shrinkOk": false,
+        "originalLength": 0,
+        "shrunkLength": 0,
+        "numShrinks": 0,
+        "minimalSequence": [],
+        "notes": [
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "按 seed+path 没复现：seed=-1090223884 path=0 没有复现失败"
+        ]
+      }
+    },
+    {
+      "id": "c3ea4e272",
+      "signature": "fault-outcome-honest | fault raceUserActionDuringKernelFault 注入失败：author endpoint does not expose operation: viewer-catalog",
+      "invariant": "fault-outcome-honest",
+      "boundary": "race",
+      "boundaries": [
+        "race"
+      ],
+      "nature": "harness",
+      "failingSteps": [
+        "fault:raceUserActionDuringKernelFault"
+      ],
+      "reason": "fault raceUserActionDuringKernelFault 注入失败：author endpoint does not expose operation: viewer-catalog",
+      "logSignatures": [
+        "race：故障挂着时跑用户操作 viewerCatalog"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:raceUserActionDuringKernelFault"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:raceTwoConversationsBuild",
+          "fault:raceLegalOrderSwap",
+          "action:retryBuild",
+          "fault:raceUserActionDuringKernelFault"
+        ]
+      ],
+      "occurrences": 2,
+      "roundIndexes": [
+        80,
+        418
+      ],
+      "seeds": [
+        1552637229,
+        1927515275
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-44-12-916Z-reify-fault-outcome-honest.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T22-20-00-563Z-reify-fault-outcome-honest.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-388/chaos/artifacts/2026-09-21T21-44-12-916Z-reify-fault-outcome-honest.json",
+      "firstSeenAt": "2026-09-21T21:44:12.916Z",
+      "lastSeenAt": "2026-09-21T22:20:00.563Z",
+      "runtimeModes": [
+        true
+      ],
+      "commits": [
+        "6381490317e911c6d574643fad359ee59285ce1d"
+      ],
+      "verdict": "false-positive",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 2,
+        "reproductions": 0,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": false,
+        "shrinkOk": false,
+        "originalLength": 0,
+        "shrunkLength": 0,
+        "numShrinks": 0,
+        "minimalSequence": [],
+        "notes": [
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "按 seed+path 没复现：seed=1552637229 path=0 没有复现失败"
+        ]
+      }
+    }
+  ],
+  "underExplored": [],
+  "notes": [
+    "本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 6381490317e9，recluster / re-triage / report 用的是 b9a321d9d1ce（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。",
+    "1 个 unique failure 是 harness 侧（c3ea4e272）：那是 campaign 自己的 fault 注入打错了，不是产品发现；修在 harness 里，回归用例进 tests/chaos-reify.test.ts。"
+  ]
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Boxes, FolderOpen, GitBranch, History, Plus, Settings2 } from "./components/icons";
-import type { AppSettings } from "@shared/contracts";
+import { runtimeTurnActive, type AppSettings } from "@shared/contracts";
 import { Workbench } from "./pages/Workbench";
 import { WorkflowEditor } from "./pages/WorkflowEditor";
 import { Traces } from "./pages/Traces";
@@ -32,7 +32,7 @@ export function App() {
   ] as const;
 
   const activateProject = async (path: string) => {
-    if (prime.status.state === "streaming" || prime.status.state === "starting") { setProjectError("Stop the current task before switching projects."); return; }
+    if (runtimeTurnActive(prime.status) || prime.status.state === "starting") { setProjectError("Stop the current task before switching projects."); return; }
     await prime.stop();
     prime.clearConversation();
     setSettings(await window.piCad.settings.update({ projectPath: path }));

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import build123d as bd
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Common
@@ -96,12 +96,21 @@ def _aabb_gap(a: dict[str, Any], b: dict[str, Any]) -> float:
     return gap
 
 
-def inspect_interference(artifact: str | Path) -> dict[str, Any]:
+def inspect_interference_shape(shape: bd.Shape, pairs: Sequence[tuple[int, int]] | None = None) -> dict[str, Any]:
+    """Inspect an already imported (and, if needed, posed) B-Rep.
+
+    ``pairs`` selects explicit solid index pairs and allows callers to reuse
+    this same exact AABB/common implementation across a pose batch.
+    """
     started = time.monotonic()
-    artifact = Path(artifact)
-    shape = bd.import_step(artifact)
     parts = _solid_parts(shape)
     solids = list(shape.solids())
+    selected_pairs = list(pairs) if pairs is not None else [(i, j) for i in range(len(solids)) for j in range(i + 1, len(solids))]
+    if pairs is not None and not selected_pairs:
+        raise InterferenceUnresolvedError("empty interference selection: choose at least one solid pair")
+    for i, j in selected_pairs:
+        if i == j or min(i, j) < 0 or max(i, j) >= len(solids):
+            raise InterferenceUnresolvedError(f"invalid solid pair ({i}, {j}) for {len(solids)} solids")
 
     if parts:
         spans = [
@@ -123,47 +132,48 @@ def inspect_interference(artifact: str | Path) -> dict[str, Any]:
 
     pairs: list[dict[str, Any]] = []
     counts = {"penetration": 0, "contact": 0, "clearance": 0}
-    for i in range(len(solids)):
-        for j in range(i + 1, len(solids)):
-            a, b = parts[i], parts[j]
-            gap = _aabb_gap(a, b)
-            intersection_volume = 0.0
-            if gap <= 0.0:
-                # AABBs overlap: exact boolean common. A boolean FAILURE is
-                # an unresolved observation, never a fact: reporting the
-                # pair as "contact" (the likely distance-based fallback)
-                # would translate a solver failure into a physical claim.
-                args = TopTools_ListOfShape()
-                args.Append(solids[i].wrapped)
-                tools = TopTools_ListOfShape()
-                tools.Append(solids[j].wrapped)
-                common = BRepAlgoAPI_Common()
-                common.SetArguments(args)
-                common.SetTools(tools)
-                common.SetRunParallel(False)
-                common.Build()
-                if not common.IsDone():
-                    raise InterferenceUnresolvedError(
-                        f"boolean common failed for pair {a['label']}<->{b['label']}: "
-                        "interference facts are unresolved for this artifact"
-                    )
-                intersection_volume = _volume_of(common.Shape())
-            if intersection_volume > volume_tol:
-                classification = "penetration"
-                distance = 0.0
-            else:
-                distance = _distance(solids[i].wrapped, solids[j].wrapped)
-                classification = "contact" if distance <= distance_tol else "clearance"
-            counts[classification] += 1
-            pairs.append(
-                {
-                    "a": a["label"],
-                    "b": b["label"],
-                    "intersectionVolume": round(intersection_volume, 9),
-                    "minDistance": round(distance, 9),
-                    "classification": classification,
-                }
-            )
+    for i, j in selected_pairs:
+        if j < i:
+            i, j = j, i
+        a, b = parts[i], parts[j]
+        gap = _aabb_gap(a, b)
+        intersection_volume = 0.0
+        if gap <= 0.0:
+            # AABBs overlap: exact boolean common. A boolean FAILURE is
+            # an unresolved observation, never a fact: reporting the
+            # pair as "contact" would translate solver failure into fact.
+            args = TopTools_ListOfShape()
+            args.Append(solids[i].wrapped)
+            tools = TopTools_ListOfShape()
+            tools.Append(solids[j].wrapped)
+            common = BRepAlgoAPI_Common()
+            common.SetArguments(args)
+            common.SetTools(tools)
+            common.SetRunParallel(False)
+            common.Build()
+            if not common.IsDone():
+                raise InterferenceUnresolvedError(
+                    f"boolean common failed for pair {a['label']}<->{b['label']}: "
+                    "interference facts are unresolved for this artifact"
+                )
+            intersection_volume = _volume_of(common.Shape())
+        if intersection_volume > volume_tol:
+            classification = "penetration"
+            distance = 0.0
+        else:
+            distance = _distance(solids[i].wrapped, solids[j].wrapped)
+            classification = "contact" if distance <= distance_tol else "clearance"
+        counts[classification] += 1
+        pairs.append(
+            {
+                "a": a["label"],
+                "b": b["label"],
+                "solidIndices": [i, j],
+                "intersectionVolume": round(intersection_volume, 9),
+                "minDistance": round(distance, 9),
+                "classification": classification,
+            }
+        )
 
     return {
         "units": "mm",
@@ -178,4 +188,63 @@ def inspect_interference(artifact: str | Path) -> dict[str, Any]:
         "pairs": pairs,
         "summary": counts,
         "durationMs": int((time.monotonic() - started) * 1000),
+    }
+
+
+def inspect_interference(artifact: str | Path) -> dict[str, Any]:
+    """Import once and compute pairwise interference facts for a STEP file."""
+    try:
+        shape = bd.import_step(Path(artifact))
+    except Exception as error:
+        raise InterferenceUnresolvedError(f"cannot import subject artifact: {error}") from error
+    return inspect_interference_shape(shape)
+
+
+def inspect_interference_batch(
+    shape: bd.Shape,
+    poses: Sequence[dict[str, Any]],
+    pairs: Sequence[tuple[int, int]] | None = None,
+) -> dict[str, Any]:
+    """Evaluate a finite rigid-pose list after the caller's one STEP import.
+
+    Each pose contains ``id`` and optional transforms, a list of
+    ``{solidIndex, translationMm, rotationDegrees}`` records. Missing solids
+    stay fixed. Results make failures explicit and never claim coverage of
+    continuous motion between samples.
+    """
+    if not poses:
+        raise InterferenceUnresolvedError("empty pose selection: provide at least one pose")
+    if len(poses) > 1000:
+        raise InterferenceUnresolvedError("pose batch exceeds the 1000-pose safety limit")
+    source_solids = list(shape.solids())
+    results: list[dict[str, Any]] = []
+    for ordinal, pose in enumerate(poses):
+        pose_id = str(pose.get("id", ordinal))
+        try:
+            posed_solids = list(source_solids)
+            for transform in pose.get("transforms", []):
+                index = int(transform["solidIndex"])
+                if index < 0 or index >= len(posed_solids):
+                    raise ValueError(f"solidIndex {index} is out of range")
+                translation = transform.get("translationMm", [0, 0, 0])
+                rotation = transform.get("rotationDegrees", [0, 0, 0])
+                if len(translation) != 3 or len(rotation) != 3:
+                    raise ValueError("translationMm and rotationDegrees must have three values")
+                posed_solids[index] = source_solids[index].moved(bd.Location(tuple(translation), tuple(rotation)))
+            posed_shape = bd.Compound(children=posed_solids)
+            facts = inspect_interference_shape(posed_shape, pairs)
+            results.append({"poseId": pose_id, "status": "evaluated", "facts": facts})
+        except Exception as error:  # preserve each failed pose as an explicit unresolved row
+            results.append({"poseId": pose_id, "status": "error", "error": f"{type(error).__name__}: {error}"})
+    evaluated = sum(item["status"] == "evaluated" for item in results)
+    errors = len(results) - evaluated
+    return {
+        "executionStatus": "completed" if errors == 0 else "partial",
+        "coverage": "finite sampled poses only; no claim between samples",
+        "requested": len(poses),
+        "evaluated": evaluated,
+        "skipped": 0,
+        "errors": errors,
+        "units": {"translation": "mm", "rotation": "degree"},
+        "poses": results,
     }

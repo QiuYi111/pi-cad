@@ -41,6 +41,55 @@ class CadPackageTests(unittest.TestCase):
                 asyncio.run(client.request("workflow-current"))
         local_engine.assert_not_awaited()
 
+    def test_cad_requests_name_the_session_that_owns_the_kernel(self) -> None:
+        client = importlib.import_module("cad.client")
+        response = json.dumps({"ok": True, "result": {"runId": "v7-1-abcdefgh"}}).encode()
+
+        def exchange(env: dict[str, str]) -> dict:
+            written: list[bytes] = []
+            writer = SimpleNamespace(
+                write=written.append,
+                drain=AsyncMock(),
+                write_eof=Mock(),
+                close=Mock(),
+                wait_closed=AsyncMock(),
+            )
+            reader = SimpleNamespace(read=AsyncMock(side_effect=[response, b""]))
+            with (
+                patch.dict(
+                    os.environ,
+                    {"PI_CAD_AUTHOR_SOCKET": "/run/pi-cad/author/authority.sock", **env},
+                    clear=True,
+                ),
+                patch.object(client.asyncio, "open_unix_connection", AsyncMock(return_value=(reader, writer))),
+            ):
+                asyncio.run(client.request("workflow-current"))
+            return json.loads(b"".join(written).decode())
+
+        # Prime names the kernel's owning session in the kernel environment, so
+        # the kernel never has to guess from process-wide state.
+        self.assertEqual(
+            exchange({"PRIME_AGENT_SESSION_ID": "prime-child-session"})["sessionId"],
+            "prime-child-session",
+        )
+        # An explicit host override still wins.
+        self.assertEqual(
+            exchange({"PRIME_AGENT_SESSION_ID": "prime-child-session", "PI_CAD_SESSION_ID": "explicit"})["sessionId"],
+            "explicit",
+        )
+        # A host that names no session keeps the older project-scoped request.
+        self.assertNotIn("sessionId", exchange({}))
+        # A reviewer never claims an author conversation's session.
+        self.assertNotIn(
+            "sessionId",
+            exchange(
+                {
+                    "PI_CAD_REVIEWER_SOCKET": "/run/pi-cad/reviewer/authority.sock",
+                    "PRIME_AGENT_SESSION_ID": "prime-child-session",
+                }
+            ),
+        )
+
     def test_sidecar_response_is_read_to_eof_before_json_decode(self) -> None:
         client = importlib.import_module("cad.client")
         encoded = json.dumps({"ok": True, "result": {"image": "a" * 100_000}}).encode()
@@ -156,7 +205,7 @@ class CadPackageTests(unittest.TestCase):
             import asyncio
             asyncio.run(closure_probe())
 
-    def test_probe_arguments_cross_as_json_literals(self) -> None:
+    def test_probe_arguments_cross_as_decoded_json_parameters(self) -> None:
         probe_module = importlib.import_module("cad.probe")
 
         @cad.probe(subject="current")
@@ -171,8 +220,9 @@ class CadPackageTests(unittest.TestCase):
         assignment = ast.parse(code).body[-1]
         self.assertIsInstance(assignment, ast.Assign)
         keyword = assignment.value.keywords[-1]
-        self.assertIsInstance(keyword.value, ast.Constant)
-        self.assertEqual(keyword.value.value, payload)
+        self.assertIsInstance(keyword.value, ast.Subscript)
+        self.assertEqual(keyword.value.value.id, "params")
+        self.assertEqual(mocked.await_args.kwargs["args"], {"label": payload})
 
     def test_probe_accepts_artifact_ref_subject(self) -> None:
         probe_module = importlib.import_module("cad.probe")
@@ -227,7 +277,7 @@ class CadPackageTests(unittest.TestCase):
                 artifact = asyncio.run(cad.model.build("part.py", "build/part.step"))
             self.assertEqual(artifact.sha256, "b" * 64)
             self.assertEqual(artifact.path, Path("build/part.step"))
-            attach.assert_awaited_once_with(response["images"])
+            attach.assert_awaited_once_with(response["images"], artifact)
 
     def test_model_build_forwards_parameter_definitions(self) -> None:
         model_module = importlib.import_module("cad.model")
@@ -270,14 +320,20 @@ class CadPackageTests(unittest.TestCase):
             {"data": base64.b64encode(b"second").decode(), "mimeType": "image/png"},
         ]
         with patch("IPython.display.display", attach):
-            asyncio.run(model_module._attach_images(images))
+            artifact = cad.ArtifactRef(Path("build/part.step"), "a" * 64, "candidate")
+            asyncio.run(model_module._attach_images(images, artifact))
         self.assertEqual(attach.call_count, 2)
         for call, expected in zip(attach.call_args_list, images, strict=True):
             self.assertTrue(call.kwargs["raw"])
             self.assertEqual(call.args[0]["application/vnd.prime-agent.attachment+json"], {
                 "mime_type": "image/png", "data": expected["data"],
             })
-            self.assertEqual(call.args[0]["text/plain"], "Pi-CAD mandatory build observation")
+        first_label = attach.call_args_list[0].args[0]["text/plain"]
+        self.assertIn("Built ArtifactRef", first_label)
+        self.assertIn("primary observation", first_label)
+        self.assertIn("Reason about what the geometry actually does", first_label)
+        self.assertNotIn("bbox", first_label)
+        self.assertEqual(attach.call_args_list[1].args[0]["text/plain"], "[VIEW]")
 
     def test_review_inspect_attaches_canonical_images_without_returning_base64(self) -> None:
         review_module = importlib.import_module("cad.review")
@@ -444,6 +500,29 @@ class CadPackageTests(unittest.TestCase):
         self.assertEqual(mocked.await_args_list[0].args, ("review-submit",))
         self.assertEqual(mocked.await_args_list[0].kwargs["subjectCommit"], commit_id)
         self.assertEqual(mocked.await_args_list[1].kwargs["reviewId"], handle["reviewId"])
+
+    def test_living_plan_resolves_latest_version_and_updates_in_place(self) -> None:
+        plan_module = importlib.import_module("cad.plan")
+        first = cad.Commit("commit-" + "a" * 32, "plan", None, "w", "plan", {}, (), "1")
+        other = cad.Commit("commit-" + "b" * 32, "candidate", first.id, "w", "cook", {}, (), "2")
+        latest = cad.Commit("commit-" + "c" * 32, "plan", other.id, "w", "cook", {}, (), "3")
+        loaded = cad.Commit(latest.id, latest.name, latest.parent, latest.workflow_hash, latest.phase, {"requirements": ["current"]}, (), latest.created_at)
+        with patch.object(cad, "history", AsyncMock(return_value=[first, other, latest])), patch.object(cad, "load", AsyncMock(return_value=loaded)):
+            self.assertEqual(asyncio.run(cad.plan.current()), loaded)
+        with patch.object(cad, "commit", AsyncMock(return_value=latest)) as commit:
+            self.assertEqual(asyncio.run(cad.plan.update(variables={"requirements": ["current"]})), latest)
+            commit.assert_awaited_once_with("plan", variables={"requirements": ["current"]}, artifacts=None)
+
+    def test_advisory_review_brief_uses_latest_plan_without_a_verdict(self) -> None:
+        review_module = importlib.import_module("cad.review")
+        candidate = cad.Commit("commit-" + "d" * 32, "candidate", None, "w", "cook", {}, (), "1")
+        current_plan = cad.Commit("commit-" + "e" * 32, "plan", None, "w", "cook", {}, (), "2")
+        with patch.object(cad.plan, "current", AsyncMock(return_value=current_plan)):
+            brief = asyncio.run(cad.review.prepare(candidate))
+        self.assertEqual(brief["candidateCommitId"], candidate.id)
+        self.assertEqual(brief["currentPlanCommitId"], current_plan.id)
+        self.assertIn("plan_stale", brief["instructions"])
+        self.assertNotIn("verdict", brief)
 
     def test_review_resolve_submits_authoritative_verdicts_and_rejects_runtime_unresolved(self) -> None:
         review_module = importlib.import_module("cad.review")

@@ -1,17 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronRight, FolderOpen, Wrench } from "../components/icons";
-import type { AppSettings, AuthStatus, RuntimeStatus } from "@shared/contracts";
+import type { AppSettings, AuthStatus, ModelCatalog, RuntimeStatus } from "@shared/contracts";
 import { Wordmark } from "../components/Brand";
 
 export function setupErrorMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error);
   if (/404|not found/i.test(text) && /node|nodejs/i.test(text)) return "Node.js 安装包下载失败。请检查网络后重试。";
-  if (/unsupported.*(?:cpu|architecture)/i.test(text)) return "当前 WSL 处理器架构不受支持。";
-  const clean = text
+  const lines = text
     .replace(/^Error:\s*/i, "")
     .replace(/^Error invoking remote method '[^']+':\s*/i, "")
-    .split(/\r?\n/)
-    .find((line) => line.trim() && !/^(command failed:|picad_|case |curl |tar |ln |mkdir |export )/i.test(line.trim()));
+    .split(/\r?\n/);
+  const architecture = lines.find((line) => /^Unsupported WSL CPU architecture:\s*/i.test(line.trim()) && !line.includes("$picad_"));
+  if (architecture) return `当前 WSL 处理器架构无法识别：${architecture.trim().replace(/^Unsupported WSL CPU architecture:\s*/i, "")}`;
+  const clean = lines.find((line) => line.trim() && !/^(command failed:|picad_|case |curl\s|tar |ln |mkdir |export )/i.test(line.trim()));
   return (clean || "安装失败，请重试。").trim().slice(0, 220);
 }
 
@@ -19,8 +20,11 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   const [runtime, setRuntime] = useState<RuntimeStatus>({ state: "checking", checks: [] });
   const [auth, setAuth] = useState<AuthStatus>({ provider: "openai-codex", state: "checking" });
   const [manual, setManual] = useState("");
+  const [secret, setSecret] = useState("");
+  const [catalog, setCatalog] = useState<ModelCatalog>({ providers: [], favorites: [], defaults: {} });
   const [projectName, setProjectName] = useState("我的第一个设计");
   const [working, setWorking] = useState<"wsl" | "runtime" | "auth" | "project" | "">("");
+  const setupAttempt = useRef("");
   const wslMissing = runtime.checks.some((item) => item.id === "wsl" && item.status !== "ready");
   const requiredIds = new Set(["host", "wsl", "node", "python", "uv", "sandbox", "bwrap", "prime", "picad"]);
   const requiredChecks = runtime.checks.filter((item) => requiredIds.has(item.id));
@@ -31,11 +35,15 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
   const check = async () => {
     setRuntime({ state: "checking", checks: [], message: "正在检查 Windows 和 WSL…" });
     try { setRuntime(await window.piCad.runtime.check()); }
-    catch (error) { setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) }); }
+    catch (error) {
+      localStorage.removeItem("reify.environment-setup-pending.v1");
+      setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) });
+    }
   };
   useEffect(() => {
     void check();
-    void window.piCad.auth.status().then(setAuth).catch(() => setAuth({ provider: "openai-codex", state: "signed-out" }));
+    void window.piCad.auth.catalog().then(setCatalog);
+    void window.piCad.auth.status(settings.provider).then(setAuth).catch(() => setAuth({ provider: settings.provider, state: "signed-out" }));
     const offAuth = window.piCad.auth.onStatus(setAuth);
     const offRuntime = window.piCad.runtime.onStatus(setRuntime);
     return () => { offAuth(); offRuntime(); };
@@ -46,22 +54,58 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
     try {
       const result = await window.piCad.runtime.installWsl();
       setRuntime(result);
-      if (result.state === "checking") await check();
+      if (result.action !== "restart-windows") await check();
     }
     catch (error) { setRuntime({ state: "error", checks: [], message: setupErrorMessage(error) }); }
     finally { setWorking(""); }
   };
   const installRuntime = async () => {
     setWorking("runtime");
-    try { setRuntime(await window.piCad.runtime.install()); }
-    catch (error) { setRuntime({ state: "error", checks: runtime.checks, message: setupErrorMessage(error) }); }
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          setRuntime(await window.piCad.runtime.install());
+          return;
+        } catch (error) {
+          if (attempt === 0) {
+            setRuntime({ state: "checking", checks: runtime.checks, message: "Ubuntu 正在启动，稍后自动继续…" });
+            await new Promise((resolve) => setTimeout(resolve, 5_000));
+            continue;
+          }
+          throw error;
+        }
+      }
+    } catch (error) {
+      localStorage.removeItem("reify.environment-setup-pending.v1");
+      setRuntime({ state: "error", checks: runtime.checks, message: setupErrorMessage(error) });
+    }
     finally { setWorking(""); }
   };
+  const prepareEnvironment = () => {
+    localStorage.setItem("reify.environment-setup-pending.v1", "1");
+    setupAttempt.current = "";
+    void (wslMissing ? installWsl() : installRuntime());
+  };
+  useEffect(() => {
+    if (localStorage.getItem("reify.environment-setup-pending.v1") !== "1") return;
+    if (runtimeReady) {
+      localStorage.removeItem("reify.environment-setup-pending.v1");
+      setupAttempt.current = "";
+      return;
+    }
+    if (working || runtime.state === "checking" || runtime.state === "installing" || runtime.action === "restart-windows") return;
+    const signature = `${runtime.state}:${runtime.action || ""}:${runtime.checks.map((item) => `${item.id}:${item.status}`).join(",")}`;
+    if (setupAttempt.current === signature) return;
+    setupAttempt.current = signature;
+    void (wslMissing ? installWsl() : installRuntime());
+  }, [runtime, runtimeReady, working, wslMissing]);
   const login = async () => {
     setWorking("auth");
-    try { setAuth(await window.piCad.auth.login()); }
+    try { setAuth(await window.piCad.auth.login(settings.provider)); }
     finally { setWorking(""); }
   };
+  const currentProvider = catalog.providers.find((item) => item.id === settings.provider);
+  const saveKey = async () => { setWorking("auth"); try { setAuth(await window.piCad.auth.setApiKey(settings.provider, secret)); setSecret(""); } finally { setWorking(""); } };
   const chooseProject = async () => {
     setWorking("project");
     try {
@@ -84,14 +128,17 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
           {runtime.state === "installing" && runtime.progress !== undefined
             ? <RuntimeProgress progress={runtime.progress} elapsedSeconds={runtime.elapsedSeconds || 0} />
             : runtime.state === "checking" || runtime.state === "installing" ? <SetupMotion label="正在检查系统" /> : null}
-          {runtime.state === "action-required"
-            ? <button className="setup-secondary" disabled={Boolean(working)} onClick={() => void check()}>{runtime.action === "restart-windows" ? "Check after restart" : "I initialized Ubuntu — check again"}</button>
-            : wslMissing ? <button className="primary" disabled={Boolean(working)} onClick={() => void installWsl()}>{working === "wsl" ? "Waiting for Windows…" : "Install WSL and Ubuntu"}<ChevronRight size={14} /></button>
-              : !runtimeReady && runtime.state !== "checking" && runtime.state !== "installing" ? <button className="primary" disabled={Boolean(working)} onClick={() => void installRuntime()}>{working === "runtime" ? "Preparing runtime…" : "Install bundled runtime"}<ChevronRight size={14} /></button> : null}
+          {runtime.action === "restart-windows"
+            ? <button className="primary" disabled={Boolean(working)} onClick={() => void window.piCad.runtime.restartWindows()}>重启并继续<ChevronRight size={14} /></button>
+            : !runtimeReady && runtime.state !== "checking" && runtime.state !== "installing"
+              ? <button className="primary" disabled={Boolean(working)} onClick={prepareEnvironment}>{working ? "正在准备…" : "准备工程环境"}<ChevronRight size={14} /></button>
+              : null}
         </SetupCard>
-        <SetupCard index="02" title="连接 ChatGPT" ready={auth.state === "signed-in"} active={runtimeReady && auth.state !== "signed-in"} icon={<span className="provider-mark" />}>
-          <p>{auth.message || (auth.state === "signed-in" ? "ChatGPT 已连接。" : "使用 ChatGPT 账号登录，无需 API Key。")}</p>
-          {auth.state !== "signed-in" && <span><button className="setup-secondary" disabled={!runtimeReady || Boolean(working)} onClick={() => void login()}>{working === "auth" || auth.state === "waiting" ? "等待浏览器登录…" : auth.state === "error" ? "重试登录" : "使用 ChatGPT 登录"}</button>{auth.state === "waiting" && <button onClick={() => void window.piCad.auth.cancel().then(setAuth)}>取消</button>}</span>}
+        <SetupCard index="02" title="连接模型服务" ready={auth.state === "signed-in"} active={runtimeReady && auth.state !== "signed-in"} icon={<span className="provider-mark" />}>
+          <label>提供商<select value={settings.provider} onChange={(event) => { const provider=catalog.providers.find(x=>x.id===event.target.value); const model=provider?.models.find(x=>x.available)||provider?.models[0]; onSettings({...settings,provider:event.target.value,model:model?.id||"",thinking:model?.thinkingLevels?.[0]||"off"}); setAuth(provider?.auth||{provider:event.target.value,state:"signed-out"}); }}>{catalog.providers.map(provider=><option key={provider.id} value={provider.id}>{provider.name}</option>)}</select></label>
+          <p>{auth.message || "配置所选提供商后继续。"}</p>
+          {auth.state !== "signed-in" && currentProvider?.oauth && <span><button className="setup-secondary" disabled={!runtimeReady || Boolean(working)} onClick={() => void login()}>{working === "auth" || auth.state === "waiting" ? "等待登录…" : "网页登录"}</button>{auth.state === "waiting" && <button onClick={() => void window.piCad.auth.cancel().then(setAuth)}>取消</button>}</span>}
+          {auth.state !== "signed-in" && currentProvider && currentProvider.id !== "openai-codex" && currentProvider.id !== "github-copilot" && <div className="setup-auth-input"><input type="password" value={secret} onChange={event=>setSecret(event.target.value)} placeholder="API key"/><button disabled={!secret.trim()} onClick={()=>void saveKey()}>保存</button></div>}
           {auth.input && <div className="setup-auth-input"><input value={manual} onChange={(event) => setManual(event.target.value)} placeholder={auth.input.kind === "text" ? auth.input.placeholder || "粘贴浏览器返回地址" : "在浏览器选择账号"} /><button disabled={!manual.trim()} onClick={() => { void window.piCad.auth.submitManualCode(manual.trim()); setManual(""); }}>继续</button></div>}
         </SetupCard>
         <SetupCard index="03" title="项目位置" ready={Boolean(settings.projectPath)} active={runtimeReady && auth.state === "signed-in" && !settings.projectPath} icon={<FolderOpen size={17} />}>

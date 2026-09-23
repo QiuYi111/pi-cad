@@ -1,13 +1,19 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { installBlender } from "./install-blender.mjs";
+import { removeBrokenPythonEnvironment } from "./python-environment.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const pythonProject = join(root, "python");
+const userWorkflowRoot = join(process.env.PI_CAD_WORKFLOW_HOME ?? homedir(), ".pi-cad", "workflows");
+const defaultWorkflow = join(userWorkflowRoot, "mechanical-default.yaml");
+mkdirSync(userWorkflowRoot, { recursive: true });
+if (!existsSync(defaultWorkflow)) copyFileSync(join(root, "workflow-packages", "mechanical", "default.yaml"), defaultWorkflow);
 function uv(args, options = {}) {
   return execFileSync(process.env.PI_CAD_UV ?? "uv", args, { cwd: root, ...options });
 }
@@ -20,9 +26,12 @@ if (process.platform !== "linux" && process.platform !== "darwin") {
 // installed only when a workflow needs them.
 const baseRuntimeOnly = process.env.PI_CAD_BASE_RUNTIME === "1";
 const pythonArgs = ["--project", pythonProject, ...(process.platform === "linux" && !baseRuntimeOnly ? ["--extra", "simulation"] : [])];
+const python = join(pythonProject, ".venv", "bin", "python");
+if (removeBrokenPythonEnvironment(pythonProject)) {
+  console.log("[pi-cad] rebuilding a broken Python environment");
+}
 uv(["sync", ...pythonArgs], { stdio: "inherit" });
 
-const python = join(pythonProject, ".venv", "bin", "python");
 if (process.platform === "linux" && !baseRuntimeOnly) await installBlender({ root, python, env: process.env });
 else if (process.platform === "linux") console.log("[pi-cad] simulation and Blender will be installed when first used");
 else console.log("[pi-cad] managed Blender is not bundled on macOS; use a PATH Blender installation when needed");

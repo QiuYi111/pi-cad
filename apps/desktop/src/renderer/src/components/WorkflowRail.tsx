@@ -19,17 +19,33 @@ export function WorkflowRail() {
   }, []);
   useEffect(() => {
     let alive = true;
+    let session = "";
     const update = (event?: unknown) => { if (alive && (!event || shouldRefreshWorkflow(event))) void refresh(); };
     void refresh();
     const unsubscribe = window.piCad.runtime.onEvent(update);
+    // A conversation change swaps which run the rail describes, so the answer
+    // has to be read again even when no Prime turn ended.
+    const unsubscribeConversation = window.piCad.runtime.onConversation(() => update());
+    const unsubscribeStatus = window.piCad.runtime.onStatus((status) => {
+      const next = status.sessionId ?? "";
+      if (next === session) return;
+      session = next;
+      update();
+    });
     window.addEventListener("focus", update);
-    return () => { alive = false; unsubscribe(); window.removeEventListener("focus", update); };
+    return () => {
+      alive = false;
+      unsubscribe();
+      unsubscribeConversation();
+      unsubscribeStatus();
+      window.removeEventListener("focus", update);
+    };
   }, [refresh]);
   const phases = current?.phases ?? [];
   if (unavailable) return <div className="workflow-rail unavailable" data-testid="workflow-rail"><span>Workflow unavailable</span></div>;
   if (!current?.runId || phases.length === 0) return <div className="workflow-rail idle" data-testid="workflow-rail"><span>No active workflow</span></div>;
   return <div className="workflow-rail" data-testid="workflow-rail">
-    <div className="workflow-level" title={`Pinned workflow ${current.workflowId}@${current.workflowVersion || "current"}`}><strong>{current.workflowId === "mechanical.design" ? "Design" : current.workflowId?.includes("modify") ? "Controlled change" : current.workflowId?.includes("one-shot") ? "Full engineering" : current.workflowId?.includes("quick") ? "Quick task" : "Engineering task"}</strong><small>{current.workflowId} · pinned {current.workflowHash?.slice(0, 10)}</small></div>
+    <div className="workflow-level" title={`Pinned workflow ${current.workflowId}@${current.workflowVersion || "current"}`}><strong>{current.workflowId === "mechanical.naked" ? "自由工程" : current.workflowId === "mechanical.default" ? "工程任务" : "自定义流程"}</strong><small>{current.workflowId} · pinned {current.workflowHash?.slice(0, 10)}</small></div>
     {phases.map((phase, index) => <div className={`rail-step ${phase.status}`} key={phase.id} aria-current={phase.status === "active" ? "step" : undefined} title={[phase.purpose, ...phase.transitions.map((item) => `${item.event} → ${item.target}`)].filter(Boolean).join("\n")}>
       <span className="rail-node">{phase.status === "complete" ? <Check size={11} /> : <Circle size={8} fill={phase.status === "active" ? "currentColor" : "none"} />}</span>
       <span>{phase.title}</span>

@@ -2,7 +2,7 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child
 import { promisify } from "node:util";
 import { realpath } from "node:fs/promises";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
-import { engineeringKnowledgeProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
+import { engineeringKnowledgeProbe, managedPythonProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
 
 export { runtimeChecksReady } from "./runtime-bridge.js";
 
@@ -64,17 +64,35 @@ export function classifyWslInstallResult(result: { exitCode: number; distroPrese
   return { state: "checking", checks: [], progress: 0.3, message: "Ubuntu is ready. Checking the engineering runtime…" };
 }
 
-export function wslInstallPowerShellCommand(distro: string): string {
+export function wslElevatedInstallScript(distro: string): string {
   const escaped = distro.replaceAll("'", "''");
-  return `$process = Start-Process -FilePath 'wsl.exe' -Verb RunAs -PassThru -ArgumentList @('--install','--distribution','${escaped}','--no-launch'); $process.WaitForExit(); exit $process.ExitCode`;
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    "$picadLog = Join-Path $env:LOCALAPPDATA 'Pi-CAD\\wsl-install.log'",
+    "New-Item -ItemType Directory -Force -Path (Split-Path $picadLog) | Out-Null",
+    `& wsl.exe --install --distribution '${escaped}' --no-launch --web-download 2>&1 | Tee-Object -FilePath $picadLog`,
+    "$picadExitCode = $LASTEXITCODE",
+    "if ($picadExitCode -eq 0) { exit 0 }",
+    "$picadFeatures = @('Microsoft-Windows-Subsystem-Linux', 'VirtualMachinePlatform')",
+    "$picadStates = @($picadFeatures | ForEach-Object { (Get-WindowsOptionalFeature -Online -FeatureName $_ -ErrorAction SilentlyContinue).State.ToString() })",
+    "if ($picadStates.Count -eq 2 -and $picadStates -contains 'EnablePending' -and @($picadStates | Where-Object { $_ -notin @('Enabled', 'EnablePending') }).Count -eq 0) { exit 0 }",
+    `if ($picadStates.Count -eq 2 -and @($picadStates | Where-Object { $_ -ne 'Enabled' }).Count -eq 0) { & wsl.exe --update --web-download 2>&1 | Tee-Object -FilePath $picadLog -Append; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & wsl.exe --install --distribution '${escaped}' --no-launch --web-download 2>&1 | Tee-Object -FilePath $picadLog -Append; exit $LASTEXITCODE }`,
+    "exit $picadExitCode",
+  ].join("; ");
+}
+
+export function wslInstallPowerShellCommand(distro: string): string {
+  const encoded = Buffer.from(wslElevatedInstallScript(distro), "utf16le").toString("base64");
+  return `$picadLog = Join-Path $env:LOCALAPPDATA 'Pi-CAD\\wsl-install.log'; $process = Start-Process -FilePath 'powershell.exe' -Verb RunAs -PassThru -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}'); $process.WaitForExit(); if ($process.ExitCode -ne 0) { $detail = if (Test-Path $picadLog) { Get-Content -Raw $picadLog } else { '' }; Write-Error (('wsl.exe exited with code {0}. {1}' -f $process.ExitCode, $detail).Trim()) }; exit $process.ExitCode`;
 }
 
 export function nodeInstallScript(version = "v22.23.2"): string {
   return [
     "set -e",
     `picad_node_version=${version}`,
-    "picad_node_machine=$(uname -m)",
-    "case \"$picad_node_machine\" in x86_64|amd64) picad_node_arch=x64 ;; aarch64|arm64) picad_node_arch=arm64 ;; *) echo \"Unsupported WSL CPU architecture: $picad_node_machine\" >&2; exit 1 ;; esac",
+    "picad_node_machine=$(uname -m | tr -d '\\r\\n' | tr '[:upper:]' '[:lower:]')",
+    "picad_dpkg_arch=$(dpkg --print-architecture 2>/dev/null | tr -d '\\r\\n' | tr '[:upper:]' '[:lower:]' || true)",
+    "case \"$picad_node_machine:$picad_dpkg_arch\" in x86_64:*|amd64:*|*:amd64) picad_node_arch=x64 ;; aarch64:*|arm64:*|*:arm64) picad_node_arch=arm64 ;; *) echo \"Unsupported WSL CPU architecture: uname=$picad_node_machine dpkg=$picad_dpkg_arch\" >&2; exit 1 ;; esac",
     "picad_node_root=$HOME/.local/lib/nodejs",
     "picad_node_dir=$picad_node_root/node-$picad_node_version-linux-$picad_node_arch",
     "picad_node_archive=/tmp/pi-cad-node.tar.xz",
@@ -85,6 +103,36 @@ export function nodeInstallScript(version = "v22.23.2"): string {
     "ln -sfn $picad_node_dir/bin/npm $HOME/.local/bin/npm",
     "ln -sfn $picad_node_dir/bin/npx $HOME/.local/bin/npx",
   ].join("; ");
+}
+
+export function wslDefaultUserName(windowsUser = process.env.USERNAME || ""): string {
+  const normalized = windowsUser.toLowerCase().replace(/[^a-z0-9_-]+/g, "").replace(/^[^a-z_]+/, "").slice(0, 32);
+  return normalized || "reify";
+}
+
+export function isNonRootWslUid(value: unknown): boolean {
+  const uid = String(value ?? "").replaceAll("\0", "").trim();
+  return /^\d+$/.test(uid) && uid !== "0";
+}
+
+export function missingDistroStatus(wslEngineAvailable: boolean, checks: DependencyCheck[]): RuntimeStatus {
+  return {
+    state: "error",
+    checks,
+    action: wslEngineAvailable ? "install-ubuntu" : undefined,
+    message: wslEngineAvailable
+      ? "WSL is ready. Install Ubuntu to continue."
+      : "Install WSL 2 and Ubuntu to continue.",
+  };
+}
+
+export function initializeWslUserScript(): string {
+  return [
+    "set -e",
+    "picad_user=$1",
+    "id -u \"$picad_user\" >/dev/null 2>&1 || useradd -m -s /bin/bash \"$picad_user\"",
+    "printf '[boot]\\nsystemd=true\\n\\n[user]\\ndefault=%s\\n' \"$picad_user\" > /etc/wsl.conf",
+  ].join("\n");
 }
 
 function uncWslPath(value: string): { distro: string; path: string } | null {
@@ -111,16 +159,16 @@ export class WslBridge implements RuntimeBridge {
     return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") };
   }
 
-  spawn(args: string[]): ChildProcessWithoutNullStreams {
-    return spawn("wsl.exe", ["-d", this.distro, "--", ...args], {
+  spawn(args: string[], user?: string): ChildProcessWithoutNullStreams {
+    return spawn("wsl.exe", ["-d", this.distro, ...(user ? ["-u", user] : []), "--", ...args], {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
       env: forwardWslRuntimeEnvironment(process.env),
     });
   }
 
-  async pipe(args: string[], input: string, timeout = 30_000): Promise<{ stdout: string; stderr: string }> {
-    const child = this.spawn(args);
+  async pipe(args: string[], input: string, timeout = 30_000, user?: string): Promise<{ stdout: string; stderr: string }> {
+    const child = this.spawn(args, user);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
@@ -205,18 +253,32 @@ export class WslBridge implements RuntimeBridge {
       const distributions = String(stdout || "").replaceAll("\0", "").split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
       const found = distributions.some((item) => item.toLowerCase() === settings.distro.toLowerCase());
       add("wsl", "WSL 2 and Ubuntu", found, found ? settings.distro : `${settings.distro} is not installed`, true);
-      if (!found) return { state: "error", checks, message: "Install WSL 2 and Ubuntu to continue." };
+      if (!found) {
+        const wslEngineAvailable = await execFileAsync("wsl.exe", ["--version"], {
+          encoding: "utf8", timeout: 10_000, windowsHide: true,
+        }).then(() => true, () => false);
+        return missingDistroStatus(wslEngineAvailable, checks);
+      }
     } catch (error) {
       add("wsl", "WSL 2 and Ubuntu", false, String(error), true);
       return { state: "error", checks, message: "Install WSL 2 and Ubuntu to continue." };
     }
     try {
-      await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "true"], { encoding: "utf8", timeout: 15_000, windowsHide: true });
+      const { stdout } = await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "id", "-u"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+      if (!isNonRootWslUid(stdout)) throw new Error("Ubuntu still uses root or an invalid default user");
     } catch {
-      return {
-        state: "action-required", checks, action: "initialize-ubuntu", progress: 0.28,
-        message: "Ubuntu needs its one-time setup. Open Ubuntu from the Start menu, create its user, then check again.",
-      };
+      try {
+        const user = wslDefaultUserName();
+        await this.pipe(["bash", "-s", "--", user], initializeWslUserScript(), 3 * 60_000, "root");
+        await execFileAsync("wsl.exe", ["--terminate", settings.distro], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+        const { stdout } = await execFileAsync("wsl.exe", ["-d", settings.distro, "--", "id", "-u"], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+        if (!isNonRootWslUid(stdout)) throw new Error("Ubuntu default user is still root or invalid after initialization");
+      } catch {
+        return {
+          state: "action-required", checks, action: "initialize-ubuntu", progress: 0.28,
+          message: "Ubuntu initialization did not finish. Retry, or open Ubuntu once if Windows requests it.",
+        };
+      }
     }
     const paths = await this.resolveRuntimePaths(settings);
     const usesBundledRuntime = !settings.piCadRepo && !settings.primeAgentRepo && Boolean(this.bundledRuntimePath);
@@ -235,12 +297,13 @@ export class WslBridge implements RuntimeBridge {
       `test -f ${JSON.stringify(paths.primeAgentRepo)}/prime-agent.sh && printf 'prime=ready\\n' || printf 'prime=missing\\n'`,
       `test -f ${JSON.stringify(paths.piCadRepo)}/package.json && printf 'picad=ready\\n' || printf 'picad=missing\\n'`,
       knowledge.command,
+      managedPythonProbe(paths.piCadRepo),
       usesBundledRuntime
         ? `cmp -s ${JSON.stringify(bundledSource)}/manifest.json ${JSON.stringify(installedRoot)}/manifest.json && printf 'bundle=ready\\n' || printf 'bundle=missing\\n'`
         : "printf 'bundle=ready\\n'",
       "printf 'python=%s\\n' \"$(command -v python3 || true)\"",
     ].join("; ");
-    const { stdout } = await this.exec(["bash", "-lc", script], { timeout: 120_000 });
+    const { stdout } = await this.pipe(["bash", "-s"], `${script}\n`, 120_000);
     const values = Object.fromEntries(stdout.trim().split("\n").map((line) => line.split(/=(.*)/s).slice(0, 2))) as Record<string, string>;
     const nodeMajor = Number(values.node?.split(".")[0] || 0);
     add("node", "Node.js 22+", nodeMajor >= 22, values.node || "Not installed");
@@ -251,19 +314,24 @@ export class WslBridge implements RuntimeBridge {
     const bundleReady = values.bundle === "ready";
     add("prime", "Prime Agent", values.prime === "ready" && bundleReady, bundleReady ? paths.primeAgentRepo : "Bundled runtime update available");
     const knowledgeReady = values.knowledge === String(knowledge.count);
-    add("picad", "Reify runtime", values.picad === "ready" && knowledgeReady && bundleReady,
-      !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
+    const managedPythonReady = values.cadpython === "ready";
+    add("picad", "Reify runtime", values.picad === "ready" && knowledgeReady && managedPythonReady && bundleReady,
+      !bundleReady ? "Bundled runtime update available" : !knowledgeReady ? "Required engineering skills are missing" : !managedPythonReady ? "Managed CAD Python needs repair" : `${paths.piCadRepo} · ${knowledge.count} engineering skills`);
     const ready = runtimeChecksReady(checks);
     return { state: ready ? "idle" : "error", checks, message: ready ? undefined : "Install the missing runtime dependencies." };
   }
 
   async installWsl(onStatus?: (status: RuntimeStatus) => void): Promise<RuntimeStatus> {
     if (!/^[A-Za-z0-9._-]+$/.test(this.distro)) throw new Error("Invalid WSL distribution name.");
-    const command = wslInstallPowerShellCommand(this.distro);
     const startedAt = Date.now();
     onStatus?.(wslInstallHeartbeat(0));
     const heartbeat = setInterval(() => onStatus?.(wslInstallHeartbeat(Date.now() - startedAt)), 2_000);
     try {
+      // Windows 10's inbox wsl.exe prints help and exits successfully for
+      // `--version`, even while both required optional features are disabled.
+      // Installing without elevation then becomes a no-op that looks successful.
+      // Always request elevation for the Windows-owned installation command.
+      const command = wslInstallPowerShellCommand(this.distro);
       await execFileAsync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command], {
         encoding: "utf8", timeout: 30 * 60_000, windowsHide: true,
       });
@@ -305,17 +373,17 @@ export class WslBridge implements RuntimeBridge {
     if (status.checks.some((item) => item.id === "wsl" && item.status !== "ready")) return status;
     const missing = new Set(status.checks.filter((item) => item.status !== "ready").map((item) => item.id));
     if (missing.has("python") || missing.has("bwrap")) {
-      await runStep("Installing Python and the secure sandbox…", 0.15, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates xz-utils"], {
+      await runStep("Installing Python and the secure sandbox…", 0.15, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-venv bubblewrap curl ca-certificates xz-utils libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
         encoding: "utf8", timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
       }).then(() => undefined));
     }
     if (missing.has("uv")) {
       await runStep("Installing the Python package runner…", 0.36,
-        () => this.exec(["bash", "-lc", "curl -LsSf https://astral.sh/uv/install.sh | sh"], { timeout: 5 * 60_000 }));
+        () => this.pipe(["bash", "-s"], "set -e\ncurl -LsSf https://astral.sh/uv/install.sh | sh\n", 5 * 60_000));
     }
     if (missing.has("node")) {
       await runStep("Downloading and installing Node.js…", 0.48,
-        () => this.exec(["bash", "-lc", nodeInstallScript()], { timeout: 10 * 60_000 }));
+        () => this.pipe(["bash", "-s"], nodeInstallScript(), 10 * 60_000));
     }
     let paths = await this.resolveRuntimePaths(settings);
     if ((missing.has("prime") || missing.has("picad")) && this.bundledRuntimePath) {
@@ -333,7 +401,7 @@ export class WslBridge implements RuntimeBridge {
         `chmod +x ${JSON.stringify(destination)}/prime-agent/prime-agent.sh`,
       ].join("; ");
       await runStep("Unpacking the bundled engineering runtime…", 0.62,
-        () => this.exec(["bash", "-lc", installBundled], { timeout: 15 * 60_000 }));
+        () => this.pipe(["bash", "-s"], installBundled, 15 * 60_000));
       paths = await this.resolveRuntimePaths(settings);
     }
     try {
@@ -345,13 +413,18 @@ export class WslBridge implements RuntimeBridge {
       throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Reify or select development checkouts in Settings.`);
     }
     await runStep("Installing the core CAD packages…", 0.78,
-      () => this.exec(["bash", "-lc", `export PATH="$HOME/.local/bin:$PATH"; export PI_CAD_BASE_RUNTIME=1; cd ${JSON.stringify(paths.piCadRepo)} && if ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi && npm run setup:python`], { timeout: 15 * 60_000 }));
-    await runStep("Connecting Prime Agent to Reify…", 0.92, () => this.exec(["bash", "-lc", [
+      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif test -d python/.venv && ! test -x python/.venv/bin/python; then rm -rf python/.venv; fi\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000));
+    await runStep("Preparing Blender system libraries…", 0.84, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "DEBIAN_FRONTEND=noninteractive apt-get install -y libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
+      encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+    }).then(() => undefined));
+    await runStep("Preparing the managed Blender runtime…", 0.88,
+      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\ncd ${JSON.stringify(paths.piCadRepo)}\nnode scripts/install-blender.mjs\n`, 30 * 60_000));
+    await runStep("Connecting Prime Agent to Reify…", 0.94, () => this.pipe(["bash", "-s"], [
       "set -e",
       `mkdir -p ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/coding-agent ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-coding-agent`,
       `ln -sfn ${JSON.stringify(paths.primeAgentRepo)}/packages/ai ${JSON.stringify(paths.piCadRepo)}/node_modules/@earendil-works/pi-ai`,
-    ].join("; ")]).then(() => undefined));
+    ].join("\n"), 30_000).then(() => undefined));
     report("Verifying the installation…", 0.97);
     status = await this.check(settings);
     onStatus?.(status);
