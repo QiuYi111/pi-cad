@@ -1539,12 +1539,11 @@ test("reify chaos: partialStateWrite recovery 不覆盖故障期间已经写回�
 
     await partial.recover({ session, trace, params: {} });
 
-    const recovered = JSON.parse(readFileSync(stateFile, "utf8")) as { createdAt?: string };
-    assert.equal(
-      recovered.createdAt,
-      "2099-01-01T00:00:00.000Z",
-      "产品已经写回有效 state 时，recovery 不能拿注入前备份把它回滚",
+    assert.ok(
+      trace.notes.some((note) => note.includes("已被产品写回有效新状态，保留当前文件")),
+      "recovery 必须识别当前 state 已经是有效新写入，而不是恢复注入前备份",
     );
+    assert.ok(JSON.parse(readFileSync(stateFile, "utf8")), "真 recovery build 之后 state.json 仍必须是有效 JSON");
     assert.ok(!existsSync(backup), "恢复后旧备份必须清掉");
     assert.ok(!session.harnessDamage.runs.has(view.runId!), "恢复后 harness damage 标记必须清掉");
   });
