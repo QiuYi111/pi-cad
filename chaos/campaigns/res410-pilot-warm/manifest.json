@@ -1,0 +1,60 @@
+{
+  "campaignId": "res410-pilot-warm",
+  "createdAt": "2026-09-23T03:30:33.125Z",
+  "mode": "targeted",
+  "seed": 7000,
+  "rounds": 1,
+  "maxCommands": 4,
+  "runtimeRatio": 1,
+  "providerFaults": false,
+  "profiles": [
+    "idle-kernel"
+  ],
+  "concurrency": 1,
+  "triageReplays": 2,
+  "faultPool": [
+    "killKernelDuringBuild",
+    "pauseKernelDuringBuild",
+    "killAuthorityDuringBuild",
+    "pauseAuthorityDuringBuild",
+    "killIdleKernel",
+    "killKernelChild",
+    "killRuntimeDuringBuild",
+    "pauseRuntimeDuringBuild",
+    "restartRuntimeDuringBuild",
+    "killPrimeRuntime",
+    "cpuPressure",
+    "missingRunStateFile",
+    "unreadableRunStateFile",
+    "partialStateWrite",
+    "missingDesktopProjection",
+    "providerCredentialExpired",
+    "providerCredentialDropped",
+    "providerCredentialBlanked",
+    "raceUserActionDuringKernelFault",
+    "raceTwoConversationsBuild",
+    "raceRestartDuringTransition",
+    "raceLegalOrderSwap",
+    "raceRepeatSubmitDuringFault",
+    "raceCrossConversationFault"
+  ],
+  "version": {
+    "package": "0.9.0",
+    "node": "v22.23.2",
+    "gitCommit": "8aa12102e39d3f1b0f6d65082c0b0a26936c7e77",
+    "gitBranch": "codex/desktop-app",
+    "gitDirty": false
+  },
+  "environment": {
+    "CHAOS_REIFY_PROVIDER_FAULTS": null,
+    "CHAOS_REIFY_PROVIDER_PROBE": null,
+    "CHAOS_REIFY_PROVIDER": null,
+    "CHAOS_REIFY_MODEL": null,
+    "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+    "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+    "CHAOS_REIFY_PAUSE_MS": null,
+    "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+    "CHAOS_REIFY_CPU_WORKERS": null,
+    "PI_CAD_KERNEL": null
+  }
+}
