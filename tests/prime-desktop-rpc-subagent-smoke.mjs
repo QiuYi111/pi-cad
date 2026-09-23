@@ -15,6 +15,8 @@ const projectKey = createHash("sha256").update(realpathSync(fixture)).digest("he
 const canonicalProject = join(dataHome, "pi-cad", projectKey);
 const capture = join(fixture, "subagent-provider-contexts.jsonl");
 copyFileSync(join(project, "tests/fixtures/prime-faux-subagents-extension.ts"), join(fixture, "prime-faux-subagents-extension.ts"));
+copyFileSync(join(project, "tests/fixtures/identity/nested_assembly.py"), join(fixture, "nested_assembly.py"));
+copyFileSync(join(project, "tests/fixtures/interference_clearance.step"), join(fixture, "interference_clearance.step"));
 
 const primeEnv = { ...process.env };
 delete primeEnv.HTTP_PROXY;
@@ -142,6 +144,8 @@ try {
   }
   assert.match(sessionText, /CHILD_A_ARTIFACT.*sha256=[a-f0-9]{64}/);
   assert.match(sessionText, /CHILD_B_ARTIFACT.*sha256=[a-f0-9]{64}/);
+  assert.match(sessionText, /CHILD_A_ARTIFACT.*selfValidated/);
+  assert.match(sessionText, /CHILD_B_ARTIFACT.*selfValidated/);
   assert.match(sessionText, /GRANDCHILD_ARTIFACT.*sha256=[a-f0-9]{64}/);
   const contexts = readFileSync(capture, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   const depths = contexts.map((context) => Number(String(context.systemPrompt ?? "").match(/Recursive agent depth:\s*(\d+)/)?.[1] ?? 0));
@@ -155,6 +159,7 @@ try {
     env: { ...process.env, PI_CAD_REPO: project, XDG_DATA_HOME: dataHome, PI_CAD_CANONICAL_PROJECT_DIR: canonicalProject },
   });
   assert.equal(verified.status, 0, `${verified.stderr}\n${verified.stdout}`);
+  process.stdout.write(verified.stdout);
   success = true;
   console.log("Desktop RPC created isolated parent, child, and grandchild CAD runs; recovered after a child provider failure and adopted all child artifacts.");
 } finally {

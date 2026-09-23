@@ -27,6 +27,8 @@ try {
   const canonicalProject = join(dataHome, "pi-cad", projectKey);
   const capture = join(fixture, "subagent-provider-contexts.jsonl");
   copyFileSync(join(project, "tests/fixtures/prime-faux-subagents-extension.ts"), join(fixture, "prime-faux-subagents-extension.ts"));
+  copyFileSync(join(project, "tests/fixtures/identity/nested_assembly.py"), join(fixture, "nested_assembly.py"));
+  copyFileSync(join(project, "tests/fixtures/interference_clearance.step"), join(fixture, "interference_clearance.step"));
 
   const primeEnv = { ...process.env };
   delete primeEnv.HTTP_PROXY;
@@ -69,6 +71,8 @@ try {
   assert.match(allSessionLogs, /GRANDCHILD_ARTIFACT[^\n]*sha256=[a-f0-9]{64}[^\n]*volume.: 125/);
   assert.match(rootSessionLogs, /CHILD_A_ARTIFACT[^\n]*sha256=[a-f0-9]{64}/, "parent must receive child A's ArtifactRef message");
   assert.match(rootSessionLogs, /CHILD_B_ARTIFACT[^\n]*sha256=[a-f0-9]{64}/, "parent must receive child B's ArtifactRef message");
+  assert.match(rootSessionLogs, /CHILD_A_ARTIFACT[^\n]*selfValidated/, "parent must receive child A's wrong-to-correct probe evidence");
+  assert.match(rootSessionLogs, /CHILD_B_ARTIFACT[^\n]*selfValidated/, "parent must receive child B's wrong-to-correct probe evidence");
   assert.match(rootSessionLogs, /GRANDCHILD_ARTIFACT[^\n]*sha256=[a-f0-9]{64}/, "parent must receive the grandchild ArtifactRef relayed by child A");
   assert.match(rootSessionLogs, /RLM child cad-fault-child[^\n]*completed without sending a reply/, "a child provider failure must stay local while the parent continues");
   assert.ok(existsSync(join(fixture, "subagents/child-a/model.step")), "child A must write its own STEP output");
@@ -93,6 +97,7 @@ try {
     env: { ...process.env, PI_CAD_REPO: project, XDG_DATA_HOME: dataHome, PI_CAD_CANONICAL_PROJECT_DIR: canonicalProject },
   });
   assert.equal(verified.status, 0, `${verified.stderr}\n${verified.stdout}`);
+  process.stdout.write(verified.stdout);
   verifiedSmoke = true;
   console.log("Prime inline subagents independently built, probed, repaired, and returned their CAD artifacts.");
 } finally {
