@@ -70,6 +70,24 @@ fail clearly; do not write ad hoc OCP code or add arbitrary thickness.
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.
 
+## Delegated CAD work
+
+Prime subagents can use this same `cad` API to build and inspect their own
+candidate. At the start of a delegated task, confirm that `import cad`,
+`await cad.workflow.current()`, and `await cad.workflow.list()` work. If a
+required host connection or API is missing, report which one failed and stop;
+do not guess package names, install CAD libraries, or create a replacement
+service.
+
+The parent assigns each parallel task a unique project-relative folder such as
+`subagents/<task-name>/`. Keep that task's source and generated files there,
+including its STEP output, so two agents never write `module.py` or
+`output.step` at the same path. Build and probe the latest artifact, then return
+its exact `ArtifactRef` and selected evidence to the parent. A child uses its
+own Prime conversation and kernel; it must not use or change the parent's run
+binding or candidate. The parent inspects the returned artifact and explicitly
+chooses whether to use it in the assembly.
+
 - Read `await cad.workflow.current()` before acting. If it is `None`, always call
   `await cad.workflow.list()` and route the request to exactly one workflow from
   that live list. Workflows are user-maintained project data as well as built-in

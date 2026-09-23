@@ -41,6 +41,55 @@ class CadPackageTests(unittest.TestCase):
                 asyncio.run(client.request("workflow-current"))
         local_engine.assert_not_awaited()
 
+    def test_cad_requests_name_the_session_that_owns_the_kernel(self) -> None:
+        client = importlib.import_module("cad.client")
+        response = json.dumps({"ok": True, "result": {"runId": "v7-1-abcdefgh"}}).encode()
+
+        def exchange(env: dict[str, str]) -> dict:
+            written: list[bytes] = []
+            writer = SimpleNamespace(
+                write=written.append,
+                drain=AsyncMock(),
+                write_eof=Mock(),
+                close=Mock(),
+                wait_closed=AsyncMock(),
+            )
+            reader = SimpleNamespace(read=AsyncMock(side_effect=[response, b""]))
+            with (
+                patch.dict(
+                    os.environ,
+                    {"PI_CAD_AUTHOR_SOCKET": "/run/pi-cad/author/authority.sock", **env},
+                    clear=True,
+                ),
+                patch.object(client.asyncio, "open_unix_connection", AsyncMock(return_value=(reader, writer))),
+            ):
+                asyncio.run(client.request("workflow-current"))
+            return json.loads(b"".join(written).decode())
+
+        # Prime names the kernel's owning session in the kernel environment, so
+        # the kernel never has to guess from process-wide state.
+        self.assertEqual(
+            exchange({"PRIME_AGENT_SESSION_ID": "prime-child-session"})["sessionId"],
+            "prime-child-session",
+        )
+        # An explicit host override still wins.
+        self.assertEqual(
+            exchange({"PRIME_AGENT_SESSION_ID": "prime-child-session", "PI_CAD_SESSION_ID": "explicit"})["sessionId"],
+            "explicit",
+        )
+        # A host that names no session keeps the older project-scoped request.
+        self.assertNotIn("sessionId", exchange({}))
+        # A reviewer never claims an author conversation's session.
+        self.assertNotIn(
+            "sessionId",
+            exchange(
+                {
+                    "PI_CAD_REVIEWER_SOCKET": "/run/pi-cad/reviewer/authority.sock",
+                    "PRIME_AGENT_SESSION_ID": "prime-child-session",
+                }
+            ),
+        )
+
     def test_sidecar_response_is_read_to_eof_before_json_decode(self) -> None:
         client = importlib.import_module("cad.client")
         encoded = json.dumps({"ok": True, "result": {"image": "a" * 100_000}}).encode()

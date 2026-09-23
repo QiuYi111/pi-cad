@@ -514,6 +514,15 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
   return { complete: true, outcome: "complete", reason: "terminal workflow, final PASS, and release commit are valid", runId: loaded.state.runId, workflowId: loaded.workflow.id };
 }
 
+/** Check one Prime conversation after its one-shot process has exited. */
+export async function completionGateForConversation(cwd: string, sessionId: string): Promise<CompletionGateResult> {
+  const binding = await new HarnessProjectStoreV7(cwd).conversationBinding(sessionId);
+  return runWithRunScope(
+    { sessionId, runId: binding?.runId ?? null },
+    () => completionGate(cwd),
+  );
+}
+
 function canonicalArtifactContentHash(artifacts: Array<{ path: string; sha256: string }>): string {
   return canonicalDigest(artifacts.map(({ path, sha256 }) => ({ path, sha256 })));
 }
