@@ -797,11 +797,30 @@ export const partialStateWrite: ReifyFaultDefinition = {
     if (armed) {
       const backup = `${armed.file}.chaos-original`;
       if (existsSync(backup)) {
-        copyFileSync(backup, armed.file);
-        rmSync(backup, { force: true });
+        // The fault owns the broken half-file, not every later write to this
+        // path. If the product successfully wrote a complete state while the
+        // fault was armed, restoring the injection-time backup would roll a
+        // newer run state backwards and make the harness invent run-ownership
+        // or terminal-state failures.
+        let currentIsValid = false;
+        if (existsSync(armed.file)) {
+          try {
+            JSON.parse(readFileSync(armed.file, "utf8"));
+            currentIsValid = true;
+          } catch {
+            currentIsValid = false;
+          }
+        }
+        if (currentIsValid) {
+          rmSync(backup, { force: true });
+          ctx.trace.note(`run ${armed.runId} 的 state.json 已被产品写回有效新状态，保留当前文件`);
+        } else {
+          copyFileSync(backup, armed.file);
+          rmSync(backup, { force: true });
+          ctx.trace.note(`run ${armed.runId} 的 state.json 仍损坏，恢复注入前备份`);
+        }
       }
       ctx.session.unmarkDamagedRun(armed.runId);
-      ctx.trace.note(`run ${armed.runId} 的 state.json 恢复完整`);
     }
     await proveRecovery(ctx, "partialStateWrite");
   },
@@ -813,7 +832,14 @@ export const missingDesktopProjection: ReifyFaultDefinition = {
   description: "删掉真 .pi-cad/status.json 投影，之后真请求必须把它写回来",
   arbitrary: fc.constant<Params>({}),
   describe: () => "missingDesktopProjection",
+  precondition: async (ctx) =>
+    ctx.session.attachedRuntime
+      ? { applicable: true }
+      : { applicable: false, reason: "这一轮没有 attached Desktop runtime；one-shot authority 不拥有 Desktop 投影" },
   inject: async (ctx) => {
+    if (!ctx.session.attachedRuntime) {
+      throw new FaultNotApplicable("这一轮没有 attached Desktop runtime；one-shot authority 不拥有 Desktop 投影");
+    }
     const file = join(ctx.session.project, ".pi-cad", "status.json");
     if (!existsSync(file)) throw new FaultNotApplicable("这一轮还没有 Desktop 投影可删");
     ctx.session.markDamagedProjection();
