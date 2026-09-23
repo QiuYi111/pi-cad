@@ -19,6 +19,6 @@
 - `PRIME_AGENT_REPO=.scratch/res406/prime-agent-main PRIME_AGENT_KERNEL_VENV=.scratch/res406/prime-kernel-venv node tests/prime-subagent-smoke.mjs`：通过，包含 Blender bridge 同件校验。
 - `PRIME_AGENT_REPO=.scratch/res406/prime-agent-main PRIME_AGENT_KERNEL_VENV=.scratch/res406/prime-kernel-venv RES406_KEEP_SMOKE=1 node tests/prime-desktop-rpc-subagent-smoke.mjs`：通过；隔离 parent/child/grandchild run、child 故障恢复、adoption 与 Blender bridge 同件 hash 检查通过。
 - `node scripts/chaos.mjs reify run --runs 1 --seed 406 --max-commands 8 --json`：通过。
-- `npm run check:agent-contract`：通过。TypeScript harness：417 项，416 通过、1 跳过、0 失败（Toxiproxy 未安装）。Desktop Vitest：28 文件、217 项通过。`npm run test:py` 正在执行 Python unittest。
+- `npm run check:agent-contract`：通过。TypeScript harness：417 项，416 通过、1 跳过、0 失败（Toxiproxy 未安装）。Desktop Vitest：28 文件、217 项通过。Python unittest：214 项通过、7 项跳过、0 失败（385.183 秒）。
 
 完整 Agent 级基线与合并版本的配对 KPI 尚未取得，因此不报告端到端时延或成功率差异。PR #56 合并记录中 Desktop CI 有独立失败（既有 Desktop TypeScript 类型错误及环境问题）；本 issue 将记录本分支实际 CI 结果，不把旧日志当作当前验证。
