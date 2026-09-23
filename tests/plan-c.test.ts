@@ -147,6 +147,14 @@ test("completed workflow permits only an explicit hash-bound artifact probe", as
     }) as any;
     assert.equal(observed.value.solids, 2);
     await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "probe", subject: { kind: "artifact", path: "build/part.step" }, purpose: "must fail without hash", code: "result = 0" }),
+      /not active/,
+    );
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "probe", subject: { kind: "artifact", path: "build/part.step", sha256: "0".repeat(64) }, purpose: "must fail with stale hash", code: "result = 0" }),
+      /ArtifactRef hash mismatch/,
+    );
+    await assert.rejects(
       handleAgentApi(cwd, { schema: 1, op: "probe", subject: "current", purpose: "must fail", code: "result = 0" }),
       /not active/,
     );
@@ -154,7 +162,11 @@ test("completed workflow permits only an explicit hash-bound artifact probe", as
       handleAgentApi(cwd, {
         schema: 1,
         op: "probe",
-        subject: { kind: "artifact", path: resolve(import.meta.dirname, "../README.md") },
+        subject: {
+          kind: "artifact",
+          path: resolve(import.meta.dirname, "../README.md"),
+          sha256: createHash("sha256").update(await readFile(resolve(import.meta.dirname, "../README.md"))).digest("hex"),
+        },
         purpose: "must fail",
         code: "result = 0",
       }),
@@ -494,7 +506,11 @@ test("Python-facing probe runs arbitrary code on a disposable artifact", async (
     await assert.rejects(
       handleAgentApi(cwd, {
         schema: 1, op: "probe",
-        subject: { kind: "artifact", path: resolve(import.meta.dirname, "fixtures", "section_box.step") },
+        subject: {
+          kind: "artifact",
+          path: resolve(import.meta.dirname, "fixtures", "section_box.step"),
+          sha256: createHash("sha256").update(await readFile(resolve(import.meta.dirname, "fixtures", "section_box.step"))).digest("hex"),
+        },
         purpose: "reject escape", code: "result = 1",
       }),
       /escapes the project root/,

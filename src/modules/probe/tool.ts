@@ -28,7 +28,15 @@ export const CAD_PROBE_PRESET_NAMES = {
   python: "python",
 } as const;
 
-const SubjectSchema = Type.Enum({ current: "current", baseline: "baseline" });
+const SubjectSchema = Type.Union([
+  Type.Enum({ current: "current", baseline: "baseline" }),
+  Type.Object({
+    kind: Type.Literal("artifact"),
+    path: Type.String({ minLength: 1 }),
+    sha256: Type.String({ pattern: "^[a-f0-9]{64}$" }),
+    role: Type.Optional(Type.String()),
+  }, { additionalProperties: false }),
+]);
 const target = (fields: Record<string, any> = {}) => Type.Object(
   { artifact: Type.Optional(Type.String({ minLength: 1 })), ...fields },
   { additionalProperties: false },
@@ -190,23 +198,21 @@ function inside(root: string, candidate: string): boolean {
   return path === "" || (path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 }
 
-async function resolveArtifactSubject(cwd: string, subject: AgentArtifactSubject): Promise<{ path: string; expectedHash?: string }> {
+async function resolveArtifactSubject(cwd: string, subject: AgentArtifactSubject): Promise<{ path: string; expectedHash: string }> {
   if (subject.kind !== "artifact" || typeof subject.path !== "string" || !subject.path.trim()) {
     throw new Error("cad.probe ArtifactRef subject requires a non-empty path");
   }
   if (/^[a-zA-Z]:[\\/]/.test(subject.path)) throw new Error("cad.probe ArtifactRef uses Linux/WSL paths; Windows paths are rejected");
-  if (subject.sha256 !== undefined && !/^[a-f0-9]{64}$/.test(subject.sha256)) {
+  if (typeof subject.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(subject.sha256)) {
     throw new Error("cad.probe ArtifactRef sha256 must be 64 lowercase hexadecimal characters");
   }
   const root = await realpath(cwd);
   const requested = isAbsolute(subject.path) ? subject.path : resolve(root, subject.path);
   const path = await realpath(requested);
   if (!inside(root, path)) throw new Error(`cad.probe ArtifactRef escapes the project root: ${subject.path}`);
-  if (subject.sha256) {
-    const actual = createHash("sha256").update(await readFile(path)).digest("hex");
-    if (actual !== subject.sha256) throw new Error(`cad.probe ArtifactRef hash mismatch for ${subject.path}`);
-  }
-  return { path: relative(root, path).replaceAll("\\", "/"), ...(subject.sha256 ? { expectedHash: subject.sha256 } : {}) };
+  const actual = createHash("sha256").update(await readFile(path)).digest("hex");
+  if (actual !== subject.sha256) throw new Error(`cad.probe ArtifactRef hash mismatch for ${subject.path}`);
+  return { path: relative(root, path).replaceAll("\\", "/"), expectedHash: subject.sha256 };
 }
 
 async function runPythonProbe(

@@ -329,6 +329,8 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
       && request.subject !== undefined
       && typeof request.subject !== "string"
       && request.subject.kind === "artifact"
+      && typeof request.subject.sha256 === "string"
+      && /^[a-f0-9]{64}$/.test(request.subject.sha256)
       && (await resolveActiveRun(cwd, mechanicalRegistries))?.state.status === "done";
     if (!completedArtifactObservation) await requireCurrentAuthorization(cwd, guardedOperation, authority);
   }

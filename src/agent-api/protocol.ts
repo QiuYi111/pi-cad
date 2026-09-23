@@ -5,7 +5,7 @@ import type { ModelParameterDefinitionInput } from "../shared/model-parameters.t
 export interface AgentArtifactSubject {
   kind: "artifact";
   path: string;
-  sha256?: string;
+  sha256: string;
   role?: string;
 }
 

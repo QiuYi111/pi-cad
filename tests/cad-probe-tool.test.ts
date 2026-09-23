@@ -16,6 +16,10 @@ import { CadProbeParametersSchema } from "../src/modules/probe/tool.ts";
 
 test("cad_probe schema is preset-discriminated and fail-closed", () => {
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: "current" }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: { kind: "artifact", path: "build/part.step", sha256: "a".repeat(64) } }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: { kind: "artifact", path: "build/part.step" } }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: { kind: "artifact", path: "build/part.step", sha256: "wrong" } }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: { kind: "artifact", path: "build/part.step", sha256: "a".repeat(64) }, purpose: "count", code: "result = 1" }), true);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", args: { artifact: "part.step" } }), true);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry" }), false);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: "current", args: { artifact: "part.step" } }), false);

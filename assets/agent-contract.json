@@ -1927,9 +1927,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2084,9 +2114,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2153,9 +2213,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2235,9 +2325,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2327,9 +2447,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2497,9 +2647,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2594,9 +2774,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2663,9 +2873,39 @@
                     "type": "string"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "args": {
@@ -2793,9 +3033,39 @@
                     "const": "python"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "purpose": {
@@ -2829,9 +3099,39 @@
                     "const": "python"
                   },
                   "subject": {
-                    "enum": [
-                      "current",
-                      "baseline"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "current",
+                          "baseline"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "path",
+                          "sha256"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "artifact"
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
                     ]
                   },
                   "purpose": {
