@@ -106,7 +106,7 @@ def inspect_interference_shape(shape: bd.Shape, pairs: Sequence[tuple[int, int]]
     parts = _solid_parts(shape)
     solids = list(shape.solids())
     selected_pairs = list(pairs) if pairs is not None else [(i, j) for i in range(len(solids)) for j in range(i + 1, len(solids))]
-    if not selected_pairs:
+    if pairs is not None and not selected_pairs:
         raise InterferenceUnresolvedError("empty interference selection: choose at least one solid pair")
     for i, j in selected_pairs:
         if i == j or min(i, j) < 0 or max(i, j) >= len(solids):

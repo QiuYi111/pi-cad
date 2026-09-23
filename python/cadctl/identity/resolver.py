@@ -313,7 +313,7 @@ class IdentityIndex:
                 raise IdentityError(
                     "unknown-ref",
                     f"'{ref}' is not a surface of artifact version {self.artifact_hash[:12]}; "
-                    "re-inspect the current artifact",
+                    "run preset='surfaces' again to refresh refs, then re-inspect the current artifact",
                     target=ref,
                     artifactHash=self.artifact_hash,
                 )
