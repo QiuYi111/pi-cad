@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
-import { completionGate, dispatchSidecarRequest } from "../src/authority/sidecar.ts";
+import { completionGate, completionGateForConversation, dispatchSidecarRequest } from "../src/authority/sidecar.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
 import { bindingFromTranscriptEntries, WORKFLOW_BINDING_CUSTOM_TYPE, type ConversationBindingV1 } from "../src/integrations/prime/workflow-binding.ts";
@@ -152,6 +152,10 @@ test("each Prime conversation owns its own workflow run", async () => {
       // The extension persists the run its conversation just started.
       a.persist(runA.runId);
       assert.equal((await current(cwd, a.scope()))?.runId, runA.runId);
+      assert.equal((await completionGate(cwd)).complete, false, "project-level gate must not inherit a conversation run");
+      const gateA = await completionGateForConversation(cwd, SESSION_A);
+      assert.equal(gateA.complete, false);
+      assert.equal(gateA.runId, runA.runId, "one-shot launcher can check its root conversation explicitly");
 
       // A brand new conversation is unbound: it sees no run, no promoted run,
       // and no phase card from A's work.
@@ -176,9 +180,9 @@ test("each Prime conversation owns its own workflow run", async () => {
       assert.equal(untouchedA?.phase, "inspect");
       assert.equal(untouchedA?.status, "active");
       assert.equal((await gate(cwd, b.scope())).complete, true);
-      const gateA = await gate(cwd, a.scope());
-      assert.equal(gateA.complete, false);
-      assert.equal(gateA.runId, runA.runId);
+      const gateAAfterB = await gate(cwd, a.scope());
+      assert.equal(gateAAfterB.complete, false);
+      assert.equal(gateAAfterB.runId, runA.runId);
 
       // A reaches its own final state.
       await advance(cwd, a.scope(), "checked");

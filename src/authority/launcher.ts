@@ -6,7 +6,8 @@ import { basename, dirname, join, resolve } from "node:path";
 import { createConnection, createServer } from "node:net";
 
 import { assertUnixRuntime } from "../shared/platform.ts";
-import { completionGate, startAuthoritySidecar } from "./sidecar.ts";
+import { completionGate, completionGateForConversation, startAuthoritySidecar } from "./sidecar.ts";
+import { HarnessProjectStoreV7 } from "../harness/run-store.ts";
 import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
 import { experienceRoot, finalizeExperience } from "../experience/store.ts";
 
@@ -793,6 +794,8 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     },
   );
   try {
+    const launchedAt = new Date().toISOString();
+    const previousConversations = (await new HarnessProjectStoreV7(project).load()).state.conversations ?? {};
     const result = process.platform === "darwin"
       ? await (async () => {
           const socket = join(paths.authorSocketDirectory, "authority.sock");
@@ -810,7 +813,16 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     // the per-launch copy, so persist /login there before the runtime directory
     // is removed in finally.
     if (process.platform === "darwin") await persistPrimeCredentials(ephemeralAgentDir, primeAgentDir);
-    const gate = await completionGate(project);
+    const conversations = (await new HarnessProjectStoreV7(project).load()).state.conversations ?? {};
+    const launchedConversation = Object.entries(conversations)
+      .filter(([sessionId, binding]) => binding.boundAt >= launchedAt && binding.runId !== previousConversations[sessionId]?.runId)
+      .sort((left, right) => left[1].boundAt.localeCompare(right[1].boundAt))[0]?.[0];
+    // A one-shot Prime process owns a conversation-scoped run. The project
+    // pointer intentionally stays empty for those runs, so gate against the
+    // first run this launch bound (the root session starts before RLM children).
+    const gate = launchedConversation
+      ? await completionGateForConversation(project, launchedConversation)
+      : await completionGate(project);
     await archivePrimeExperience(project, gate, currentAuthorModel);
     if (result.signal) return 128;
     if (!isOneShot(primeArgs)) return result.code;
