@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,9 +17,27 @@ import build123d as bd
 from cadctl.export import export_artifact
 
 
-def _export_at_barrier(source: str, output: str, barrier) -> None:
+def _export_at_barrier(source: str, output: str, barrier, step_replaced, second_started) -> None:
+    from cadctl import export as export_module
+
     barrier.wait(timeout=20)
-    export_artifact(source, output, "step")
+    original_replace = os.replace
+    pause_after_step = Path(source).name == "revision-a.step"
+
+    def interleave_revisions(src, dst):
+        original_replace(src, dst)
+        if pause_after_step and Path(dst) == Path(output) and Path(src) != Path(source):
+            step_replaced.set()
+            if not second_started.wait(timeout=10):
+                raise TimeoutError("second revision did not start during publication")
+            time.sleep(0.2)
+
+    if not pause_after_step:
+        if not step_replaced.wait(timeout=20):
+            raise TimeoutError("first revision did not publish its STEP")
+        second_started.set()
+    with patch.object(export_module.os, "replace", side_effect=interleave_revisions):
+        export_artifact(source, output, "step")
 
 
 class ExportIdentityTests(unittest.TestCase):
@@ -105,8 +124,10 @@ class ExportIdentityTests(unittest.TestCase):
             output = root / "delivery.step"
             context = multiprocessing.get_context("fork")
             barrier = context.Barrier(2)
+            step_replaced = context.Event()
+            second_started = context.Event()
             workers = [
-                context.Process(target=_export_at_barrier, args=(str(source), str(output), barrier))
+                context.Process(target=_export_at_barrier, args=(str(source), str(output), barrier, step_replaced, second_started))
                 for source in sources
             ]
             for worker in workers:
