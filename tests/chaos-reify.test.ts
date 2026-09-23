@@ -1533,15 +1533,15 @@ test("reify chaos: partialStateWrite recovery 不覆盖故障期间已经写回�
 
     const backup = `${stateFile}.chaos-original`;
     assert.ok(existsSync(backup), "注入后必须保留完整备份");
-    const newer = JSON.parse(readFileSync(backup, "utf8")) as { updatedAt?: string };
-    newer.updatedAt = "2099-01-01T00:00:00.000Z";
+    const newer = JSON.parse(readFileSync(backup, "utf8")) as { createdAt?: string };
+    newer.createdAt = "2099-01-01T00:00:00.000Z";
     writeFileSync(stateFile, JSON.stringify(newer, null, 2));
 
     await partial.recover({ session, trace, params: {} });
 
-    const recovered = JSON.parse(readFileSync(stateFile, "utf8")) as { updatedAt?: string };
+    const recovered = JSON.parse(readFileSync(stateFile, "utf8")) as { createdAt?: string };
     assert.equal(
-      recovered.updatedAt,
+      recovered.createdAt,
       "2099-01-01T00:00:00.000Z",
       "产品已经写回有效 state 时，recovery 不能拿注入前备份把它回滚",
     );
