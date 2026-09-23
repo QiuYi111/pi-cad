@@ -153,20 +153,84 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
     "await cad.workflow.advance('finished')",
   ].join("\n");
 
+  const daemonParentCode = [
+    "import asyncio, json, rlm, time",
+    "target = await rlm.run('TASK_DAEMON_CANCEL: start a live CAD kernel and wait for cancellation.', name='daemon-cancel-target')",
+    "sibling = await rlm.run('TASK_DAEMON_SIBLING: start a CAD kernel, wait for release, then build and probe a cube.', name='daemon-sibling')",
+    "from pathlib import Path",
+    "Path('/workspace/daemon-child-ids.json').write_text(json.dumps({'target': target.rlm_child_id, 'sibling': sibling.rlm_child_id}), encoding='utf-8')",
+    "deadline = time.monotonic() + 180",
+    "while not Path('/workspace/daemon-restart-target').exists():",
+    "    if time.monotonic() >= deadline: raise TimeoutError('daemon controller did not request child restart')",
+    "    await asyncio.sleep(0.05)",
+    "restart = await rlm.run('TASK_DAEMON_RESTART: build and probe a 5 mm cube after the cancelled child.', name='daemon-restarted-target')",
+    "deadline = time.monotonic() + 180",
+    "while True:",
+    "    states = {item.rlm_child_id: item.status for item in await rlm.list_subagents()}",
+    "    if states.get(sibling.rlm_child_id) == 'completed' and states.get(restart.rlm_child_id) == 'completed': break",
+    "    if time.monotonic() >= deadline: raise TimeoutError(f'daemon siblings did not finish: {states}')",
+    "    await asyncio.sleep(0.1)",
+    "Path('/workspace/daemon-parent-complete.json').write_text(json.dumps({'target': target.rlm_child_id, 'sibling': sibling.rlm_child_id, 'restart': restart.rlm_child_id, 'statuses': states}), encoding='utf-8')",
+  ].join("\n");
+
+  const daemonTargetCode = [
+    "import asyncio, os, cad",
+    "from pathlib import Path",
+    "await cad.workflow.start('mechanical.naked', interaction_mode='headless')",
+    "Path('/workspace/daemon-target-kernel-started').write_text(str(os.getpid()), encoding='utf-8')",
+    "while True: await asyncio.sleep(0.05)",
+  ].join("\n");
+
+  const daemonArtifactCode = (folderName: string, size: number, marker: string) => [
+    "from pathlib import Path",
+    "import cad, json",
+    `folder = Path('${folderName}')`,
+    "folder.mkdir(parents=True, exist_ok=True)",
+    "source = folder / 'module.py'",
+    `source.write_text('from build123d import Box\\nresult = Box(${size}, ${size}, ${size})\\n', encoding='utf-8')`,
+    "artifact = await cad.model.build(source, folder / 'model.step')",
+    "evidence = await cad.probe.run(subject=artifact, purpose='Verify independent daemon child geometry', code=\"result = {'volume': round(shape.volume, 6)}\")",
+    `assert abs(evidence.value['volume'] - ${size ** 3}) < 1e-6, evidence.value`,
+    "await cad.workflow.advance('finished')",
+    `Path('/workspace/${marker}').write_text(json.dumps({'path': str(artifact.path), 'sha256': artifact.sha256, 'volume': evidence.value['volume']}), encoding='utf-8')`,
+  ];
+
+  const daemonSiblingCode = [
+    "import asyncio, json, os, cad",
+    "from pathlib import Path",
+    "await cad.workflow.start('mechanical.naked', interaction_mode='headless')",
+    "Path('/workspace/daemon-sibling-kernel.json').write_text(json.dumps({'pid': os.getpid(), 'pidNamespace': os.readlink('/proc/self/ns/pid')}), encoding='utf-8')",
+    "while not Path('/workspace/daemon-release-sibling').exists(): await asyncio.sleep(0.05)",
+    ...daemonArtifactCode("subagents/daemon-sibling", 8, "daemon-sibling-done.json"),
+  ].join("\n");
+
+  const daemonRestartCode = [
+    "import cad",
+    "await cad.workflow.start('mechanical.naked', interaction_mode='headless')",
+    ...daemonArtifactCode("subagents/daemon-restarted-target", 5, "daemon-restart-artifact.json"),
+  ].join("\n");
+
   const responseFor = (context: any) => {
     appendFileSync(capturePath, `${JSON.stringify(context)}\n`, "utf8");
     const serialized = JSON.stringify(context);
     const depth = Number(String(context.systemPrompt ?? "").match(/Recursive agent depth:\s*(\d+)/)?.[1] ?? 0);
     const task = depth > 0
-      ? serialized.includes("TASK_FAULT") ? "F" : serialized.includes("TASK_GRANDCHILD") ? "G" : serialized.includes("TASK_CHILD_A") ? "A" : serialized.includes("TASK_CHILD_B") ? "B" : "UNKNOWN"
-      : "PARENT";
+      ? serialized.includes("TASK_DAEMON_CANCEL") ? "DAEMON_CANCEL" : serialized.includes("TASK_DAEMON_SIBLING") ? "DAEMON_SIBLING" : serialized.includes("TASK_DAEMON_RESTART") ? "DAEMON_RESTART" : serialized.includes("TASK_FAULT") ? "F" : serialized.includes("TASK_GRANDCHILD") ? "G" : serialized.includes("TASK_CHILD_A") ? "A" : serialized.includes("TASK_CHILD_B") ? "B" : "UNKNOWN"
+      : serialized.includes("DAEMON_CANCEL_RESTART") ? "DAEMON_PARENT" : "PARENT";
     const key = `${depth}:${task}`;
     const call = (calls.get(key) ?? 0) + 1;
     calls.set(key, call);
 
+    if (task === "DAEMON_PARENT") {
+      if (call === 1) return ai.fauxAssistantMessage(ai.fauxToolCall("ipython", { code: daemonParentCode }), { stopReason: "toolUse" });
+      return ai.fauxAssistantMessage("DAEMON_PARENT_CANCEL_RESTART_OK");
+    }
     if (depth > 0) {
       if (task === "F") throw new Error("intentional faux-provider failure for isolation smoke");
-      if (call === 1) return ai.fauxAssistantMessage(ai.fauxToolCall("ipython", { code: childCode(task as "A" | "B" | "G") }), { stopReason: "toolUse" });
+      if (call === 1) {
+        const code = task === "DAEMON_CANCEL" ? daemonTargetCode : task === "DAEMON_SIBLING" ? daemonSiblingCode : task === "DAEMON_RESTART" ? daemonRestartCode : childCode(task as "A" | "B" | "G");
+        return ai.fauxAssistantMessage(ai.fauxToolCall("ipython", { code }), { stopReason: "toolUse" });
+      }
       return ai.fauxAssistantMessage(`CHILD_${task}_DONE`);
     }
     if (call === 1) return ai.fauxAssistantMessage(ai.fauxToolCall("ipython", { code: parentCode }), { stopReason: "toolUse" });

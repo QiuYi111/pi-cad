@@ -101,6 +101,9 @@ await test("events identify repeated failure and steering keeps the session", as
   await sleep(20);
   const events = await core.events({ session_id: started.session_id });
   assert.ok(events.events.some((event) => event.type === "action_failed" && event.failure_streak === 3));
+  const completionDeadline = Date.now() + 1000;
+  while (fake.primes[0].state !== "ready" && Date.now() < completionDeadline) await sleep(1);
+  assert.equal(fake.primes[0].state, "ready", "the simulated recovery turn must settle before checking idle status");
   const before = await core.status({ session_id: started.session_id });
   assert.equal(before.progress_signal, "idle");
   fake.primes[0].state = "streaming";
