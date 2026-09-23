@@ -17,6 +17,7 @@ DEFAULTS = {
     "pin_h": 10.0,
     "spacer": False,
     "reverse_order": False,
+    "local_multi_solid_axis": False,
 }
 
 MIN = (bd.Align.MIN, bd.Align.MIN, bd.Align.MIN)
@@ -66,6 +67,14 @@ def build(parameters=None):
     identity.solid("arm/bracket_right/rib", owner="arm/bracket_right", label="筋板", shape=right_rib)
     identity.instance("arm/pin_a", part="arm/pin_def", label="销", shape=pin_a)
     identity.instance("arm/pin_b", part="arm/pin_def", label="销", shape=pin_b)
+    if values["local_multi_solid_axis"]:
+        identity.axis(
+            "arm/bracket_left/frame_axis",
+            owner="arm/bracket_left",
+            origin=[0, 0, 0],
+            direction=[0, 0, 1],
+            coordinate="local",
+        )
     identity.axis(
         "arm/pin_a/hole_axis",
         owner="arm/pin_a",

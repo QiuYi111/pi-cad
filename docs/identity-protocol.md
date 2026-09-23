@@ -84,9 +84,10 @@ Entity kinds: `assembly`, `part`, `instance`, `solid`, `feature`, `faces`,
 placement (`instance`), so the same part installed twice has two instance paths
 and two occurrence refs.
 
-An `instance` or `solid` declared with `shape=` is bound by that shape's world
-bounding box, so it carries the placement the author already applied. A node
-declared with no selector is a grouping container; it owns whatever its
+An `instance` or `solid` declared with `shape=` is bound in the exported STEP
+by exact bounds and volume for one solid, or by exact bounds and volume for
+each member of a multi-solid shape. Each member must resolve exactly once. A
+node declared with no selector is a grouping container; it owns whatever its
 descendants bind.
 
 ## Selectors
@@ -130,10 +131,15 @@ binds it to final geometry.
     {"path": "arm/forearm/j3_bearing_seat", "kind": "feature", "owner": "arm/forearm",
      "featureKind": "bearing_seat", "bindings": [{"ref": "surf-...", "solidIndex": 3}]}
   ],
-  "refs": {"surf-...": "arm/forearm/j3_bearing_seat"},
+  "refs": {"surf-...": ["arm/forearm/j3_bearing_seat"]},
   "counts": {"feature": 1, "instance": 2}
 }
 ```
+
+`refs` maps each geometry ref to every semantic path that directly binds it.
+Resolving a ref that has several paths fails with `ambiguous-ref`; resolve a
+semantic path to choose the intended meaning. Grouping containers are omitted
+from this reverse index.
 
 Bindings name real objects in the exported STEP and record the facts used to
 find them: kind, owner occurrence, area or volume, and local plus world

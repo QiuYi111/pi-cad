@@ -17,7 +17,7 @@ from .protocol import IdentityError
 
 DEFAULT_TOLERANCE = 1e-6
 
-_SOLID_KEYS = {"entity", "near", "volume", "bounds", "withinBounds", "extreme", "tolerance"}
+_SOLID_KEYS = {"entity", "near", "volume", "bounds", "withinBounds", "extreme", "members", "tolerance"}
 _FACE_KEYS = {
     "entity",
     "type",
@@ -75,6 +75,16 @@ def normalize(selector: dict[str, Any]) -> dict[str, Any]:
         )
     normalized = dict(selector)
     normalized["tolerance"] = _tolerance(selector)
+    if entity == "solid" and "members" in normalized:
+        members = normalized["members"]
+        if not isinstance(members, list) or not members:
+            raise IdentityError("bad-selector", "solid selector members must be a non-empty list")
+        for member in members:
+            if not isinstance(member, dict) or set(member) != {"bounds", "volume"}:
+                raise IdentityError(
+                    "bad-selector",
+                    "each solid selector member needs exact bounds and volume",
+                )
     return normalized
 
 
@@ -189,6 +199,34 @@ def evaluate(
         solids = [record for record in solids if record["index"] in wanted]
 
     if entity == "solid":
+        if "members" in normalized:
+            result: list[dict[str, Any]] = []
+            for member in normalized["members"]:
+                matches = evaluate(
+                    model,
+                    {
+                        "entity": "solid",
+                        **member,
+                        "tolerance": tolerance,
+                    },
+                    solid_indices,
+                )
+                if len(matches) != 1:
+                    raise IdentityError(
+                        "ambiguous-shape-member",
+                        "shape= member matched "
+                        f"{len(matches)} exported solids; refine the declaration or fail the build",
+                        member=member,
+                        matches=[match["ref"] for match in matches],
+                    )
+                if any(existing["ref"] == matches[0]["ref"] for existing in result):
+                    raise IdentityError(
+                        "ambiguous-shape-member",
+                        "two source shape members match the same exported solid",
+                        ref=matches[0]["ref"],
+                    )
+                result.append(matches[0])
+            return result
         if "extreme" in normalized:
             matched = _extreme_solids(solids, normalized) if solids else []
             remaining = {key: value for key, value in normalized.items() if key not in ("extreme", "tolerance", "entity")}

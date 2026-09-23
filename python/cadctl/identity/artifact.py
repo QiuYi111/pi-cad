@@ -28,8 +28,6 @@ from OCP.gp import gp_XYZ
 from ..assembly import _location_dict, assembly_tree_from_shape
 from .protocol import IdentityError
 
-_CENTER_TOLERANCE = 1e-6
-
 
 def _hash_file(path: str | Path) -> str:
     digest = hashlib.sha256()
@@ -63,6 +61,17 @@ def _bbox(shape: Any) -> list[list[float]]:
     ]
 
 
+def _same_placement(left: Any, right: Any) -> bool:
+    """Compare STEP instance placements without using shape proximity."""
+    a = left.wrapped.Location().Transformation()
+    b = right.wrapped.Location().Transformation()
+    return all(
+        abs(a.Value(row, column) - b.Value(row, column)) <= 1e-9
+        for row in range(1, 4)
+        for column in range(1, 5)
+    )
+
+
 def _world_bounds(
     parent_world: bd.Location, bounds: list[list[float]]
 ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
@@ -78,18 +87,6 @@ def _world_bounds(
         tuple(min(corner[axis] for corner in corners) for axis in range(3)),
         tuple(max(corner[axis] for corner in corners) for axis in range(3)),
     )
-
-
-def _inside(
-    point: tuple[float, float, float],
-    low: tuple[float, float, float],
-    high: tuple[float, float, float],
-) -> bool:
-    return all(low[axis] - _CENTER_TOLERANCE <= point[axis] <= high[axis] + _CENTER_TOLERANCE for axis in range(3))
-
-
-def _near(left: tuple[float, float, float], right: tuple[float, float, float]) -> bool:
-    return all(abs(a - b) <= _CENTER_TOLERANCE for a, b in zip(left, right))
 
 
 class ArtifactModel:
@@ -196,26 +193,51 @@ class ArtifactModel:
         return records
 
     def _link_occurrences_to_solids(self) -> None:
+        exported_solids = list(self.shape.solids())
         for entry in self.occurrences:
             if entry["kind"] != "leaf":
                 continue
-            low, high = entry["bounds"][0], entry["bounds"][1]
-            matches = [
-                record["index"]
-                for record in self.solids
-                if _inside(record["center"], tuple(low), tuple(high))
-            ]
-            if not matches:
-                nearest = min(
-                    self.solids,
-                    key=lambda record: sum((record["center"][axis] - entry["world"][axis]) ** 2 for axis in range(3)),
-                    default=None,
+            node = self._occurrence_shape(entry["path"])
+            matches: list[int] = []
+            for node_solid in node.solids():
+                candidates = [
+                    record["index"]
+                    for record, exported in zip(self.solids, exported_solids)
+                    if exported.wrapped.IsPartner(node_solid.wrapped)
+                    and _same_placement(exported, node_solid)
+                ]
+                if len(candidates) != 1:
+                    raise IdentityError(
+                        "ambiguous-occurrence-solid",
+                        f"STEP occurrence '{entry['ref']}' maps one of its solids to "
+                        f"{len(candidates)} exported solids by topology and placement; "
+                        "the occurrence-to-solid relationship is not unique",
+                        occurrence=entry["ref"],
+                        candidates=candidates,
+                    )
+                matches.append(candidates[0])
+            if len(matches) != entry["solidCount"]:
+                raise IdentityError(
+                    "incomplete-occurrence-solid-map",
+                    f"STEP occurrence '{entry['ref']}' declares {entry['solidCount']} "
+                    f"solid(s), but its topology maps to {len(matches)} exported solids",
+                    occurrence=entry["ref"],
+                    expected=entry["solidCount"],
+                    found=len(matches),
                 )
-                if nearest is not None and _near(nearest["center"], entry["world"]):
-                    matches = [nearest["index"]]
             entry["solidIndices"] = matches
             for index in matches:
                 self.solids[index]["occurrenceRefs"].append(entry["ref"])
+        for solid in self.solids:
+            if len(solid["occurrenceRefs"]) != 1:
+                raise IdentityError(
+                    "ambiguous-solid-occurrence",
+                    f"exported solid '{solid['ref']}' belongs to "
+                    f"{len(solid['occurrenceRefs'])} STEP leaf occurrence(s); "
+                    "cannot prove a unique owner",
+                    solid=solid["ref"],
+                    occurrences=solid["occurrenceRefs"],
+                )
         # Roll descendant solids up so an occurrence node owns its whole body.
         by_parent: dict[str, list[dict[str, Any]]] = {}
         for entry in self.occurrences:
@@ -234,6 +256,24 @@ class ArtifactModel:
             if face["solidIndex"] is not None:
                 self.solids[face["solidIndex"]]["faceIds"].append(face["id"])
 
+    def _occurrence_shape(self, path: str) -> Any:
+        node = self.shape
+        for component in path.split("."):
+            if component == "root":
+                continue
+            children = list(node.children)
+            if not children and node is self.shape and len(node.solids()) > 1:
+                children = list(node.solids())
+            index = int(component)
+            if index < 0 or index >= len(children):
+                raise IdentityError(
+                    "missing-occurrence",
+                    f"STEP occurrence path '{path}' no longer exists in the imported tree",
+                    path=path,
+                )
+            node = children[index]
+        return node
+
     # -- lookups ---------------------------------------------------------
 
     def occurrence(self, ref: str) -> dict[str, Any] | None:
@@ -243,15 +283,16 @@ class ArtifactModel:
         return None
 
     def occurrence_by_solid(self, index: int) -> str | None:
-        # Prefer the deepest node: a sub-assembly too, but a leaf body is the
-        # placement a declaration means when it names one occurrence.
-        for entry in self.occurrences:
-            if entry["kind"] == "leaf" and index in entry["solidIndices"]:
-                return entry["ref"]
-        for entry in self.occurrences:
-            if index in entry["solidIndices"]:
-                return entry["ref"]
-        return None
+        record = self.solids[index] if 0 <= index < len(self.solids) else None
+        refs = record["occurrenceRefs"] if record else []
+        if len(refs) > 1:
+            raise IdentityError(
+                "ambiguous-solid-occurrence",
+                f"solid index {index} maps to multiple STEP occurrences",
+                solidIndex=index,
+                occurrences=refs,
+            )
+        return refs[0] if refs else None
 
     def face(self, face_id: str) -> dict[str, Any] | None:
         for record in self.faces:

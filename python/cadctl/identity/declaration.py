@@ -111,14 +111,32 @@ def _expectation(value: Any, *, default: int | str) -> dict[str, Any]:
 
 def _shape_selector(shape: Any, tolerance: float) -> dict[str, Any]:
     box = shape.bounding_box()
-    return {
-        "entity": "solid",
-        "withinBounds": [
-            [float(box.min.X), float(box.min.Y), float(box.min.Z)],
-            [float(box.max.X), float(box.max.Y), float(box.max.Z)],
-        ],
-        "tolerance": tolerance,
-    }
+    selector: dict[str, Any] = {"entity": "solid"}
+    if len(shape.solids()) == 1:
+        selector.update(
+            {
+                "bounds": [
+                    [float(box.min.X), float(box.min.Y), float(box.min.Z)],
+                    [float(box.max.X), float(box.max.Y), float(box.max.Z)],
+                ],
+                "volume": float(shape.volume),
+            }
+        )
+    else:
+        selector["members"] = []
+        for solid in shape.solids():
+            solid_box = solid.bounding_box()
+            selector["members"].append(
+                {
+                    "bounds": [
+                        [float(solid_box.min.X), float(solid_box.min.Y), float(solid_box.min.Z)],
+                        [float(solid_box.max.X), float(solid_box.max.Y), float(solid_box.max.Z)],
+                    ],
+                    "volume": float(solid.volume),
+                }
+            )
+    selector["tolerance"] = tolerance
+    return selector
 
 
 class Assembly:

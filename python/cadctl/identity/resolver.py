@@ -9,7 +9,7 @@ raise an actionable error instead of returning the first hit.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -203,7 +203,7 @@ class IdentityIndex:
             "counts": (self.manifest or {}).get("counts", {}),
         }
 
-    def refs(self) -> dict[str, str]:
+    def refs(self) -> dict[str, list[str]]:
         if self.source == "identity":
             return dict(self.manifest["refs"])
         if self.source == "legacy":
@@ -217,8 +217,8 @@ class IdentityIndex:
             if not ref.startswith(prefix):
                 continue
             if self.source == "identity":
-                path = self.manifest["refs"].get(ref)
-                if path is None:
+                paths = self.manifest["refs"].get(ref)
+                if paths is None:
                     raise IdentityError(
                         "unknown-ref",
                         f"'{ref}' is not bound by artifact version {self.artifact_hash[:12]}; "
@@ -226,9 +226,21 @@ class IdentityIndex:
                         target=ref,
                         artifactHash=self.artifact_hash,
                     )
+                if isinstance(paths, str):  # manifests written before ref arrays
+                    paths = [paths]
+                if len(paths) != 1:
+                    raise IdentityError(
+                        "ambiguous-ref",
+                        f"'{ref}' is bound to {len(paths)} semantic paths "
+                        f"({', '.join(paths)}); resolve a semantic path instead",
+                        target=ref,
+                        paths=paths,
+                        artifactHash=self.artifact_hash,
+                    )
+                path = paths[0]
                 for entry in self.manifest["entities"]:
                     if entry["path"] == path:
-                        return replace(self._resolution_for(entry, expected=ref), kind=kind)
+                        return self._resolution_for(entry, expected=ref)
             self._require_current_ref(ref)
             return Resolution(
                 target=ref,

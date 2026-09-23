@@ -246,6 +246,12 @@ def _binding_solids(bindings: list[dict[str, Any]]) -> list[int]:
     return sorted(indices)
 
 
+def _add_ref_path(refs: dict[str, list[str]], ref: str, path: str) -> None:
+    paths = refs.setdefault(ref, [])
+    if path not in paths:
+        paths.append(path)
+
+
 def build_manifest(
     assembly: Any,
     artifact: str | Path,
@@ -258,7 +264,7 @@ def build_manifest(
     model = artifact_model or ArtifactModel(artifact)
     ordered = _topological(assembly.entities)
     resolved: dict[str, dict[str, Any]] = {}
-    refs: dict[str, str] = {}
+    refs: dict[str, list[str]] = {}
     entities: list[dict[str, Any]] = []
 
     for record in ordered:
@@ -298,7 +304,7 @@ def build_manifest(
                 entry["bindings"] = bindings
                 entry["solidIndices"] = _binding_solids(bindings)
                 for binding in bindings:
-                    refs.setdefault(binding["ref"], record["path"])
+                    _add_ref_path(refs, binding["ref"], record["path"])
         resolved[record["path"]] = entry
         entities.append(entry)
 
@@ -319,8 +325,6 @@ def build_manifest(
                 collected.append(binding)
         entry["bindings"] = collected
         entry["solidIndices"] = _binding_solids(collected)
-        for binding in collected:
-            refs.setdefault(binding["ref"], entry["path"])
 
     sources, closure = _source_entries(source_files or [])
     parameters = parameters or {}
@@ -385,16 +389,30 @@ def _resolve_frame(
 
 
 def _owner_occurrence(model: ArtifactModel, owner_entry: dict[str, Any]) -> str | None:
+    candidates: set[str] = set()
     for binding in owner_entry.get("bindings", []):
         ref = binding.get("ref")
         if isinstance(ref, str) and ref.startswith("occ-"):
-            return ref
-    indices = owner_entry.get("solidIndices") or []
-    if indices:
-        ref = model.occurrence_by_solid(indices[0])
-        if ref:
-            return ref
-    return None
+            candidates.add(ref)
+        index = binding.get("solidIndex")
+        if isinstance(index, int):
+            ref = model.occurrence_by_solid(index)
+            if ref:
+                candidates.add(ref)
+    if not candidates:
+        for index in owner_entry.get("solidIndices") or []:
+            ref = model.occurrence_by_solid(index)
+            if ref:
+                candidates.add(ref)
+    if len(candidates) != 1:
+        raise IdentityError(
+            "ambiguous-owner-occurrence",
+            f"local frame owner '{owner_entry['path']}' maps to {len(candidates)} "
+            "STEP occurrences; use a single occurrence owner or declare a world frame",
+            owner=owner_entry["path"],
+            occurrences=sorted(candidates),
+        )
+    return next(iter(candidates))
 
 
 def _transform_point(location: dict[str, Any], point: list[float]) -> list[float]:

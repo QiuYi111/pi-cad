@@ -27,12 +27,14 @@ from cadctl.identity import (
     reset as reset_identity,
     write_manifest,
 )
+from cadctl.identity.artifact import ArtifactModel
 from cadctl.mesh import mesh_document
 from cadctl.model import run_source
 
 FIXTURES = Path(__file__).parent / "fixtures" / "identity"
 SIMPLE = "simple_plate.py"
 NESTED = "nested_assembly.py"
+OVERLAPPING = "overlapping_occurrences.py"
 
 
 def _build(source_name: str, output: Path, parameters: dict | None = None) -> tuple[Path, dict | None]:
@@ -272,6 +274,18 @@ class NegativeSelectionTests(unittest.TestCase):
                 index.resolve("plate/no_such_face")
             self.assertEqual(caught.exception.code, "unknown-path")
 
+    def test_overlapping_occurrence_bounds_do_not_steal_another_solid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path, _ = _build(OVERLAPPING, Path(directory) / "case.step")
+            index = IdentityIndex(path)
+            outer = index.resolve("case/outer")
+            inner = index.resolve("case/inner")
+            self.assertEqual(len(outer.solid_indices), 1)
+            self.assertEqual(len(inner.solid_indices), 1)
+            self.assertNotEqual(outer.solid_indices, inner.solid_indices)
+            self.assertAlmostEqual(outer.bindings[0]["facts"]["volume"], 8000.0)
+            self.assertAlmostEqual(inner.bindings[0]["facts"]["volume"], 64.0)
+
     def test_owner_scoping_prevents_selecting_another_part(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path, _ = _build(NESTED, Path(directory) / "arm.step")
@@ -346,6 +360,35 @@ class NestedAssemblyTests(unittest.TestCase):
         self.assertIn("part", kinds)
         self.assertIn("instance", kinds)
 
+    def test_shared_instance_and_child_solid_ref_fails_as_ambiguous(self) -> None:
+        solid_ref = self.index.resolve("arm/bracket_left/base").refs[0]
+        paths = self.manifest["refs"][solid_ref]
+        self.assertEqual(paths, ["arm/bracket_left", "arm/bracket_left/base"])
+        with self.assertRaises(IdentityError) as caught:
+            self.index.resolve(solid_ref)
+        self.assertEqual(caught.exception.code, "ambiguous-ref")
+        self.assertEqual(caught.exception.details["paths"], paths)
+
+    def test_single_semantic_face_ref_keeps_its_declared_kind(self) -> None:
+        face_ref = self.index.resolve("arm/bracket_left/rib_face").refs[0]
+        self.assertEqual(
+            self.manifest["refs"][face_ref],
+            ["arm/bracket_left/rib_face"],
+        )
+        resolved = self.index.resolve(face_ref)
+        self.assertEqual(resolved.path, "arm/bracket_left/rib_face")
+        self.assertEqual(resolved.kind, "faces")
+
+    def test_local_frame_on_multi_solid_owner_fails_without_unique_occurrence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(IdentityError) as caught:
+                _build(
+                    NESTED,
+                    Path(directory) / "arm.step",
+                    {"local_multi_solid_axis": True},
+                )
+        self.assertEqual(caught.exception.code, "ambiguous-owner-occurrence")
+
 
 class RebuildTests(unittest.TestCase):
     def test_parameter_change_and_reordering_keep_the_same_names(self) -> None:
@@ -399,6 +442,18 @@ class RebuildTests(unittest.TestCase):
 
 
 class CompatibilityTests(unittest.TestCase):
+    def test_flattened_step_solids_have_exact_unique_occurrences(self) -> None:
+        model = ArtifactModel(Path(__file__).parent / "fixtures" / "interference_three.step")
+        self.assertEqual(len(model.solids), 3)
+        self.assertEqual(
+            [len(record["occurrenceRefs"]) for record in model.solids],
+            [1, 1, 1],
+        )
+        self.assertEqual(
+            [entry["solidIndices"] for entry in model.occurrences],
+            [[0], [1], [2]],
+        )
+
     def test_anonymous_model_builds_and_exposes_only_current_refs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path, manifest = _build("../plate.py", Path(directory) / "plate.step")
