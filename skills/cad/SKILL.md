@@ -48,7 +48,9 @@ cad.probe.run(
     *,
     subject: str | ArtifactRef = "current",
     purpose: str,
-    code: str,
+    code: str | None = None,
+    script: str | Path | None = None,
+    args: dict | None = None,
 ) -> ProbeResult
 cad.review.submit(final_commit: Commit) -> dict
 cad.review.current(handle: dict) -> dict | None
@@ -169,6 +171,17 @@ chooses whether to use it in the assembly.
   `result` is an output name, not a pre-bound input—never read it before the
   assignment. Use `@cad.probe(...)` only for a synchronous
   function defined in a real source file, where Python can capture its source.
+  For reusable programs, pass `script="checks/probe.py"`; pass structured
+  JSON values with `args={...}`. Inside either program form, decoded values are
+  available as `params`; the decorator forwards named arguments through this
+  channel. Done workflows allow observations only with an explicit,
+  hash-bound project `ArtifactRef`.
+  Use `cad_resolve(path, kind=..., owner=..., expect="one"|"many")` to resolve
+  the shared, hash-bound identity manifest. It returns identity metadata and
+  B-Rep objects from the same imported STEP; `.object` requires one match and
+  `.objects` exposes an explicitly requested collection.
+  `cad_measure(metric, a, b=None)` reuses the managed measurement implementation
+  on the loaded shape, including hash-bound semantic names and geometry refs.
   The legacy `"current"` and `"baseline"` subjects remain available for
   state-bound v7 runs; unrestricted imports do not cross the effect fence.
 - For movable designs, treat the concept as a kinematic hypothesis and the
@@ -181,6 +194,15 @@ chooses whether to use it in the assembly.
   unreachable or singular states, endpoint reachability, and pass/fail result.
   Use `analysisLevel="fast"`, `"standard"`, or `"full"` in that result to state
   the strength of the proof; this is an evidence label, not a separate solver.
+  For finite rigid-pose batches, Python probes preload `cad_interference` and
+  `cad_interference_batch`; both use the same exact AABB/common implementation
+  as the interference preset. Batch transforms use solid indexes from the
+  current hash-bound STEP, translation in mm, and Euler rotation in degrees.
+  Batch output reports each pose and failure and states that it sampled only
+  those poses.
+  Use `cad_interference_named([("left/group", "right/group")])` or
+  `cad_interference_batch_named(pairs, poses)` to choose groups by shared
+  semantic path and compare them without importing the STEP again.
 - Use `await cad.probe.run(subject=artifact_ref, preset="visual",
   args={"views": ["right", "top"]})` when another direction would resolve a
   visual question. Choose only the views needed from `iso`, `front`, `back`,

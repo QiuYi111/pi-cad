@@ -324,7 +324,14 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
   bootstrapAgentApiContracts();
   if (!request || request.schema !== 1 || typeof request.op !== "string") throw new Error("invalid Agent API request");
   const guardedOperation = AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS];
-  if (guardedOperation) await requireCurrentAuthorization(cwd, guardedOperation, authority);
+  if (guardedOperation) {
+    const completedArtifactObservation = request.op === "probe"
+      && request.subject !== undefined
+      && typeof request.subject !== "string"
+      && request.subject.kind === "artifact"
+      && (await resolveActiveRun(cwd, mechanicalRegistries))?.state.status === "done";
+    if (!completedArtifactObservation) await requireCurrentAuthorization(cwd, guardedOperation, authority);
+  }
   switch (request.op) {
     case "workflow-list": {
       const packages = await discoverWorkflowPackages(cwd, mechanicalRegistries);
@@ -391,6 +398,7 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
         subject: request.subject ?? (request.args?.artifact ? undefined : "current"),
         purpose: request.purpose,
         code: request.code,
+        script: request.script,
         args: request.args,
       });
       const details = "details" in rendered ? rendered.details as any : undefined;

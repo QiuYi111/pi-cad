@@ -92,13 +92,14 @@ def _world_bounds(
 class ArtifactModel:
     """Occurrence tree, solids, and faces of one exact STEP byte string."""
 
-    def __init__(self, artifact: str | Path) -> None:
+    def __init__(self, artifact: str | Path, *, shape: bd.Shape | None = None) -> None:
         self.path = Path(artifact).resolve()
         if not self.path.is_file():
             raise IdentityError("missing-artifact", f"artifact does not exist: {self.path}")
         self.artifact_hash = _hash_file(self.path)
         self.token = self.artifact_hash[:12]
-        self.shape = bd.import_step(str(self.path))
+        self.shape = shape if shape is not None else bd.import_step(str(self.path))
+        self.face_shapes: dict[str, Any] = {}
         self.report = assembly_tree_from_shape(self.shape, self.artifact_hash)
         self.occurrences = self._walk_occurrences()
         self.solids = self._collect_solids()
@@ -190,6 +191,7 @@ class ArtifactModel:
                 facts["area"] = round(float(facts["area"]), 9)
                 facts["centroid"] = [round(float(value), 9) for value in facts["centroid"]]
                 records.append(facts)
+                self.face_shapes[sid] = face
         return records
 
     def _link_occurrences_to_solids(self) -> None:
@@ -299,6 +301,44 @@ class ArtifactModel:
             if record["id"] == face_id:
                 return record
         return None
+
+    def shape_for_binding(self, binding: dict[str, Any]) -> Any:
+        """Map one already resolved identity binding onto this imported B-Rep."""
+        target = binding.get("target")
+        ref = binding.get("ref")
+        solid_index = binding.get("solidIndex")
+        solids = list(self.shape.solids())
+        if target == "solid":
+            if not isinstance(solid_index, int) or not 0 <= solid_index < len(solids):
+                # Current solid refs carry the index, while semantic bindings
+                # always pin it in the manifest.
+                try:
+                    solid_index = int(str(ref).rsplit("-", 1)[1])
+                except (ValueError, IndexError):
+                    raise IdentityError("bad-binding", f"solid binding {ref!r} has no valid solid index")
+            if not 0 <= solid_index < len(solids):
+                raise IdentityError("bad-binding", f"solid binding {ref!r} is out of range")
+            return solids[solid_index]
+        if target == "face":
+            face = self.face_shapes.get(str(ref))
+            if face is None:
+                raise IdentityError("bad-binding", f"face binding {ref!r} is absent from this artifact")
+            return face
+        if target == "edge":
+            for index, solid in enumerate(solids):
+                for ordinal, edge in enumerate(solid.edges()):
+                    if ref == f"edge-{self.token}-{index}-{ordinal}":
+                        return edge
+            raise IdentityError("bad-binding", f"edge binding {ref!r} is absent from this artifact")
+        if target == "instance":
+            entry = self.occurrence(str(ref))
+            if entry is None:
+                raise IdentityError("bad-binding", f"instance binding {ref!r} is absent from this artifact")
+            indices = entry["solidIndices"]
+            if not indices:
+                raise IdentityError("bad-binding", f"instance binding {ref!r} owns no solids")
+            return solids[indices[0]] if len(indices) == 1 else bd.Compound(children=[solids[index] for index in indices])
+        raise IdentityError("bad-binding", f"binding {ref!r} has unsupported geometry target {target!r}")
 
     def faces_of(self, solid_indices: list[int]) -> list[dict[str, Any]]:
         wanted = set(solid_indices)

@@ -13,6 +13,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import build123d as bd
 
@@ -31,6 +32,7 @@ from cadctl.identity.artifact import ArtifactModel
 from cadctl.mesh import mesh_document
 from cadctl.render import _resolve_parts, _selection_index
 from cadctl.model import run_source
+from cadctl.probe import run_probe
 
 FIXTURES = Path(__file__).parent / "fixtures" / "identity"
 SIMPLE = "simple_plate.py"
@@ -203,6 +205,40 @@ class SimplePartTests(unittest.TestCase):
         self.assertAlmostEqual(binding["facts"]["area"], 2 * math.pi * 8.0 * (10.0 - 1.0), places=6)
         # The seat lives on the body that reaches plate_t + boss_h.
         self.assertAlmostEqual(_solid_bounds(self.path)[binding["solidIndex"]][1][2], 16.0, places=6)
+
+    def test_probe_resolves_named_faces_and_collections_on_the_loaded_shape(self) -> None:
+        shape = _shape(self.path)
+        with patch.object(bd, "import_step", side_effect=AssertionError("unexpected second STEP import")):
+            seat, objects = self.index.resolve_shapes("plate/bearing_seat", shape, kind="feature", expect="one")
+            holes, hole_faces = self.index.resolve_shapes("plate/mount_holes", shape, kind="faces", expect="many")
+        self.assertEqual(seat.artifact_hash, self.index.artifact_hash)
+        self.assertEqual(len(objects), 1)
+        self.assertEqual(str(objects[0].geom_type.name).lower(), "cylinder")
+        self.assertEqual(holes.cardinality, "4")
+        self.assertEqual(len(hole_faces), 4)
+        self.assertTrue(all(str(face.geom_type.name).lower() == "cylinder" for face in hole_faces))
+        with self.assertRaisesRegex(IdentityError, "expect='many'"):
+            self.index.resolve_shapes("plate/mount_holes", shape, kind="faces")
+
+    def test_shared_measurement_uses_semantic_face_on_the_existing_shape(self) -> None:
+        from cadctl.geometry import measure_shape
+
+        shape = _shape(self.path)
+        with patch.object(bd, "import_step", side_effect=AssertionError("unexpected second STEP import")):
+            measured = measure_shape(shape, "radius", "plate/bearing_seat", identity_index=self.index)
+        self.assertAlmostEqual(measured["value"], 8.0, places=5)
+        self.assertEqual(measured["units"], "mm")
+
+    def test_probe_program_receives_manifest_and_named_shape(self) -> None:
+        payload = run_probe(
+            self.path,
+            "selection = cad_resolve('plate/bearing_seat', kind='feature', expect='one')\n"
+            "result = {'identity': selection.identity, 'radius': selection.object.radius}",
+        )
+        self.assertEqual(payload["result"]["identity"]["manifestVersion"], 1)
+        self.assertEqual(payload["result"]["identity"]["target"], "plate/bearing_seat")
+        self.assertAlmostEqual(payload["result"]["radius"], 8.0, places=5)
+        self.assertGreaterEqual(payload["importSeconds"], 0)
 
     def test_chamfered_mounting_face_still_resolves_and_is_smaller(self) -> None:
         top = self.index.resolve("plate/top_face", kind="feature").bindings[0]["facts"]

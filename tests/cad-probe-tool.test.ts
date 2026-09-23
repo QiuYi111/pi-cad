@@ -24,7 +24,9 @@ test("cad_probe schema is preset-discriminated and fail-closed", () => {
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "compare", args: { before: "a.step", after: "b.step" } }), true);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "compare", args: { artifact: "a.step" } }), false);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", code: "result = 1" }), true);
-  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", code: "result = 1", args: { artifact: "part.step" } }), false);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", code: "result = 1", args: { enabled: false, title: "孔组", list: [1, null] } }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", script: "checks/probe.py", args: { enabled: false } }), true);
+  assert.equal(Value.Check(CadProbeParametersSchema, { preset: "python", subject: "current", purpose: "count", script: "checks/probe.py", code: "result = 1" }), false);
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "measure", subject: "current", args: { metric: "distance", a: "#c0", unknown: true } }), false);
 });
 
@@ -116,6 +118,35 @@ try {
     assert.equal(result.details.kind, undefined, "python mode must not bind evidence kind");
     assert.ok(result.details.subjectArtifactHash);
     assert.equal(readFileSync(statePath, "utf8"), stateBefore, "state must be unchanged");
+  });
+
+  await test("cad_probe: reusable project script receives decoded JSON parameters", async () => {
+    mkdirSync(join(cwd, "checks"), { recursive: true });
+    writeFileSync(join(cwd, "checks", "named.py"), "result = {'label': params['label'], 'enabled': params['enabled'], 'values': params['values']}\n");
+    const args = { label: "孔\"组", enabled: false, values: [1, null, true] };
+    const result = await probe.execute(
+      "t4b",
+      { preset: "python", subject: "current", purpose: "script parameters", script: "checks/named.py", args },
+      undefined,
+      undefined,
+      { cwd },
+    );
+    assert.ok(result.details.envelope.ok, JSON.stringify(result.details.envelope.payload));
+    assert.deepEqual(result.details.envelope.payload.result, args);
+    assert.ok(result.details.envelope.inputHashes.parameters);
+  });
+
+  await test("cad_probe: cancellation stops the hosted Python process", async () => {
+    const controller = new AbortController();
+    const pending = probe.execute(
+      "t4c",
+      { preset: "python", subject: "current", purpose: "cancel", code: "while True:\n    pass" },
+      controller.signal,
+      undefined,
+      { cwd },
+    );
+    setTimeout(() => controller.abort(), 250).unref();
+    await assert.rejects(pending, /abort|termination|failed/i);
   });
 
   await test("cad_probe: python mode rejects baseline without binding", async () => {

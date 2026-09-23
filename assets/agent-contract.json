@@ -2778,34 +2778,80 @@
             "additionalProperties": false
           },
           {
-            "type": "object",
-            "required": [
-              "preset",
-              "subject",
-              "purpose",
-              "code"
-            ],
-            "properties": {
-              "preset": {
-                "type": "string",
-                "const": "python"
+            "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject",
+                  "purpose",
+                  "code"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "python"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^.*$": {}
+                    }
+                  }
+                },
+                "additionalProperties": false
               },
-              "subject": {
-                "enum": [
-                  "current",
-                  "baseline"
-                ]
-              },
-              "purpose": {
-                "type": "string",
-                "minLength": 1
-              },
-              "code": {
-                "type": "string",
-                "minLength": 1
+              {
+                "type": "object",
+                "required": [
+                  "preset",
+                  "subject",
+                  "purpose",
+                  "script"
+                ],
+                "properties": {
+                  "preset": {
+                    "type": "string",
+                    "const": "python"
+                  },
+                  "subject": {
+                    "enum": [
+                      "current",
+                      "baseline"
+                    ]
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "script": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "object",
+                    "patternProperties": {
+                      "^.*$": {}
+                    }
+                  }
+                },
+                "additionalProperties": false
               }
-            },
-            "additionalProperties": false
+            ]
           }
         ]
       },

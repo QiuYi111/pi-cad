@@ -205,7 +205,7 @@ class CadPackageTests(unittest.TestCase):
             import asyncio
             asyncio.run(closure_probe())
 
-    def test_probe_arguments_cross_as_json_literals(self) -> None:
+    def test_probe_arguments_cross_as_decoded_json_parameters(self) -> None:
         probe_module = importlib.import_module("cad.probe")
 
         @cad.probe(subject="current")
@@ -220,8 +220,9 @@ class CadPackageTests(unittest.TestCase):
         assignment = ast.parse(code).body[-1]
         self.assertIsInstance(assignment, ast.Assign)
         keyword = assignment.value.keywords[-1]
-        self.assertIsInstance(keyword.value, ast.Constant)
-        self.assertEqual(keyword.value.value, payload)
+        self.assertIsInstance(keyword.value, ast.Subscript)
+        self.assertEqual(keyword.value.value.id, "params")
+        self.assertEqual(mocked.await_args.kwargs["args"], {"label": payload})
 
     def test_probe_accepts_artifact_ref_subject(self) -> None:
         probe_module = importlib.import_module("cad.probe")

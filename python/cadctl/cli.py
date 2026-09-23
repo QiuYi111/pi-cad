@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -285,9 +286,12 @@ def _cmd_render(args: argparse.Namespace) -> int:
 
 def _cmd_probe(args: argparse.Namespace) -> int:
     from .probe import ProbeError, run_probe
+    from .identity.manifest import identity_path
 
     started = time.monotonic()
     artifact = Path(args.artifact)
+    identity_manifest = identity_path(artifact)
+    identity_hash = sha256_file(identity_manifest) if identity_manifest.is_file() else "absent"
     try:
         code = Path(args.code_file).read_text(encoding="utf-8")
     except OSError as exc:
@@ -299,18 +303,34 @@ def _cmd_probe(args: argparse.Namespace) -> int:
         )
         return 1
     try:
-        payload = run_probe(artifact, code)
+        parameters = json.loads(args.params_json) if args.params_json else {}
+        if not isinstance(parameters, dict):
+            raise ProbeError("probe params must decode to a JSON object")
+        payload = run_probe(artifact, code, params=parameters)
         emit(
             "cad_probe_python",
             payload,
             input_hashes={
                 "artifact": sha256_file(artifact),
                 "script": sha256_file(Path(args.code_file)),
+                "parameters": hashlib.sha256(json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "identityManifest": identity_hash,
             },
-            input_artifacts=[{"path": str(artifact), "role": "subject"}],
+            input_artifacts=[
+                {"path": str(artifact), "role": "subject"},
+                *([{"path": str(identity_manifest), "role": "identity-manifest"}] if identity_manifest.is_file() else []),
+            ],
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0
+    except json.JSONDecodeError as exc:
+        emit_error(
+            "cad_probe_python",
+            f"probe params are invalid JSON: {exc}",
+            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else "", "script": sha256_file(Path(args.code_file)), "identityManifest": identity_hash},
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        return 1
     except ProbeError as exc:
         emit_error(
             "cad_probe_python",
@@ -318,6 +338,8 @@ def _cmd_probe(args: argparse.Namespace) -> int:
             input_hashes={
                 "artifact": sha256_file(artifact) if artifact.exists() else "",
                 "script": sha256_file(Path(args.code_file)),
+                "parameters": hashlib.sha256(json.dumps(parameters if "parameters" in locals() else {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+                "identityManifest": identity_hash,
             },
             duration_ms=int((time.monotonic() - started) * 1000),
         )
@@ -899,6 +921,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--artifact", required=True)
     p.add_argument("--code-file", required=True, help="Path to the probe script (harness-managed temporary file)")
+    p.add_argument("--params-json", default="{}", help="Structured JSON parameters passed to the Python scope")
     p.set_defaults(func=_cmd_probe)
 
     p = sub.add_parser("section", help="Render a deterministic section view")
