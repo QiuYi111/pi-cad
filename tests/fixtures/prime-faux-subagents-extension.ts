@@ -154,11 +154,35 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
   ].join("\n");
 
   const daemonParentCode = [
-    "import asyncio, json, rlm, time",
-    "target = await rlm.run('TASK_DAEMON_CANCEL: start a live CAD kernel and wait for cancellation.', name='daemon-cancel-target')",
-    "sibling = await rlm.run('TASK_DAEMON_SIBLING: start a CAD kernel, wait for release, then build and probe a cube.', name='daemon-sibling')",
+    "import asyncio, cad, json, os, rlm, time",
     "from pathlib import Path",
+    "await cad.workflow.start('mechanical.naked', interaction_mode='headless')",
+    "parent_folder = Path('subagents/daemon-parent')",
+    "parent_folder.mkdir(parents=True, exist_ok=True)",
+    "parent_source = parent_folder / 'module.py'",
+    "parent_source.write_text('from build123d import Box\\nresult = Box(3, 3, 3)\\n', encoding='utf-8')",
+    "parent_artifact = await cad.model.build(parent_source, parent_folder / 'model.step')",
+    "parent_probe = await cad.probe.run(subject=parent_artifact, purpose='Record parent run before hosted child deletion', code=\"result = {'volume': round(shape.volume, 6)}\")",
+    "parent_state = await cad.workflow.current()",
+    "parent_pid = {'pid': os.getpid(), 'pidNamespace': os.readlink('/proc/self/ns/pid')} ",
+    "parent_before = {'runId': parent_state['runId'], 'pid': parent_pid['pid'], 'pidNamespace': parent_pid['pidNamespace'], 'path': str(parent_artifact.path), 'sha256': parent_artifact.sha256, 'probeHash': parent_probe.artifact_hash}",
+    "Path('/workspace/daemon-parent-before.json').write_text(json.dumps(parent_before), encoding='utf-8')",
+    "target = await rlm.run('TASK_DAEMON_DELETE: start a live CAD kernel and wait for hosted deletion.', name='daemon-delete-target')",
+    "sibling = await rlm.run('TASK_DAEMON_SIBLING: start a CAD kernel, wait for release, then build and probe a cube.', name='daemon-sibling')",
     "Path('/workspace/daemon-child-ids.json').write_text(json.dumps({'target': target.rlm_child_id, 'sibling': sibling.rlm_child_id}), encoding='utf-8')",
+    "deadline = time.monotonic() + 180",
+    "while not Path('/workspace/daemon-delete-target').exists():",
+    "    if time.monotonic() >= deadline: raise TimeoutError('daemon controller did not request hosted child deletion')",
+    "    await asyncio.sleep(0.05)",
+    "deleted = await rlm.delete_subagent(target.rlm_child_id)",
+    "assert deleted.rlm_child_id == target.rlm_child_id, deleted",
+    "Path('/workspace/daemon-delete-result.json').write_text(json.dumps({'childId': deleted.rlm_child_id}), encoding='utf-8')",
+    "parent_state_after = await cad.workflow.current()",
+    "parent_probe_after = await cad.probe.run(subject=parent_artifact, purpose='Verify parent run and output after hosted child deletion', code=\"result = {'volume': round(shape.volume, 6)}\")",
+    "assert parent_state_after['runId'] == parent_before['runId'], parent_state_after",
+    "assert parent_probe_after.artifact_hash == parent_before['sha256'], parent_probe_after",
+    "parent_after = {'runId': parent_state_after['runId'], 'pid': os.getpid(), 'pidNamespace': os.readlink('/proc/self/ns/pid'), 'path': str(parent_artifact.path), 'sha256': parent_artifact.sha256, 'probeHash': parent_probe_after.artifact_hash, 'deletedChildId': deleted.rlm_child_id} ",
+    "Path('/workspace/daemon-parent-after-delete.json').write_text(json.dumps(parent_after), encoding='utf-8')",
     "deadline = time.monotonic() + 180",
     "while not Path('/workspace/daemon-restart-target').exists():",
     "    if time.monotonic() >= deadline: raise TimeoutError('daemon controller did not request child restart')",
@@ -170,14 +194,15 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
     "    if states.get(sibling.rlm_child_id) == 'completed' and states.get(restart.rlm_child_id) == 'completed': break",
     "    if time.monotonic() >= deadline: raise TimeoutError(f'daemon siblings did not finish: {states}')",
     "    await asyncio.sleep(0.1)",
-    "Path('/workspace/daemon-parent-complete.json').write_text(json.dumps({'target': target.rlm_child_id, 'sibling': sibling.rlm_child_id, 'restart': restart.rlm_child_id, 'statuses': states}), encoding='utf-8')",
+    "Path('/workspace/daemon-parent-complete.json').write_text(json.dumps({'target': target.rlm_child_id, 'sibling': sibling.rlm_child_id, 'restart': restart.rlm_child_id, 'parentRunId': parent_state['runId'], 'parentArtifactSha': parent_artifact.sha256, 'statuses': states}), encoding='utf-8')",
   ].join("\n");
 
   const daemonTargetCode = [
-    "import asyncio, os, cad",
+    "import asyncio, json, os, cad",
     "from pathlib import Path",
     "await cad.workflow.start('mechanical.naked', interaction_mode='headless')",
-    "Path('/workspace/daemon-target-kernel-started').write_text(str(os.getpid()), encoding='utf-8')",
+    "run = await cad.workflow.current()",
+    "Path('/workspace/daemon-target-kernel-started.json').write_text(json.dumps({'pid': os.getpid(), 'pidNamespace': os.readlink('/proc/self/ns/pid'), 'runId': run['runId']}), encoding='utf-8')",
     "while True: await asyncio.sleep(0.05)",
   ].join("\n");
 
@@ -191,15 +216,17 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
     "artifact = await cad.model.build(source, folder / 'model.step')",
     "evidence = await cad.probe.run(subject=artifact, purpose='Verify independent daemon child geometry', code=\"result = {'volume': round(shape.volume, 6)}\")",
     `assert abs(evidence.value['volume'] - ${size ** 3}) < 1e-6, evidence.value`,
+    "run = await cad.workflow.current()",
     "await cad.workflow.advance('finished')",
-    `Path('/workspace/${marker}').write_text(json.dumps({'path': str(artifact.path), 'sha256': artifact.sha256, 'volume': evidence.value['volume']}), encoding='utf-8')`,
+    `Path('/workspace/${marker}').write_text(json.dumps({'path': str(artifact.path), 'sha256': artifact.sha256, 'volume': evidence.value['volume'], 'runId': run['runId']}), encoding='utf-8')`,
   ];
 
   const daemonSiblingCode = [
     "import asyncio, json, os, cad",
     "from pathlib import Path",
     "await cad.workflow.start('mechanical.naked', interaction_mode='headless')",
-    "Path('/workspace/daemon-sibling-kernel.json').write_text(json.dumps({'pid': os.getpid(), 'pidNamespace': os.readlink('/proc/self/ns/pid')}), encoding='utf-8')",
+    "run = await cad.workflow.current()",
+    "Path('/workspace/daemon-sibling-kernel.json').write_text(json.dumps({'pid': os.getpid(), 'pidNamespace': os.readlink('/proc/self/ns/pid'), 'runId': run['runId']}), encoding='utf-8')",
     "while not Path('/workspace/daemon-release-sibling').exists(): await asyncio.sleep(0.05)",
     ...daemonArtifactCode("subagents/daemon-sibling", 8, "daemon-sibling-done.json"),
   ].join("\n");
@@ -215,20 +242,20 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
     const serialized = JSON.stringify(context);
     const depth = Number(String(context.systemPrompt ?? "").match(/Recursive agent depth:\s*(\d+)/)?.[1] ?? 0);
     const task = depth > 0
-      ? serialized.includes("TASK_DAEMON_CANCEL") ? "DAEMON_CANCEL" : serialized.includes("TASK_DAEMON_SIBLING") ? "DAEMON_SIBLING" : serialized.includes("TASK_DAEMON_RESTART") ? "DAEMON_RESTART" : serialized.includes("TASK_FAULT") ? "F" : serialized.includes("TASK_GRANDCHILD") ? "G" : serialized.includes("TASK_CHILD_A") ? "A" : serialized.includes("TASK_CHILD_B") ? "B" : "UNKNOWN"
-      : serialized.includes("DAEMON_CANCEL_RESTART") ? "DAEMON_PARENT" : "PARENT";
+      ? serialized.includes("TASK_DAEMON_DELETE") ? "DAEMON_DELETE" : serialized.includes("TASK_DAEMON_SIBLING") ? "DAEMON_SIBLING" : serialized.includes("TASK_DAEMON_RESTART") ? "DAEMON_RESTART" : serialized.includes("TASK_FAULT") ? "F" : serialized.includes("TASK_GRANDCHILD") ? "G" : serialized.includes("TASK_CHILD_A") ? "A" : serialized.includes("TASK_CHILD_B") ? "B" : "UNKNOWN"
+      : serialized.includes("DAEMON_HOSTED_DELETE_RESTART") ? "DAEMON_PARENT" : "PARENT";
     const key = `${depth}:${task}`;
     const call = (calls.get(key) ?? 0) + 1;
     calls.set(key, call);
 
     if (task === "DAEMON_PARENT") {
       if (call === 1) return ai.fauxAssistantMessage(ai.fauxToolCall("ipython", { code: daemonParentCode }), { stopReason: "toolUse" });
-      return ai.fauxAssistantMessage("DAEMON_PARENT_CANCEL_RESTART_OK");
+      return ai.fauxAssistantMessage("DAEMON_PARENT_HOSTED_DELETE_RESTART_OK");
     }
     if (depth > 0) {
       if (task === "F") throw new Error("intentional faux-provider failure for isolation smoke");
       if (call === 1) {
-        const code = task === "DAEMON_CANCEL" ? daemonTargetCode : task === "DAEMON_SIBLING" ? daemonSiblingCode : task === "DAEMON_RESTART" ? daemonRestartCode : childCode(task as "A" | "B" | "G");
+        const code = task === "DAEMON_DELETE" ? daemonTargetCode : task === "DAEMON_SIBLING" ? daemonSiblingCode : task === "DAEMON_RESTART" ? daemonRestartCode : childCode(task as "A" | "B" | "G");
         return ai.fauxAssistantMessage(ai.fauxToolCall("ipython", { code }), { stopReason: "toolUse" });
       }
       return ai.fauxAssistantMessage(`CHILD_${task}_DONE`);

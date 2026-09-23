@@ -131,7 +131,13 @@ function request(command, timeoutMs = 60_000) {
 async function waitForFile(path, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (existsSync(path)) return JSON.parse(readFileSync(path, "utf8"));
+    if (existsSync(path)) {
+      try {
+        return JSON.parse(readFileSync(path, "utf8"));
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+      }
+    }
     if (child.exitCode !== null) throw new Error(`Prime daemon exited before ${path}\n${stderr}\n${stdout}`);
     await delay(100);
   }
@@ -202,10 +208,11 @@ try {
   const activeSessionId = created.data.activeSessionId ?? created.data.id;
   assert.equal(created.data.model.provider, "faux");
 
-  const prompted = await request({ type: "prompt", activeSessionId, message: "DAEMON_CANCEL_RESTART: start two CAD children, cancel one, preserve the sibling kernel, then restart the cancelled work." });
+  const prompted = await request({ type: "prompt", activeSessionId, message: "DAEMON_HOSTED_DELETE_RESTART: build in the parent, start two CAD children, delete one through hosted RLM, preserve the sibling kernel, then restart the deleted work." });
   assert.equal(prompted.success, true, prompted.error);
   const childIds = await waitForFile(join(fixture, "daemon-child-ids.json"));
-  await waitForFile(join(fixture, "daemon-target-kernel-started"));
+  const parentBefore = await waitForFile(join(fixture, "daemon-parent-before.json"));
+  const targetKernel = await waitForFile(join(fixture, "daemon-target-kernel-started.json"));
   const siblingKernel = await waitForFile(join(fixture, "daemon-sibling-kernel.json"));
 
   const roster = await request({ type: "get_rlm_children", activeSessionId });
@@ -216,10 +223,26 @@ try {
   assert.ok(target, `target must be present in live daemon child roster: ${JSON.stringify(roster.data)}`);
   assert.ok(sibling, `sibling must be present in live daemon child roster: ${JSON.stringify(roster.data)}`);
   assert.equal(sibling.status, "running", "sibling's live RLM run must be visible before cancellation");
+  assert.ok(pidInNamespaceAlive(targetKernel), `target CAD kernel ${JSON.stringify(targetKernel)} must be alive before hosted deletion`);
+  assert.ok(pidInNamespaceAlive(siblingKernel), `sibling CAD kernel ${JSON.stringify(siblingKernel)} must be alive before hosted deletion`);
+  assert.ok(pidInNamespaceAlive({ pid: parentBefore.pid, pidNamespace: parentBefore.pidNamespace }), "parent Python kernel must be alive before hosted deletion");
+  const parentArtifactPath = join(fixture, parentBefore.path.replace(/^\//, ""));
+  assert.equal(createHash("sha256").update(readFileSync(parentArtifactPath)).digest("hex"), parentBefore.sha256);
 
-  const cancelled = await request({ type: "cancel_rlm_child", activeSessionId, childId: childIds.target });
-  assert.equal(cancelled.success, true, cancelled.error);
-  assert.equal(cancelled.data?.cancelled, true, `Prime must confirm cancellation: ${JSON.stringify(cancelled.data)}`);
+  await import("node:fs/promises").then(({ writeFile }) => writeFile(join(fixture, "daemon-delete-target"), "delete through hosted RLM\n", "utf8"));
+  const deleteResult = await waitForFile(join(fixture, "daemon-delete-result.json"));
+  assert.equal(deleteResult.childId, childIds.target, "hosted rlm.delete_subagent must resolve the selected child");
+  const parentAfter = await waitForFile(join(fixture, "daemon-parent-after-delete.json"));
+  assert.equal(parentAfter.runId, parentBefore.runId, "parent CAD run must survive hosted child deletion");
+  assert.equal(parentAfter.pid, parentBefore.pid);
+  assert.equal(parentAfter.pidNamespace, parentBefore.pidNamespace);
+  assert.equal(parentAfter.path, parentBefore.path);
+  assert.equal(parentAfter.sha256, parentBefore.sha256);
+  assert.equal(parentAfter.probeHash, parentBefore.sha256);
+  assert.equal(parentAfter.deletedChildId, childIds.target);
+  assert.ok(pidInNamespaceAlive({ pid: parentAfter.pid, pidNamespace: parentAfter.pidNamespace }), "parent Python kernel must survive hosted child deletion");
+  assert.equal(createHash("sha256").update(readFileSync(parentArtifactPath)).digest("hex"), parentBefore.sha256);
+
   const siblingAfterCancel = await waitFor(async () => {
     const current = await request({ type: "get_rlm_children", activeSessionId });
     const currentChildren = current.data?.children ?? current.data?.agents ?? current.data?.subagents ?? [];
@@ -227,11 +250,18 @@ try {
     const cancelledTarget = currentChildren.some((item) => (item.rlmChildId ?? item.rlm_child_id ?? item.id) === childIds.target);
     return liveSibling?.status === "running" && !cancelledTarget ? liveSibling : undefined;
   }, "target removal with sibling still running");
-  assert.ok(pidInNamespaceAlive(siblingKernel), `sibling CAD kernel ${JSON.stringify(siblingKernel)} must remain alive after target cancellation`);
+  assert.ok(pidInNamespaceAlive(targetKernel) === false, `deleted target CAD kernel ${JSON.stringify(targetKernel)} must terminate`);
+  assert.ok(pidInNamespaceAlive(siblingKernel), `sibling CAD kernel ${JSON.stringify(siblingKernel)} must remain alive after hosted deletion`);
+  const parentState = await request({ type: "get_state", activeSessionId });
+  assert.equal(parentState.success, true, parentState.error);
+  assert.equal(parentState.data.activeSessionId ?? parentState.data.id, activeSessionId, "parent daemon session must stay active");
   await import("node:fs/promises").then(({ writeFile }) => writeFile(join(fixture, "daemon-release-sibling"), "released\n", "utf8"));
   const siblingResult = await waitForFile(join(fixture, "daemon-sibling-done.json"));
   assert.match(siblingResult.sha256, /^[a-f0-9]{64}$/);
   assert.equal(siblingResult.volume, 512);
+  assert.equal(siblingResult.runId, siblingKernel.runId, "sibling run must remain the same across hosted deletion");
+  assert.ok(pidInNamespaceAlive(siblingKernel), "sibling Python kernel must still be alive after completing its CAD build");
+  assert.equal(createHash("sha256").update(readFileSync(join(fixture, siblingResult.path))).digest("hex"), siblingResult.sha256);
 
   await import("node:fs/promises").then(({ writeFile }) => writeFile(join(fixture, "daemon-restart-target"), "restart\n", "utf8"));
   const restartArtifact = await waitForFile(join(fixture, "daemon-restart-artifact.json"));
@@ -240,6 +270,8 @@ try {
   assert.equal(completed.target, childIds.target);
   assert.equal(completed.sibling, childIds.sibling);
   assert.notEqual(completed.restart, completed.target, "restart must create an independent RLM child run");
+  assert.equal(completed.parentRunId, parentBefore.runId);
+  assert.equal(completed.parentArtifactSha, parentBefore.sha256);
   assert.equal(completed.statuses[completed.sibling], "completed");
   assert.equal(completed.statuses[completed.restart], "completed");
   assert.ok(existsSync(join(fixture, "subagents/daemon-sibling/model.step")));
@@ -248,7 +280,7 @@ try {
   const projectStatePath = join(canonicalProject, "v7-project", "state.json");
   const state = JSON.parse(readFileSync(projectStatePath, "utf8"));
   const bindings = Object.values(state.conversations ?? {});
-  assert.ok(bindings.length >= 3, `parent, sibling, and restarted child need separate CAD run bindings: ${bindings.length}`);
+  assert.ok(bindings.length >= 4, `parent, deleted target, sibling, and restarted child need separate CAD run bindings: ${bindings.length}`);
   assert.ok(new Set(bindings.map((binding) => binding.runId)).size === bindings.length, "daemon child canonical CAD runs must be unique");
   success = true;
   console.log(JSON.stringify({
@@ -256,10 +288,15 @@ try {
     primeBuild: "dfaee8067c5def339d1ca0d7b9f3573bc86c948c",
     piCadHead: process.env.PI_CAD_GIT_SHA ?? "workspace",
     activeSessionId,
+    parentRunId: parentBefore.runId,
+    parentArtifactSha: parentBefore.sha256,
     cancelledChildId: childIds.target,
+    deletedViaHostedRlm: true,
+    targetRunId: targetKernel.runId,
+    targetKernelTerminated: true,
     siblingChildId: childIds.sibling,
     siblingKernelPid: siblingKernel.pid,
-    siblingKernelSurvivedCancellation: true,
+    siblingKernelSurvivedDeletion: true,
     siblingArtifact: siblingResult,
     restartedChildId: completed.restart,
     childStatuses: completed.statuses,
