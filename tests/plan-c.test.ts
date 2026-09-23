@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -123,6 +123,55 @@ test("Plan C discovers and pins a workflow package before mutation", async () =>
     const advanced = await handleAgentApi(cwd, { schema: 1, op: "workflow-advance", event: "plan_ready" }) as any;
     assert.equal(advanced.phase, "cook");
     assert.match((await compilePhaseCard(cwd, { registries: mechanicalRegistries }))?.text ?? "", /phase cook/);
+  } finally { await rm(cwd, { recursive: true, force: true }); }
+});
+
+test("completed workflow permits only an explicit hash-bound artifact probe", async () => {
+  const { cwd, loaded } = await projectFixture();
+  try {
+    const artifact = join(cwd, "build", "part.step");
+    await mkdir(join(cwd, "build"), { recursive: true });
+    await writeFile(artifact, await readFile(resolve(import.meta.dirname, "fixtures", "interference_contact.step")));
+    const store = new HarnessRunStoreV7(cwd, loaded.state.runId);
+    await store.mutate(mechanicalRegistries, (current) => ({
+      state: { ...current.state, status: "done" },
+      event: { type: "TestCompletedWorkflow" },
+    }));
+    const sha256 = createHash("sha256").update(await readFile(artifact)).digest("hex");
+    const observed = await handleAgentApi(cwd, {
+      schema: 1,
+      op: "probe",
+      subject: { kind: "artifact", path: "build/part.step", sha256 },
+      purpose: "post-completion observation",
+      code: "result = {'solids': len(shape.solids())}",
+    }) as any;
+    assert.equal(observed.value.solids, 2);
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "probe", subject: { kind: "artifact", path: "build/part.step" }, purpose: "must fail without hash", code: "result = 0" }),
+      /not active/,
+    );
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "probe", subject: { kind: "artifact", path: "build/part.step", sha256: "0".repeat(64) }, purpose: "must fail with stale hash", code: "result = 0" }),
+      /ArtifactRef hash mismatch/,
+    );
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "probe", subject: "current", purpose: "must fail", code: "result = 0" }),
+      /not active/,
+    );
+    await assert.rejects(
+      handleAgentApi(cwd, {
+        schema: 1,
+        op: "probe",
+        subject: {
+          kind: "artifact",
+          path: resolve(import.meta.dirname, "../README.md"),
+          sha256: createHash("sha256").update(await readFile(resolve(import.meta.dirname, "../README.md"))).digest("hex"),
+        },
+        purpose: "must fail",
+        code: "result = 0",
+      }),
+      /escapes the project root/,
+    );
   } finally { await rm(cwd, { recursive: true, force: true }); }
 });
 
@@ -457,7 +506,11 @@ test("Python-facing probe runs arbitrary code on a disposable artifact", async (
     await assert.rejects(
       handleAgentApi(cwd, {
         schema: 1, op: "probe",
-        subject: { kind: "artifact", path: resolve(import.meta.dirname, "fixtures", "section_box.step") },
+        subject: {
+          kind: "artifact",
+          path: resolve(import.meta.dirname, "fixtures", "section_box.step"),
+          sha256: createHash("sha256").update(await readFile(resolve(import.meta.dirname, "fixtures", "section_box.step"))).digest("hex"),
+        },
         purpose: "reject escape", code: "result = 1",
       }),
       /escapes the project root/,

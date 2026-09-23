@@ -31,12 +31,13 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Pick the preset that answers the question; use preset=python for custom geometry operations or analysis.",
       "Selectors (#pN/#cN/#fN, surface IDs) come from geometry/surfaces presets and are hash-scoped — they die with the next candidate.",
-      "preset=python needs subject=current|baseline, purpose, and code assigning a JSON-serializable `result`; scope preloads shape, bd, np, math, statistics. Imports, shape changes, and scratch files are allowed.",
-      "Python experiments are discarded after returning result. Change the official candidate through model.build, not by writing to scratch.",
+      "preset=python needs a subject, purpose, and exactly one of code or a project-local script path. JSON args are decoded as Python values in `params`; scope preloads shape, bd, np, math, statistics.",
+      "Observations bind evidence only through the control plane (commit/review); probing never mutates the canonical design.",
+      "Python runs against a disposable STEP copy with scratch files; assigning a JSON-serializable `result` is required. Change the official candidate through model.build, not by writing to scratch.",
     ],
     parameters: CadProbeParametersSchema,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      return executeCadProbe(ctx.cwd, params);
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      return executeCadProbe(ctx.cwd, params, signal);
     },
   });
 

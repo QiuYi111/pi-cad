@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..common import sha256_file
+from .artifact import ArtifactModel
 from .manifest import identity_path, legacy_path, load_manifest
 from .protocol import IdentityError, canonicalize_path, parent_path
 
@@ -96,6 +97,7 @@ class IdentityIndex:
             raise IdentityError("missing-artifact", f"artifact does not exist: {self.artifact}")
         self.artifact_hash = sha256_file(self.artifact)
         self.manifest = load_manifest(self.artifact)
+        self._artifact_model: ArtifactModel | None = None
         self.legacy: dict[str, Any] | None = None
         self._surfaces: set[str] | None = None
         if self.manifest is not None:
@@ -191,6 +193,51 @@ class IdentityIndex:
                 )
         return resolution
 
+    def resolve_shapes(
+        self,
+        target: str,
+        shape: Any,
+        *,
+        kind: str | None = None,
+        owner: str | None = None,
+        expect: Any = None,
+    ) -> tuple[Resolution, list[Any]]:
+        """Resolve identity metadata and B-Rep objects using an existing STEP import."""
+        metadata_only = self.resolve(target, kind=kind, owner=owner)
+        if metadata_only.kind in ("axis", "datum"):
+            if expect is not None:
+                raise IdentityError("bad-query", "axis and datum selections carry frame facts, not B-Rep objects")
+            return metadata_only, []
+
+        if self._artifact_model is None:
+            self._artifact_model = ArtifactModel(self.artifact, shape=shape)
+            # A legacy surface ref is verified against this imported topology.
+            self._surfaces = {record["id"] for record in self._artifact_model.faces}
+        resolution = self.resolve(target, kind=kind, owner=owner)
+        bindings = list(resolution.bindings)
+        if not bindings and resolution.solid_indices:
+            token = self.artifact_hash[:12]
+            bindings = [
+                {"target": "solid", "ref": f"solid-{token}-{index}", "solidIndex": index}
+                for index in resolution.solid_indices
+            ]
+        objects = [self._artifact_model.shape_for_binding(binding) for binding in bindings]
+        found = len(objects)
+        cardinality = _normalize_expectation(expect) if expect is not None else (1, 1)
+        assert cardinality is not None
+        low, high = cardinality
+        if found < low or (high is not None and found > high):
+            raise IdentityError(
+                "cardinality",
+                f"'{target}' resolved to {found} geometry object(s); requested {expect or 'one'}. "
+                "Use expect='many' to receive the full collection or narrow the semantic selection.",
+                target=target,
+                found=found,
+                expected={"min": low, "max": high},
+                artifactHash=self.artifact_hash,
+            )
+        return resolution, objects
+
     def verify(self) -> dict[str, Any]:
         """Report whether the manifest and the artifact still agree."""
         return {
@@ -266,7 +313,7 @@ class IdentityIndex:
                 raise IdentityError(
                     "unknown-ref",
                     f"'{ref}' is not a surface of artifact version {self.artifact_hash[:12]}; "
-                    "re-inspect the current artifact",
+                    "run preset='surfaces' again to refresh refs, then re-inspect the current artifact",
                     target=ref,
                     artifactHash=self.artifact_hash,
                 )

@@ -81,6 +81,7 @@ export interface CadctlOptions {
   cwd: string;
   timeoutMs?: number;
   extra?: "simulation";
+  signal?: AbortSignal;
 }
 
 async function runCadctl(
@@ -110,6 +111,7 @@ async function runCadctl(
         cwd: options.cwd,
         env: cadctlEnv(options.cwd),
         timeoutMs,
+        signal: options.signal,
         maxStdoutBytes,
         maxStderrBytes,
       });
@@ -352,17 +354,21 @@ export async function probePython(
   cwd: string,
   artifact: string,
   code: string,
-  timeoutMs = 30_000,
+  params: Record<string, unknown> = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<CadEventEnvelope> {
   const tmpDir = mkdtempSync(join(tmpdir(), "pi-cad-probe-"));
   const subject = join(tmpDir, "subject.step");
   const codeFile = join(tmpDir, "probe.py");
+  const identitySource = `${resolve(cwd, artifact)}.identity.json`;
+  const identityCopy = `${subject}.identity.json`;
   try {
     copyFileSync(resolve(cwd, artifact), subject);
+    if (existsSync(identitySource)) copyFileSync(identitySource, identityCopy);
     writeFileSync(codeFile, code, "utf-8");
     return await runCadctl(
-      ["probe", "--artifact", subject, "--code-file", codeFile],
-      { cwd: tmpDir, timeoutMs },
+      ["probe", "--artifact", subject, "--code-file", codeFile, "--params-json", JSON.stringify(params)],
+      { cwd: tmpDir, timeoutMs: options.timeoutMs ?? 30_000, signal: options.signal },
     );
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
