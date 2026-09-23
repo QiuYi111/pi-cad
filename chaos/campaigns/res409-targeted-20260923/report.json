@@ -1,0 +1,190 @@
+{
+  "campaignId": "res409-targeted-20260923",
+  "createdAt": "2026-09-23T04:46:42.537Z",
+  "manifest": {
+    "campaignId": "res409-targeted-20260923",
+    "createdAt": "2026-09-23T04:28:29.282Z",
+    "mode": "targeted",
+    "seed": 4092026,
+    "rounds": 50,
+    "maxCommands": 14,
+    "runtimeRatio": 1,
+    "providerFaults": true,
+    "profiles": [
+      "provider-oauth",
+      "runtime-recovery",
+      "session-isolation",
+      "lifecycle-action-race"
+    ],
+    "concurrency": 1,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "providerTimeout",
+      "providerReset",
+      "providerLatency",
+      "providerStreamCut",
+      "providerRateLimited",
+      "providerServerError",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "8aa12102e39d3f1b0f6d65082c0b0a26936c7e77",
+      "gitBranch": "codex/res-409-chaos",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": "1",
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 50,
+    "roundsPassed": 50,
+    "roundsFailed": 0,
+    "roundsErrored": 0,
+    "distinctSeeds": 50,
+    "stateObservations": 1112,
+    "actions": {
+      "startRun": 71,
+      "commitPlan": 80,
+      "advance": 76,
+      "refresh": 13,
+      "burstRefresh": 9,
+      "completionGate": 6,
+      "build": 32,
+      "desktopRestart": 10,
+      "multiConversationBuild": 16,
+      "duplicateCommit": 7,
+      "switchConversation": 12,
+      "concurrentBuild": 13,
+      "openConversation": 25,
+      "stopRun": 7,
+      "resumeRun": 7,
+      "history": 4,
+      "retryBuild": 17,
+      "phaseCard": 4,
+      "authorize": 6,
+      "phaseContract": 4,
+      "listWorkflows": 4
+    },
+    "faultsInjected": {
+      "providerStreamCut": 5,
+      "providerCredentialBlanked": 3,
+      "providerReset": 4,
+      "restartRuntimeDuringBuild": 8,
+      "providerCredentialDropped": 4,
+      "providerTimeout": 2,
+      "killRuntimeDuringBuild": 5,
+      "pauseRuntimeDuringBuild": 3,
+      "providerCredentialExpired": 7,
+      "killPrimeRuntime": 5,
+      "raceRepeatSubmitDuringFault": 2,
+      "raceTwoConversationsBuild": 2,
+      "killKernelDuringBuild": 4,
+      "raceCrossConversationFault": 2,
+      "providerServerError": 3,
+      "raceUserActionDuringKernelFault": 2,
+      "raceRestartDuringTransition": 1,
+      "providerRateLimited": 1
+    },
+    "faultsNotApplicable": {
+      "raceRestartDuringTransition": 3,
+      "raceUserActionDuringKernelFault": 3,
+      "raceTwoConversationsBuild": 1,
+      "restartRuntimeDuringBuild": 2,
+      "killAuthorityDuringBuild": 2
+    },
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {},
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 14,
+        "injected": 25
+      },
+      "file-state": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "provider-oauth": {
+        "rounds": 17,
+        "injected": 29
+      },
+      "race": {
+        "rounds": 6,
+        "injected": 9
+      }
+    },
+    "components": {
+      "authority": 308,
+      "provider-oauth": 34,
+      "run-store": 37,
+      "kernel": 87,
+      "runtime": 27,
+      "prime": 5
+    },
+    "profiles": {
+      "provider-oauth": 20,
+      "runtime-recovery": 10,
+      "session-isolation": 10,
+      "lifecycle-action-race": 10
+    },
+    "runtimeRounds": 50,
+    "oneShotRounds": 0
+  },
+  "failures": {
+    "rounds": 0,
+    "unique": 0,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 0,
+    "unverified": 0,
+    "product": 0,
+    "harness": 0
+  },
+  "clusters": [],
+  "underExplored": [
+    "file-state：0 次真注入"
+  ],
+  "notes": []
+}
