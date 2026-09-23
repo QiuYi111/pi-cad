@@ -227,7 +227,7 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--ro-bind", join(paths.repository, "python"), "/opt/pi-cad/python",
     "--ro-bind", join(paths.repository, "scripts"), "/opt/pi-cad/scripts",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
-    "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv", "--ro-bind", paths.kernelPythonRoot, "/opt/python",
+    "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
     "--ro-bind", input.reviewerSocketDirectory, "/run/pi-cad/reviewer",
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime", "--setenv", "TMPDIR", "/tmp",
@@ -239,9 +239,10 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad", "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PYTHONPATH", `${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime", "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
-    "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
+    "--setenv", "PRIME_AGENT_KERNEL_VENV", "/opt/prime-kernel-venv",
     "--setenv", "PI_OFFLINE", "1",
   );
+  bindAtOriginalPath(args, paths.kernelPythonRoot);
   bindSharedAgentDirectory(args, input.reviewerAgentDir, paths.primeAgentDir);
   for (const name of ["TERM", "LANG", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) passEnvironment(args, name, process.env[name]);
   args.push(
@@ -298,8 +299,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--ro-bind", join(paths.repository, "scripts"), "/opt/pi-cad/scripts",
     "--ro-bind", join(paths.repository, "packages", "prime-codex-image-gen"), "/opt/pi-cad/imagegen",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
-    "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
-    "--ro-bind", paths.kernelPythonRoot, "/opt/python",
+    "--bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
     "--ro-bind", paths.authorSocketDirectory, "/run/pi-cad/author",
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime",
@@ -313,14 +313,17 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PI_CAD_BLENDER_MCP_ROOT", "/opt/pi-cad/blender-mcp",
     "--setenv", "BLENDER_MCP_PORT", process.env.PI_CAD_BLENDER_MCP_PORT ?? "9876",
     "--setenv", "PI_CAD_PYTHON", "/opt/pi-cad/python/.venv/bin/python",
-    "--setenv", "PYTHONPATH", `/opt/pi-cad/blender-mcp/deps:/opt/pi-cad/blender-mcp/mcp:${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
+    // Blender MCP vendors a partial `pydantic` compatibility package. Put the
+    // declared Prime kernel venv first so it cannot shadow real dependencies.
+    "--setenv", "PYTHONPATH", `${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/blender-mcp/deps:/opt/pi-cad/blender-mcp/mcp:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime",
     "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
     "--setenv", "PRIME_AGENT_SESSION_DIR", "/workspace/.prime-sessions",
-    "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
+    "--setenv", "PRIME_AGENT_KERNEL_VENV", "/opt/prime-kernel-venv",
     "--setenv", "PI_OFFLINE", process.env.PI_OFFLINE ?? "1",
   );
+  bindAtOriginalPath(args, paths.kernelPythonRoot);
   bindSharedAgentDirectory(args, paths.ephemeralAgentDir, paths.primeAgentDir);
   for (const name of ["TERM", "COLORTERM", "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) {
     passEnvironment(args, name, process.env[name]);
@@ -399,7 +402,7 @@ async function archivePrimeExperience(
 
 export function withHeadlessEventContinuation(args: string[]): string[] {
   if (!isOneShot(args)) return args;
-  const completionCommand = "$PRIME_AGENT_KERNEL_PYTHON -m cad._completion_gate";
+  const completionCommand = "$PRIME_AGENT_KERNEL_VENV/bin/python -m cad._completion_gate";
   const gate = args.includes(completionCommand) ? [] : [
     "--autonomous-gate", completionCommand,
     "--autonomous-gate-timeout-ms", "5000",
@@ -462,6 +465,22 @@ export async function preparePerRunAgentDir(agentDir: string): Promise<void> {
   for (const name of PRIME_AGENT_PER_RUN_DIRECTORIES) {
     await mkdir(join(agentDir, name), { recursive: true, mode: 0o700 });
   }
+}
+
+async function ensurePrimeKernelRuntime(paths: LaunchPaths, nodeExecutable: string, electronNode: boolean): Promise<void> {
+  const bootstrapCli = join(paths.primeRoot, "packages", "coding-agent", "dist", "core", "kernel", "bootstrap-cli.js");
+  if (!existsSync(bootstrapCli)) throw new Error(`Prime kernel bootstrap is missing: ${bootstrapCli}. Build the selected Prime checkout first.`);
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PRIME_AGENT_REPO: paths.primeRoot,
+    PRIME_AGENT_KERNEL_VENV: paths.primeKernelVenv,
+    ...(electronNode ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  };
+  // Let Prime validate and refresh its own venv before it is mounted into bwrap.
+  // Inside the sandbox Prime can then sync Python skills without deleting a mount.
+  delete env.PRIME_AGENT_KERNEL_PYTHON;
+  const result = await childExit(nodeExecutable, [bootstrapCli], env);
+  if (result.code !== 0) throw new Error(`Prime kernel bootstrap exited with code ${result.code}${result.signal ? ` (${result.signal})` : ""}`);
 }
 
 async function configureBlenderMcp(agentDir: string, command: string, env: Record<string, { env: string }>): Promise<void> {
@@ -657,11 +676,12 @@ function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string,
     PI_CAD_BLENDER_MCP_ROOT: join(paths.repository, "third_party", "blender-mcp"),
     BLENDER_MCP_PORT: process.env.PI_CAD_BLENDER_MCP_PORT,
     PI_CAD_PYTHON: join(paths.repository, "python", ".venv", "bin", "python"),
-    PYTHONPATH: `${join(paths.repository, "third_party", "blender-mcp", "deps")}:${join(paths.repository, "third_party", "blender-mcp", "mcp")}:${primePythonPath(paths.primeRoot, join(paths.primeKernelVenv, paths.kernelSitePackages), false)}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
+    PYTHONPATH: `${primePythonPath(paths.primeRoot, join(paths.primeKernelVenv, paths.kernelSitePackages), false)}:${join(paths.repository, "third_party", "blender-mcp", "deps")}:${join(paths.repository, "third_party", "blender-mcp", "mcp")}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
     PYTHONDONTWRITEBYTECODE: "1", PRIME_AGENT_REPO: paths.primeRoot,
     PRIME_AGENT_CODING_AGENT_DIR: agentDir,
     PRIME_AGENT_SESSION_DIR: reviewer ? undefined : join(paths.project, ".prime-sessions"),
-    PRIME_AGENT_KERNEL_PYTHON: join(paths.kernelPythonRoot, "bin", paths.kernelPythonExecutable),
+    PRIME_AGENT_KERNEL_VENV: paths.primeKernelVenv,
+    PRIME_AGENT_KERNEL_PYTHON: undefined,
     PI_OFFLINE: reviewer ? "1" : process.env.PI_OFFLINE ?? "1",
     ...(reviewer ? { PI_CAD_REVIEWER_SOCKET: socket, PI_CAD_REVIEWER_MODE: "1" } : { PI_CAD_AUTHOR_SOCKET: socket }),
   };
@@ -722,7 +742,9 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
   const cadPythonRoot = resolveVenvPythonRoot(join(repository, "python", ".venv", "bin", "python"));
   const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
-  const kernelPythonRoot = dirname(dirname(kernelPython));
+  // Preserve the uv alias used by the venv's absolute interpreter symlink.
+  // Binding only realpath(kernelPython) leaves that link dangling in bwrap.
+  const kernelPythonRoot = resolveVenvPythonRoot(join(primeKernelVenv, "bin", "python"));
   const kernelPythonExecutable = basename(kernelPython);
   const kernelPythonLibrary = readdirSync(join(primeKernelVenv, "lib"), { withFileTypes: true })
     .find((entry) => entry.isDirectory() && entry.name.startsWith("python") && existsSync(join(primeKernelVenv, "lib", entry.name, "site-packages")));
@@ -782,13 +804,14 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     ephemeralAgentDir, authorSocketDirectory: resolve(sidecar.authorSocket, ".."), nodeExecutableRelative,
   };
   launchPaths = paths;
+  await ensurePrimeKernelRuntime(paths, nodeExecutable, electronNode);
   reviewerSocketDirectory = resolve(sidecar.reviewerSocket, "..");
   const blenderMcp = process.platform === "linux" ? await startManagedBlenderMcp(repository) : null;
   await configureBlenderMcp(
     ephemeralAgentDir,
     process.platform === "darwin" ? join(repository, "scripts", "blender-mcp-server.sh") : "/opt/pi-cad/scripts/blender-mcp-server.sh",
     {
-      PRIME_AGENT_KERNEL_PYTHON: { env: "PRIME_AGENT_KERNEL_PYTHON" },
+      PRIME_AGENT_KERNEL_VENV: { env: "PRIME_AGENT_KERNEL_VENV" },
       PI_CAD_BLENDER_MCP_ROOT: { env: "PI_CAD_BLENDER_MCP_ROOT" },
       BLENDER_MCP_PORT: { env: "BLENDER_MCP_PORT" },
     },

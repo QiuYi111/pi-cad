@@ -349,9 +349,13 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
+  assert.match(joined, /--setenv\nPRIME_AGENT_KERNEL_VENV\n\/opt\/prime-kernel-venv/);
+  assert.match(joined, /--bind\n\/host\/kernel\n\/opt\/prime-kernel-venv/, "Prime bootstrap must be able to update its declared kernel venv");
+  assert.doesNotMatch(joined, /--setenv\nPRIME_AGENT_KERNEL_PYTHON\n/);
   assert.match(joined, /--skill\n\/opt\/pi-cad\/cad\/SKILL\.md/);
   assert.match(joined, /cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
+  assert.ok(joined.indexOf("/opt/prime-kernel-venv/lib/python3.11/site-packages") < joined.indexOf("/opt/pi-cad/blender-mcp/deps"), "Prime venv packages must win over Blender MCP's partial compatibility modules");
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/python\n\/opt\/pi-cad\/python/);
   assert.match(joined, /--ro-bind\n\/runtime\/cad-python\n\/runtime\/cad-python/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/scripts\n\/opt\/pi-cad\/scripts/);
@@ -382,7 +386,7 @@ test("Prime one-shot mode uses the canonical sidecar completion gate", () => {
   const args = withHeadlessEventContinuation(["--provider", "openai-codex", "--print", "build it"]);
   assert.ok(args.includes("--autonomous"));
   assert.deepEqual(args.slice(args.indexOf("--autonomous-gate"), args.indexOf("--autonomous-gate") + 2), [
-    "--autonomous-gate", "$PRIME_AGENT_KERNEL_PYTHON -m cad._completion_gate",
+    "--autonomous-gate", "$PRIME_AGENT_KERNEL_VENV/bin/python -m cad._completion_gate",
   ]);
   assert.equal(args[args.indexOf("--autonomous-gate-retries") + 1], "8");
   const previousRetries = process.env.PI_CAD_AUTONOMOUS_GATE_RETRIES;

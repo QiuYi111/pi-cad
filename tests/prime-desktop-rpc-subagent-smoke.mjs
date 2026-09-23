@@ -32,7 +32,7 @@ const child = spawn(process.execPath, [
   env: {
     ...primeEnv,
     PRIME_AGENT_REPO: primeRoot,
-    PRIME_SUBAGENT_CAPTURE: capture,
+    PRIME_SUBAGENT_CAPTURE: "/workspace/subagent-provider-contexts.jsonl",
     PRIME_AGENT_CODING_AGENT_DIR: join(fixture, "prime-agent"),
     PRIME_AGENT_SESSION_DIR: join(fixture, "sessions"),
     PRIME_AGENT_KERNEL_VENV: process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(homedir(), ".prime-plan-c/test-kernel-venv"),
@@ -110,9 +110,12 @@ let success = false;
 try {
   const state = await request("get_state", {}, 60_000);
   assert.ok(state?.sessionId, "Desktop RPC must open a Prime conversation");
+  // The host has loaded the fixture if the model call reaches its registered faux provider.
   await request("prompt", { message: "PARENT_SPAWN_TWO: complete both independent CAD child tasks and report their artifacts." });
   const projectStatePath = join(canonicalProject, "v7-project", "state.json");
-  const deadline = Date.now() + 240_000;
+  // First Desktop RPC startup installs Prime's Python skill dependencies in
+  // isolated kernels; allow enough time for parent, children, and grandchild.
+  const deadline = Date.now() + 600_000;
   let projectState;
   while (Date.now() < deadline) {
     if (existsSync(projectStatePath)) {
@@ -126,10 +129,17 @@ try {
     await delay(200);
   }
   assert.ok(Date.now() < deadline, `Desktop RPC subagent workflow did not finish\n${stderr}`);
+  assert.ok(existsSync(join(fixture, "subagent-provider-loaded.txt")), "Prime must load the faux provider fixture before starting the model");
   assert.ok(existsSync(join(fixture, "subagents/child-a/model.step")));
   assert.ok(existsSync(join(fixture, "subagents/child-b/model.step")));
   assert.ok(existsSync(join(fixture, "subagents/grandchild/model.step")));
-  const kernelStates = findNamedFiles(join(fixture, "session-artifacts"), "kernel-state.json");
+  let kernelStates = [];
+  const kernelDeadline = Date.now() + 30_000;
+  while (Date.now() < kernelDeadline) {
+    kernelStates = findNamedFiles(join(fixture, "session-artifacts"), "kernel-state.json");
+    if (kernelStates.length >= 4) break;
+    await delay(100);
+  }
   assert.ok(kernelStates.length >= 4, "Desktop RPC parent, two children, and grandchild must each own a separate kernel state");
   assert.equal(new Set(kernelStates).size, kernelStates.length);
   let sessionText = "";
@@ -163,6 +173,6 @@ try {
     await Promise.race([new Promise((resolveExit) => child.once("exit", resolveExit)), delay(15_000)]);
     if (!exited) child.kill("SIGTERM");
   }
-  if (success) rmSync(fixture, { recursive: true, force: true });
+  if (success && process.env.RES406_KEEP_SMOKE !== "1") rmSync(fixture, { recursive: true, force: true });
   else console.error(`Desktop RPC smoke artifacts kept at ${fixture}`);
 }

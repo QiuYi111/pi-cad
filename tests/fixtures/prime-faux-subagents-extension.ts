@@ -6,16 +6,19 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
   const primeRoot = process.env.PRIME_AGENT_REPO;
   const capturePath = process.env.PRIME_SUBAGENT_CAPTURE ?? join(process.cwd(), "subagent-provider-contexts.jsonl");
   if (!primeRoot) throw new Error("Prime subagent fixture requires PRIME_AGENT_REPO");
-  const ai = await import(pathToFileURL(join(primeRoot, "packages/ai/src/index.ts")).href);
+  appendFileSync(join(process.cwd(), "subagent-provider-loaded.txt"), "faux provider extension loaded\n", "utf8");
+  const ai = await import(pathToFileURL(join(primeRoot, "packages/ai/dist/index.js")).href);
   const faux = ai.registerFauxProvider({ provider: "faux", models: [{ id: "faux", reasoning: false, input: ["text", "image"] }] });
   const calls = new Map<string, number>();
 
   const childCode = (name: "A" | "B" | "G") => {
     const folder = name === "A" ? "subagents/child-a" : name === "B" ? "subagents/child-b" : "subagents/grandchild";
-    const target = name === "A" ? 25 : name === "B" ? 8 : 5;
+    const target = name === "A" ? 25 : name === "B" ? 10 : 5;
     const initial = name === "A" ? 10 : name === "B" ? 8 : 5;
-    const crossSection = name === "A" ? 20 : name === "B" ? 8 : 5;
-    const thickness = name === "A" ? 5 : name === "B" ? 8 : 5;
+    const crossSection = name === "A" ? 20 : name === "B" ? 10 : 5;
+    const thickness = name === "A" ? 5 : name === "B" ? 10 : 5;
+    const initialCrossSection = name === "B" ? 8 : crossSection;
+    const initialThickness = name === "B" ? 8 : thickness;
     const probe = name === "A" ? "result = {'x': shape.bounding_box().size.X}" : "result = {'volume': round(shape.volume, 6)}";
     return [
       "from pathlib import Path",
@@ -24,19 +27,25 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
       `folder = Path('${folder}')`,
       "folder.mkdir(parents=True, exist_ok=True)",
       "source = folder / 'module.py'",
-      `source.write_text('from build123d import Box\\nresult = Box(${initial}, ${crossSection}, ${thickness})\\n', encoding='utf-8')`,
+      `source.write_text('from build123d import Box\\nresult = Box(${initial}, ${initialCrossSection}, ${initialThickness})\\n', encoding='utf-8')`,
       "first = await cad.model.build(source, folder / 'model.step')",
       `first_probe = await cad.probe.run(subject=first, purpose='Check initial child ${name} geometry', code=${JSON.stringify(probe)})`,
       ...(name === "A" ? [
-        "assert first_probe.value['x'] == 10, first_probe.value",
+        "assert first_probe.value['x'] == 10 and first_probe.value['x'] != 25, first_probe.value",
         `source.write_text('from build123d import Box\\nresult = Box(${target}, ${crossSection}, ${thickness})\\n', encoding='utf-8')`,
         "artifact = await cad.model.build(source, folder / 'model.step', force=True)",
         `evidence = await cad.probe.run(subject=artifact, purpose='Verify repaired child ${name} geometry', code=${JSON.stringify(probe)})`,
         "assert evidence.value['x'] == 25, evidence.value",
       ] : [
-        "artifact = first",
-        "evidence = first_probe",
-        ...(name === "B" ? ["assert abs(evidence.value['volume'] - 512) < 1e-6, evidence.value"] : [
+        ...(name === "B" ? [
+          "assert abs(first_probe.value['volume'] - 512) < 1e-6 and abs(first_probe.value['volume'] - 1000) > 1e-6, first_probe.value",
+          `source.write_text('from build123d import Box\\nresult = Box(${target}, ${crossSection}, ${thickness})\\n', encoding='utf-8')`,
+          "artifact = await cad.model.build(source, folder / 'model.step', force=True)",
+          `evidence = await cad.probe.run(subject=artifact, purpose='Verify repaired child ${name} geometry', code=${JSON.stringify(probe)})`,
+          "assert abs(evidence.value['volume'] - 1000) < 1e-6, evidence.value",
+        ] : [
+          "artifact = first",
+          "evidence = first_probe",
           "assert abs(evidence.value['volume'] - 125) < 1e-6, evidence.value",
           "import json",
           "Path('subagents/grandchild-ref.json').write_text(json.dumps({'path': str(artifact.path), 'sha256': artifact.sha256, 'role': artifact.role, 'evidence': evidence.value}), encoding='utf-8')",
@@ -67,8 +76,8 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
   const parentCode = [
     "import asyncio, cad, rlm, time",
     "await cad.workflow.start('mechanical.naked', interaction_mode='headless')",
-    "child_a = await rlm.run('TASK_CHILD_A: build a 10 mm part, probe it, repair it to 25 mm, rebuild and return the ArtifactRef and evidence in subagents/child-a.', name='cad-child-a')",
-    "child_b = await rlm.run('TASK_CHILD_B: build an 8 mm cube, probe its volume, and return the ArtifactRef and evidence in subagents/child-b.', name='cad-child-b')",
+    "child_a = await rlm.run('TASK_CHILD_A: target a 25 mm part. Deliberately build it at 10 mm, measure and identify the mismatch, repair it to 25 mm, rebuild, remeasure, and return the ArtifactRef and evidence in subagents/child-a.', name='cad-child-a')",
+    "child_b = await rlm.run('TASK_CHILD_B: target a 10 mm cube. Deliberately build it at 8 mm, measure and identify the wrong volume, repair it to 10 mm, rebuild, remeasure, and return the ArtifactRef and evidence in subagents/child-b.', name='cad-child-b')",
     "fault = await rlm.run('TASK_FAULT: simulate a provider failure; this child must not affect the other runs.', name='cad-fault-child')",
     "children = [child_a, child_b]",
     "deadline = time.monotonic() + 240",
@@ -88,10 +97,11 @@ export default async function registerPrimeSubagentFaux(pi: any): Promise<void> 
 
   const responseFor = (context: any) => {
     appendFileSync(capturePath, `${JSON.stringify(context)}\n`, "utf8");
-    const serialized = JSON.stringify(context);
     const depth = Number(String(context.systemPrompt ?? "").match(/Recursive agent depth:\s*(\d+)/)?.[1] ?? 0);
+    const latestUser = [...(context.messages ?? [])].reverse().find((message: any) => message?.role === "user");
+    const taskText = JSON.stringify(latestUser?.content ?? "");
     const task = depth > 0
-      ? serialized.includes("TASK_FAULT") ? "F" : serialized.includes("TASK_GRANDCHILD") ? "G" : serialized.includes("TASK_CHILD_A") ? "A" : serialized.includes("TASK_CHILD_B") ? "B" : "UNKNOWN"
+      ? taskText.includes("TASK_FAULT") ? "F" : taskText.includes("TASK_GRANDCHILD") ? "G" : taskText.includes("TASK_CHILD_A") ? "A" : taskText.includes("TASK_CHILD_B") ? "B" : "UNKNOWN"
       : "PARENT";
     const key = `${depth}:${task}`;
     const call = (calls.get(key) ?? 0) + 1;

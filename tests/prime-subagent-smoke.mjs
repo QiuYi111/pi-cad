@@ -48,7 +48,7 @@ try {
     env: {
       ...primeEnv,
       PRIME_AGENT_REPO: primeRoot,
-      PRIME_SUBAGENT_CAPTURE: capture,
+      PRIME_SUBAGENT_CAPTURE: "/workspace/subagent-provider-contexts.jsonl",
       PRIME_AGENT_CODING_AGENT_DIR: join(fixture, "prime-agent"),
       PRIME_AGENT_SESSION_DIR: join(fixture, "sessions"),
       PRIME_AGENT_KERNEL_VENV: process.env.PRIME_AGENT_KERNEL_VENV ?? resolve(homedir(), ".prime-plan-c/test-kernel-venv"),
@@ -62,10 +62,11 @@ try {
   const diagnostic = `${run.stderr}\n${run.stdout}`;
   assert.notEqual(run.signal, "SIGTERM", `Prime subagent smoke timed out\n${diagnostic.slice(-12000)}`);
   assert.equal(run.status, 0, `Prime subagent smoke failed\n${diagnostic.slice(-16000)}`);
+  assert.ok(existsSync(join(fixture, "subagent-provider-loaded.txt")), "Prime must load the faux provider fixture before starting the model");
   const allSessionLogs = readJsonlTree(join(fixture, "session-artifacts")).join("\n");
   const rootSessionLogs = readJsonlTree(join(fixture, ".prime-sessions")).join("\n");
   assert.match(allSessionLogs, /CHILD_A_ARTIFACT[^\n]*sha256=[a-f0-9]{64}[^\n]*x.: 25/);
-  assert.match(allSessionLogs, /CHILD_B_ARTIFACT[^\n]*sha256=[a-f0-9]{64}[^\n]*volume.: 512/);
+  assert.match(allSessionLogs, /CHILD_B_ARTIFACT[^\n]*sha256=[a-f0-9]{64}[^\n]*volume.: 1000/);
   assert.match(allSessionLogs, /GRANDCHILD_ARTIFACT[^\n]*sha256=[a-f0-9]{64}[^\n]*volume.: 125/);
   assert.match(rootSessionLogs, /CHILD_A_ARTIFACT[^\n]*sha256=[a-f0-9]{64}/, "parent must receive child A's ArtifactRef message");
   assert.match(rootSessionLogs, /CHILD_B_ARTIFACT[^\n]*sha256=[a-f0-9]{64}/, "parent must receive child B's ArtifactRef message");
