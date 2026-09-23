@@ -631,7 +631,10 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   assert.deepEqual({ ...(appendedEntries[0]!.data as Record<string, unknown>), boundAt: "" }, {
     schema: 1, sessionId, runId: bound.state.runId, workflowHash: bound.workflow.hash, boundAt: "",
   });
-  assert.equal(process.env.PI_CAD_SESSION_ID, sessionId);
+  // The extension never writes a process-wide session identity: this Prime
+  // process hosts more than one conversation, and the kernel environment is
+  // what names the session that owns each kernel.
+  assert.equal(process.env.PI_CAD_SESSION_ID, previousSessionId);
   const continued = [...original, { role: "assistant", content: "working", timestamp: 2 }, { role: "toolResult", content: "ok", timestamp: 3 }];
   assert.equal(await context({ messages: continued }, transcriptContext), undefined);
   await messageEnd({ message: { role: "toolResult", toolName: "ipython", toolCallId: "same", isError: false } }, transcriptContext);
