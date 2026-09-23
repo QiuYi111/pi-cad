@@ -462,11 +462,11 @@ function registerIpc() {
     return importStepIntoProject(runtime, { source, fileName: name, projectPath });
   });
   ipcMain.handle(IPC.viewerLoadStep, async (_event, path: string) => demo ? demoMesh(path) : (await ensureViewer()).loadStep(await settingsStore.get(), path));
-  ipcMain.handle(IPC.viewerExportStep, async (_event, source: string) => {
+  ipcMain.handle(IPC.viewerExportStep, async (_event, source: string, expectedSha?: string) => {
     const settings = await settingsStore.get();
     const basename = source.split(/[\\/]/).at(-1) || "model.step";
     if (testExportStep) {
-      if (!demo) await (await ensureViewer()).exportStep(settings, source, testExportStep);
+      if (!demo) await (await ensureViewer()).exportStep(settings, source, testExportStep, expectedSha);
       return testExportStep;
     }
     const result = await dialog.showSaveDialog(mainWindow!, {
@@ -475,7 +475,7 @@ function registerIpc() {
       filters: [{ name: "STEP model", extensions: ["step", "stp"] }],
     });
     if (result.canceled || !result.filePath) return null;
-    if (!demo) await (await ensureViewer()).exportStep(settings, source, result.filePath);
+    if (!demo) await (await ensureViewer()).exportStep(settings, source, result.filePath, expectedSha);
     return result.filePath;
   });
   ipcMain.handle(IPC.viewerCatalog, async () => stubWorkflowProjection ? {

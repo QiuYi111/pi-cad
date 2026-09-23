@@ -620,13 +620,16 @@ def _cmd_export(args: argparse.Namespace) -> int:
     started = time.monotonic()
     source = Path(args.source)
     try:
-        payload = export_artifact(source, args.output, args.format)
+        payload = export_artifact(source, args.output, args.format, expected_source_sha256=args.source_sha256)
         output = Path(args.output)
+        artifacts = [{"path": args.output, "kind": args.format, "sha256": sha256_file(output)}]
+        if payload.get("identityManifest") and payload.get("identityManifestSha256"):
+            artifacts.append({"path": payload["identityManifest"], "kind": "assembly_identity_manifest", "sha256": payload["identityManifestSha256"]})
         emit(
             "cad_export",
             payload,
             input_hashes={"source": sha256_file(source)},
-            artifacts=[{"path": args.output, "kind": args.format, "sha256": sha256_file(output)}],
+            artifacts=artifacts,
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0
@@ -957,6 +960,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("export", help="Export STEP/STL/GLB/BREP deterministically")
     p.add_argument("--source", required=True)
+    p.add_argument("--source-sha256", default=None)
     p.add_argument("--output", required=True)
     p.add_argument("--format", required=True)
     p.set_defaults(func=_cmd_export)

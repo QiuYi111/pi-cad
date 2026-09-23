@@ -23,6 +23,7 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import sys
 import time
 from pathlib import Path
@@ -165,25 +166,6 @@ def validate_spec(spec: dict[str, Any]) -> tuple[bool, list[str]]:
     return not errors, errors
 
 
-def _occurrence_labels(artifact: Path, solid_count: int) -> list[str | None]:
-    """Assembly occurrence labels aligned with the explorer's solid order.
-
-    The presentation driver matches spec module names and explode
-    directions against THESE labels — never against generic mesh names —
-    so the moduleName -> occurrence mapping survives into Blender.
-    """
-    try:
-        from .assembly import assembly_tree
-
-        tree = assembly_tree(artifact)
-        labels = [leaf.get("label") or None for leaf in tree.get("occurrences", [])]
-        if len(labels) == solid_count:
-            return labels
-        return [None] * solid_count
-    except Exception:
-        return [None] * solid_count
-
-
 def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
     """Deterministically tessellate each world-positioned solid of a STEP
     into its own ASCII STL (fixed tolerance from the bounding sphere),
@@ -196,12 +178,19 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
     """
     import build123d as bd
 
-    bundle_dir.mkdir(parents=True, exist_ok=True)
+    bundle_dir.parent.mkdir(parents=True, exist_ok=True)
+    stage_dir = Path(tempfile.mkdtemp(prefix=f".{bundle_dir.name}.stage-", dir=bundle_dir.parent))
     shape = bd.import_step(artifact)
     solids = list(shape.solids())
     if not solids:
+        shutil.rmtree(stage_dir, ignore_errors=True)
         raise ValueError("artifact contains no solids to present")
-    labels = _occurrence_labels(artifact, len(solids))
+    from .mesh import mesh_document
+
+    identities = mesh_document(artifact)
+    if len(identities["parts"]) != len(solids):
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        raise ValueError("STEP identity map does not match the solids selected for Blender export")
     all_bb = shape.bounding_box()
     diag = (all_bb.size.X + all_bb.size.Y + all_bb.size.Z) or 1.0
     tolerance = max(diag * 1e-4, 1e-4)
@@ -209,7 +198,7 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
     paths: list[Path] = []
     for index, solid in enumerate(solids):
         vertices, triangles = solid.tessellate(tolerance, angular)
-        path = bundle_dir / f"part-{index:04d}.stl"
+        path = stage_dir / f"part-{index:04d}.stl"
         lines = [f"solid pi-cad-part-{index:04d}"]
         for triangle in triangles:
             # Compute the face normal from the triangle itself.
@@ -233,20 +222,46 @@ def _tessellate_step(artifact: Path, bundle_dir: Path) -> list[Path]:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         paths.append(path)
     manifest = {
+        "schema": 2,
         "units": "mm",
+        "source": str(artifact.resolve()),
+        "stepSha256": identities["sha256"],
+        "identityManifestSha256": identities["identityManifestSha256"],
+        "identityBound": identities["identityBound"],
         "partCount": len(paths),
         "parts": [
             {
                 "meshPath": path.name,
                 "solidIndex": index,
-                "label": labels[index],
-                "occurrenceKey": labels[index] if labels[index] else f"solid-{index:04d}",
+                "partId": identities["parts"][index]["partId"],
+                "occurrenceId": identities["parts"][index]["occurrenceId"],
+                "solidId": identities["parts"][index]["solidId"],
+                "semanticId": identities["parts"][index]["semanticId"],
+                "features": identities["parts"][index]["features"],
+                "datums": identities["parts"][index]["datums"],
+                "name": identities["parts"][index]["name"],
+                "identityQuality": "semantic" if identities["parts"][index]["semanticId"] else "artifact-local",
+                "occurrenceKey": identities["parts"][index]["occurrenceId"],
+                "meshSha256": sha256_file(path),
             }
             for index, path in enumerate(paths)
         ],
     }
-    (bundle_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return paths
+    (stage_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    backup = bundle_dir.with_name(f".{bundle_dir.name}.previous-{os.getpid()}")
+    try:
+        if backup.exists():
+            shutil.rmtree(backup)
+        if bundle_dir.exists():
+            os.replace(bundle_dir, backup)
+        os.replace(stage_dir, bundle_dir)
+        shutil.rmtree(backup, ignore_errors=True)
+    except Exception:
+        if not bundle_dir.exists() and backup.exists():
+            os.replace(backup, bundle_dir)
+        shutil.rmtree(stage_dir, ignore_errors=True)
+        raise
+    return [bundle_dir / path.name for path in paths]
 
 
 def _blender_manifest_path() -> Path:
@@ -545,6 +560,19 @@ def run_presentation(
         if path.exists():
             manifest_outputs[fixed] = {"path": str(path), "sha256": sha256_file(path)}
 
+    mesh_bundle_evidence = None
+    if mesh_bundle:
+        bundle_path = Path(mesh_bundle)
+        bundle_manifest_path = bundle_path / "manifest.json"
+        bundle_manifest = json.loads(bundle_manifest_path.read_text(encoding="utf-8"))
+        mesh_bundle_evidence = {
+            "manifestPath": str(bundle_manifest_path),
+            "manifestSha256": sha256_file(bundle_manifest_path),
+            "stepSha256": bundle_manifest["stepSha256"],
+            "identityManifestSha256": bundle_manifest.get("identityManifestSha256"),
+            "identityBound": bundle_manifest.get("identityBound", False),
+            "parts": bundle_manifest["parts"],
+        }
     manifest = {
         "schemaVersion": 1,
         "status": "rendered",
@@ -569,6 +597,8 @@ def run_presentation(
             "camera": spec.get("camera", {}),
         },
         "assemblyDefinition": assembly,
+        "blenderBridge": report.get("bridge"),
+        "meshBundle": mesh_bundle_evidence,
         "outputs": manifest_outputs,
         "durationMs": int((time.monotonic() - started) * 1000),
     }
