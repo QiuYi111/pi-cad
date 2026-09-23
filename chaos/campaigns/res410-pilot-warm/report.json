@@ -1,0 +1,137 @@
+{
+  "campaignId": "res410-pilot-warm",
+  "createdAt": "2026-09-23T03:30:48.425Z",
+  "manifest": {
+    "campaignId": "res410-pilot-warm",
+    "createdAt": "2026-09-23T03:30:33.125Z",
+    "mode": "targeted",
+    "seed": 7000,
+    "rounds": 1,
+    "maxCommands": 4,
+    "runtimeRatio": 1,
+    "providerFaults": false,
+    "profiles": [
+      "idle-kernel"
+    ],
+    "concurrency": 1,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "8aa12102e39d3f1b0f6d65082c0b0a26936c7e77",
+      "gitBranch": "codex/desktop-app",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 1,
+    "roundsPassed": 1,
+    "roundsFailed": 0,
+    "roundsErrored": 0,
+    "distinctSeeds": 1,
+    "stateObservations": 18,
+    "actions": {
+      "startRun": 3,
+      "commitPlan": 1,
+      "advance": 1,
+      "build": 1,
+      "concurrentBuild": 1,
+      "openConversation": 1
+    },
+    "faultsInjected": {},
+    "faultsNotApplicable": {},
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {},
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "file-state": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "provider-oauth": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "race": {
+        "rounds": 0,
+        "injected": 0
+      }
+    },
+    "components": {
+      "authority": 6,
+      "kernel": 2
+    },
+    "profiles": {
+      "idle-kernel": 1
+    },
+    "runtimeRounds": 1,
+    "oneShotRounds": 0
+  },
+  "failures": {
+    "rounds": 0,
+    "unique": 0,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 0,
+    "unverified": 0,
+    "product": 0,
+    "harness": 0
+  },
+  "clusters": [],
+  "underExplored": [
+    "process：0 次真注入",
+    "file-state：0 次真注入",
+    "provider-oauth：0 次真注入",
+    "race：0 次真注入"
+  ],
+  "notes": []
+}
