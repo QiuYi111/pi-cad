@@ -354,6 +354,13 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/python\n\/opt\/pi-cad\/python/);
   assert.match(joined, /--ro-bind\n\/runtime\/cad-python\n\/runtime\/cad-python/);
+  assert.match(joined, /--ro-bind\n\/runtime\/python\n\/runtime\/python/);
+  assert.match(joined, /PRIME_AGENT_KERNEL_VENV\n\/opt\/prime-kernel-venv/);
+  assert.match(joined, /PRIME_AGENT_KERNEL_PYTHON\n\/opt\/prime-kernel-venv\/bin\/python/);
+  assert.match(joined, /PRIME_KERNEL_PROVENANCE/);
+  assert.match(joined, /sys\.prefix does not match PRIME_AGENT_KERNEL_VENV/);
+  assert.match(joined, /PRIME_KERNEL_PROVENANCE_FAILURE/);
+  assert.doesNotMatch(joined, /--ro-bind\n\/runtime\/python\n\/opt\/python/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/scripts\n\/opt\/pi-cad\/scripts/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/python/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/prime\/packages\/coding-agent\/dist\/skills\/attach-image\/src/);

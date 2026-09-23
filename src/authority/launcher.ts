@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { chmod, copyFile, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
@@ -218,6 +218,7 @@ export function primeAgentMounts(perRunAgentDir: string, primeAgentDir: string):
 export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: string; reviewerAgentDir: string; reviewerWorkspace: string; reviewerSocketDirectory: string; prompt: string; modelArgs?: string[] }): string[] {
   const args = ["--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--clearenv", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/home/prime", "--dir", "/home/prime/.prime", "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad"];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  bindKernelPythonRoot(args, paths);
   bindAtOriginalPath(args, paths.cadPythonRoot);
   args.push(
     "--bind", input.reviewerWorkspace, "/workspace",
@@ -227,7 +228,7 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--ro-bind", join(paths.repository, "python"), "/opt/pi-cad/python",
     "--ro-bind", join(paths.repository, "scripts"), "/opt/pi-cad/scripts",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
-    "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv", "--ro-bind", paths.kernelPythonRoot, "/opt/python",
+    "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
     "--ro-bind", input.reviewerSocketDirectory, "/run/pi-cad/reviewer",
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime", "--setenv", "TMPDIR", "/tmp",
@@ -239,7 +240,9 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PI_CAD_REPO", "/opt/pi-cad", "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PYTHONPATH", `${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime", "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
-    "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
+    "--setenv", "PRIME_AGENT_KERNEL_VENV", "/opt/prime-kernel-venv",
+    "--setenv", "PRIME_AGENT_KERNEL_PYTHON", "/opt/prime-kernel-venv/bin/python",
+    "--setenv", "PRIME_AGENT_GIT_SHA", gitRevision(paths.primeRoot), "--setenv", "PI_CAD_GIT_SHA", gitRevision(paths.repository),
     "--setenv", "PI_OFFLINE", "1",
   );
   bindSharedAgentDirectory(args, input.reviewerAgentDir, paths.primeAgentDir);
@@ -261,6 +264,18 @@ function systemBind(args: string[], path: string): void {
   if (existsSync(path)) args.push("--ro-bind", path, path);
 }
 
+function bindKernelPythonRoot(args: string[], paths: LaunchPaths): void {
+  const root = paths.kernelPythonRoot;
+  if (["/usr", "/bin", "/sbin", "/lib", "/lib64"].some((systemRoot) => root === systemRoot || root.startsWith(`${systemRoot}/`))) return;
+  const parents: string[] = [];
+  for (let parent = dirname(root); parent !== "/"; parent = dirname(parent)) parents.push(parent);
+  for (const parent of parents.reverse()) {
+    if (["/home", "/opt", "/run", "/tmp"].includes(parent)) continue;
+    args.push("--dir", parent);
+  }
+  args.push("--ro-bind", root, root);
+}
+
 function bindAtOriginalPath(args: string[], path: string): void {
   const parents: string[] = [];
   for (let parent = dirname(path); parent !== "/"; parent = dirname(parent)) parents.push(parent);
@@ -280,6 +295,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--dir", "/opt", "--dir", "/run", "--dir", "/run/pi-cad",
   ];
   for (const path of ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"]) systemBind(args, path);
+  bindKernelPythonRoot(args, paths);
   bindAtOriginalPath(args, paths.cadPythonRoot);
   const blenderRuntime = join(paths.repository, ".runtime", "blender");
   if (existsSync(blenderRuntime)) args.push("--ro-bind", blenderRuntime, "/opt/pi-cad/blender-runtime");
@@ -299,7 +315,6 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--ro-bind", join(paths.repository, "packages", "prime-codex-image-gen"), "/opt/pi-cad/imagegen",
     "--ro-bind", join(paths.repository, "node_modules"), "/opt/pi-cad/node_modules",
     "--ro-bind", paths.primeKernelVenv, "/opt/prime-kernel-venv",
-    "--ro-bind", paths.kernelPythonRoot, "/opt/python",
     "--ro-bind", paths.authorSocketDirectory, "/run/pi-cad/author",
     "--chdir", "/workspace",
     "--setenv", "HOME", "/home/prime",
@@ -313,12 +328,14 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PI_CAD_BLENDER_MCP_ROOT", "/opt/pi-cad/blender-mcp",
     "--setenv", "BLENDER_MCP_PORT", process.env.PI_CAD_BLENDER_MCP_PORT ?? "9876",
     "--setenv", "PI_CAD_PYTHON", "/opt/pi-cad/python/.venv/bin/python",
-    "--setenv", "PYTHONPATH", `/opt/pi-cad/blender-mcp/deps:/opt/pi-cad/blender-mcp/mcp:${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
+    "--setenv", "PYTHONPATH", `${primePythonPath(paths.primeRoot, paths.kernelSitePackages, true)}:/opt/pi-cad/blender-mcp/deps:/opt/pi-cad/blender-mcp/mcp:/opt/pi-cad/cad/src:/opt/pi-cad/python`,
     "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
     "--setenv", "PRIME_AGENT_REPO", "/opt/prime",
     "--setenv", "PRIME_AGENT_CODING_AGENT_DIR", "/home/prime/.prime/agent",
     "--setenv", "PRIME_AGENT_SESSION_DIR", "/workspace/.prime-sessions",
-    "--setenv", "PRIME_AGENT_KERNEL_PYTHON", `/opt/python/bin/${paths.kernelPythonExecutable}`,
+    "--setenv", "PRIME_AGENT_KERNEL_VENV", "/opt/prime-kernel-venv",
+    "--setenv", "PRIME_AGENT_KERNEL_PYTHON", "/opt/prime-kernel-venv/bin/python",
+    "--setenv", "PRIME_AGENT_GIT_SHA", gitRevision(paths.primeRoot), "--setenv", "PI_CAD_GIT_SHA", gitRevision(paths.repository),
     "--setenv", "PI_OFFLINE", process.env.PI_OFFLINE ?? "1",
   );
   bindSharedAgentDirectory(args, paths.ephemeralAgentDir, paths.primeAgentDir);
@@ -326,7 +343,9 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     passEnvironment(args, name, process.env[name]);
   }
   args.push(
-    "--", "/opt/prime/prime-agent.sh", "--dist",
+    "--", "/bin/sh", "-c", '"$1" -c "$2" || { printf "PRIME_KERNEL_PROVENANCE_FAILURE prime=%s pi_cad=%s venv=%s executable=%s prefix=unavailable\\n" "$PRIME_AGENT_GIT_SHA" "$PI_CAD_GIT_SHA" "$PRIME_AGENT_KERNEL_VENV" "$1" >&2; exit 1; }; shift 2; exec "$@"',
+    "prime-kernel-provenance", "/opt/prime-kernel-venv/bin/python", KERNEL_PROVENANCE,
+    "/opt/prime/prime-agent.sh", "--dist",
     "--cwd", "/workspace",
     "--no-extensions", "--no-prompt-templates", "--no-themes", "--no-context-files",
     "--tools", "ipython,codex_generate_image,cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read",
@@ -620,6 +639,44 @@ function childExit(command: string, args: string[], env: NodeJS.ProcessEnv): Pro
   });
 }
 
+async function bootstrapPrimeKernel(primeRoot: string, primeAgentDir: string, primeKernelVenv: string, repository: string): Promise<void> {
+  const env = {
+    ...process.env,
+    PRIME_AGENT_REPO: primeRoot,
+    PRIME_AGENT_CODING_AGENT_DIR: primeAgentDir,
+    PRIME_AGENT_KERNEL_VENV: primeKernelVenv,
+  };
+  delete env.PRIME_AGENT_KERNEL_PYTHON;
+  const result = await capturedChildExit(join(primeRoot, "node_modules", ".bin", "tsx"), [join(primeRoot, "packages", "coding-agent", "src", "core", "kernel", "bootstrap-cli.ts")], env);
+  if (result.code !== 0) {
+    const failure = JSON.stringify({ primeSha: gitRevision(primeRoot), piCadSha: gitRevision(repository), venv: primeKernelVenv, executable: join(primeKernelVenv, "bin", "python"), prefix: "unavailable", stage: "bootstrap" });
+    throw new Error(`PRIME_KERNEL_PROVENANCE_FAILURE ${failure}\nPrime kernel bootstrap failed: ${result.diagnostic.trim() || `exit code ${result.code}`}`);
+  }
+  const python = join(primeKernelVenv, "bin", "python");
+  const provenance = await capturedChildExit(python, ["-c", KERNEL_PROVENANCE], {
+    ...env, PRIME_AGENT_KERNEL_PYTHON: python,
+    PRIME_AGENT_GIT_SHA: gitRevision(primeRoot), PI_CAD_GIT_SHA: gitRevision(repository),
+  });
+  process.stderr.write(`${result.diagnostic}${provenance.diagnostic}`);
+  if (provenance.code !== 0) {
+    throw new Error(`Prime kernel venv provenance check failed for ${primeKernelVenv}: ${provenance.diagnostic.trim() || `exit code ${provenance.code}`}`);
+  }
+}
+
+const KERNEL_PROVENANCE = [
+  "import json,os,sys",
+  "venv=os.environ.get('PRIME_AGENT_KERNEL_VENV')",
+  "print('PRIME_KERNEL_PROVENANCE '+json.dumps({'primeSha':os.environ.get('PRIME_AGENT_GIT_SHA'),'piCadSha':os.environ.get('PI_CAD_GIT_SHA'),'venv':venv,'executable':sys.executable,'prefix':sys.prefix,'path':sys.path},sort_keys=True),flush=True)",
+  "assert venv and os.path.realpath(sys.prefix)==os.path.realpath(venv), 'kernel sys.prefix does not match PRIME_AGENT_KERNEL_VENV'",
+  "import pydantic,rlm,ipykernel",
+  "print('PRIME_KERNEL_IMPORTS '+json.dumps({'pydantic':pydantic.__file__,'rlm':rlm.__file__,'ipykernel':ipykernel.__file__},sort_keys=True),flush=True)",
+].join(";");
+
+function gitRevision(directory: string): string {
+  try { return execFileSync("git", ["-C", directory, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(); }
+  catch { return "unknown"; }
+}
+
 function capturedChildExit(command: string, args: string[], env: NodeJS.ProcessEnv, abortSignal?: AbortSignal): Promise<{ code: number; signal: NodeJS.Signals | null; diagnostic: string; aborted: boolean }> {
   return new Promise((accept, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], env });
@@ -657,11 +714,14 @@ function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string,
     PI_CAD_BLENDER_MCP_ROOT: join(paths.repository, "third_party", "blender-mcp"),
     BLENDER_MCP_PORT: process.env.PI_CAD_BLENDER_MCP_PORT,
     PI_CAD_PYTHON: join(paths.repository, "python", ".venv", "bin", "python"),
-    PYTHONPATH: `${join(paths.repository, "third_party", "blender-mcp", "deps")}:${join(paths.repository, "third_party", "blender-mcp", "mcp")}:${primePythonPath(paths.primeRoot, join(paths.primeKernelVenv, paths.kernelSitePackages), false)}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
+    PYTHONPATH: `${primePythonPath(paths.primeRoot, join(paths.primeKernelVenv, paths.kernelSitePackages), false)}:${join(paths.repository, "third_party", "blender-mcp", "deps")}:${join(paths.repository, "third_party", "blender-mcp", "mcp")}:${join(paths.repository, "skills", "cad", "src")}:${join(paths.repository, "python")}`,
     PYTHONDONTWRITEBYTECODE: "1", PRIME_AGENT_REPO: paths.primeRoot,
     PRIME_AGENT_CODING_AGENT_DIR: agentDir,
     PRIME_AGENT_SESSION_DIR: reviewer ? undefined : join(paths.project, ".prime-sessions"),
-    PRIME_AGENT_KERNEL_PYTHON: join(paths.kernelPythonRoot, "bin", paths.kernelPythonExecutable),
+    PRIME_AGENT_KERNEL_VENV: paths.primeKernelVenv,
+    PRIME_AGENT_KERNEL_PYTHON: join(paths.primeKernelVenv, "bin", "python"),
+    PRIME_AGENT_GIT_SHA: gitRevision(paths.primeRoot),
+    PI_CAD_GIT_SHA: gitRevision(paths.repository),
     PI_OFFLINE: reviewer ? "1" : process.env.PI_OFFLINE ?? "1",
     ...(reviewer ? { PI_CAD_REVIEWER_SOCKET: socket, PI_CAD_REVIEWER_MODE: "1" } : { PI_CAD_AUTHOR_SOCKET: socket }),
   };
@@ -720,9 +780,12 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   const primeRoot = resolvePrimeRepository(repository, primeAgentDir);
   process.env.PRIME_AGENT_REPO = primeRoot;
   const primeKernelVenv = resolve(process.env.PRIME_AGENT_KERNEL_VENV ?? join(primeAgentDir, "kernel-venv"));
+  await bootstrapPrimeKernel(primeRoot, primeAgentDir, primeKernelVenv, repository);
   const cadPythonRoot = resolveVenvPythonRoot(join(repository, "python", ".venv", "bin", "python"));
-  const kernelPython = realpathSync(join(primeKernelVenv, "bin", "python"));
-  const kernelPythonRoot = dirname(dirname(kernelPython));
+  const kernelPythonPath = join(primeKernelVenv, "bin", "python");
+  const kernelPython = realpathSync(kernelPythonPath);
+  const kernelPythonTarget = resolve(dirname(kernelPythonPath), readlinkSync(kernelPythonPath));
+  const kernelPythonRoot = dirname(dirname(kernelPythonTarget));
   const kernelPythonExecutable = basename(kernelPython);
   const kernelPythonLibrary = readdirSync(join(primeKernelVenv, "lib"), { withFileTypes: true })
     .find((entry) => entry.isDirectory() && entry.name.startsWith("python") && existsSync(join(primeKernelVenv, "lib", entry.name, "site-packages")));
