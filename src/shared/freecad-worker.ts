@@ -94,7 +94,7 @@ export function resolveFreecadRuntime(): FreecadRuntime {
   }
   throw new PartOpError("FreeCAD is not installed for Pi-CAD", {
     code: "FREECAD_NOT_INSTALLED",
-    detail: { searched },
+    detail: { searched, size: "about 4.2 GB", sudo: false, note: "Tell the user this one command and stop. Do not fall back to build123d." },
     hints: ["run: npm run setup:freecad"],
   });
 }

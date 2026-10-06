@@ -45,6 +45,15 @@ The same feature with build123d: a wider plate and one bigger hole, rebuilt with
 10. **No CJK label font.** The repository has none. Labels are ASCII; other characters become `?`.
 11. **Not changed**: the desktop activity cards. A `doc.apply(...)` call shows as a generic Python card with its images.
 
+## Assemblies and review fixes
+
+- Units are `body`, `occurrence` and `reference`. The ops `link`, `import_step` and `joint` add them.
+- An occurrence is an `App::Part` container that holds a `Part::Feature` copy of the part shape. The copy refreshes when the sha256 of the part file changes. This is a deviation from the plan: it does not use a cross-document `App::Link`, because that link is not stable when documents reload.
+- A joint computes the child pose from role frames. Its `value` is bound by an expression. `apply_joints` runs after each recompute. `sweep` can sweep a joint value.
+- Named export writes a flat STEP: one product per unit, named by its semantic path, with its pose. `cadctl assembly-tree` and render `focus`/`hide` use these names.
+- `cad.part` is now the default modeling path. build123d stays for compatibility.
+- If FreeCAD is not installed, the error is `FREECAD_NOT_INSTALLED`. Tell the user the one command (`npm run setup:freecad`, about 4.2 GB, no sudo, once) and stop. There is no silent build123d fallback.
+
 ## Version checks (plan section 7)
 
 1. `App::VarSet` works. Dynamic properties (`ReifyPath`, the `Params` attributes, requirement fields) are stored in the `.FCStd` and survive a reopen (`test_the_document_reopens_with_the_same_model`).

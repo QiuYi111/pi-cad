@@ -117,7 +117,7 @@ def _freecad_status() -> dict[str, Any]:
         return {"status": "ready" if Path(override).is_file() else "error", "python": override, "source": "PI_CAD_FREECAD_PYTHON"}
     path = _freecad_runtime_json()
     if not path.is_file():
-        return {"status": "unavailable", "hint": "run: npm run setup:freecad"}
+        return {"status": "unavailable", "hint": "run: npm run setup:freecad (about 4.2 GB, no sudo, once)"}
     try:
         record = json.loads(path.read_text(encoding="utf-8"))
         python = record["python"]

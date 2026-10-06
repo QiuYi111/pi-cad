@@ -110,6 +110,7 @@ fi
 export MAMBA_ROOT_PREFIX="$FREECAD_HOME/mamba-root"
 rm -rf "$ENV_DIR"
 if [ -f "$LOCK" ]; then
+  echo "[pi-cad] FreeCAD install: about 4.2 GB on disk, no sudo needed, done once per machine"
   echo "[pi-cad] creating FreeCAD environment from $(basename "$LOCK")"
   "$MICROMAMBA" create -y -p "$ENV_DIR" --file "$LOCK" || { echo "[pi-cad] environment creation failed" >&2; exit 4; }
 else
