@@ -52,6 +52,14 @@ cad.probe.run(
     script: str | Path | None = None,
     args: dict | None = None,
 ) -> ProbeResult
+cad.part.open(path: str | Path, *, output: str | Path | None = None, create: bool = False, body: str | None = None, validation: str = "auto") -> PartDocument
+PartDocument.apply(ops: list[dict], *, message: str | None = None, validation: str = "auto", budget_s: float | None = None) -> PartResult
+PartDocument.try_(ops: list[dict], *, budget_s: float | None = None) -> PartResult
+PartDocument.undo() -> PartResult
+PartDocument.tree() -> dict
+PartDocument.query(target: str, what: list[str] | None = None) -> dict
+PartDocument.check(kind: str, *, budget_s: float | None = None, **args) -> dict
+PartDocument.sweep(param: str, range: tuple[float, float], *, step: float, check: tuple[str, dict], refine: bool = False, budget_s: float | None = None) -> dict
 cad.review.submit(final_commit: Commit) -> dict
 cad.review.current(handle: dict) -> dict | None
 cad.review.prepare(candidate: Commit) -> dict
@@ -71,6 +79,45 @@ fail clearly; do not write ad hoc OCP code or add arbitrary thickness.
 `await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")`,
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.
+
+## FreeCAD part documents
+
+`cad.part` edits a parametric FreeCAD part with small JSON ops instead of
+rewriting a build123d script. Use it for a new part you will keep editing: a
+dimension the user may change, features added one at a time, a pose swept for
+collisions. `await cad.model.build(...)` with build123d stays the default for
+one-shot geometry and for anything the ops cannot express.
+
+```python
+doc = await cad.part.open("parts/bracket.FCStd", create=True, body="bracket")
+r = await doc.apply([
+    {"op": "param", "name": "width", "value": 40, "unit": "mm"},
+    {"op": "sketch", "name": "bracket/base_profile", "plane": "XY",
+     "shapes": [{"rect": {"center": [0, 0], "size": ["=width", 20]}}]},
+    {"op": "pad", "name": "bracket/base", "sketch": "bracket/base_profile", "length": 5},
+])
+r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
+```
+
+- Every `open`, `apply`, `undo` and `try_` attaches the seven standard views and
+  names what changed. Faces on a surface the previous build did not have are
+  orange; features are labelled by name. The first image's text starts with
+  `Changes since previous build:`. Read it, then look at the views, before the
+  next edit.
+- `apply` is one transaction. If an op or the recompute fails, nothing changed:
+  the `CadApiError` carries `code`, `target`, `detail`, `hints` and
+  `rolled_back`. Fix the named op and send the batch again.
+- Faces and edges are named by role (`bracket/mount_hole/wall`, `top_outer`),
+  never `Face12`. The names survive dimension edits and added features.
+- `try_` shows an edit and discards it. `check` and `sweep` read the in-memory
+  model (clearance, interference, wall thickness, mass, pose sweeps) without
+  exporting a STEP.
+- If a call raises `CadApiError` with `code == "FREECAD_NOT_INSTALLED"`, do not
+  try to install FreeCAD or fall back silently. Tell the user to run
+  `npm run setup:freecad`, then continue with build123d if they want.
+- Read `skills/parametric-cad-modeling/references/freecad-part-ops.md` before
+  the first `cad.part` call in a task: the full op table, role names, error
+  codes, and three worked examples.
 
 ## Delegated CAD work
 

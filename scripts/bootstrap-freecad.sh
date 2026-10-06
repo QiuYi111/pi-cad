@@ -121,5 +121,8 @@ if [ "$PLATFORM" = "osx-arm64" ]; then
 fi
 
 smoke_test || { echo "[pi-cad] FreeCAD smoke test failed" >&2; exit 5; }
+# The download cache holds every package a second time; the environment is hard-linked, not symlinked.
+"$MICROMAMBA" clean --all --yes >/dev/null 2>&1 || true
+smoke_test >/dev/null || { echo "[pi-cad] FreeCAD smoke test failed after cleaning the package cache" >&2; exit 5; }
 write_runtime_json
 echo "[pi-cad] FreeCAD part backend installed: $FREECAD_HOME"

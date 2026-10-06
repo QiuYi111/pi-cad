@@ -41,7 +41,7 @@ async def _attach_images(
                 f"{subject or f'{action} {artifact!r}'}. Inspect the attached views carefully as the primary observation of the actual geometry. "
                 f"Reason about what the geometry actually does before your next action. Probe only for facts you need to verify.\n"
                 f"{change_text + chr(10) if change_text else ''}\n{view_label}"
-                if index == 0 and artifact is not None else view_label
+                if index == 0 and (artifact is not None or subject is not None) else view_label
             )
             display_inline_image(image, label=label)
     except Exception as error:

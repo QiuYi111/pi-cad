@@ -48,6 +48,6 @@ The script supports Linux x86_64 (including WSL) and macOS arm64. It needs no su
 
 Check the result with `python -m cadctl doctor --json`. The `freecad` entry shows `ready`, `unavailable`, or `error`. Without the backend, `cad.part` calls fail with `FREECAD_NOT_INSTALLED` and the message `run: npm run setup:freecad`. The API never downloads FreeCAD by itself.
 
-Disk use: about 4 GB (measured with FreeCAD 1.1.0 on Linux x86_64). To uninstall, delete the `freecad` directory from the table above.
+Disk use: about 4.2 GB (measured with FreeCAD 1.1.0 on Linux x86_64, after the download cache is cleaned). To uninstall, delete the `freecad` directory from the table above.
 
 The osx-arm64 lock file was solved on Linux (`CONDA_OVERRIDE_OSX=11.0`) and has not been install-tested on a Mac. If it fails, the script prints the error. Delete the lock file to make the script solve `environment.yml` instead.
