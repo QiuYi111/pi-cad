@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 import build123d as bd
 
+from .fingerprints import shape_fingerprints
+
 MAX_EXHAUSTIVE_SELF_INTERSECTION_SOLIDS = 64
 ValidationMode = Literal["auto", "fast", "full"]
 
@@ -244,6 +246,7 @@ def inspect_geometry(artifact: str | Path, validation: ValidationMode = "auto") 
 
     solids = shape.solids()
     labels = [shape.label] if getattr(shape, "label", "") else []
+    fingerprints, truncated = shape_fingerprints(shape)
     return {
         "units": "mm",
         "bbox": {
@@ -274,6 +277,8 @@ def inspect_geometry(artifact: str | Path, validation: ValidationMode = "auto") 
         "labels": labels,
         "planes": planes,
         "cylinders": cylinders,
+        "faceFingerprints": fingerprints,
+        **({"faceFingerprintsTruncated": True} if truncated else {}),
     }
 
 

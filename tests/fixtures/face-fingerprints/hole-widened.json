@@ -1,0 +1,84 @@
+{
+ "description": "a hole radius change leaves the wall unmatched",
+ "diagonal": 100.0,
+ "before": [
+  {
+   "i": 0,
+   "type": "PLANE",
+   "c": [
+    0,
+    0,
+    5
+   ],
+   "a": 800,
+   "n": [
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "i": 0,
+   "type": "CYLINDER",
+   "c": [
+    10,
+    0,
+    2.5
+   ],
+   "a": 47.1,
+   "ax": [
+    0,
+    0,
+    1
+   ],
+   "r": 3.0
+  }
+ ],
+ "after": [
+  {
+   "i": 0,
+   "type": "PLANE",
+   "c": [
+    0,
+    0,
+    5
+   ],
+   "a": 800,
+   "n": [
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "i": 0,
+   "type": "CYLINDER",
+   "c": [
+    10,
+    0,
+    2.5
+   ],
+   "a": 62.8,
+   "ax": [
+    0,
+    0,
+    1
+   ],
+   "r": 4.0
+  }
+ ],
+ "expected": {
+  "pairs": [
+   [
+    0,
+    0
+   ]
+  ],
+  "unmatchedBefore": [
+   1
+  ],
+  "unmatchedAfter": [
+   1
+  ]
+ }
+}

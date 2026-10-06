@@ -130,6 +130,7 @@ def emit_error(
     input_hashes: dict[str, str] | None = None,
     duration_ms: int,
     stderr: str = "",
+    detail: dict[str, Any] | None = None,
 ) -> None:
     envelope = {
         "ok": False,
@@ -141,7 +142,7 @@ def emit_error(
         "durationMs": duration_ms,
         "warnings": [],
         "artifacts": [],
-        "payload": {"error": message, "stderr": stderr},
+        "payload": {"error": message, "stderr": stderr, **(detail or {})},
     }
     print(json.dumps(envelope, sort_keys=True, ensure_ascii=True))
 
