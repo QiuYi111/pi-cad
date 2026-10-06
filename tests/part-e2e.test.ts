@@ -16,6 +16,8 @@ import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+import { partOpsHooks } from "../src/agent-api/part-ops.ts";
+import { sha256File } from "../src/shared/store.ts";
 import { PartOpError, resolveFreecadRuntime, shutdownPartWorkers } from "../src/shared/freecad-worker.ts";
 
 let installed = true;
@@ -139,6 +141,58 @@ test("FreeCAD part: open, build, edit one dimension, resolve the named hole", { 
     assert.ok(undone.changes.volumeMm3.delta > 0, "undoing the wider hole adds volume back");
   } finally {
     delete process.env.PI_CAD_PART_KILL_GRACE_S;
+    shutdownPartWorkers();
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});
+
+test("FreeCAD part: a failure after the commit is undone and the restored STEP is registered", { skip: !installed && "FreeCAD runtime is not installed" }, async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-part-undo-canonical-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-part-undo-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  const realBind = partOpsHooks.bindIdentity;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  try {
+    const started = await new HarnessProjectStoreV7(cwd).startRun({ workflow: buildWorkflow(), registryContract: buildRegistryContract(mechanicalRegistries) });
+    await handleAgentApi(cwd, { schema: 1, op: "part-open", doc, create: true, body: "bracket" });
+    await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc, ops: base as never });
+
+    // The binder fails once, after the worker committed the edit.
+    let failures = 0;
+    partOpsHooks.bindIdentity = async (...args) => {
+      if (failures++ === 0) return { ok: false, payload: { error: "forced binding failure", paths: ["bracket/mount_hole"] } } as never;
+      return realBind(...args);
+    };
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "part-apply", doc, ops: [{ op: "param", name: "hole_d", value: 9 }] as never }),
+      (error: unknown) => error instanceof PartOpError && error.code === "IDENTITY_BIND_FAILED" && error.rolledBack === true
+        && (error.detail as any).undone === true && (error.detail as any).stepRegistered === true,
+    );
+    const tree = await handleAgentApi(cwd, { schema: 1, op: "part-tree", doc }) as any;
+    assert.equal(tree.rev, 1, "the failed revision was undone");
+
+    // The registered candidate is the file on disk, and its names still resolve.
+    const run = await new HarnessRunStoreV7(cwd, started.state.runId).load(mechanicalRegistries);
+    assert.equal(run?.state.artifacts["candidate:authoritative"]?.sha256, await sha256File(join(cwd, "build", "bracket.step")));
+    const resolved = await handleAgentApi(cwd, {
+      schema: 1, op: "probe", preset: "python", subject: "current", purpose: "resolve after the undo",
+      code: "selection = cad_resolve('bracket/mount_hole', kind='feature', expect='one')\nresult = {'radius': selection.object.radius}",
+    }) as any;
+    assert.ok(Math.abs(resolved.value.radius - 3) < 1e-4, `hole radius ${resolved.value.radius}`);
+
+    // If the restored STEP cannot be registered either, the error says so instead of claiming a rollback.
+    failures = -1;
+    partOpsHooks.bindIdentity = async () => ({ ok: false, payload: { error: "binder is down", paths: [] } }) as never;
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "part-apply", doc, ops: [{ op: "param", name: "hole_d", value: 9 }] as never }),
+      (error: unknown) => error instanceof PartOpError && error.rolledBack === false
+        && (error.detail as any).undone === true && (error.detail as any).stepRegistered === false && /not registered/.test(String((error.detail as any).note)),
+    );
+  } finally {
+    partOpsHooks.bindIdentity = realBind;
     shutdownPartWorkers();
     if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
     else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;

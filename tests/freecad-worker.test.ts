@@ -139,3 +139,20 @@ test("without FreeCAD installed the error says how to install it", async () => {
     if (previous.home === undefined) delete process.env.PI_CAD_FREECAD_HOME; else process.env.PI_CAD_FREECAD_HOME = previous.home;
   }
 });
+
+test("a bridge with no memory of a document opens an existing file on first use", async () => {
+  await withFakeRuntime(async (cwd) => {
+    const doc = join(cwd, "existing.FCStd");
+    await writeFile(doc, "not a real document; the fake worker does not read it");
+    // No `open` was ever sent: this is a fresh sidecar process after a restart.
+    const result = await runPartCommand(cwd, {
+      op: "echo", doc, args: { tag: "first" }, ensureOpen: { output: join(cwd, "x.step"), historyDir: join(cwd, "h"), create: false },
+    }) as { reopened: boolean };
+    assert.equal(result.reopened, true, "the document was opened before the request ran");
+    // A document that does not exist is not opened for the caller: the worker's own error stands.
+    const missing = await runPartCommand(cwd, {
+      op: "echo", doc: join(cwd, "missing.FCStd"), args: {}, ensureOpen: { output: join(cwd, "x.step"), historyDir: join(cwd, "h"), create: false },
+    }) as { reopened: boolean };
+    assert.equal(missing.reopened, false);
+  });
+});

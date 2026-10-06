@@ -63,6 +63,18 @@ export function resolvePartPaths(cwd: string, doc: string, output?: string): Par
   };
 }
 
+/** Test seam: the identity binder can be replaced to make one binding fail. */
+export const partOpsHooks = { bindIdentity };
+
+/** Every worker request carries the arguments that open its document, so a restarted sidecar can reopen it. */
+function partRequest(cwd: string, paths: PartPaths, request: Omit<Parameters<typeof runPartCommand>[1], "doc" | "ensureOpen">, body?: string) {
+  return runPartCommand(cwd, {
+    ...request,
+    doc: paths.docAbs,
+    ensureOpen: { output: paths.outputAbs, historyDir: paths.historyAbs, root: resolve(cwd), ...(body ? { body } : {}), create: false },
+  });
+}
+
 interface WorkerBuildResult {
   rev: number;
   fcstd: string;
@@ -89,7 +101,7 @@ async function observeWorkerResult(cwd: string, paths: PartPaths, result: Worker
   if (!result.step || !result.declarations) {
     return { part: jsonValue(result as never), images: [], changes: null, highlighted: false, artifact: null };
   }
-  const bound = await bindIdentity(cwd, projectRelativePath(cwd, result.step), projectRelativePath(cwd, result.declarations));
+  const bound = await partOpsHooks.bindIdentity(cwd, projectRelativePath(cwd, result.step), projectRelativePath(cwd, result.declarations));
   if (!bound.ok) {
     const payload = bound.payload as { error?: string; paths?: string[] } | undefined;
     throw new PartOpError(payload?.error || "the part could not be bound to semantic names", {
@@ -118,35 +130,43 @@ async function observeWorkerResult(cwd: string, paths: PartPaths, result: Worker
   };
 }
 
-/** Roll the document back one revision after a failure that came after the commit. */
-async function undoAfterFailure(cwd: string, paths: PartPaths): Promise<boolean> {
-  try {
-    await runPartCommand(cwd, { op: "undo", doc: paths.docAbs });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function committedStep<T>(cwd: string, paths: PartPaths, action: () => Promise<T>): Promise<T> {
+/**
+ * A failure after the worker committed leaves the document one revision ahead of
+ * the registered candidate. Undo it, then bind and register the restored STEP, so
+ * the file on disk, the identity manifest and the run state describe one revision.
+ */
+async function committedStep<T>(cwd: string, paths: PartPaths, validation: Validation, action: () => Promise<T>): Promise<T> {
   try {
     return await action();
   } catch (error) {
-    const undone = await undoAfterFailure(cwd, paths);
+    let restored: WorkerBuildResult | null = null;
+    try {
+      restored = (await partRequest(cwd, paths, { op: "undo" })) as WorkerBuildResult;
+    } catch { /* reported below */ }
+    let registered = false;
+    if (restored) {
+      try {
+        await observeWorkerResult(cwd, paths, restored, validation);
+        registered = true;
+      } catch { /* the document is restored; the STEP is not registered */ }
+    }
+    const detail = {
+      ...(error instanceof PartOpError ? error.detail ?? {} : { freecadStatus: "observation of the committed revision failed" }),
+      undone: restored !== null,
+      stepRegistered: registered,
+      ...(restored !== null && !registered ? { note: `the document is at revision ${restored.rev} but its STEP is not registered; apply again to rebuild it` } : {}),
+    };
+    const rolledBack = restored !== null && registered;
     if (error instanceof PartOpError) {
       throw new PartOpError(error.message, {
         code: error.code,
         ...(error.target !== undefined ? { target: error.target } : {}),
-        detail: { ...(error.detail ?? {}), undone },
+        detail,
         ...(error.hints !== undefined ? { hints: error.hints } : {}),
-        rolledBack: undone,
+        rolledBack,
       });
     }
-    throw new PartOpError(error instanceof Error ? error.message : String(error), {
-      code: "FEATURE_FAILED",
-      detail: { freecadStatus: "observation of the committed revision failed", undone },
-      rolledBack: undone,
-    });
+    throw new PartOpError(error instanceof Error ? error.message : String(error), { code: "FEATURE_FAILED", detail, rolledBack });
   }
 }
 
@@ -159,7 +179,7 @@ async function openDocument(cwd: string, request: Extract<PartRequest, { op: "pa
   const result = (await runPartCommand(cwd, {
     op: "open",
     doc: paths.docAbs,
-    args: { output: paths.outputAbs, historyDir: paths.historyAbs, body: request.body, create: request.create ?? false },
+    args: { output: paths.outputAbs, historyDir: paths.historyAbs, root: resolve(cwd), body: request.body, create: request.create ?? false },
   })) as WorkerBuildResult & { created?: boolean };
   const observed = await observeWorkerResult(cwd, paths, result, request.validation ?? "auto");
   return { ...observed, created: Boolean(result.created) };
@@ -167,18 +187,17 @@ async function openDocument(cwd: string, request: Extract<PartRequest, { op: "pa
 
 async function applyOps(cwd: string, request: Extract<PartRequest, { op: "part-apply" }>) {
   const paths = resolvePartPaths(cwd, request.doc, request.output);
-  const result = (await runPartCommand(cwd, {
+  const result = (await partRequest(cwd, paths, {
     op: "apply",
-    doc: paths.docAbs,
     args: { ops: request.ops, message: request.message },
     ...budget(request),
   })) as WorkerBuildResult;
-  return committedStep(cwd, paths, () => observeWorkerResult(cwd, paths, result, request.validation ?? "auto"));
+  return committedStep(cwd, paths, request.validation ?? "auto", () => observeWorkerResult(cwd, paths, result, request.validation ?? "auto"));
 }
 
 async function undo(cwd: string, request: Extract<PartRequest, { op: "part-undo" }>) {
   const paths = resolvePartPaths(cwd, request.doc, request.output);
-  const result = (await runPartCommand(cwd, { op: "undo", doc: paths.docAbs })) as WorkerBuildResult;
+  const result = (await partRequest(cwd, paths, { op: "undo" })) as WorkerBuildResult;
   return observeWorkerResult(cwd, paths, result, request.validation ?? "auto");
 }
 
@@ -235,8 +254,8 @@ async function tryOps(cwd: string, request: Extract<PartRequest, { op: "part-try
   const directory = resolve(cwd, TRY_DIR, key);
   await mkdir(directory, { recursive: true });
   const stepAbs = join(directory, "trial.step");
-  const result = (await runPartCommand(cwd, {
-    op: "try", doc: paths.docAbs, args: { ops: request.ops, output: stepAbs }, ...budget(request),
+  const result = (await partRequest(cwd, paths, {
+    op: "try", args: { ops: request.ops, output: stepAbs }, ...budget(request),
   })) as WorkerBuildResult;
   if (!result.step) return { part: jsonValue(result as never), images: [], changes: null, highlighted: false };
   const observed = await observeTemporary(cwd, paths, stepAbs, result.annotations ?? [], {
@@ -255,9 +274,8 @@ async function sweep(cwd: string, request: Extract<PartRequest, { op: "part-swee
   const directory = resolve(cwd, TRY_DIR, `sweep-${key}`);
   await mkdir(directory, { recursive: true });
   const stepAbs = join(directory, "worst-pose.step");
-  const result = (await runPartCommand(cwd, {
+  const result = (await partRequest(cwd, paths, {
     op: "sweep",
-    doc: paths.docAbs,
     args: { param: request.param, range: request.range, step: request.step, check: request.check, refine: request.refine ?? false, output: stepAbs },
     ...budget(request),
   })) as { pose?: { step: string; annotations: Array<{ text: string; at: [number, number, number] }> }; [key: string]: unknown };
@@ -281,15 +299,15 @@ export async function handlePartOperation(cwd: string, request: PartRequest): Pr
     case "part-sweep": return jsonValue(await sweep(cwd, request) as never);
     case "part-tree": {
       const paths = resolvePartPaths(cwd, request.doc, request.output);
-      return jsonValue(await runPartCommand(cwd, { op: "tree", doc: paths.docAbs }) as never);
+      return jsonValue(await partRequest(cwd, paths, { op: "tree" }) as never);
     }
     case "part-query": {
       const paths = resolvePartPaths(cwd, request.doc, request.output);
-      return jsonValue(await runPartCommand(cwd, { op: "query", doc: paths.docAbs, args: { target: request.target, what: request.what } }) as never);
+      return jsonValue(await partRequest(cwd, paths, { op: "query", args: { target: request.target, what: request.what } }) as never);
     }
     case "part-check": {
       const paths = resolvePartPaths(cwd, request.doc, request.output);
-      return jsonValue(await runPartCommand(cwd, { op: "check", doc: paths.docAbs, args: { kind: request.kind, args: request.args }, ...budget(request) }) as never);
+      return jsonValue(await partRequest(cwd, paths, { op: "check", args: { kind: request.kind, args: request.args }, ...budget(request) }) as never);
     }
   }
 }

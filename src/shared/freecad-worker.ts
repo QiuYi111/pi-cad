@@ -111,6 +111,13 @@ export interface PartRequest {
   args?: Record<string, unknown>;
   budgetS?: number;
   signal?: AbortSignal;
+  /**
+   * How to open `doc` when this bridge has not opened it. The sidecar can restart
+   * (desktop restart, session resume) while documents stay on disk, so every
+   * request names the arguments an open needs; an existing file is then opened
+   * on first use and the caller never sees DOCUMENT_NOT_OPEN.
+   */
+  ensureOpen?: Record<string, unknown>;
 }
 
 interface Frame {
@@ -190,7 +197,11 @@ class PartWorker {
       const child = this.ensureChild(runtime);
       this.setReferenced(child, true);
       if (request.op !== "open" && !this.openInChild.has(request.doc)) {
-        const reopen = this.openArgs.get(request.doc);
+        let reopen = this.openArgs.get(request.doc);
+        if (!reopen && request.ensureOpen && existsSync(request.doc)) {
+          reopen = { ...request.ensureOpen, export: true };
+          this.openArgs.set(request.doc, reopen);
+        }
         if (reopen) await this.send(child, { op: "open", doc: request.doc, args: { ...reopen, create: false, export: false }, budgetS }, budgetS, request.signal);
       }
       const result = await this.send(child, request, budgetS, request.signal);
