@@ -13,7 +13,8 @@ from typing import Any
 from .errors import ReifyOpError
 
 PARAMS_OBJECT = "Params"
-_IDENTIFIER = re.compile(r"(?<![\w.])([A-Za-z_][A-Za-z_0-9]*)(?!\s*\()")
+# (?!\w) stops the match from backtracking to a prefix ("si" of "sin(").
+_IDENTIFIER = re.compile(r"(?<![\w.])([A-Za-z_]\w*)(?!\w)(?!\s*\()")
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #: Units and constants FreeCAD expressions know; never rewritten.
 _KEEP = frozenset({

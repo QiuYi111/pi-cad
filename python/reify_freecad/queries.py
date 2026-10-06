@@ -12,8 +12,9 @@ from typing import Any
 import FreeCAD as App
 import Part
 
-from .core import PARAMS_NAME, bodies, get_path, is_body, is_sketch, owning_body, similar_paths
+from .core import bodies, get_path, is_body, is_sketch, owning_body, similar_paths
 from .errors import ReifyOpError
+from .roles import role_matches
 
 DEFAULT_DENSITY_G_CM3 = 2.7
 
@@ -51,10 +52,10 @@ def shape_of(ctx: Any, target: str) -> Any:
                 raise ReifyOpError("TARGET_NOT_FOUND", f"'{target}' has no shape", target=target, detail={"target": target, "known": []})
             owner = owning_body(obj)
             if owner is None:
-                return obj.Shape
+                return _one_solid(obj.Shape)
             placed = obj.Shape.copy()  # features live in their body's local frame
             placed.Placement = owner.Placement.multiply(placed.Placement)
-            return placed
+            return _one_solid(placed)
     faces = _role_faces(ctx, target)
     if faces:
         return Part.makeCompound(faces)
@@ -66,12 +67,19 @@ def shape_of(ctx: Any, target: str) -> Any:
                        detail={"target": target, "known": similar_paths(target, known)})
 
 
+def _one_solid(shape: Any) -> Any:
+    """FreeCAD sometimes wraps a body's single solid in a compound, which has no centre of mass."""
+    if shape.ShapeType == "Compound" and len(shape.Solids) == 1:
+        return shape.Solids[0]
+    return shape
+
+
 def _role_faces(ctx: Any, target: str) -> list[Any]:
     out: list[Any] = []
     for body in bodies(ctx.doc):
         roles = ctx.session.roles(body)
         for key, entries in roles.faces.items():
-            if key == target or key.startswith(target + ".") or key.startswith(target + "@"):
+            if role_matches(key, target):
                 out.extend(roles.to_world(entry.face) for entry in entries)
     return out
 
@@ -239,20 +247,41 @@ def _inward_length(solid: Any, point: Any, normal: Any, diagonal: float) -> floa
     return None if best is None else best + 1e-4
 
 
+def _solids_of(shapes: list[Any]) -> list[Any]:
+    solids: list[Any] = []
+    for shape in shapes:
+        solids.extend(shape.Solids)
+    return solids
+
+
 def mass(ctx: Any, target: str | None, density: float | None) -> dict[str, Any]:
+    """Mass, centre of mass and inertia (about the centre of mass) of a body, feature, or every body."""
     paths = [target] if target else [get_path(b) for b in bodies(ctx.doc) if get_path(b)]
-    shapes = [shape_of(ctx, p) for p in paths]
-    shape = shapes[0] if len(shapes) == 1 else Part.makeCompound(shapes)
+    solids = _solids_of([shape_of(ctx, p) for p in paths])
+    if not solids:
+        raise ReifyOpError("RESULT_NOT_SOLID", f"'{target or 'the document'}' has no solid to weigh", target=target,
+                           detail={"body": target, "solids": 0, "validity": "empty"})
     rho = density if density is not None else ctx.session.density()
     scale = rho * 1e-3  # g/cm3 -> g/mm3
-    inertia = shape.MatrixOfInertia
+    volume = sum(solid.Volume for solid in solids)
+    centre = App.Vector()
+    for solid in solids:
+        centre = centre + solid.CenterOfMass * (solid.Volume / volume)
+    tensor = [[0.0] * 3 for _ in range(3)]
+    for solid in solids:
+        d = solid.CenterOfMass - centre
+        m = solid.Volume
+        inner = solid.MatrixOfInertia
+        d2 = d.dot(d)
+        components = (d.x, d.y, d.z)
+        for i in range(3):
+            for j in range(3):
+                tensor[i][j] += getattr(inner, f"A{i + 1}{j + 1}") + m * ((d2 if i == j else 0.0) - components[i] * components[j])
     return {
-        "kind": "mass", "target": target, "value": _round(shape.Volume * scale, 4), "unit": "g",
-        "volumeMm3": _round(shape.Volume), "densityGPerCm3": rho,
-        "centerOfMassMm": _vec(shape.CenterOfMass),
-        "inertiaGMm2": [[_round(inertia.A11 * scale, 3), _round(inertia.A12 * scale, 3), _round(inertia.A13 * scale, 3)],
-                        [_round(inertia.A21 * scale, 3), _round(inertia.A22 * scale, 3), _round(inertia.A23 * scale, 3)],
-                        [_round(inertia.A31 * scale, 3), _round(inertia.A32 * scale, 3), _round(inertia.A33 * scale, 3)]],
+        "kind": "mass", "target": target, "value": _round(volume * scale, 4), "unit": "g",
+        "volumeMm3": _round(volume), "densityGPerCm3": rho,
+        "centerOfMassMm": _vec(centre),
+        "inertiaGMm2": [[_round(value * scale, 3) for value in row] for row in tensor],
     }
 
 

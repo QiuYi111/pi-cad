@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import FreeCAD as App
 
-from ..core import PARAMS_NAME, PATH_PROPERTY, bodies, get_path, is_body, is_feature, is_sketch, set_path
+from ..core import PARAMS_NAME, bodies, get_path, is_body, is_sketch, set_path
 from ..errors import ReifyOpError
 from ..exprs import PARAMS_OBJECT, is_expression, rewrite_expression
 from ..naming import check_not_role_name

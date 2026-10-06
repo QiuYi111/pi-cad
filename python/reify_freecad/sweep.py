@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from .errors import ReifyOpError
-from .exprs import is_expression
 from .ops.context import OpContext
 from .queries import Budget, run_check
 

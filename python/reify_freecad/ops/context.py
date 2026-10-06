@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..core import PARAMS_NAME, bodies, get_path, path_index, set_path, similar_paths
+from ..core import bodies, get_path, path_index, set_path, similar_paths
 from ..errors import ReifyOpError
 from ..exprs import PARAMS_OBJECT, is_expression, rewrite_expression
 from ..naming import check_not_role_name

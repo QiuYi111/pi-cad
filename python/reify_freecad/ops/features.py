@@ -6,7 +6,6 @@ from typing import Any
 
 from ..core import is_sketch, origin_feature
 from ..errors import ReifyOpError
-from ..exprs import evaluate_constant
 from ..roles import resolve_edges, resolve_single_face
 from .sketch import build_sketch
 
@@ -34,12 +33,14 @@ def _new_feature(ctx: Any, op: dict[str, Any], type_id: str, hint: Any | None = 
 
 def pad(ctx: Any, op: dict[str, Any]) -> None:
     sk = _sketch_of(ctx, op)
+    kind = op.get("type", "length")
+    # Resolve the end face first: creating the pad moves the body's Tip to it.
+    up_to = resolve_single_face(ctx, op["face"]) if kind == "up_to_face" else None
     _body, obj = _new_feature(ctx, op, "PartDesign::Pad", sk)
     obj.Profile = sk
-    kind = op.get("type", "length")
     obj.Type = {"length": "Length", "through_all": "UpToLast", "up_to_face": "UpToFace"}[kind]
-    if kind == "up_to_face":
-        owner, face = resolve_single_face(ctx, op["face"])
+    if up_to is not None:
+        owner, face = up_to
         obj.UpToFace = (owner, [face])
     ctx.set_value(obj, "Length", op["length"])
     obj.Reversed = bool(op.get("reversed", False))
@@ -67,14 +68,7 @@ def hole(ctx: Any, op: dict[str, Any]) -> None:
     if not through:
         ctx.set_value(obj, "Depth", op["depth"])
     if "thread" in op:
-        try:
-            obj.Threaded = True
-            obj.ModelThread = False
-            obj.ThreadType = "ISOMetricProfile"
-            obj.ThreadSize = op["thread"]
-        except Exception as error:
-            raise ReifyOpError("HOLE_FAILED", f"unsupported thread {op['thread']!r}: {error}", target=op["name"],
-                               detail={"thread": op["thread"]}, hints=["use an ISO metric size such as M6"]) from error
+        _thread(obj, op)
     if "counterbore" in op:
         spec = _dict(op["counterbore"], ("diameter", "depth"), "counterbore")
         obj.HoleCutType = "Counterbore"
@@ -86,6 +80,22 @@ def hole(ctx: Any, op: dict[str, Any]) -> None:
         ctx.set_value(obj, "HoleCutDiameter", spec["diameter"])
         ctx.set_value(obj, "HoleCutCountersinkAngle", spec.get("angle", 90))
     ctx.register(obj, op["name"])
+
+
+def _thread(obj: Any, op: dict[str, Any]) -> None:
+    """ISO metric coarse thread: ``"M6"`` (or ``"M6x1"``) as FreeCAD spells it, ``M6x1``."""
+    wanted = op["thread"]
+    obj.Threaded = True
+    obj.ModelThread = False
+    obj.ThreadType = "ISOMetricProfile"
+    sizes = list(obj.getEnumerationsOfProperty("ThreadSize"))
+    matches = [wanted] if wanted in sizes else [size for size in sizes if size.startswith(f"{wanted}x")]
+    if not matches:
+        raise ReifyOpError(
+            "HOLE_FAILED", f"unsupported thread {wanted!r}", target=op["name"],
+            detail={"thread": wanted, "allowed": sizes[:30]}, hints=["use an ISO metric size such as M6"],
+        )
+    obj.ThreadSize = matches[0]
 
 
 def _dict(value: Any, required: tuple[str, ...], name: str, optional: tuple[str, ...] = ()) -> dict[str, Any]:

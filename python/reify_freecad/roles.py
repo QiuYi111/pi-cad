@@ -124,17 +124,22 @@ def face_within(inner: Any, outer: Any, tol: float) -> bool:
     return True
 
 
-def surface_exists_in(face: Any, shape: Any | None, tol: float) -> bool:
-    if shape is None or shape.isNull():
+def contained_in_base(face: Any, base: Any | None, tol: float) -> bool:
+    """True when ``face`` already existed in ``base``: same surface, and inside a face of it.
+
+    The surface alone is not enough: a boss whose top is flush with a tower top
+    lies on the tower's plane but is a new face.
+    """
+    if base is None or base.isNull():
         return False
-    return any(same_surface(face, other, tol) for other in shape.Faces)
+    return any(same_surface(face, other, tol) and face_within(face, other, tol) for other in base.Faces)
 
 
 def created_faces(feature: Any, tol: float) -> list[Any]:
-    """Faces of ``feature.Shape`` whose surface did not exist in its base shape."""
+    """Faces of ``feature.Shape`` that did not exist in its base shape."""
     base = getattr(feature, "BaseFeature", None)
     base_shape = base.Shape if base is not None else None
-    return [face for face in feature.Shape.Faces if not surface_exists_in(face, base_shape, tol)]
+    return [face for face in feature.Shape.Faces if not contained_in_base(face, base_shape, tol)]
 
 
 # ---------------------------------------------------------------- sketch helpers
@@ -248,9 +253,12 @@ def _hole_roles(feature: Any, created: list[Any], out: dict[str, list[Any]], ori
     for face in cylinders:
         if face not in main:
             out.setdefault("counterbore_wall", []).append(face)
-    drill_point = str(getattr(feature, "DrillPoint", "Flat"))
-    for face in cones:
-        out.setdefault("bottom" if drill_point == "Angled" else "countersink", []).append(face)
+    # A cone is the countersink when the hole has one and it is the cone nearest the opening;
+    # any other cone is the angled drill point at the bottom of a blind hole.
+    countersunk = str(getattr(feature, "HoleCutType", "None")) == "Countersink"
+    entry_first = sorted(cones, key=lambda f: -_along(f, origin, normal))
+    for position, face in enumerate(entry_first):
+        out.setdefault("countersink" if countersunk and position == 0 else "bottom", []).append(face)
     has_cut = str(getattr(feature, "HoleCutType", "None")) != "None"
     through = str(getattr(feature, "DepthType", "Dimension")) == "ThroughAll"
     if through:
@@ -308,7 +316,7 @@ def compute_body_roles(body: Any) -> BodyRoles:
                 claimed.add(position)
                 result.faces.setdefault(f"{path}/{role}", []).append(RoleFace(f"Face{position}", face))
     _pattern_roles(result, features, created_by_feature, tol, claimed)
-    _edge_roles(result)
+    _edge_roles(result, {path: feature for path, (feature, _roles) in created_by_feature.items()})
     return result
 
 
@@ -479,8 +487,17 @@ def _edge_name(shape: Any, edge: Any) -> str | None:
     return None
 
 
-def _edge_roles(result: BodyRoles) -> None:
+def _profile_plane(feature: Any) -> tuple[Any, Any]:
+    profile = getattr(feature, "Profile", None)
+    sketch = profile[0] if isinstance(profile, tuple) else profile
+    if sketch is not None and sketch.TypeId == "Sketcher::SketchObject":
+        return sketch_plane_info(sketch)
+    return App.Vector(), App.Vector(0, 0, 1)
+
+
+def _edge_roles(result: BodyRoles, features: dict[str, Any]) -> None:
     shape = result.shape
+    tol = _tolerance(shape)
     for key, role_faces in list(result.faces.items()):
         path, _, role = key.rpartition("/")
         base = role.split("@")[0].split(".")[0]
@@ -489,28 +506,39 @@ def _edge_roles(result: BodyRoles) -> None:
                 names = [n for n in (_edge_name(shape, e) for e in entry.face.OuterWire.Edges) if n]
                 if names:
                     result.edges.setdefault(f"{path}/top_outer", []).extend(names)
-        elif base in {"wall", "counterbore_wall"}:
-            for entry in role_faces:
-                names = _rim_edges(shape, entry.face)
-                if names:
-                    rim_role = "rim" if base == "wall" else "counterbore_rim"
-                    result.edges.setdefault(f"{path}/{rim_role}", []).extend(names)
+        elif base in {"wall", "counterbore_wall"} and "@" not in role and path in features:
+            origin, normal = _profile_plane(features[path])
+            names = _entry_rim_edges(shape, [entry.face for entry in role_faces], origin, normal, tol)
+            if names:
+                rim_role = "rim" if base == "wall" else "counterbore_rim"
+                known = result.edges.setdefault(f"{path}/{rim_role}", [])
+                known.extend(name for name in names if name not in known)
 
 
-def _rim_edges(shape: Any, wall: Any) -> list[str]:
-    """Circular edges where a hole wall meets a planar face (not the seam)."""
-    names: list[str] = []
-    for edge in wall.Edges:
-        if not isinstance(edge.Curve, Part.Circle):
-            continue
-        for other in shape.Faces:
-            if other.isSame(wall) or not isinstance(other.Surface, Part.Plane):
-                continue
-            if any(edge.isSame(shared) for shared in other.Edges):
-                name = _edge_name(shape, edge)
-                if name and name not in names:
-                    names.append(name)
-    return names
+def _entry_rim_edges(shape: Any, walls: list[Any], origin: Any, normal: Any, tol: float) -> list[str]:
+    """Edges where the walls meet a face parallel to the sketch plane, on the side the cut opens.
+
+    A hole or pocket is sketched on a face and cuts away from it, so the opening
+    is the part of the wall nearest to the sketch plane's side.
+    """
+    openings: list[tuple[float, str]] = []
+    for wall in walls:
+        for edge in wall.Edges:
+            for other in shape.Faces:
+                if other.isSame(wall) or not isinstance(other.Surface, Part.Plane) or not _parallel(other.Surface.Axis, normal):
+                    continue
+                if any(edge.isSame(shared) for shared in other.Edges):
+                    name = _edge_name(shape, edge)
+                    if name:
+                        openings.append(((edge.CenterOfMass - origin).dot(normal), name))
+    if not openings:
+        return []
+    nearest = max(position for position, _name in openings)
+    out: list[str] = []
+    for position, name in openings:
+        if abs(position - nearest) <= tol * 10 and name not in out:
+            out.append(name)
+    return out
 
 
 # ---------------------------------------------------------------- resolution (used by ops)
@@ -520,12 +548,16 @@ def _matching_keys(roles: BodyRoles, feature_path: str, role: str | None) -> lis
     keys = [key for key in list(roles.faces) + list(roles.edges) if key.startswith(prefix)]
     if role is None:
         return keys
-    wanted = f"{feature_path}/{role}"
-    out = []
-    for key in keys:
-        if key == wanted or key.startswith(wanted + ".") or key.startswith(wanted + "@"):
-            out.append(key)
-    return out
+    return [key for key in keys if role_matches(key, f"{feature_path}/{role}")]
+
+
+def role_matches(key: str, wanted: str) -> bool:
+    """``wall`` is exactly that role (the first instance of a pattern); ``side`` also
+    covers ``side.0``, ``side.1``...; ``wall@*`` covers every instance of a pattern."""
+    if wanted.endswith("@*"):
+        base = wanted[:-2]
+        return key == base or key.startswith(base + "@")
+    return key == wanted or key.startswith(wanted + ".")
 
 
 def known_role_paths(ctx: Any) -> list[str]:

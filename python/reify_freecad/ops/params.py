@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..core import PARAMS_NAME
 from ..errors import ReifyOpError
 from ..exprs import is_expression, rewrite_expression
 

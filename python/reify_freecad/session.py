@@ -11,13 +11,12 @@ from pathlib import Path
 from typing import Any
 
 import FreeCAD as App
-import Part
 
 from . import export as export_module
 from . import intent as intent_module
 from . import summary
 from .core import (
-    PARAMS_NAME, REQUIREMENTS_NAME, bodies, body_features, get_path, is_body, is_feature, is_sketch,
+    PARAMS_NAME, REQUIREMENTS_NAME, bodies, body_features, get_path, is_feature, is_sketch,
     path_index, set_path,
 )
 from .errors import ReifyOpError, failure_code, hints_for

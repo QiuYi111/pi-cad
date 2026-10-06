@@ -87,7 +87,8 @@ class Worker:
             "bodies": [b.Label for b in session.doc.Objects if b.TypeId == "PartDesign::Body"],
             "paramValues": session.param_values(),
         }
-        result.update(session.export_current())
+        if args.get("export", True):  # a silent reopen after a restart exports nothing
+            result.update(session.export_current())
         return result
 
     def cmd_apply(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:

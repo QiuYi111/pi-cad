@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .core import REQUIREMENTS_NAME, bodies, get_path, path_index
+from .core import get_path, path_index
 from .errors import ReifyOpError
 from .queries import Budget, clearance, mass, shape_of, wall_thickness
 
