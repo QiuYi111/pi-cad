@@ -58,7 +58,10 @@ def _error_wire(error: ReifyOpError) -> dict[str, Any]:
 
 class Worker:
     def __init__(self) -> None:
+        from .registry import SessionRegistry
+
         self.sessions: dict[str, Any] = {}
+        self.registry = SessionRegistry(self.sessions)
 
     # ------------------------------------------------------------ helpers
     def _session(self, doc: str) -> Any:
@@ -70,6 +73,7 @@ class Worker:
     def _ctx(self, session: Any) -> Any:
         from .ops.context import OpContext
 
+        session.sync_links()  # reads see the latest revision of every linked part
         return OpContext(session)
 
     # ------------------------------------------------------------ commands
@@ -79,7 +83,10 @@ class Worker:
         existing = self.sessions.get(doc)
         if existing is not None:
             existing.close()
+        self.registry.adopt(Path(doc))  # one session owns a document, even when an assembly linked it first
         session = DocumentSession(Path(doc), Path(args["output"]), Path(args["historyDir"]), args.get("body"))
+        session.registry = self.registry
+        session.root = Path(args["root"]) if args.get("root") else Path(doc).parent
         created = session.open(bool(args.get("create", False)))
         self.sessions[doc] = session
         result: dict[str, Any] = {
@@ -103,7 +110,9 @@ class Worker:
         return self._session(doc).undo()
 
     def cmd_tree(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
-        return self._session(doc).tree()
+        session = self._session(doc)
+        session.sync_links()
+        return session.tree()
 
     def cmd_query(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
         from . import queries
@@ -133,13 +142,13 @@ class Worker:
         from . import export as export_module
         from . import queries
 
-        vs = session.params_object()
-        expression = next((expr for prop, expr in vs.ExpressionEngine if prop in (param, f".{param}")), None)
-        original = getattr(vs, param)
+        vs, prop = session.param_target(param)
+        expression = next((expr for name, expr in vs.ExpressionEngine if name in (prop, f".{prop}")), None)
+        original = getattr(vs, prop)
         original_value = float(original.Value if hasattr(original, "Value") else original)
         try:
-            vs.setExpression(param, None)
-            setattr(vs, param, value)
+            vs.setExpression(prop, None)
+            setattr(vs, prop, value)
             session.recompute()
             export_module.write_step(session, output)
             args = check.get("args") or {}
@@ -152,10 +161,10 @@ class Worker:
             return {"step": str(output), "annotations": annotations}
         finally:
             if expression:
-                vs.setExpression(param, expression)
+                vs.setExpression(prop, expression)
             else:
-                vs.setExpression(param, None)
-                setattr(vs, param, original_value)
+                vs.setExpression(prop, None)
+                setattr(vs, prop, original_value)
             session.recompute()
 
     def cmd_close(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:

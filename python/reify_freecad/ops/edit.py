@@ -6,6 +6,7 @@ from typing import Any
 
 import FreeCAD as App
 
+from ..assembly import is_unit_container, joint_objects
 from ..core import PARAMS_NAME, bodies, get_path, is_body, is_sketch, set_path
 from ..errors import ReifyOpError
 from ..exprs import PARAMS_OBJECT, is_expression, rewrite_expression
@@ -94,6 +95,10 @@ def delete(ctx: Any, op: dict[str, Any]) -> None:
             dependents.append(path)
     if is_body(obj):
         dependents.extend(p for p in (get_path(o) for o in obj.Group) if p)
+    if is_body(obj) or is_unit_container(obj):
+        for joint in joint_objects(ctx.session):
+            if f'"{target}' in joint.Parent + joint.Child:  # a joint names this part or one of its features
+                dependents.append(get_path(joint) or joint.Label)
     if dependents:
         raise ReifyOpError("HAS_DEPENDENTS", f"'{target}' is used by {len(dependents)} other object(s)", target=target,
                            detail={"dependents": sorted(set(dependents))}, hints=["delete the dependents first"])
@@ -103,6 +108,9 @@ def delete(ctx: Any, op: dict[str, Any]) -> None:
             owner = body
     if owner is not None:
         owner.removeObject(obj)
+    if is_unit_container(obj):  # an occurrence owns the shape object inside it
+        for child in list(obj.Group):
+            ctx.doc.removeObject(child.Name)
     ctx.doc.removeObject(obj.Name)
 
 
@@ -122,6 +130,9 @@ def rename(ctx: Any, op: dict[str, Any]) -> None:
     for path, obj in moved.items():
         set_path(obj, new + path[len(old):])
     _rewrite_requirement_targets(ctx, old, new)
+    for joint in joint_objects(ctx.session):  # joints name parts and roles by path
+        for prop in ("Parent", "Child"):
+            setattr(joint, prop, getattr(joint, prop).replace(f'"{old}', f'"{new}'))
 
 
 def _rewrite_requirement_targets(ctx: Any, old: str, new: str) -> None:

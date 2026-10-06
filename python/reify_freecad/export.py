@@ -10,7 +10,7 @@ from typing import Any
 import FreeCAD as App
 import Part
 
-from .core import body_features, get_path
+from .assembly import units
 
 _KINDS = {
     "PartDesign::Pad": "pad", "PartDesign::Pocket": "pocket", "PartDesign::Hole": "hole",
@@ -26,24 +26,62 @@ SELECTOR_TOLERANCE = 1e-4
 LOOSE_TOLERANCE = 1e-3
 
 
-def solid_bodies(session: Any) -> list[Any]:
-    """Bodies that have a solid, in a stable order (sorted by semantic path)."""
-    found = [b for b in session.doc.Objects if b.TypeId == "PartDesign::Body" and not b.Shape.isNull() and b.Shape.Solids]
-    return sorted(found, key=lambda b: get_path(b) or b.Name)
+def solid_units(session: Any) -> list[Any]:
+    """Units that go into the STEP, sorted by path: those with a solid, and references that are surfaces only."""
+    found = []
+    for unit in units(session):
+        shape = unit.shape()
+        if shape.isNull():
+            continue
+        if shape.Solids or (unit.kind == "reference" and shape.Faces):
+            found.append(unit)
+    return found
 
 
 def write_step(session: Any, destination: Path) -> list[Any]:
-    bodies = solid_bodies(session)
-    shape = bodies[0].Shape if len(bodies) == 1 else Part.makeCompound([b.Shape for b in bodies])
+    """Write the STEP. One body is a plain solid; anything else is a named assembly.
+
+    The assembly goes through FreeCAD's STEP exporter with the document structure:
+    every body and occurrence is a product named by its semantic path, with its
+    placement, so ``cadctl assembly-tree`` and the render ``focus``/``hide`` refs
+    can use the names.
+    """
+    exported = solid_units(session)
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp.step")
     try:
-        shape.exportStep(str(temporary))
+        if len(exported) == 1 and exported[0].kind == "body":
+            exported[0].shape().exportStep(str(temporary))
+        else:
+            _export_named(exported, temporary)
         os.replace(temporary, destination)
     finally:
         if temporary.exists():
             temporary.unlink()
-    return bodies
+    return exported
+
+
+def _export_named(exported: list[Any], destination: Path) -> None:
+    """One product per unit, directly under the root, named by semantic path and placed by its pose.
+
+    The flat layout is the one ``cadctl`` can bind: a nested container would give a
+    leaf whose location is relative to its parent, which the identity binder does not
+    compose. A scratch document holds the products so the real document is not touched.
+    """
+    import Import
+
+    scratch = App.newDocument("reify_export")
+    try:
+        leaves = []
+        for unit in exported:
+            leaf = scratch.addObject("Part::Feature", "Product")
+            leaf.Shape = unit.shape()
+            leaf.Label = unit.path
+            leaves.append(leaf)
+        scratch.recompute()
+        Import.export(leaves, str(destination))
+    finally:
+        App.closeDocument(scratch.Name)
 
 
 def _unit(v: Any) -> list[float]:
@@ -112,21 +150,27 @@ def face_selector(face: Any, all_faces: list[Any]) -> dict[str, Any]:
 
 
 def build_declarations(session: Any) -> dict[str, Any]:
-    bodies = solid_bodies(session)
+    exported = solid_units(session)
     entities: list[dict[str, Any]] = []
-    for solid_index, body in enumerate(bodies):
-        body_path = get_path(body) or body.Label
-        entities.append({"call": "instance", "path": body_path, "label": body_path.split("/")[-1], "solidIndex": solid_index})
-        roles = session.roles(body)
+    cursor = 0  # index of the unit's first solid in the STEP
+    for unit in exported:
+        solids = unit.solid_count()
+        entity: dict[str, Any] = {"call": "instance", "path": unit.path, "label": unit.path.split("/")[-1]}
+        if solids == 1:
+            entity["solidIndex"] = cursor
+        cursor += solids
+        if solids != 1 and unit.kind != "reference":
+            continue  # the identity binder names one solid per instance
+        entities.append(entity)
+        roles = unit.roles(session)
+        if roles is None:
+            continue
         shape_faces = [roles.to_world(face) for face in roles.shape.Faces]
-        declared: set[str] = {body_path}
-        for feature in body_features(body):
-            feature_path = get_path(feature)
-            if not feature_path:
-                continue
+        declared: set[str] = {unit.path}
+        for feature_path, feature in unit.features():
             keys = sorted(k for k in roles.faces if k.startswith(feature_path + "/") and "/" not in k[len(feature_path) + 1:])
             record: dict[str, Any] = {
-                "call": "feature", "path": feature_path, "owner": body_path,
+                "call": "feature", "path": feature_path, "owner": unit.path,
                 "kind": _KINDS.get(feature.TypeId, "feature"), "label": feature_path.split("/")[-1],
             }
             primary = _primary_role(feature.TypeId)
@@ -147,7 +191,8 @@ def build_declarations(session: Any) -> dict[str, Any]:
                         "call": "faces", "path": path, "owner": feature_path,
                         "selector": face_selector(face, shape_faces), "expect": "one",
                     })
-    return {"schema": 1, "assembly": get_path(bodies[0]) if len(bodies) == 1 else None, "entities": entities}
+    only = exported[0] if len(exported) == 1 else None
+    return {"schema": 1, "assembly": only.path if only is not None else None, "entities": entities}
 
 
 def _primary_role(type_id: str) -> str | None:

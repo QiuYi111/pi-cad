@@ -24,6 +24,7 @@ from .exprs import PARAMS_OBJECT
 from .naming import canonicalize_path
 from .ops import handler_for, validate_ops
 from .ops.context import OpContext
+from .assembly import apply_joints, joint_objects, refresh_links, units
 from .roles import BodyRoles, compute_body_roles, label_anchor
 from .queries import DEFAULT_DENSITY_G_CM3
 
@@ -73,6 +74,25 @@ class DocumentSession:
         self._recomputed: set[str] = set()
         self._recorder = _RecomputeRecorder()
         App.addDocumentObserver(self._recorder)
+        self.registry: Any = None
+        self.root: Path = fcstd.parent
+        self.loaded_sha = ""
+        #: Occurrences refreshed from their part files since the last commit.
+        self.refreshed: set[str] = set()
+        #: occurrence container name -> (part sha the roles belong to, roles)
+        self.occurrence_roles: dict[str, tuple[str, Any]] = {}
+
+    def resolve_project_path(self, relative: str | Path) -> Path:
+        path = Path(relative)
+        return path if path.is_absolute() else (self.root / path)
+
+    def reload_if_stale(self) -> bool:
+        """Reload when the file changed on disk (another process committed a revision)."""
+        if self.doc is None or not self.fcstd.exists() or _sha256(self.fcstd) == self.loaded_sha:
+            return False
+        self._load()
+        self.rev = self._count_log()
+        return True
 
     # ------------------------------------------------------------ lifecycle
     def open(self, create: bool) -> bool:
@@ -87,6 +107,7 @@ class DocumentSession:
             self._ensure_scaffold()
             self.doc.recompute()
             self.doc.saveAs(str(self.fcstd))
+            self.loaded_sha = _sha256(self.fcstd)
             created = True
         else:
             raise ReifyOpError("TARGET_NOT_FOUND", f"document {self.fcstd.name} does not exist", target=str(self.fcstd),
@@ -103,11 +124,18 @@ class DocumentSession:
                 App.closeDocument(self.doc.Name)
             except Exception:
                 pass
+        for known in list(App.listDocuments().values()):
+            if known.FileName == str(self.fcstd):
+                App.closeDocument(known.Name)  # one in-memory copy of a file
         self.doc = App.openDocument(str(self.fcstd))
         self.doc.UndoMode = 1
         self._ensure_scaffold()
         self.doc.recompute()
+        self.loaded_sha = _sha256(self.fcstd)
+        self.refreshed.clear()
+        self.occurrence_roles.clear()
         self._invalidate()
+        self._after_recompute()
 
     def reload(self) -> None:
         """Throw away in-memory changes: reopen the last saved state."""
@@ -153,6 +181,15 @@ class DocumentSession:
         vs = self.params_object()
         return float(getattr(vs, "density")) if "density" in self.param_names() else DEFAULT_DENSITY_G_CM3
 
+    def param_target(self, name: str) -> tuple[Any, str] | None:
+        """(object, property) a sweep may drive: a parameter, or a joint's value."""
+        if name in self.param_names():
+            return self.params_object(), name
+        for item in joint_objects(self):
+            if get_path(item) == name and "Value" in item.PropertiesList:
+                return item, "Value"
+        return None
+
     def default_body(self) -> Any:
         found = bodies(self.doc)
         if self.body_path:
@@ -181,6 +218,21 @@ class DocumentSession:
             if path and (is_feature(obj) or is_sketch(obj)):
                 self._recomputed.add(path)
         self._invalidate()
+        self._after_recompute()
+
+    def sync_links(self) -> list[str]:
+        """Take the new revision of every linked part or STEP; returns the occurrences that changed."""
+        changed = refresh_links(self)
+        if changed:
+            self.refreshed |= set(changed)
+            self.recompute()
+        return changed
+
+    def _after_recompute(self) -> None:
+        """Joints set the pose of their child from the values just computed."""
+        if apply_joints(self):
+            self.doc.recompute()
+            self._invalidate()
 
     def roles(self, body: Any) -> BodyRoles:
         cached = self._roles.get(body.Name)
@@ -204,15 +256,22 @@ class DocumentSession:
                 if is_sketch(obj):
                     values.update({f"constraint:{c.Name}": _value(c.Value) for c in obj.Constraints if c.Name})
                 props[path] = values
+        for item in joint_objects(self):
+            props[get_path(item) or item.Label] = {"Value": _value(item.Value) if "Value" in item.PropertiesList else None}
         signatures: dict[str, Any] = {}
-        for body in bodies(self.doc):
-            if body.Shape.isNull():
+        for unit in units(self):
+            roles = unit.roles(self)
+            if roles is None or unit.shape().isNull():
                 continue
-            for key, entries in self.roles(body).faces.items():
+            for key, entries in roles.faces.items():
                 signatures[key] = sorted(
-                    (type(f.face.Surface).__name__, *[round(c, 3) for c in self.roles(body).point_to_world(f.face.CenterOfMass)], round(f.face.Area, 3))
+                    (type(f.face.Surface).__name__, *[round(c, 3) for c in roles.point_to_world(f.face.CenterOfMass)], round(f.face.Area, 3))
                     for f in entries
                 )
+        for unit in units(self):  # a moved or refreshed occurrence changes even when it has no roles
+            if unit.kind != "body":
+                box = unit.shape().BoundBox if not unit.shape().isNull() else None
+                signatures[unit.path] = [round(v, 3) for v in (box.XMin, box.YMin, box.ZMin, box.XMax, box.YMax, box.ZMax)] if box else []
         return {"paths": paths, "props": props, "params": self.param_values(), "roles": signatures}
 
     # ------------------------------------------------------------ health checks
@@ -269,10 +328,14 @@ class DocumentSession:
         self.doc.openTransaction("reify-apply")
         index = -1
         try:
+            self.sync_links()
+            self._recomputed |= self.refreshed
             for index, op in enumerate(normalised):
                 handler_for(op["op"])(ctx, op)
                 self.recompute()
                 warnings.extend(self.check_health(index))
+                warnings.extend(ctx.warnings)
+                ctx.warnings.clear()
             index = -1
             self.check_bodies()
         except ReifyOpError as error:
@@ -342,10 +405,10 @@ class DocumentSession:
     def _annotations(self, highlight: list[str], changed_roles: list[str]) -> list[dict[str, Any]]:
         """Labels anchored on a visible face of each highlighted feature (first build: every feature)."""
         biggest: dict[str, tuple[float, Any]] = {}
-        for body in bodies(self.doc):
-            if body.Shape.isNull():
+        for unit in units(self):
+            roles = unit.roles(self)
+            if roles is None or unit.shape().isNull():
                 continue
-            roles = self.roles(body)
             for key, entries in roles.faces.items():
                 feature = summary.feature_of_role(key)
                 if changed_roles and key not in highlight and feature not in highlight:
@@ -361,7 +424,7 @@ class DocumentSession:
         return labels[: summary.MAX_ANNOTATIONS]
 
     def _export(self, step: Path) -> dict[str, Any]:
-        if not export_module.solid_bodies(self):
+        if not export_module.solid_units(self):
             return {"step": None, "declarations": None, "empty": True}
         export_module.write_step(self, step)
         declarations = export_module.write_declarations(self, step)
@@ -384,6 +447,8 @@ class DocumentSession:
         self.doc.saveCopy(str(temporary))
         os.replace(temporary, self.fcstd)
         self.rev += 1
+        self.refreshed.clear()
+        self.loaded_sha = _sha256(self.fcstd)
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"rev": self.rev, "ops": ops, "message": message, "fcstdSha256": _sha256(self.fcstd)}, ensure_ascii=False) + "\n")
         self._prune_history()
@@ -407,6 +472,7 @@ class DocumentSession:
         previous.unlink(missing_ok=True)
         self.rev -= 1
         self.reload()
+        self.sync_links()
         result = {"features": {"recomputed": [], "added": [], "removed": []}, "params": {"changed": {}}, "intent": intent_module.evaluate_all(OpContext(self)),
                   "warnings": [], "highlight": {"paths": []}, "annotations": self._annotations([], []), "rev": self.rev,
                   "fcstd": str(self.fcstd), "fcstdSha256": _sha256(self.fcstd), "undone": True}
@@ -416,8 +482,9 @@ class DocumentSession:
 
     # ------------------------------------------------------------ read-only views
     def export_current(self, output: Path | None = None) -> dict[str, Any]:
+        changed = sorted(set(self.sync_links()) | self.refreshed)
         result = {
-            "features": {"recomputed": [], "added": [], "removed": []}, "params": {"changed": {}},
+            "features": {"recomputed": changed, "added": [], "removed": []}, "params": {"changed": {}},
             "intent": intent_module.evaluate_all(OpContext(self)), "warnings": [], "highlight": {"paths": []},
             "annotations": self._annotations([], []), "rev": self.rev, "fcstd": str(self.fcstd), "fcstdSha256": _sha256(self.fcstd),
         }
@@ -458,4 +525,20 @@ class DocumentSession:
                 "objects": entries,
             })
         requirements = intent_module.evaluate_all(OpContext(self))
-        return {"rev": self.rev, "params": self.param_values(), "bodies": features, "requirements": requirements}
+        occurrences = [
+            {
+                "path": unit.path, "kind": unit.kind, "source": unit.source_path,
+                **({"body": get_path(unit.body)} if unit.body is not None else {}),
+                "placement": {"position": [round(v, 4) for v in unit.placement.Base], "angleDeg": round(unit.placement.Rotation.Angle * 57.29577951308232, 4)},
+                "solids": unit.solid_count(),
+            }
+            for unit in units(self) if unit.kind != "body"
+        ]
+        joints = [
+            {
+                "path": get_path(item), "type": item.JointType, "value": _value(item.Value) if "Value" in item.PropertiesList else None,
+                "limits": json.loads(item.Limits), "parent": json.loads(item.Parent), "child": json.loads(item.Child),
+            }
+            for item in joint_objects(self)
+        ]
+        return {"rev": self.rev, "params": self.param_values(), "bodies": features, "occurrences": occurrences, "joints": joints, "requirements": requirements}

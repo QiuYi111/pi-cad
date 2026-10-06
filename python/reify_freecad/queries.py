@@ -12,7 +12,8 @@ from typing import Any
 import FreeCAD as App
 import Part
 
-from .core import bodies, get_path, is_body, is_sketch, owning_body, similar_paths
+from .assembly import unit_by_path, units
+from .core import is_sketch, owning_body, similar_paths
 from .errors import ReifyOpError
 from .roles import role_matches
 
@@ -45,9 +46,15 @@ class Budget:
 def shape_of(ctx: Any, target: str) -> Any:
     """Shape for a body, feature, or role path."""
     index = ctx.index()
+    unit = unit_by_path(ctx.session, target)
+    if unit is not None:  # a body, an occurrence, or a reference
+        shape = unit.shape()
+        if shape.isNull():
+            raise ReifyOpError("TARGET_NOT_FOUND", f"'{target}' has no shape", target=target, detail={"target": target, "known": []})
+        return shape
     if target in index:
         obj = index[target]
-        if is_body(obj) or hasattr(obj, "Shape"):
+        if hasattr(obj, "Shape"):
             if obj.Shape.isNull():
                 raise ReifyOpError("TARGET_NOT_FOUND", f"'{target}' has no shape", target=target, detail={"target": target, "known": []})
             owner = owning_body(obj)
@@ -60,9 +67,10 @@ def shape_of(ctx: Any, target: str) -> Any:
     if faces:
         return Part.makeCompound(faces)
     known = list(index)
-    for body in bodies(ctx.doc):
-        roles = ctx.session.roles(body)
-        known.extend(roles.faces)
+    for each in units(ctx.session):
+        roles = each.roles(ctx.session)
+        if roles is not None:
+            known.extend(roles.faces)
     raise ReifyOpError("TARGET_NOT_FOUND", f"nothing is named '{target}'", target=target,
                        detail={"target": target, "known": similar_paths(target, known)})
 
@@ -76,10 +84,13 @@ def _one_solid(shape: Any) -> Any:
 
 def _role_faces(ctx: Any, target: str) -> list[Any]:
     out: list[Any] = []
-    for body in bodies(ctx.doc):
-        roles = ctx.session.roles(body)
+    for unit in units(ctx.session):
+        roles = unit.roles(ctx.session)
+        if roles is None:
+            continue
         for key, entries in roles.faces.items():
-            if role_matches(key, target):
+            # a feature path of an occurrence is no object here: it stands for all its faces
+            if role_matches(key, target) or key.startswith(target + "/"):
                 out.extend(roles.to_world(entry.face) for entry in entries)
     return out
 
@@ -167,12 +178,11 @@ def clearance(ctx: Any, a: str, b: str) -> dict[str, Any]:
 
 
 def interference(ctx: Any, pairs: list[list[str]] | None, all_pairs: bool, budget: Budget) -> dict[str, Any]:
-    paths = {get_path(body): body for body in bodies(ctx.doc) if get_path(body)}
     combos: list[tuple[str, str]]
     if pairs:
         combos = [(p[0], p[1]) for p in pairs]
-    elif all_pairs or True:
-        names = sorted(paths)
+    else:  # all: every pair of bodies, occurrences and references that has a solid
+        names = sorted(unit.path for unit in units(ctx.session) if unit.solid_count())
         combos = [(names[i], names[j]) for i in range(len(names)) for j in range(i + 1, len(names))]
     results = []
     worst = 0.0
@@ -200,9 +210,10 @@ def wall_thickness(ctx: Any, target: str, samples: int, budget: Budget) -> dict[
     if obj is not None and hasattr(obj, "Shape") and obj.Shape.Solids:
         solid_source = obj.Shape
     if solid_source is None:
-        for body in bodies(ctx.doc):
-            if body.Shape.Solids and body.Shape.BoundBox.isInside(shape.BoundBox.Center):
-                solid_source = body.Shape
+        for unit in units(ctx.session):
+            candidate = unit.shape()
+            if not candidate.isNull() and candidate.Solids and candidate.BoundBox.isInside(shape.BoundBox.Center):
+                solid_source = candidate
                 break
     if solid_source is None:
         raise ReifyOpError("TARGET_NOT_FOUND", f"'{target}' is not part of a solid", target=target, detail={"target": target, "known": []})
@@ -256,7 +267,7 @@ def _solids_of(shapes: list[Any]) -> list[Any]:
 
 def mass(ctx: Any, target: str | None, density: float | None) -> dict[str, Any]:
     """Mass, centre of mass and inertia (about the centre of mass) of a body, feature, or every body."""
-    paths = [target] if target else [get_path(b) for b in bodies(ctx.doc) if get_path(b)]
+    paths = [target] if target else [unit.path for unit in units(ctx.session) if unit.solid_count()]
     solids = _solids_of([shape_of(ctx, p) for p in paths])
     if not solids:
         raise ReifyOpError("RESULT_NOT_SOLID", f"'{target or 'the document'}' has no solid to weigh", target=target,

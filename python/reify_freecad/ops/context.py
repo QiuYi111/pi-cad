@@ -15,6 +15,8 @@ class OpContext:
         self.session = session
         self.doc = session.doc
         self.current_body = session.default_body()
+        #: Warnings an op raises for the result (for example a surface-only STEP import).
+        self.warnings: list[dict[str, Any]] = []
 
     # ---------------------------------------------------------------- lookup
     @property

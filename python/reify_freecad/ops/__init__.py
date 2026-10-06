@@ -24,6 +24,9 @@ _HANDLERS: dict[str, tuple[str, str]] = {
     "set": ("edit", "set_prop"),
     "delete": ("edit", "delete"),
     "rename": ("edit", "rename"),
+    "link": ("..assembly", "link"),
+    "import_step": ("..assembly", "import_step"),
+    "joint": ("..assembly", "joint"),
     "require": ("..intent", "require"),
 }
 

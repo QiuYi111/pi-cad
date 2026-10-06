@@ -134,6 +134,12 @@ def c_rotation(value: Any, index: int | None, where: str) -> dict[str, Any]:
     return {"axis": c_vec3(value["axis"], index, f"{where}.axis"), "angle": c_value(value["angle"], index, f"{where}.angle")}
 
 
+def c_limits(value: Any, index: int | None, where: str) -> list[float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2 or not all(is_number(item) for item in value):
+        raise fail(index, where, "expected [low, high] as numbers")
+    return [float(value[0]), float(value[1])]
+
+
 _SHAPE_FIELDS: dict[str, tuple[dict[str, Check], dict[str, Check]]] = {
     "rect": ({"size": c_vec2}, {"center": c_vec2, "corner": c_vec2, "name": c_constraint_name}),
     "circle": ({"center": c_vec2, "diameter": c_value}, {"name": c_constraint_name}),
@@ -221,6 +227,18 @@ SCHEMAS: dict[str, tuple[dict[str, Check], dict[str, Check]]] = {
         {"target": c_path},
         {"position": c_vec3, "rotation": c_rotation},
     ),
+    "link": (
+        {"name": c_path, "part": c_str, "body": c_path},
+        {"position": c_vec3, "rotation": c_rotation},
+    ),
+    "import_step": (
+        {"name": c_path, "file": c_str},
+        {"position": c_vec3, "rotation": c_rotation},
+    ),
+    "joint": (
+        {"name": c_path, "type": c_enum("revolute", "prismatic", "fixed"), "parent": c_selector, "child": c_selector},
+        {"value": c_value, "limits": c_limits, "flip": c_bool},
+    ),
     "require": (
         {"name": c_path, "kind": c_enum(*REQUIRE_KINDS), "target": c_any, "limit": c_any},
         {"tolerance": c_value},
@@ -256,6 +274,10 @@ def validate_op(op: Any, index: int | None = None) -> dict[str, Any]:
         raise fail(index, "face", "required when type is up_to_face")
     if kind == "hole" and out.get("type", "blind") == "blind" and "depth" not in out:
         raise fail(index, "depth", "required for a blind hole")
+    if kind == "joint":
+        for side in ("parent", "child"):
+            if "role" not in out[side]:
+                raise fail(index, side, "a joint frame needs a role (a cylinder, cone or plane face)")
     if kind == "set" and not isinstance(out["prop"], str):
         raise fail(index, "prop", "expected a string")
     return out

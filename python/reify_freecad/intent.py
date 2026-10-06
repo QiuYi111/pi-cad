@@ -50,10 +50,12 @@ def _validate(kind: str, target: Any, limit: Any) -> None:
 
 
 def evaluate_all(ctx: Any) -> list[dict[str, Any]]:
+    from .assembly import joint_status
+
     group = ctx.session.requirements_group(create=False)
+    results: list[dict[str, Any]] = joint_status(ctx.session)
     if group is None:
-        return []
-    results = []
+        return results
     for item in group.Group:
         path = get_path(item) or item.Label
         try:

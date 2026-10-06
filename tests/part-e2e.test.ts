@@ -200,3 +200,67 @@ test("FreeCAD part: a failure after the commit is undone and the restored STEP i
     await rm(canonical, { recursive: true, force: true });
   }
 });
+
+test("FreeCAD assembly: parts in their own documents, linked, jointed, swept", { skip: !installed && "FreeCAD runtime is not installed" }, async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-assembly-canonical-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-assembly-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  try {
+    await new HarnessProjectStoreV7(cwd).startRun({ workflow: buildWorkflow(), registryContract: buildRegistryContract(mechanicalRegistries) });
+    const plate = (name: string, size: [number, number], thickness: number) => [
+      { op: "sketch", name: `${name}/profile`, plane: "XY", shapes: [{ rect: { center: [0, 0], size } }] },
+      { op: "pad", name: `${name}/body`, sketch: `${name}/profile`, length: thickness },
+      { op: "sketch", name: `${name}/pin_profile`, on: { feature: `${name}/body`, role: "top" }, shapes: [{ circle: { center: [0, 0], diameter: 8 } }] },
+      { op: "hole", name: `${name}/pin`, sketch: `${name}/pin_profile`, diameter: 8, type: "through_all" },
+    ];
+    // Each part is its own document, as when subagents own one part each.
+    await handleAgentApi(cwd, { schema: 1, op: "part-open", doc: "parts/base.FCStd", create: true, body: "base" });
+    await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: "parts/base.FCStd", ops: plate("base", [50, 50], 6) as never });
+    await handleAgentApi(cwd, { schema: 1, op: "part-open", doc: "parts/link.FCStd", create: true, body: "link" });
+    await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: "parts/link.FCStd", ops: plate("link", [80, 10], 6) as never });
+
+    const asm = "assembly/arm.FCStd";
+    await handleAgentApi(cwd, { schema: 1, op: "part-open", doc: asm, create: true, body: "arm" });
+    const built = await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: asm, ops: [
+      { op: "param", name: "j1_angle", value: 0, unit: "deg" },
+      { op: "link", name: "arm/base", part: "parts/base.FCStd", body: "base" },
+      { op: "link", name: "arm/link", part: "parts/link.FCStd", body: "link" },
+      { op: "joint", name: "arm/j1", type: "revolute", flip: true, value: "=j1_angle", limits: [-90, 90],
+        parent: { feature: "arm/base/body", role: "top" }, child: { feature: "arm/link/body", role: "bottom" } },
+    ] as never }) as any;
+    assert.equal(built.images.length, 7);
+    assert.ok(existsSync(join(cwd, "build", "arm.step.identity.json")));
+
+    // Occurrence paths resolve with the existing probe helpers.
+    const resolved = await handleAgentApi(cwd, {
+      schema: 1, op: "probe", preset: "python", subject: "current", purpose: "resolve a part feature through its occurrence",
+      code: "selection = cad_resolve('arm/link/pin', kind='feature', expect='one')\nresult = {'radius': selection.object.radius}",
+    }) as any;
+    assert.ok(Math.abs(resolved.value.radius - 4) < 1e-4);
+
+    // The assembly's seven views can focus one occurrence by its name.
+    const focused = await handleAgentApi(cwd, {
+      schema: 1, op: "probe", preset: "visual", subject: "current", purpose: "look at the link only", args: { views: ["iso"], focus: ["arm/link"] },
+    }) as any;
+    assert.equal(focused.images.length, 1);
+
+    // A part changes in its own document; the assembly picks the revision up on its next apply.
+    await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: "parts/base.FCStd", ops: [{ op: "set", target: "base/body", prop: "Length", value: 12 }] as never });
+    const next = await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: asm, ops: [{ op: "param", name: "j1_angle", value: 30 }] as never }) as any;
+    assert.ok(next.changes.features.recomputed.includes("arm/base"), JSON.stringify(next.changes.features));
+    assert.equal(next.images.length, 7);
+    const sweep = await handleAgentApi(cwd, {
+      schema: 1, op: "part-sweep", doc: asm, param: "arm/j1", range: [-90, 90], step: 30,
+      check: { kind: "clearance", args: { a: "arm/link", b: "arm/base" } },
+    }) as any;
+    assert.equal(sweep.sweep.samples, 7);
+    assert.equal(sweep.images.length, 7);
+  } finally {
+    shutdownPartWorkers();
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});

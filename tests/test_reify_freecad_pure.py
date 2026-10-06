@@ -66,7 +66,7 @@ class OpSchemaTests(unittest.TestCase):
     def test_every_documented_op_has_a_schema_and_a_handler(self) -> None:
         self.assertEqual(
             set(OP_REGISTRY),
-            {"param", "body", "sketch", "pad", "pocket", "hole", "fillet", "chamfer", "linear_pattern", "polar_pattern", "mirror", "set", "delete", "rename", "placement", "require"},
+            {"param", "body", "sketch", "pad", "pocket", "hole", "fillet", "chamfer", "linear_pattern", "polar_pattern", "mirror", "set", "delete", "rename", "placement", "require", "link", "import_step", "joint"},
         )
 
     def test_a_valid_batch_is_normalised(self) -> None:
@@ -94,6 +94,10 @@ class OpSchemaTests(unittest.TestCase):
             ([{"op": "linear_pattern", "name": "a/p", "features": ["a/h"], "direction": "Q", "length": 1, "count": 2}], "direction"),
             ([{"op": "linear_pattern", "name": "a/p", "features": ["a/h"], "direction": "X", "length": 1, "count": 0}], "count"),
             ([{"op": "fillet", "name": "a/f", "edges": {"role": "top"}, "radius": 1}], "edges[0]"),
+            ([{"op": "link", "name": "a/b", "part": "p.FCStd"}], "body"),
+            ([{"op": "joint", "name": "a/j", "type": "ball", "parent": {"feature": "a/x", "role": "wall"}, "child": {"feature": "a/y", "role": "wall"}}], "type"),
+            ([{"op": "joint", "name": "a/j", "type": "fixed", "parent": {"feature": "a/x"}, "child": {"feature": "a/y", "role": "wall"}}], "parent"),
+            ([{"op": "joint", "name": "a/j", "type": "revolute", "parent": {"feature": "a/x", "role": "wall"}, "child": {"feature": "a/y", "role": "wall"}, "limits": [1]}], "limits"),
             ([{"op": "weld"}], "op"),
             (["pad"], "op"),
         ]

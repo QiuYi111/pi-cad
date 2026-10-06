@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from .assembly import joint_objects
+from .core import get_path
 from .errors import ReifyOpError
 from .ops.context import OpContext
 from .queries import Budget, run_check
@@ -40,7 +42,7 @@ def _failing(kind: str, value: float, args: dict[str, Any]) -> bool:
 class _Runner:
     def __init__(self, ctx: Any, name: str, kind: str, args: dict[str, Any], budget: Budget) -> None:
         self.ctx, self.name, self.kind, self.args, self.budget = ctx, name, kind, args, budget
-        self.vs = ctx.session.params_object()
+        self.vs, self.prop = ctx.session.param_target(name)
         self.cache: dict[float, float] = {}
 
     def at(self, parameter: float) -> float:
@@ -49,8 +51,8 @@ class _Runner:
             return self.cache[key]
         if self.budget.expired():
             raise _OutOfTime()
-        self.vs.setExpression(self.name, None)
-        setattr(self.vs, self.name, parameter)
+        self.vs.setExpression(self.prop, None)
+        setattr(self.vs, self.prop, parameter)
         self.ctx.session.recompute()
         value = float(run_check(self.ctx, self.kind, self.args, self.budget)["value"])
         self.cache[key] = value
@@ -66,18 +68,19 @@ class _OutOfTime(Exception):
 
 def sweep(ctx: OpContext, param: str, span: tuple[float, float], step: float, check: dict[str, Any], refine: bool, budget: Budget) -> dict[str, Any]:
     session = ctx.session
-    if param not in session.param_names():
-        raise ReifyOpError("TARGET_NOT_FOUND", f"no parameter named '{param}'", target=param,
-                           detail={"target": param, "known": sorted(session.param_names())})
+    if session.param_target(param) is None:
+        known = sorted(session.param_names()) + [get_path(j) for j in joint_objects(session) if get_path(j)]
+        raise ReifyOpError("TARGET_NOT_FOUND", f"no parameter or joint named '{param}'", target=param,
+                           detail={"target": param, "known": known})
     kind = check["kind"]
     args = dict(check.get("args") or {})
     runner = _Runner(ctx, param, kind, args, budget)
-    vs = runner.vs
+    vs, prop = runner.vs, runner.prop
     original_expression = None
-    for prop, expr in vs.ExpressionEngine:
-        if prop == param or prop == f".{param}":
+    for expression_prop, expr in vs.ExpressionEngine:
+        if expression_prop in (prop, f".{prop}"):
             original_expression = expr
-    original_value = float(getattr(vs, param).Value if hasattr(getattr(vs, param), "Value") else getattr(vs, param))
+    original_value = float(getattr(vs, prop).Value if hasattr(getattr(vs, prop), "Value") else getattr(vs, prop))
     low, high = float(span[0]), float(span[1])
     values = _frange(low, high, step)
     truncated = False
@@ -97,7 +100,7 @@ def sweep(ctx: OpContext, param: str, span: tuple[float, float], step: float, ch
         raise ReifyOpError("BUDGET_EXCEEDED", "sweep ran out of time", detail={"sampled": len(samples), "total": len(values)},
                            hints=["increase budget_s", "use a larger step"])
     finally:
-        _restore(vs, param, original_value, original_expression)
+        _restore(vs, prop, original_value, original_expression)
         session.recompute()
     lowest = min(points, key=lambda item: item[1])
     flags = [(p, _failing(kind, v, args)) for p, v in points]

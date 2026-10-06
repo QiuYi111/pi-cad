@@ -27,7 +27,7 @@ from typing import Any
 import FreeCAD as App
 import Part
 
-from .core import body_features, bodies, get_path, owning_body, similar_paths
+from .core import body_features, get_path, owning_body, similar_paths
 from .errors import ReifyOpError
 
 _ROLE_INDEX = re.compile(r"^(?P<base>[a-z_]+)\.(?P<index>\d+)$")
@@ -561,15 +561,28 @@ def role_matches(key: str, wanted: str) -> bool:
 
 
 def known_role_paths(ctx: Any) -> list[str]:
+    from .assembly import units
+
     paths: list[str] = []
-    for body in bodies(ctx.doc):
-        roles = ctx.session.roles(body)
-        paths.extend(roles.faces)
-        paths.extend(roles.edges)
+    for unit in units(ctx.session):
+        roles = unit.roles(ctx.session)
+        if roles is not None:
+            paths.extend(roles.faces)
+            paths.extend(roles.edges)
     return paths
 
 
 def _body_for_feature(ctx: Any, feature_path: str) -> Any:
+    from .assembly import units
+
+    for unit in units(ctx.session):
+        if unit.kind != "body" and (feature_path == unit.path or feature_path.startswith(unit.path + "/")):
+            raise ReifyOpError(
+                "OP_SCHEMA_INVALID",
+                f"'{feature_path}' belongs to the {unit.kind} '{unit.path}'; features of a linked part change in the part's own document",
+                detail={"path": "feature", "reason": f"{unit.kind} features are read-only here", "source": unit.source_path},
+                hints=[f"edit {unit.source_path} with cad.part.open, then apply again here" if unit.source_path else "edit the source document"],
+            )
     obj = ctx.lookup(feature_path)
     owner = owning_body(obj)
     if owner is None:

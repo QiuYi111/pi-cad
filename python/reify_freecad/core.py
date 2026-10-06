@@ -17,7 +17,13 @@ def set_path(obj: Any, path: str) -> None:
     if PATH_PROPERTY not in obj.PropertiesList:
         obj.addProperty("App::PropertyString", PATH_PROPERTY, PATH_GROUP, "Semantic path (Pi-CAD)")
     setattr(obj, PATH_PROPERTY, path)
-    obj.Label = path.split("/")[-1]
+    # Bodies and occurrences become STEP products; their label is the full path so every
+    # occurrence name in the exported assembly is unique.
+    obj.Label = path if obj.TypeId in {"PartDesign::Body", "App::Part"} else path.split("/")[-1]
+    if obj.TypeId == "App::Part":  # the shape inside an occurrence is the STEP product that carries the name
+        for child in obj.Group:
+            if child.TypeId == "Part::Feature":
+                child.Label = path
 
 
 def get_path(obj: Any) -> str | None:
@@ -86,3 +92,7 @@ def similar_paths(path: str, known: Iterable[str], limit: int = 20) -> list[str]
 def vector(values: Iterable[float]) -> Any:
     x, y, z = values
     return App.Vector(float(x), float(y), float(z))
+
+
+JOINTS_NAME = "Joints"
+KIND_PROPERTY = "OccurrenceKind"

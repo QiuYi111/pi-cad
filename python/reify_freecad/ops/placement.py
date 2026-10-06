@@ -6,6 +6,7 @@ from typing import Any
 
 import FreeCAD as App
 
+from ..assembly import is_unit_container
 from ..core import is_body
 from ..errors import ReifyOpError
 from ..exprs import evaluate_constant, is_expression, rewrite_expression
@@ -19,9 +20,13 @@ def body(ctx: Any, op: dict[str, Any]) -> None:
 
 def placement(ctx: Any, op: dict[str, Any]) -> None:
     obj = ctx.lookup(op["target"])
-    if not is_body(obj):
-        raise ReifyOpError("OP_SCHEMA_INVALID", f"'{op['target']}' is not a body; poses are set on bodies",
-                           detail={"path": "target", "reason": "not a body"})
+    if not (is_body(obj) or is_unit_container(obj)):
+        raise ReifyOpError("OP_SCHEMA_INVALID", f"'{op['target']}' is not a body or an occurrence; poses are set on those",
+                           detail={"path": "target", "reason": "not a body or occurrence"})
+    set_pose(ctx, obj, op)
+
+
+def set_pose(ctx: Any, obj: Any, op: dict[str, Any]) -> None:
     position = op.get("position")
     rotation = op.get("rotation")
     base = obj.Placement.Base
