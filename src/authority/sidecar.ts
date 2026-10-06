@@ -6,6 +6,7 @@ import { canonicalDigest, jsonValue } from "../harness/canonical.ts";
 import { loadWorkspaceCommit } from "../harness/commit.ts";
 import { currentAuthorization } from "../agent-api/authorization.ts";
 import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
+import { agentApiErrorBody } from "../agent-api/errors.ts";
 import { handleAgentApi } from "../agent-api/handlers.ts";
 import type { AgentApiRequest, AgentApiResponse } from "../agent-api/protocol.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
@@ -48,10 +49,12 @@ export type SidecarRequest = AgentApiRequest
   | { schema: 1; op: "experience-read"; identifier: { seq?: number; sha?: string }; startLine?: number; endLine?: number };
 
 const MAX_REQUEST_BYTES = 1024 * 1024;
-const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "review-watch", "phase-card", "phase-contract", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
-const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", "review-current", "history"]);
+const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "part-open", "part-apply", "part-undo", "simulation-run", "review-submit", "review-watch", "phase-card", "phase-contract", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
+/** Part backend reads and trial runs: probes by authority, so reviewers may use them. */
+const PART_PROBE_OPERATIONS = ["part-try", "part-tree", "part-query", "part-check", "part-sweep"];
+const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", ...PART_PROBE_OPERATIONS, "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
-const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "simulation-run", "review-submit", "mission-capture", "image-generated"]);
+const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "part-open", "part-apply", "part-undo", "simulation-run", "review-submit", "mission-capture", "image-generated"]);
 const READ_ONLY_OPERATIONS = new Set<Operation>(["workspace.commit", "model.build", "simulation.run", "image.generate", "review.submit", "workflow.transition"]);
 
 function assertValidPng(bytes: Buffer): void {
@@ -84,14 +87,7 @@ function assertValidPng(bytes: Buffer): void {
 }
 
 function errorResponse(error: unknown): AgentApiResponse {
-  return {
-    schema: 1,
-    ok: false,
-    error: {
-      type: error instanceof Error ? error.name : "Error",
-      message: error instanceof Error ? error.message : String(error),
-    },
-  };
+  return { schema: 1, ok: false, error: agentApiErrorBody(error) };
 }
 
 function validateRequest(value: unknown): asserts value is SidecarRequest {
@@ -189,7 +185,7 @@ async function dispatchAuthorRequest(role: SidecarRole, cwd: string, value: Side
     if (!reviewRuntime || !reviewerRequestId) throw new Error("reviewer request is missing its scoped reviewId");
     const subjectCommit = await reviewRuntime.reviewerSubject(reviewerRequestId);
     if (value.op === "load" && value.id !== subjectCommit) throw new Error("reviewer may load only its immutable subject commit");
-    if (value.op === "probe") await reviewRuntime.admitProbe(reviewerRequestId);
+    if (value.op === "probe" || PART_PROBE_OPERATIONS.includes(value.op)) await reviewRuntime.admitProbe(reviewerRequestId);
     if (value.op === "review-complete" && value.reviewId !== reviewerRequestId) throw new Error("reviewer authority does not match review result");
   }
   let result: unknown;

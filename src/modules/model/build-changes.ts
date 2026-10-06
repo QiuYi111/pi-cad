@@ -171,11 +171,51 @@ export function summarizeBuildChanges(
   return changes;
 }
 
-/** Faces of the current build that have no match in the previous build. */
+function lineDistance(point: readonly number[], origin: readonly number[], direction: readonly number[]): number {
+  const length = Math.sqrt(direction.reduce((sum, value) => sum + value * value, 0)) || 1;
+  const offset = point.map((value, index) => value - (origin[index] ?? 0));
+  const along = offset.reduce((sum, value, index) => sum + value * (direction[index] ?? 0) / length, 0);
+  return Math.sqrt(offset.reduce((sum, value, index) => sum + (value - along * (direction[index] ?? 0) / length) ** 2, 0));
+}
+
+/** Same underlying surface (plane position, cylinder axis and radius), whatever the face extent. */
+function sameSurface(a: FaceFingerprint, b: FaceFingerprint, tolerance: number): boolean | null {
+  if (a.type !== b.type) return false;
+  if (a.type === "PLANE" && a.n && b.n) {
+    if (unitDot(a.n, b.n) < DIRECTION_DOT) return false;
+    const offset = (f: FaceFingerprint) => f.c.reduce((sum, value, index) => sum + value * (f.n![index] ?? 0), 0)
+      / (Math.sqrt(f.n!.reduce((sum, value) => sum + value * value, 0)) || 1);
+    return Math.abs(offset(a) - offset(b)) <= tolerance;
+  }
+  if ((a.type === "CYLINDER" || a.type === "CONE") && a.ax && b.ax && a.ap && b.ap) {
+    if (Math.abs(unitDot(a.ax, b.ax)) < DIRECTION_DOT) return false;
+    if (a.r !== undefined && b.r !== undefined && Math.abs(a.r - b.r) > tolerance) return false;
+    return lineDistance(b.ap, a.ap, a.ax) <= tolerance;
+  }
+  return null; // no surface parameters: cannot tell
+}
+
+/**
+ * Faces of the current build that lie on a surface the previous build did not
+ * have: a new cylinder wall, a moved plane, a fillet. A face that only grew or
+ * shrank on an unchanged surface (the top of a plate that gained a hole) is not
+ * listed, so the highlight shows what the edit made, not everything it touched.
+ * Faces without surface parameters fall back to the fingerprint match.
+ */
 export function changedFaces(previous: GeometryPayload | null, current: GeometryPayload): FaceFingerprint[] {
-  const match = matchableFaces(previous, current);
-  if (!match || !current.faceFingerprints) return [];
-  return match.unmatchedAfter.slice(0, MAX_HIGHLIGHT_FACES).map((index) => current.faceFingerprints![index]!);
+  if (!previous?.faceFingerprints || !current.faceFingerprints) return [];
+  const diagonal = Math.max(bboxDiagonal(previous), bboxDiagonal(current), 1e-9);
+  const tolerance = Math.max(2e-4, 1e-5 * diagonal);
+  const strict = matchFaces(previous.faceFingerprints, current.faceFingerprints, diagonal);
+  const unmatched = new Set(strict.unmatchedAfter);
+  const changed: FaceFingerprint[] = [];
+  current.faceFingerprints.forEach((face, index) => {
+    if (!unmatched.has(index)) return;
+    const verdicts = previous.faceFingerprints!.map((old) => sameSurface(old, face, tolerance));
+    if (verdicts.some((verdict) => verdict === true)) return; // same surface existed before
+    changed.push(face);
+  });
+  return changed.slice(0, MAX_HIGHLIGHT_FACES);
 }
 
 interface ManifestBinding { target?: string; facts?: { area?: number; type?: string; bbox?: number[][] } }

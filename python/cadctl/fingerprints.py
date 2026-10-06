@@ -44,6 +44,8 @@ def face_fingerprint(face: Any, index: int) -> dict[str, Any]:
             axis = face.axis_of_rotation
             direction = axis.direction
             record["ax"] = _round((direction.X, direction.Y, direction.Z))
+            position = axis.position
+            record["ap"] = _round((position.X, position.Y, position.Z))
         except Exception:
             pass
         try:

@@ -554,6 +554,8 @@ export interface FaceFingerprint {
   n?: number[];
   /** Cylinder or cone axis direction. */
   ax?: number[];
+  /** A point on the cylinder or cone axis. */
+  ap?: number[];
   /** Cylinder or cone radius. */
   r?: number;
 }

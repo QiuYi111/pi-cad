@@ -175,6 +175,19 @@ export async function inspectGeometry(
   );
 }
 
+/** Bind a declarations.json (from the FreeCAD part backend) to its STEP and write the identity manifest. */
+export async function bindIdentity(
+  cwd: string,
+  artifact: string,
+  declarations: string,
+  timeoutMs?: number,
+): Promise<CadEventEnvelope> {
+  return runCadctl(
+    ["bind-identity", "--artifact", resolve(cwd, artifact), "--declarations", resolve(cwd, declarations)],
+    { cwd, timeoutMs },
+  );
+}
+
 export interface VisualOptions {
   views?: string[];
   width?: number;

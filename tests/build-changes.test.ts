@@ -57,6 +57,28 @@ test("volume delta, unchanged bbox, and changed faces", () => {
   assert.equal(highlight[0]!.r, 4);
 });
 
+test("a face that only changed extent on an unchanged surface is not highlighted", () => {
+  // The top plane lost area to a new hole but did not move; the hole wall is new.
+  const withHole = payload({
+    faceFingerprints: [plane([0, 0, 5], 700, [0, 0, 1]), plane([0, 0, -5], 700, [0, 0, -1]), { type: "CYLINDER", c: [10, 0, 0], a: 251.3, ax: [0, 0, 1], ap: [10, 0, -5], r: 4 }],
+  });
+  const without = payload({
+    faceFingerprints: [plane([0, 0, 5], 800, [0, 0, 1]), plane([0, 0, -5], 800, [0, 0, -1])],
+  });
+  const highlighted = changedFaces(without, withHole);
+  assert.deepEqual(highlighted.map((face) => face.type), ["CYLINDER"]);
+  // The summary still counts the two resized planes as changed geometry.
+  assert.equal(summarizeBuildChanges(without, withHole).faces.new, 3);
+});
+
+test("a plane that moved is highlighted", () => {
+  const thin = payload({ faceFingerprints: [plane([0, 0, 5], 800, [0, 0, 1]), plane([0, 0, -5], 800, [0, 0, -1])] });
+  const thick = payload({ faceFingerprints: [plane([0, 0, 8], 800, [0, 0, 1]), plane([0, 0, -5], 800, [0, 0, -1])] });
+  const highlighted = changedFaces(thin, thick);
+  assert.equal(highlighted.length, 1);
+  assert.deepEqual(highlighted[0]!.c, [0, 0, 8]);
+});
+
 test("bbox change is reported", () => {
   const wider = payload({ bbox: { x: 45, y: 20, z: 10 }, faceFingerprints: before.faceFingerprints });
   const changes = summarizeBuildChanges(before, wider);
