@@ -1,4 +1,6 @@
-# build123d authoring cookbook
+# build123d authoring cookbook (compatibility)
+
+> New parts and assemblies use `cad.part`: start from `assets/freecad-part` or `assets/freecad-assembly`. This cookbook is for an existing build123d source or for geometry the ops cannot express yet.
 
 ## Applicable / not applicable
 

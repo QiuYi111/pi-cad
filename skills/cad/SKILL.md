@@ -34,7 +34,15 @@ cad.commit(
 ) -> Commit
 cad.plan.current() -> Commit | None
 cad.plan.update(*, variables: dict | None = None, artifacts: list | None = None) -> Commit
-cad.model.build(
+cad.part.open(path: str | Path, *, output: str | Path | None = None, create: bool = False, body: str | None = None, validation: str = "auto") -> PartDocument
+PartDocument.apply(ops: list[dict], *, message: str | None = None, validation: str = "auto", budget_s: float | None = None) -> PartResult
+PartDocument.try_(ops: list[dict], *, budget_s: float | None = None) -> PartResult
+PartDocument.undo() -> PartResult
+PartDocument.tree() -> dict
+PartDocument.query(target: str, what: list[str] | None = None) -> dict
+PartDocument.check(kind: str, *, budget_s: float | None = None, **args) -> dict
+PartDocument.sweep(param: str, range: tuple[float, float], *, step: float, check: tuple[str, dict], refine: bool = False, budget_s: float | None = None) -> dict
+cad.model.build(   # build123d compatibility path
     source: str | Path,
     output: str | Path | None = None,
     *,
@@ -52,21 +60,14 @@ cad.probe.run(
     script: str | Path | None = None,
     args: dict | None = None,
 ) -> ProbeResult
-cad.part.open(path: str | Path, *, output: str | Path | None = None, create: bool = False, body: str | None = None, validation: str = "auto") -> PartDocument
-PartDocument.apply(ops: list[dict], *, message: str | None = None, validation: str = "auto", budget_s: float | None = None) -> PartResult
-PartDocument.try_(ops: list[dict], *, budget_s: float | None = None) -> PartResult
-PartDocument.undo() -> PartResult
-PartDocument.tree() -> dict
-PartDocument.query(target: str, what: list[str] | None = None) -> dict
-PartDocument.check(kind: str, *, budget_s: float | None = None, **args) -> dict
-PartDocument.sweep(param: str, range: tuple[float, float], *, step: float, check: tuple[str, dict], refine: bool = False, budget_s: float | None = None) -> dict
 cad.review.submit(final_commit: Commit) -> dict
 cad.review.current(handle: dict) -> dict | None
 cad.review.prepare(candidate: Commit) -> dict
 ```
 
-The three engineering calls are therefore canonical exactly as
-`await cad.model.build("part.py", "part.step")`,
+Model new parts and assemblies with `cad.part` (next section). The build123d calls
+below are the compatibility path, canonical exactly as
+`await cad.model.build("part.py", "part.step")` for an existing build123d source,
 `await cad.model.import_step("imports/reference.step")` for existing STEP files in the project,
 including face-only supplier models. This returns a reference artifact with seven
 views. A reference is not an authoritative CAD candidate; a solid candidate
@@ -80,13 +81,13 @@ fail clearly; do not write ad hoc OCP code or add arbitrary thickness.
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.
 
-## FreeCAD part documents
+## Parts and assemblies: `cad.part` is the default
 
-`cad.part` edits a parametric FreeCAD part with small JSON ops instead of
-rewriting a build123d script. Use it for a new part you will keep editing: a
-dimension the user may change, features added one at a time, a pose swept for
-collisions. `await cad.model.build(...)` with build123d stays the default for
-one-shot geometry and for anything the ops cannot express.
+`cad.part` creates and edits a parametric FreeCAD model with small JSON ops
+instead of rewriting a script. Use it first for every new part and every
+assembly: dimensions that change, features added one at a time, poses swept for
+collisions, parts linked into an assembly. `cad.model.build` with build123d is
+only a compatibility path (below).
 
 ```python
 doc = await cad.part.open("parts/bracket.FCStd", create=True, body="bracket")
@@ -100,8 +101,9 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
 ```
 
 - Every `open`, `apply`, `undo` and `try_` attaches the seven standard views and
-  names what changed. Faces on a surface the previous build did not have are
-  orange; features are labelled by name. The first image's text starts with
+  names what changed. All seven views are always attached; do not skip or reduce
+  them. Faces on a surface the previous build did not have are orange; features
+  are labelled by name. The first image's text starts with
   `Changes since previous build:`. Read it, then look at the views, before the
   next edit.
 - `apply` is one transaction. If an op or the recompute fails, nothing changed:
@@ -112,12 +114,32 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
 - `try_` shows an edit and discards it. `check` and `sweep` read the in-memory
   model (clearance, interference, wall thickness, mass, pose sweeps) without
   exporting a STEP.
-- If a call raises `CadApiError` with `code == "FREECAD_NOT_INSTALLED"`, do not
-  try to install FreeCAD or fall back silently. Tell the user to run
-  `npm run setup:freecad`, then continue with build123d if they want.
+- One part, one document. One assembly, one document. A part is
+  `parts/<name>.FCStd` with one owner; the assembly is
+  `assembly/<name>.FCStd` and links the parts with `link`, adds bought-in STEP
+  files with `import_step`, and seats parts with `joint` (revolute, prismatic,
+  fixed). A joint name can be swept like a parameter. A new revision of a part
+  reaches the assembly on its next call.
+- Delegating an assembly: give each subagent one part document (see "Delegated
+  CAD work" for its folder). The parent builds none of the parts: it links their
+  documents, joints them, and checks interference and clearance on occurrence
+  paths.
+- If a call raises `CadApiError` with `code == "FREECAD_NOT_INSTALLED"`, this is
+  a normal first-run state. Tell the user the one command, `npm run setup:freecad`
+  (about 4.2 GB, no sudo, once), and stop. Do not try to install FreeCAD
+  yourself, and do not fall back to build123d on your own.
 - Read `skills/parametric-cad-modeling/references/freecad-part-ops.md` before
-  the first `cad.part` call in a task: the full op table, role names, error
-  codes, and three worked examples.
+  the first `cad.part` call in a task: the full op table, role names, assemblies,
+  error codes, and worked examples. The copyable starting points are the
+  `freecad-part` and `freecad-assembly` assets of the `parametric-cad-modeling`
+  skill.
+
+## build123d compatibility
+
+Use `cad.model.build` only to edit an existing build123d source, to build
+geometry the `cad.part` ops cannot express yet, or when the user asks for
+build123d. For the second case, say in your reply which op is missing, so it can
+be added. The mandatory seven views and every build rule below stay the same.
 
 ## Delegated CAD work
 
@@ -136,6 +158,13 @@ its exact `ArtifactRef` and selected evidence to the parent. A child uses its
 own Prime conversation and kernel; it must not use or change the parent's run
 binding or candidate. The parent inspects the returned artifact and explicitly
 chooses whether to use it in the assembly.
+
+For a `cad.part` assembly, the split is one part document per subagent, such as
+`subagents/<task-name>/parts/<part>.FCStd`. The subagent applies ops to its own
+document and returns the document path, the body path, and the roles the parent
+needs for joints. The parent owns the assembly document: it uses `link` with
+those paths, `joint` between roles, and `check`/`sweep` on occurrence paths. A
+subagent never edits the assembly or another part's document.
 
 - Read `await cad.workflow.current()` before acting. If it is `None`, always call
   `await cad.workflow.list()` and route the request to exactly one workflow from
@@ -160,7 +189,7 @@ chooses whether to use it in the assembly.
   `canonicalCall`; execute that closer instead of guessing an operation from
   the obligation's name. Only `type == "workspace_commit"` is closed by
   `cad.commit(ref, ...)`; visual and geometry evidence commonly share one
-  managed `cad.model.build(...)` closer. After every obligation is closed, use
+  managed `cad.part` `apply(...)` or `cad.model.build(...)` closer. After every obligation is closed, use
   one of the returned `transitions` events with
   `await cad.workflow.advance(event)`; do not invent a friendlier commit name,
   guess legacy semantic APIs, or inspect Pi-CAD source to discover events.
@@ -174,14 +203,15 @@ chooses whether to use it in the assembly.
 - Load handoffs by ID with `await cad.load(id)`; do not copy child transcripts.
 - Use `cad.templates` only as optional conveniences. Workflow never requires
   their schema unless a project workflow says so explicitly.
-- Author project-local model source with build123d and expose a build123d `Shape` as
-  `result`; `await cad.model.build(source, output)` exports the STEP artifact
+- Author new parts and assemblies with `cad.part`. When the compatibility path
+  applies, author project-local model source with build123d and expose a
+  build123d `Shape` as `result`; `await cad.model.build(source, output)` exports the STEP artifact
   only after the v7 visual inspection chain has produced and attached all
   standard views to Prime. Missing visual output or attachment is a failed
   build. CadQuery source is not a supported model backend. When a benchmark or
   legacy task asks for CadQuery, preserve its requested geometry and dimensions
-  but implement the managed candidate with build123d; do not probe for or try
-  to install CadQuery.
+  but implement the managed candidate with `cad.part`, or with build123d only
+  if the ops cannot express it; do not probe for or try to install CadQuery.
 - Choose build validation deliberately: `validation="auto"` fully checks small
   parts and defers expensive per-solid self-intersection checks for large
   assemblies; `validation="fast"` is for iteration; `validation="full"` runs

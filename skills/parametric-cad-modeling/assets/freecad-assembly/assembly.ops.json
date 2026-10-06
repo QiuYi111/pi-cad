@@ -1,0 +1,8 @@
+[
+  {"op": "param", "name": "j1_angle", "value": 0, "unit": "deg"},
+  {"op": "link", "name": "arm/base", "part": "parts/base.FCStd", "body": "base"},
+  {"op": "link", "name": "arm/link", "part": "parts/link.FCStd", "body": "link"},
+  {"op": "joint", "name": "arm/j1", "type": "revolute", "flip": true, "value": "=j1_angle", "limits": [-90, 90],
+   "parent": {"feature": "arm/base/plate", "role": "top"}, "child": {"feature": "arm/link/arm", "role": "bottom"}},
+  {"op": "require", "name": "arm/clearance", "kind": "min_clearance", "target": {"a": "arm/link", "b": "arm/base"}, "limit": 0}
+]

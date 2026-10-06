@@ -11,6 +11,7 @@ Work datum-first and contract-first. A valid assembly model explains how every p
 - Read [references/interfaces.md](references/interfaces.md) for degree-of-freedom budgets, fits, fasteners, seals, and bought-in component interfaces.
 - Read [references/verification.md](references/verification.md) for interference interpretation, clearance evidence, and tolerance-sensitive checks.
 - Read [references/motion-and-fits.md](references/motion-and-fits.md) for joint freedom, fit ownership, tolerance stacks, and service checks.
+- Read [references/freecad-assembly.md](references/freecad-assembly.md) to build the assembly with `cad.part`: one part document per part (and per subagent), `link`, `import_step`, `joint`, joint sweeps, and interference and clearance on occurrence paths. This is the default way to build an assembly.
 - Use `pi-cad` for controlled assembly/interface records and `pi-cad-tools` for the active probe and model tools.
 
 Do not invent supplier interfaces or silently change committed contracts to fit authored geometry.

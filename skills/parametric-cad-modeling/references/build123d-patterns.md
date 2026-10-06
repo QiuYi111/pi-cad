@@ -1,3 +1,5 @@
+> Compatibility path. New parts and assemblies use `cad.part` (see [freecad-part-ops.md](freecad-part-ops.md)). Use this file to edit an existing build123d source or for geometry the ops cannot express yet.
+
 # build123d patterns
 
 Load this reference while authoring build123d code. Keep the workflow card small; these details belong here.

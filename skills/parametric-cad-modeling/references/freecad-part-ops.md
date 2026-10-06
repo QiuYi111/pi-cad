@@ -1,8 +1,12 @@
 # FreeCAD part documents (`cad.part`)
 
-Use `cad.part` for a **new part you will keep editing**: dimensions that change, features you add one at a time, poses you sweep. A parametric FreeCAD model (`.FCStd`) stays in memory between calls. You send small JSON ops instead of rewriting a script, and every change returns the seven standard views, a summary of what changed, and a structured error when it fails.
+`cad.part` is the **default way to model a part or an assembly**. A parametric FreeCAD model (`.FCStd`) stays in memory between calls. You send small JSON ops instead of rewriting a script, and every change returns the seven standard views, a summary of what changed, and a structured error when it fails.
 
-`cad.model.build` with build123d stays the default for one-shot geometry and for anything these ops cannot express. If a `cad.part` call raises `CadApiError` with `code == "FREECAD_NOT_INSTALLED"`, FreeCAD is not installed. Do not try to install it. Tell the user to run `npm run setup:freecad`.
+`cad.model.build` with build123d is the compatibility path: use it to edit an existing build123d source, or for geometry these ops cannot express yet. In that case, say which op is missing.
+
+If a `cad.part` call raises `CadApiError` with `code == "FREECAD_NOT_INSTALLED"`, FreeCAD is not installed. This is a normal first-run state. Do not try to install it and do not switch to build123d on your own. Tell the user the one command, `npm run setup:freecad` (a download of about 4.2 GB, no sudo, one time), and stop until they have run it.
+
+**One part, one document. One assembly, one document.** A part is `parts/<name>.FCStd` and has one owner (with subagents: one part document each). The assembly is `assembly/<name>.FCStd`, belongs to the parent, and links the parts (see "Assemblies").
 
 ## Python API
 
@@ -82,7 +86,10 @@ Declare a parameter once with `{"op": "param", "name": "width", "value": 40, "un
 | `set` | `target`, `prop`, `value` | | see below |
 | `delete` | `target` | | `HAS_DEPENDENTS` lists what still uses it |
 | `rename` | `target`, `to` | | children and requirements follow |
-| `placement` | `target` (a body) | `position`, `rotation` `{"axis", "angle"}` | values may be `=expressions`: this is how poses are driven |
+| `placement` | `target` (a body or an occurrence) | `position`, `rotation` `{"axis", "angle"}` | values may be `=expressions`: this is how poses are driven |
+| `link` | `name`, `part` (a `.FCStd` path), `body` (the part's body path) | `position`, `rotation` | an occurrence of a part in an assembly; see "Assemblies" |
+| `import_step` | `name`, `file` (a project STEP path) | `position`, `rotation` | a bought-in part, kept as a reference |
+| `joint` | `name`, `type` (`revolute`, `prismatic`, `fixed`), `parent`, `child` (face selectors with a `role`) | `value`, `limits` `[low, high]`, `flip` | seats the child on the parent from two role frames; see "Assemblies" |
 | `require` | `name`, `kind`, `target`, `limit` | `tolerance` | an intent, checked after every apply |
 
 `set` changes `Length`, `Length2`, `Depth`, `Diameter`, `Radius`, `Size`, `Occurrences`, `Angle`, `Reversed`, `Midplane`, `Type`, any parameter (`target: "Params"`), or a named sketch constraint (`prop: "constraint:s0_w"`). Anything else is `PROP_NOT_ALLOWED`, and the error lists what is allowed.
@@ -105,6 +112,23 @@ Each shape is fully constrained when it is built, and its dimensions are named s
 ### Intents
 
 `require` kinds: `min_wall` (target path, limit mm), `min_clearance` (target `{"a", "b"}`, limit mm), `max_mass` (target path or null, limit g; density is the parameter `density` in g/cm3, default 2.7), `bbox_within` (target path, limit `[x, y, z]`), `dimension` (target `{"target", "prop"}`, limit). A failed intent is a result (`status: "fail"` in `r.intent`), not an error.
+
+## Assemblies
+
+An assembly document holds occurrences (`link`), references (`import_step`), and joints. The parts stay in their own documents; the assembly never edits them.
+
+- `{"op": "link", "name": "arm/forearm", "part": "parts/forearm.FCStd", "body": "forearm"}` adds an occurrence named `arm/forearm`. The part's own paths appear under it: the part's `forearm/j3_bearing_seat/wall` is `arm/forearm/j3_bearing_seat/wall` here, so every query, check, joint and probe helper (`cad_resolve` in a probe program) takes the occurrence path. Features of a linked part cannot be edited here: an op on them is refused with a hint naming the part document.
+- `{"op": "import_step", "name": "arm/motor_j3", "file": "imports/motor.step"}` adds a bought-in part as a reference (role `bought_in`). It has a pose and a shape, no features, and no roles. A STEP that has surfaces and no solid is imported too, with the warning `REFERENCE_SURFACES_ONLY`: it is a visual reference and does not take part in solid checks.
+- `joint` seats `child` on `parent`. Each side is `{"feature": path, "role": role}` of exactly one face: a cylinder or cone role gives its axis, a plane role gives its normal. The frames of the two faces are made to coincide, then the child moves by `value` (degrees for `revolute`, mm for `prismatic`, nothing for `fixed`). Plane roles of two faces that touch point in opposite directions, so use `"flip": true` to seat the child face to face. `value` may be `=expression`. A cylinder role of a through hole has an arbitrary origin along its axis, so use a plane role when the position along the axis matters.
+- `limits` are checked after every apply. A value outside the limits is a failed intent in `r.intent` (`status: "fail"`, the value and the limits).
+- The pose of a body or an occurrence can still be set with `placement`; a joint takes precedence over it for its child.
+- `doc.sweep(...)` accepts a joint name in place of a parameter: `await arm.sweep("arm/j1", (-90, 90), step=5, check=("clearance", {"a": "arm/link", "b": "arm/post"}), refine=True)`.
+- `check("interference", all=True)` and `check("clearance", a=..., b=...)` take occurrence paths. Bounding boxes are compared first.
+- **A new revision of a part reaches the assembly on its next `open`, `apply`, `tree`, `query` or `check`.** The changed occurrences are listed in `features.recomputed`, their faces that changed are orange, and the joints seat the occurrences again. A part's `apply` changes only the part document; the parent's run state does not change until the parent applies.
+- The exported STEP has one named product per body, occurrence and reference, with its pose. `cadctl assembly-tree` lists them by semantic path, and the `focus` and `hide` options of the visual probe take those paths (`focus: ["arm/link"]`).
+- A part keeps its own pose inside its document; in the assembly only the occurrence's pose counts.
+
+A complete example is in the assets: [freecad-assembly](../assets/freecad-assembly/README.md) builds two parts in two documents, links them, adds a joint with limits and an intent, edits a part, applies again, and sweeps the joint. [freecad-part](../assets/freecad-part/README.md) is the single-part starting point.
 
 ## Checks and sweeps
 
@@ -137,14 +161,15 @@ A check that runs past `budget_s` (default 30, at most 600) is stopped. Raise `b
 | `SKETCH_PROFILE_NOT_CLOSED` | the profile has a gap | | |
 | `FILLET_FAILED`, `CHAMFER_FAILED`, `HOLE_FAILED`, `PATTERN_FAILED`, `BOOLEAN_FAILED`, `FEATURE_FAILED` | a feature did not recompute | `feature`, `freecadStatus` | `reduce radius`, `fillet before pocket` ... |
 | `RESULT_NOT_SOLID`, `RESULT_MULTIPLE_SOLIDS` | a body is not one valid solid | `body`, `solids`, `validity` | |
-| `IDENTITY_BIND_FAILED` | the STEP could not be bound to the names; the apply was undone | `paths` | |
+| `OP_SCHEMA_INVALID` on a linked feature | an op names a feature of an occurrence | `reason`, `source` | edit the part document, then apply again |
+| `IDENTITY_BIND_FAILED` | the STEP could not be bound to the names; the apply was undone (`detail.stepRegistered` says whether the restored STEP is registered, and `rolled_back` is true only if it is) | `paths` | |
 | `BUDGET_EXCEEDED`, `BUDGET_EXCEEDS_LIMIT`, `CANCELLED` | time limit, or an interrupted request | `budgetS`, `limitS` | `increase budget_s`, `split the check` |
 
 Under-constrained sketches are warnings (`SKETCH_UNDER_CONSTRAINED`, with the remaining degrees of freedom), not errors. Shapes from `sketch` are always fully constrained.
 
 ## Not supported in v1
 
-Assembly constraints (use `placement` with parameters), lofts, sweeps, revolves, sketch constraints beyond the shapes above, selecting by `Face12` or `Edge7`, threads that are modelled in 3D, and inserting a feature before an earlier one (features append; edit with `set` instead).
+The FreeCAD Assembly workbench solver (joints are computed from role frames, one at a time, parents before children), joint types other than `revolute`, `prismatic` and `fixed`, assemblies of assemblies (a `link` takes a body), lofts, sweeps, revolves, sketch constraints beyond the shapes above, selecting by `Face12` or `Edge7`, threads that are modelled in 3D, and inserting a feature before an earlier one (features append; edit with `set` instead).
 
 ## Example 1: bracket with four mounting holes, then a wider hole
 

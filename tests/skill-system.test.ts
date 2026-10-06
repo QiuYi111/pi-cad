@@ -29,6 +29,8 @@ test("skills have valid frontmatter, resolvable links, executable assets, and no
     for (const path of all.filter((item) => item.endsWith("Allrun"))) assert.ok((statSync(path).mode & 0o111) !== 0, `Recipe entrypoint is not executable: ${path}`);
   }
   for (const expected of [
+    "parametric-cad-modeling/assets/freecad-part",
+    "parametric-cad-modeling/assets/freecad-assembly",
     "parametric-cad-modeling/assets/build123d-part",
     "parametric-cad-modeling/assets/build123d-assembly",
     "thermal-fluid-analysis/assets/recipes/openfoam-steady-incompressible",

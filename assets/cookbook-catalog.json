@@ -159,6 +159,8 @@
       "generatedReference": "pi-cad-tools/references/generated/model.md",
       "authoringCookbook": "pi-cad-tools/references/cookbooks/modeling.md",
       "executableAssets": [
+        "parametric-cad-modeling/assets/freecad-part",
+        "parametric-cad-modeling/assets/freecad-assembly",
         "parametric-cad-modeling/assets/build123d-part",
         "parametric-cad-modeling/assets/build123d-assembly"
       ],
