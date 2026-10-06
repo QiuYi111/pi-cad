@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ._attachments import display_inline_image
+from ._changes import describe_changes
 from .client import CadApiError, project_path, request
 from .refs import ArtifactRef
 
@@ -14,7 +15,14 @@ def _project_path(value: str | Path) -> tuple[Path, Path]:
     return project_path(value, error_type="ModelBuildError")
 
 
-async def _attach_images(images: list[dict[str, str]], artifact: ArtifactRef | None = None) -> None:
+async def _attach_images(
+    images: list[dict[str, str]],
+    artifact: ArtifactRef | None = None,
+    *,
+    changes: dict[str, Any] | None = None,
+    highlighted: bool = False,
+    subject: str | None = None,
+) -> None:
     if not images:
         raise CadApiError("Pi-CAD model build produced no mandatory visual observations", error_type="ModelBuildError")
     try:
@@ -28,9 +36,11 @@ async def _attach_images(images: list[dict[str, str]], artifact: ArtifactRef | N
             view = image.get("name") or image.get("view")
             view_label = f"[{str(view).upper()}]" if view else "[VIEW]"
             action = "Imported reference" if artifact is not None and artifact.role.endswith("reference") else "Built"
+            change_text = "\n".join(describe_changes(changes, highlighted))
             label = (
-                f"{action} {artifact!r}. Inspect the attached views carefully as the primary observation of the actual geometry. "
-                f"Reason about what the geometry actually does before your next action. Probe only for facts you need to verify.\n\n{view_label}"
+                f"{subject or f'{action} {artifact!r}'}. Inspect the attached views carefully as the primary observation of the actual geometry. "
+                f"Reason about what the geometry actually does before your next action. Probe only for facts you need to verify.\n"
+                f"{change_text + chr(10) if change_text else ''}\n{view_label}"
                 if index == 0 and artifact is not None else view_label
             )
             display_inline_image(image, label=label)
@@ -70,8 +80,10 @@ async def build(
     if not artifact or not output_path.is_file():
         raise CadApiError(f"Pi-CAD model build did not create {output_relative.as_posix()}", error_type="ModelBuildError")
     digest = artifact.get("sha256") if artifact else None
-    ref = ArtifactRef(output_relative, digest, response.get("referenceType", "reference") if _import_mode == "reference" else "candidate")
-    await _attach_images(response.get("images") or [], ref)
+    changes = response.get("changes")
+    ref = ArtifactRef(output_relative, digest, response.get("referenceType", "reference") if _import_mode == "reference" else "candidate", changes)
+    extra = {"changes": changes, "highlighted": bool(response.get("highlighted"))} if changes else {}
+    await _attach_images(response.get("images") or [], ref, **extra)
     return ref
 
 

@@ -185,6 +185,10 @@ export interface VisualOptions {
   hide?: string[];
   explode?: number;
   ghostOthers?: boolean;
+  /** Face fingerprints to colour orange (faces changed by this build). */
+  highlight?: unknown[];
+  /** Up to eight labels per view, anchored at 3D points. */
+  annotations?: Array<{ text: string; at: [number, number, number] }>;
 }
 
 export async function inspectVisual(
@@ -217,6 +221,8 @@ export async function inspectVisual(
   if (options.hide?.length) args.push("--hide-json", JSON.stringify(options.hide));
   if (options.explode !== undefined) args.push("--explode", String(options.explode));
   if (options.ghostOthers === false) args.push("--no-ghost-others");
+  if (options.highlight?.length) args.push("--highlight-json", JSON.stringify(options.highlight));
+  if (options.annotations?.length) args.push("--annotations-json", JSON.stringify(options.annotations));
   return runCadctl(args, { cwd, timeoutMs });
 }
 

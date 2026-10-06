@@ -6,6 +6,8 @@ import { reviseEvidenceRef, transitionRun } from "../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { executeCadProbe } from "../modules/probe/tool.ts";
+import { annotationsForChangedFaces, changedFaces, summarizeBuildChanges, type FaceFingerprint, type FeatureChanges } from "../modules/model/build-changes.ts";
+import type { GeometryPayload } from "../shared/protocol.ts";
 import { artifactPathForKind, buildStep, envelopeArtifactHash, FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
 import { executeMechanicalRecipeV7 } from "../domains/mechanical/recipe-actions-v7.ts";
 import { cadStartSnapshot } from "../harness/kernel.ts";
@@ -174,38 +176,65 @@ async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   }
 }
 
-async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
-  const importingReference = request.importMode === "reference";
-  const solidifying = request.importMode === "solidify";
-  if ((importingReference || solidifying) && !/\.(step|stp)$/i.test(request.source)) throw new Error("STEP import requires a STEP file");
-  if ((importingReference || solidifying) && request.parameters) throw new Error("STEP import does not accept model parameters");
-  const activeBeforeBuild = await resolveActiveRun(cwd, mechanicalRegistries);
-  if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
-  const parameterContract = request.parameters
-    ? normalizeModelParameterDefinitions(request.parameters)
-    : undefined;
-  const build = await buildStep(cwd, {
-    source: request.source,
-    output: request.output,
-    force: request.force,
-    parameters: parameterContract?.values,
-    solidify: solidifying,
-  });
-  if (!build.ok) return { build, visual: null, images: [] };
+type ActiveRun = NonNullable<Awaited<ReturnType<typeof resolveActiveRun>>>;
 
-  const artifact = artifactPathForKind(build, "step") ?? request.output;
+export interface ObserveCandidateInput {
+  /** Project-relative STEP path. */
+  artifact: string;
+  /** Project-relative source: a build123d `.py` file or a FreeCAD `.FCStd` file. */
+  sourcePath: string;
+  sourceHash: string;
+  /** SHA-256 of the STEP file; computed from the file when omitted. */
+  artifactHash?: string;
+  validation: "auto" | "fast" | "full";
+  importMode?: "reference" | "solidify";
+  parameters?: ReturnType<typeof normalizeModelParameterDefinitions>;
+  highlight?: FaceFingerprint[];
+  annotations?: Array<{ text: string; at: [number, number, number] }>;
+  backend: "build123d" | "freecad";
+  /** Feature-level facts only the FreeCAD backend can supply. */
+  extraChanges?: FeatureChanges;
+  /** Extra evidence envelopes, e.g. the build step, kept for the caller. */
+  build?: unknown;
+}
+
+/** A change touching most faces says nothing useful when coloured; keep the shading instead. */
+const MAX_HIGHLIGHT_FRACTION = 0.6;
+
+async function readJsonOrNull<T>(path: string): Promise<T | null> {
+  try {
+    return JSON.parse(await readFile(path, "utf8")) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Everything that happens to a freshly produced STEP candidate, whichever
+ * backend made it: geometry check, change summary against the previous build
+ * of the same output, the seven mandatory views (changed faces highlighted),
+ * and evidence registration.
+ */
+export async function observeCandidate(cwd: string, active: ActiveRun, input: ObserveCandidateInput) {
+  const importingReference = input.importMode === "reference";
+  const artifact = input.artifact;
+  const geometryPath = runGeometryEvidencePath(cwd, active.state.runId, artifact);
+  // The previous build of this output left its geometry evidence here. Read it
+  // before inspecting, because inspecting overwrites the file.
+  const previousGeometry = await readJsonOrNull<GeometryPayload>(geometryPath);
+  const baselineSha256 = previousGeometry ? await sha256File(geometryPath) : undefined;
   const geometry = await inspectGeometry(
     cwd,
     artifact,
-    runGeometryEvidencePath(cwd, activeBeforeBuild.state.runId, artifact),
-    request.validation === "full" ? FULL_GEOMETRY_VALIDATION_TIMEOUT_MS : undefined,
-    request.validation ?? "auto",
+    geometryPath,
+    input.validation === "full" ? FULL_GEOMETRY_VALIDATION_TIMEOUT_MS : undefined,
+    input.validation,
   );
   if (!geometry.ok) {
     const payload = geometry.payload as { error?: string } | undefined;
     throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");
   }
-  const geometryPayload = geometry.payload as { validity?: { ok?: boolean; reasons?: string[]; checks?: { topology?: boolean }; solids?: Array<{ reasons?: string[] }> }; solidCount?: number; faceCount?: number };
+  const geometryPayload = geometry.payload as GeometryPayload & { validity?: { ok?: boolean; reasons?: string[]; checks?: { topology?: boolean }; solids?: Array<{ reasons?: string[] }> } };
   const validity = geometryPayload.validity;
   if (importingReference && (!validity?.checks?.topology || !geometryPayload.faceCount)) {
     throw new Error("STEP reference import failed: the file has no valid displayable B-Rep faces");
@@ -217,14 +246,25 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     ];
     throw new Error(`Pi-CAD built the model but generic B-Rep validation failed${reasons.length ? `: ${[...new Set(reasons)].join(", ")}` : ""}`);
   }
-  const visual = await inspectVisual(cwd, artifact, runVisualEvidenceDir(cwd, activeBeforeBuild.state.runId, artifact));
+
+  const changes = summarizeBuildChanges(importingReference ? null : previousGeometry, geometryPayload, { ...input.extraChanges, ...(baselineSha256 ? { baselineSha256 } : {}) });
+  const changed = input.highlight ?? changedFaces(importingReference ? null : previousGeometry, geometryPayload);
+  const highlight = changed.length > 0 && changed.length < MAX_HIGHLIGHT_FRACTION * (geometryPayload.faceCount ?? Infinity) ? changed : [];
+  const manifest = highlight.length && !input.annotations
+    ? await readJsonOrNull<Parameters<typeof annotationsForChangedFaces>[0]>(`${resolve(cwd, artifact)}.identity.json`)
+    : null;
+  const annotations = input.annotations ?? annotationsForChangedFaces(manifest, highlight);
+
+  const visual = await inspectVisual(cwd, artifact, runVisualEvidenceDir(cwd, active.state.runId, artifact), {
+    ...(highlight.length ? { highlight } : {}),
+    ...(highlight.length && annotations.length ? { annotations } : {}),
+  });
   if (!visual.ok) {
     const payload = visual.payload as { error?: string } | undefined;
     throw new Error(payload?.error || "Pi-CAD built the model but mandatory visual inspection failed");
   }
   const views = visualPayload(visual).views ?? [];
   if (!views.length) throw new Error("Pi-CAD built the model but mandatory visual inspection produced no images");
-  const images = views.map((view) => view.path);
 
   // Attach the complete seven-view set to the build result so both Prime and
   // the desktop activity card can inspect the same orientation-complete
@@ -233,13 +273,12 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     `mandatoryImage${view.name.charAt(0).toUpperCase()}${view.name.slice(1)}`,
     phaseCardEvidenceRef(cwd, view.path),
   ]));
-  const artifactHash = envelopeArtifactHash(build, "step");
-  if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
+  const artifactHash = input.artifactHash ?? await sha256File(resolve(cwd, artifact));
   const referenceType = importingReference ? (geometryPayload.solidCount ? "solid-reference" : "surface-reference") : undefined;
-  const sourcePath = projectRelativePath(cwd, request.source);
-  const sourceHash = await sha256File(resolve(cwd, request.source));
+  const sourcePath = input.sourcePath;
+  const sourceHash = input.sourceHash;
   let parameterManifest: StoredModelParameterManifest | undefined;
-  if (parameterContract) {
+  if (input.parameters) {
     const outputPath = projectRelativePath(cwd, artifact);
     const modelId = `model-${canonicalDigest({ source: sourcePath, output: outputPath }).slice(0, 20)}`;
     const manifest: ModelParameterManifestV1 = {
@@ -247,7 +286,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
       modelId,
       source: { path: sourcePath, sha256: sourceHash, entrypoint: "build" },
       output: { path: outputPath, sha256: artifactHash },
-      parameters: parameterContract.parameters,
+      parameters: input.parameters.parameters,
     };
     const manifestPath = `${resolve(cwd, artifact)}.parameters.json`;
     await writeJsonAtomic(manifestPath, manifest);
@@ -257,7 +296,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
       manifest,
     };
   }
-  if (!importingReference) await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
+  if (!importingReference) await new HarnessRunStoreV7(cwd, active.state.runId).mutate(mechanicalRegistries, (loaded) => {
     let state = {
       ...loaded.state,
       artifacts: {
@@ -295,7 +334,7 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     return {
       state,
       payloads,
-      event: { type: "ModelBuildObserved", data: { artifact: projectRelativePath(cwd, artifact), images: Object.values(contextRefs), evidence: [...envelopes.keys()] } },
+      event: { type: "ModelBuildObserved", data: { artifact: projectRelativePath(cwd, artifact), images: Object.values(contextRefs), evidence: [...envelopes.keys()], backend: input.backend } },
     };
   });
   const inlineImages = await Promise.all(views.map(async (view) => ({
@@ -303,7 +342,45 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
     data: (await readFile(view.path)).toString("base64"),
     mimeType: "image/png",
   })));
-  return { build, visual, geometry, images: inlineImages, ...(referenceType ? { referenceType } : {}), ...(parameterManifest ? { parameterManifest } : {}) };
+  return {
+    visual, geometry, images: inlineImages, changes, highlighted: highlight.length > 0,
+    ...(referenceType ? { referenceType } : {}), ...(parameterManifest ? { parameterManifest } : {}),
+  };
+}
+
+async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
+  const importingReference = request.importMode === "reference";
+  const solidifying = request.importMode === "solidify";
+  if ((importingReference || solidifying) && !/\.(step|stp)$/i.test(request.source)) throw new Error("STEP import requires a STEP file");
+  if ((importingReference || solidifying) && request.parameters) throw new Error("STEP import does not accept model parameters");
+  const activeBeforeBuild = await resolveActiveRun(cwd, mechanicalRegistries);
+  if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
+  const parameterContract = request.parameters
+    ? normalizeModelParameterDefinitions(request.parameters)
+    : undefined;
+  const build = await buildStep(cwd, {
+    source: request.source,
+    output: request.output,
+    force: request.force,
+    parameters: parameterContract?.values,
+    solidify: solidifying,
+  });
+  if (!build.ok) return { build, visual: null, images: [] };
+
+  const artifact = artifactPathForKind(build, "step") ?? request.output;
+  const artifactHash = envelopeArtifactHash(build, "step");
+  if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
+  const observed = await observeCandidate(cwd, activeBeforeBuild, {
+    artifact,
+    sourcePath: projectRelativePath(cwd, request.source),
+    sourceHash: await sha256File(resolve(cwd, request.source)),
+    artifactHash,
+    validation: request.validation ?? "auto",
+    ...(request.importMode ? { importMode: request.importMode } : {}),
+    ...(parameterContract ? { parameters: parameterContract } : {}),
+    backend: "build123d",
+  });
+  return { build, ...observed };
 }
 
 /**
@@ -404,7 +481,12 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
         args: request.args,
       });
       const details = "details" in rendered ? rendered.details as any : undefined;
-      const value = preset === "python" ? details?.envelope?.payload?.result : details?.envelope?.payload;
+      const rawValue = preset === "python" ? details?.envelope?.payload?.result : details?.envelope?.payload;
+      // Face fingerprints exist for change detection between builds; a probe
+      // answer must not carry thousands of them into the agent's context.
+      const value = rawValue && typeof rawValue === "object" && Array.isArray(rawValue.faceFingerprints)
+        ? (({ faceFingerprints, ...rest }) => ({ ...rest, faceFingerprintCount: faceFingerprints.length }))(rawValue)
+        : rawValue;
       if (details?.presetFailed || value === undefined) throw new Error(rendered.content.map((item) => item.type === "text" ? item.text : "").join("\n") || `probe preset ${preset} failed`);
       const visuals = Array.isArray(details?.observation?.visuals) ? details.observation.visuals : [];
       const images = rendered.content.filter((item) => item.type === "image").map((item, index) => ({

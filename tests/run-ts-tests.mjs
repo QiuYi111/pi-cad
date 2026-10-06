@@ -76,6 +76,7 @@ await jiti.import("./cad-probe-tool.test.ts", { default: true });
 await jiti.import("./finalizer.test.ts", { default: true });
 await jiti.import("./model-backend.test.ts", { default: true });
 await jiti.import("./model-parameters.test.ts", { default: true });
+await jiti.import("./build-changes.test.ts", { default: true });
 await jiti.import("./simulation-v2-protocol.test.ts", { default: true });
 await jiti.import("./simulation-v2-store.test.ts", { default: true });
 await jiti.import("./simulation-v2-runtime.test.ts", { default: true });
