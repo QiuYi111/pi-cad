@@ -1,0 +1,63 @@
+{
+ "valid": [
+  [
+   "arm",
+   "arm"
+  ],
+  [
+   "arm/forearm/j3_bearing_seat",
+   "arm/forearm/j3_bearing_seat"
+  ],
+  [
+   "前臂/轴承座",
+   "前臂/轴承座"
+  ],
+  [
+   "arm/a%2Fb",
+   "arm/a%2Fb"
+  ],
+  [
+   "arm%2fforearm",
+   "arm%2Fforearm"
+  ],
+  [
+   "100%25",
+   "100%25"
+  ],
+  [
+   "café/x",
+   "café/x"
+  ],
+  [
+   "wall.0",
+   "wall.0"
+  ],
+  [
+   "wall@2",
+   "wall@2"
+  ],
+  [
+   "bracket/mount_hole/wall",
+   "bracket/mount_hole/wall"
+  ]
+ ],
+ "invalid": [
+  "",
+  "/",
+  "a//b",
+  "a/",
+  "/a",
+  ".",
+  "a/..",
+  "a/3",
+  "007",
+  "a/ b",
+  "a/b ",
+  "a\tb",
+  "a%",
+  "a%zz",
+  "a%41",
+  "a%2",
+  "a/\u0000"
+ ]
+}

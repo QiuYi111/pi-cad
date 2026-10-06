@@ -58,6 +58,23 @@ class BindIdentityTests(unittest.TestCase):
         self.assertEqual(envelope["payload"]["code"], "IDENTITY_BIND_FAILED")
         self.assertEqual(envelope["payload"]["paths"], ["bracket/mount_hole"])
 
+    def test_axis_point_and_bbox_center_name_curved_faces_without_a_parametric_centroid(self) -> None:
+        by_center = _declarations()
+        by_center["entities"][1]["selector"] = {
+            "entity": "face", "type": "cylinder", "radius": 3.0, "bboxCenter": [10, 0, 0], "tolerance": 1e-3,
+        }
+        self.assertTrue(self._bind(by_center)["ok"])
+        # The same hole axis one millimetre away matches nothing: the selector is bounded, not nearest-match.
+        off_axis = _declarations()
+        off_axis["entities"][1]["selector"]["axisPoint"] = [11, 0, 0]
+        failed = self._bind(off_axis)
+        self.assertFalse(failed["ok"])
+        self.assertEqual(failed["payload"]["code"], "IDENTITY_BIND_FAILED")
+        # axisPoint is the distance from the axis line, so any point along the axis matches.
+        along = _declarations()
+        along["entities"][1]["selector"]["axisPoint"] = [10, 0, 123]
+        self.assertTrue(self._bind(along)["ok"])
+
 
 if __name__ == "__main__":
     unittest.main()

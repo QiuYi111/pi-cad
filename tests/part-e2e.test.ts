@@ -117,12 +117,28 @@ test("FreeCAD part: open, build, edit one dimension, resolve the named hole", { 
     );
     assert.deepEqual(await readFile(join(cwd, doc)), before);
 
+    // An edit that outlives its budget kills the worker; the next request restarts it and
+    // finds the document at its last committed revision.
+    process.env.PI_CAD_PART_KILL_GRACE_S = "0.2";
+    await assert.rejects(
+      handleAgentApi(cwd, {
+        schema: 1, op: "part-apply", doc, budgetS: 1,
+        ops: [{ op: "linear_pattern", name: "bracket/hole_row", features: ["bracket/mount_hole"], direction: "X", length: 25, count: 4000 }] as never,
+      }),
+      (error: unknown) => error instanceof PartOpError && error.code === "BUDGET_EXCEEDED",
+    );
+    const tree = await handleAgentApi(cwd, { schema: 1, op: "part-tree", doc }) as any;
+    assert.equal(tree.rev, 2, "the killed transaction left no trace");
+    assert.deepEqual(await readFile(join(cwd, doc)), before);
+    delete process.env.PI_CAD_PART_KILL_GRACE_S;
+
     // Undo goes back to the previous revision and rebuilds it.
     const undone = await handleAgentApi(cwd, { schema: 1, op: "part-undo", doc }) as any;
     assert.equal(undone.part.rev, 1);
     assert.equal(undone.images.length, 7);
     assert.ok(undone.changes.volumeMm3.delta > 0, "undoing the wider hole adds volume back");
   } finally {
+    delete process.env.PI_CAD_PART_KILL_GRACE_S;
     shutdownPartWorkers();
     if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
     else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
