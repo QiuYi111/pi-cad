@@ -27,3 +27,27 @@ Update by downloading a newer AppImage after stopping active tasks, verifying it
 The public DMG must be Developer ID signed and Apple notarized. Copy Reify to Applications, then start it normally. The release pipeline treats missing certificate, Apple ID, app-specific password, or team ID as a release blocker; disabling Gatekeeper is not an installation method. Native author and reviewer processes retain separate authority boundaries.
 
 Quit active Agent work before replacing the app from a newer signed and notarized DMG. Keep the prior notarized DMG for compatible rollback. Removing the app preserves projects and user data.
+
+## Optional FreeCAD part backend
+
+The `cad.part` Python API builds parametric parts in FreeCAD (Part Design). It is optional. The build123d path (`cad.model.build`) works without it.
+
+Install it with one command from the repository root:
+
+```bash
+npm run setup:freecad            # add -- --force to reinstall
+```
+
+The script supports Linux x86_64 (including WSL) and macOS arm64. It needs no sudo. It does not change shell configuration files. It downloads a pinned micromamba from conda-forge (SHA-256 checked), creates a private conda environment from the lock file in `python/runtimes/freecad/`, runs a smoke test (Pad, Pocket, Fillet, STEP export), and writes `runtime.json`.
+
+| Item | Location |
+|---|---|
+| Linux / WSL | `${XDG_DATA_HOME:-~/.local/share}/pi-cad/runtimes/freecad` |
+| macOS | `~/Library/Application Support/pi-cad/runtimes/freecad` |
+| Override | `PI_CAD_FREECAD_HOME` (install) and `PI_CAD_FREECAD_PYTHON` (use another FreeCAD Python at run time) |
+
+Check the result with `python -m cadctl doctor --json`. The `freecad` entry shows `ready`, `unavailable`, or `error`. Without the backend, `cad.part` calls fail with `FREECAD_NOT_INSTALLED` and the message `run: npm run setup:freecad`. The API never downloads FreeCAD by itself.
+
+Disk use: about 4 GB (measured with FreeCAD 1.1.0 on Linux x86_64). To uninstall, delete the `freecad` directory from the table above.
+
+The osx-arm64 lock file was solved on Linux (`CONDA_OVERRIDE_OSX=11.0`) and has not been install-tested on a Mac. If it fails, the script prints the error. Delete the lock file to make the script solve `environment.yml` instead.

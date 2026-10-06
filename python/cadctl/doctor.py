@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -99,6 +100,39 @@ def _presentation_status() -> dict[str, Any]:
     return {"status": "unavailable", "missing": missing, "blender": source}
 
 
+def _freecad_runtime_json() -> Path:
+    configured = os.environ.get("PI_CAD_FREECAD_HOME")
+    if configured:
+        return Path(configured) / "runtime.json"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "pi-cad" / "runtimes" / "freecad" / "runtime.json"
+    data_home = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(data_home) / "pi-cad" / "runtimes" / "freecad" / "runtime.json"
+
+
+def _freecad_status() -> dict[str, Any]:
+    """Optional FreeCAD part backend. Reads runtime.json only; never imports FreeCAD here."""
+    override = (os.environ.get("PI_CAD_FREECAD_PYTHON") or "").strip()
+    if override:
+        return {"status": "ready" if Path(override).is_file() else "error", "python": override, "source": "PI_CAD_FREECAD_PYTHON"}
+    path = _freecad_runtime_json()
+    if not path.is_file():
+        return {"status": "unavailable", "hint": "run: npm run setup:freecad"}
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        python = record["python"]
+    except Exception as exc:
+        return {"status": "error", "error": f"unreadable {path}: {exc}"}
+    if not Path(python).is_file():
+        return {"status": "error", "error": f"FreeCAD python is missing: {python}", "hint": "re-run: npm run setup:freecad -- --force"}
+    return {
+        "status": "ready",
+        "python": python,
+        "freecadVersion": record.get("freecadVersion"),
+        "occtVersion": record.get("occtVersion"),
+    }
+
+
 def _managed_runtime_catalog() -> dict[str, Any]:
     registry_path = Path(__file__).resolve().parents[2] / "assets" / "simulation-runtimes.json"
     try:
@@ -152,6 +186,7 @@ def doctor() -> dict[str, Any]:
             "assembly": {"status": "ready"},
             "export": {"status": "ready"},
             "presentation": _presentation_status(),
+            "freecad": _freecad_status(),
         },
         "hostDevelopmentPython": {
             "simulation": _torch_fem_status(),
