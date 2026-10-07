@@ -412,8 +412,15 @@ export class WslBridge implements RuntimeBridge {
     } catch {
       throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Reify or select development checkouts in Settings.`);
     }
-    await runStep("Installing the core CAD packages…", 0.78,
-      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif test -d python/.venv && ! test -x python/.venv/bin/python; then rm -rf python/.venv; fi\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000));
+    await runStep("Installing the core CAD packages…", 0.78, async () => {
+      const probe = await this.pipe(["bash", "-s"], [
+        "set -e",
+        `cd ${JSON.stringify(paths.piCadRepo)}`,
+        "if test -x python/.venv/bin/python && python/.venv/bin/python -c 'import build123d, cadctl' >/dev/null 2>&1; then echo cadpython=ready; else echo cadpython=missing; fi",
+      ].join(";\n") + "\n", 60_000);
+      if (probe.stdout.trim().endsWith("cadpython=ready")) return;
+      await this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif test -d python/.venv && ! test -x python/.venv/bin/python; then rm -rf python/.venv; fi\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000);
+    });
     await runStep("Preparing Blender system libraries…", 0.84, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "DEBIAN_FRONTEND=noninteractive apt-get install -y libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
       encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
     }).then(() => undefined));
