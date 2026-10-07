@@ -349,6 +349,8 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
+  assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/skills\/parametric-cad-modeling\n\/opt\/pi-cad\/skills\/parametric-cad-modeling/);
+  assert.match(joined, /--skill\n\/opt\/pi-cad\/skills\/parametric-cad-modeling\/SKILL\.md/);
   assert.match(joined, /--skill\n\/opt\/pi-cad\/cad\/SKILL\.md/);
   assert.match(joined, /cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
