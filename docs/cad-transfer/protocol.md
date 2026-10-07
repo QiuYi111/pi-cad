@@ -73,6 +73,7 @@ Rules:
 - `loops[].geometry` lists geometry ids in drawing order. A circle is a loop of one id.
 - Intersecting loops, open loops, and loops that touch are errors in the canonicalizer.
 - `pad`/`pocket`/`hole` `direction` is the final world direction in which material is added (pad) or removed (pocket, hole). `midplane: true` means the extent is symmetric about the sketch plane.
+- `plane.offset` is the signed distance of `frame.origin` from the base plane, measured along the **positive world axis** of that plane (Z for XY, Y for XZ, X for YZ), not along `frame.n`. `frame.n` may point the other way; executors use `frame.n` for the extrusion sign and `plane.offset` only to place the plane.
 - `plane.base` is `XY`, `XZ` or `YZ`. The canonicalizer rejects a sketch whose normal is not parallel to a world axis.
 - Supported ops, P0 + P1: `pad` (length, midplane, reversed), `pocket` (length or through_all), `hole` (through_all, no thread, no counterbore, no countersink), `polar_pattern`. Sketch geometry: line, arc, circle (and polyline = lines). Everything else stops the export with `UNSUPPORTED_OP`.
 
