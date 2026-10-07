@@ -155,10 +155,47 @@ function uncWslPath(value: string): { distro: string; path: string } | null {
   return { distro: match[1]!, path: `/${match[2]!.replaceAll("\\", "/")}` };
 }
 
+async function readWindowsUserProxy(): Promise<NodeJS.ProcessEnv> {
+  if (process.platform !== "win32") return {};
+  const read = async (name: string): Promise<string | undefined> => {
+    try {
+      const { stdout } = await execFileAsync("reg.exe", ["query", "HKCU\\Environment", "/v", name], {
+        encoding: "utf8", timeout: 5000, windowsHide: true,
+      });
+      const match = stdout.match(new RegExp(`^\\s*${name}\\s+REG_\\w+\\s+(.*)$`, "m"));
+      return match?.[1]?.trim();
+    } catch {
+      return undefined;
+    }
+  };
+  const [http, https, all, no] = await Promise.all([read("HTTP_PROXY"), read("HTTPS_PROXY"), read("ALL_PROXY"), read("NO_PROXY")]);
+  return {
+    ...(http ? { HTTP_PROXY: http, http_proxy: http } : {}),
+    ...(https ? { HTTPS_PROXY: https, https_proxy: https } : {}),
+    ...(all ? { ALL_PROXY: all, all_proxy: all } : {}),
+    ...(no ? { NO_PROXY: no, no_proxy: no } : {}),
+  };
+}
+
 export class WslBridge implements RuntimeBridge {
   readonly kind = "wsl" as const;
   private homePromise?: Promise<string>;
+  private proxyEnvPromise?: Promise<NodeJS.ProcessEnv>;
+  private proxyEnv?: NodeJS.ProcessEnv;
   constructor(readonly distro: string, readonly bundledRuntimePath?: string) {}
+
+  private async desktopEnv(): Promise<NodeJS.ProcessEnv> {
+    this.proxyEnvPromise ??= readWindowsUserProxy().then((proxy) => {
+      this.proxyEnv = proxy;
+      return proxy;
+    });
+    const proxy = await this.proxyEnvPromise;
+    return { ...process.env, ...proxy };
+  }
+
+  private desktopEnvSync(): NodeJS.ProcessEnv {
+    return { ...process.env, ...this.proxyEnv };
+  }
 
   async exec(args: string[], options: { input?: string; timeout?: number; user?: string } = {}): Promise<{ stdout: string; stderr: string }> {
     const prefix = ["-d", this.distro, ...(options.user ? ["-u", options.user] : []), "--"];
@@ -168,7 +205,7 @@ export class WslBridge implements RuntimeBridge {
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,
       input: options.input,
-      env: forwardWslRuntimeEnvironment(process.env),
+      env: forwardWslRuntimeEnvironment(await this.desktopEnv()),
     } as Parameters<typeof execFileAsync>[2]);
     return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") };
   }
@@ -177,7 +214,7 @@ export class WslBridge implements RuntimeBridge {
     return spawn("wsl.exe", ["-d", this.distro, ...(user ? ["-u", user] : []), "--", ...args], {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
-      env: forwardWslRuntimeEnvironment(process.env),
+      env: forwardWslRuntimeEnvironment(this.desktopEnvSync()),
     });
   }
 
