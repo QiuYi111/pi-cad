@@ -8,6 +8,17 @@ export { runtimeChecksReady } from "./runtime-bridge.js";
 
 const execFileAsync = promisify(execFile);
 
+const WSL_PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+] as const;
+
 const WSL_RUNTIME_ENV_KEYS = [
   "PI_CAD_CANONICAL_PROJECT_DIR",
   "PI_CAD_EXPERIENCE_ROOT",
@@ -34,6 +45,9 @@ const WSL_RUNTIME_ENV_KEYS = [
 export function forwardWslRuntimeEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const entries = (source.WSLENV || "").split(":").filter(Boolean);
   const present = new Set(entries.map((entry) => entry.split("/")[0]));
+  for (const key of WSL_PROXY_ENV_KEYS) {
+    if (source[key] !== undefined && !present.has(key)) entries.push(key);
+  }
   for (const key of WSL_RUNTIME_ENV_KEYS) {
     if (source[key] !== undefined && !present.has(key)) entries.push(key);
   }
