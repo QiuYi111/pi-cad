@@ -55,7 +55,7 @@ export type AgentApiRequest = AgentApiConversationV1 & (
   | { schema: 1; op: "part-sweep"; doc: string; param: string; range: [number, number]; step: number; check: { kind: string; args: Record<string, JsonValue> }; refine?: boolean; output?: string; budgetS?: number }
   | { schema: 1; op: "transfer-status" }
   | { schema: 1; op: "transfer-features"; doc: string }
-  | { schema: 1; op: "transfer-export"; doc: string; target: "fusion" | "solidworks"; output: string; check?: boolean; jobId?: string }
+  | { schema: 1; op: "transfer-export"; doc: string; target: "fusion" | "solidworks"; output?: string; check?: boolean; jobId?: string }
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }
   | { schema: 1; op: "review-submit"; subjectCommit: string }
   | { schema: 1; op: "review-current"; reviewId?: string }

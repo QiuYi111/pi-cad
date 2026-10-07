@@ -38,19 +38,34 @@ const SETTINGS_HINT = "Open Settings > CAD exports in the Reify desktop app and 
 
 const TARGETS = ["fusion", "solidworks"] as const;
 type Target = (typeof TARGETS)[number];
-const SUFFIX: Record<Target, RegExp> = { fusion: /\.f3d$/i, solidworks: /\.sldprt$/i };
+const SUFFIX: Record<Target, RegExp> = { fusion: /\.f3d$/i, solidworks: /\.(sldprt|sldasm)$/i };
 
 /** Test seams: the clock, the poll delay and the geometry inspector. */
 export const transferHooks = {
   now: () => Date.now(),
   sleep: (ms: number) => new Promise<void>((accept) => setTimeout(accept, ms)),
   pollMs: 500,
-  /** Run `export_features` in the FreeCAD worker. */
-  canonicalize: async (cwd: string, doc: string, referenceStepAbs?: string): Promise<unknown> =>
-    partRequest(cwd, resolvePartPaths(cwd, doc), {
-      op: "export_features",
-      args: referenceStepAbs ? { referenceStep: referenceStepAbs } : {},
-    }),
+  /**
+   * Run `export_features` in the FreeCAD worker. An assembly document answers with an
+   * unsupported-op error for `occurrence`; then `export_assembly` builds `reify.assembly/1`.
+   */
+  canonicalize: async (cwd: string, doc: string, referenceStepAbs?: string): Promise<unknown> => {
+    const paths = resolvePartPaths(cwd, doc);
+    const args = referenceStepAbs ? { referenceStep: referenceStepAbs } : {};
+    try {
+      return { kind: "part", ...(await partRequest(cwd, paths, { op: "export_features", args }) as object) };
+    } catch (error) {
+      const failure = error as PartOpError;
+      if (failure?.code !== "TRANSFER_UNSUPPORTED_OP" || failure.detail?.op !== "assembly") throw error;
+      const assembly = await partRequest(cwd, paths, { op: "export_assembly", args }) as {
+        assembly: WorkerFeatures["features"]; occurrenceCount: number; part?: string; referenceStep?: string;
+      };
+      return {
+        kind: "assembly", features: assembly.assembly, featureCount: assembly.occurrenceCount,
+        part: assembly.part ?? basename(paths.docRel, extname(paths.docRel)), referenceStep: assembly.referenceStep,
+      };
+    }
+  },
   inspect: async (cwd: string, artifactRel: string, outputRel: string): Promise<GeometryPayload> => {
     const envelope = await inspectGeometry(cwd, artifactRel, outputRel);
     if (!envelope.ok) {
@@ -130,6 +145,8 @@ export async function transferStatus(cwd: string): Promise<JsonValue> {
 }
 
 interface WorkerFeatures {
+  /** `part` (default) or `assembly` (`reify.assembly/1`). */
+  kind?: "part" | "assembly";
   features: { part?: string; bodies?: Array<{ features?: unknown[] }>; reference?: { feature_volumes?: FeatureVolume[] } };
   featureCount: number;
   part: string;
@@ -152,11 +169,12 @@ async function featuresOperation(cwd: string, request: Extract<TransferRequest, 
   const paths = documentPaths(cwd, request.doc);
   const result = await canonicalize(cwd, request.doc);
   const stem = basename(paths.docRel, extname(paths.docRel));
-  const pathRel = projectRelativePath(cwd, join("build", "transfer", `${stem}.features.json`));
+  const kind = result.kind ?? "part";
+  const pathRel = projectRelativePath(cwd, join("build", "transfer", `${stem}.${kind === "assembly" ? "assembly" : "features"}.json`));
   await writeJsonAtomic(resolve(cwd, pathRel), result.features);
   const text = JSON.stringify(result.features);
   return jsonValue({
-    part: result.part, features: result.featureCount, path: pathRel,
+    kind, part: result.part, features: result.featureCount, path: pathRel,
     ...(Buffer.byteLength(text) <= INLINE_FEATURES_BYTES ? { data: result.features } : {}),
   } as never);
 }
@@ -166,15 +184,25 @@ function newJobId(): string {
   return `${stamp}-${randomBytes(3).toString("hex")}`;
 }
 
-function validateExport(request: Extract<TransferRequest, { op: "transfer-export" }>): { target: Target; outputRel: string } {
+function validateExport(request: Extract<TransferRequest, { op: "transfer-export" }>): { target: Target } {
   if (!TARGETS.includes(request.target as Target)) {
     throw transferError(`target must be "fusion" or "solidworks", got ${JSON.stringify(request.target)}`, "BAD_REQUEST");
   }
   const target = request.target as Target;
-  if (typeof request.output !== "string" || !SUFFIX[target].test(request.output)) {
-    throw transferError(`a ${target} export must end in ${target === "fusion" ? ".f3d" : ".SLDPRT"}`, "BAD_REQUEST", { detail: { output: request.output } });
+  if (request.output !== undefined && (typeof request.output !== "string" || !SUFFIX[target].test(request.output))) {
+    throw transferError(`a ${target} export must end in ${target === "fusion" ? ".f3d" : ".SLDPRT or .SLDASM"}`, "BAD_REQUEST", { detail: { output: request.output } });
   }
-  return { target, outputRel: request.output };
+  return { target };
+}
+
+/** The native file name: the caller's, or `exports/<stem>.<ext>`. A part is .SLDPRT, an assembly .SLDASM. */
+function resolveOutput(request: Extract<TransferRequest, { op: "transfer-export" }>, target: Target, kind: "part" | "assembly", stem: string): string {
+  const extension = target === "fusion" ? ".f3d" : kind === "assembly" ? ".SLDASM" : ".SLDPRT";
+  if (request.output === undefined) return join("exports", `${stem}${extension}`);
+  if (target === "solidworks" && !request.output.toLowerCase().endsWith(extension.toLowerCase())) {
+    throw transferError(`a SolidWorks ${kind} export must end in ${extension}`, "BAD_REQUEST", { detail: { output: request.output } });
+  }
+  return request.output;
 }
 
 /** Executor error code on the spool -> `CadApiError.code` of the Agent API. */
@@ -219,10 +247,9 @@ async function waitForResult(cwd: string, jobId: string, timeoutS: number): Prom
 }
 
 async function exportOperation(cwd: string, request: Extract<TransferRequest, { op: "transfer-export" }>): Promise<JsonValue> {
-  const { target, outputRel } = validateExport(request);
+  const { target } = validateExport(request);
   const check = request.check !== false;
   const paths = documentPaths(cwd, request.doc);
-  projectRelativePath(cwd, outputRel);
 
   const dispatcher = await readDispatcher(cwd);
   if (!dispatcher.alive) throw unavailable(dispatcher.reason);
@@ -244,12 +271,15 @@ async function exportOperation(cwd: string, request: Extract<TransferRequest, { 
   await mkdir(resolve(cwd, workRel), { recursive: true });
 
   const canonical = await canonicalize(cwd, request.doc, resolve(cwd, referenceRel));
+  const kind = canonical.kind ?? "part";
+  const outputRel = projectRelativePath(cwd, resolveOutput(request, target, kind, basename(paths.docRel, extname(paths.docRel))));
   await writeJsonAtomic(resolve(cwd, featuresRel), canonical.features);
 
   const checkStepRel = projectRelativePath(cwd, join(workRel, "check.step"));
   await mkdir(dirname(resolve(cwd, outputRel)), { recursive: true });
   await writeJsonAtomic(resolve(cwd, TRANSFER_DIR, "requests", `${jobId}.json`), {
-    schema: "reify.transfer.request/1", jobId, target, doc: paths.docRel, features: featuresRel,
+    schema: "reify.transfer.request/1", jobId, target, doc: paths.docRel, kind,
+    ...(kind === "assembly" ? { assembly: featuresRel } : { features: featuresRel }),
     native: outputRel, checkStep: checkStepRel, check, timeoutS: DEFAULT_TIMEOUT_S,
   });
 

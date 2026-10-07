@@ -23,7 +23,7 @@ from .client import CadApiError, project_path, request
 from .part import PartDocument
 
 TARGETS = ("fusion", "solidworks")
-_SUFFIX = {"fusion": ".f3d", "solidworks": ".SLDPRT"}
+_SUFFIXES = {"fusion": (".f3d",), "solidworks": (".sldprt", ".sldasm")}
 
 
 def _bad_request(message: str) -> CadApiError:
@@ -58,6 +58,7 @@ class TransferFeatures:
     features: int
     path: str
     data: dict[str, Any] = field(default_factory=dict, compare=False)
+    kind: str = field(default="part", compare=False)  # "part" or "assembly"
 
     def __repr__(self) -> str:
         return f"TransferFeatures(part={self.part!r}, features={self.features}, path={self.path!r})"
@@ -121,7 +122,7 @@ async def features(doc: str | Path | PartDocument) -> TransferFeatures:
     """Dry run: build the canonical feature JSON. Raises ``TRANSFER_UNSUPPORTED_OP`` for an op the targets cannot build."""
     response = await request("transfer-features", doc=_doc_path(doc))
     data = response.get("data") or {}
-    return TransferFeatures(response["part"], int(response["features"]), response["path"], data)
+    return TransferFeatures(response["part"], int(response["features"]), response["path"], data, response.get("kind", "part"))
 
 
 async def export(
@@ -133,19 +134,21 @@ async def export(
 ) -> TransferJob:
     """Start an export and return a job. ``await job.result()`` gives the ``TransferResult``.
 
-    ``check=False`` is for debugging only; the result then says ``check='skipped'``.
+    ``output`` defaults to ``exports/<stem>.f3d`` for Fusion, ``.SLDPRT`` for a SolidWorks part and
+    ``.SLDASM`` for a SolidWorks assembly. ``check=False`` is for debugging only; the result then
+    says ``check='skipped'``.
     """
     if target not in TARGETS:
         raise _bad_request(f"target must be one of {list(TARGETS)}, got {target!r}")
     doc_relative = _doc_path(doc)
-    suffix = _SUFFIX[target]
-    requested = Path(output) if output is not None else Path("exports") / f"{Path(doc_relative).stem}{suffix}"
-    _absolute, output_relative = project_path(requested, error_type="TransferError")
-    if output_relative.suffix.lower() != suffix.lower():
-        raise _bad_request(f"a {target} export must end in {suffix}, got {output_relative.as_posix()}")
-    task = asyncio.create_task(
-        request("transfer-export", doc=doc_relative, target=target, output=output_relative.as_posix(), check=bool(check))
-    )
+    wire: dict[str, Any] = {"doc": doc_relative, "target": target, "check": bool(check)}
+    if output is not None:
+        _absolute, output_relative = project_path(Path(output), error_type="TransferError")
+        if output_relative.suffix.lower() not in _SUFFIXES[target]:
+            allowed = " or ".join(item.replace(".sldprt", ".SLDPRT").replace(".sldasm", ".SLDASM") for item in _SUFFIXES[target])
+            raise _bad_request(f"a {target} export must end in {allowed}, got {output_relative.as_posix()}")
+        wire["output"] = output_relative.as_posix()
+    task = asyncio.create_task(request("transfer-export", **wire))
     return TransferJob(task, target)
 
 

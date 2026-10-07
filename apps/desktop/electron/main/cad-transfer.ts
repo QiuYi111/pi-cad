@@ -37,7 +37,11 @@ export interface DispatchRequest {
   jobId?: string;
   target: CadTransferTarget;
   /** A project-relative features.json path (spool) or the canonical feature JSON itself (UI). */
-  features: string | Record<string, unknown>;
+  features?: string | Record<string, unknown>;
+  /** "assembly": `assembly` replaces `features` (protocol section 6). */
+  kind?: "part" | "assembly";
+  /** A project-relative reify.assembly/1 JSON path (spool) or the assembly object itself. */
+  assembly?: string | Record<string, unknown>;
   native: string;
   checkStep?: string;
   check?: boolean;
@@ -51,7 +55,7 @@ export interface SpoolResult {
   ok: boolean;
   target: CadTransferTarget;
   executor?: Record<string, unknown>;
-  files: { native?: string; check_step?: string; log?: string };
+  files: { native?: string; check_step?: string; log?: string; extra?: string[] };
   features_built?: number;
   feature_volumes?: Array<{ name: string; volume_mm3: number }>;
   error: CadTransferError | null;
@@ -104,8 +108,13 @@ export const REFERENCE_PLATE_OPS = [
   { op: "pocket", name: "plate/pocket", sketch: "plate/pocket_profile", depth: 2 },
 ];
 
-export function nativeExtension(target: CadTransferTarget): string {
-  return target === "fusion" ? "f3d" : "SLDPRT";
+/** A document in assembly/ or assemblies/ is an assembly. The sidecar makes the final decision from the document. */
+export function isAssemblyDoc(doc: string): boolean {
+  return /^(assembly|assemblies)\//i.test(doc.replace(/\\/g, "/"));
+}
+
+export function nativeExtension(target: CadTransferTarget, assembly = false): string {
+  return target === "fusion" ? "f3d" : assembly ? "SLDASM" : "SLDPRT";
 }
 
 /** Target states of dispatcher.json, or "unavailable" when the file is missing or stale (> 15 s). */
@@ -262,8 +271,9 @@ export class CadTransferService {
       try { raw = JSON.parse(text ?? "") as Record<string, unknown>; }
       catch { await finish("fusion", failure("EXECUTOR_FAILED", "The transfer request is not valid JSON.")); return; }
       const target = raw.target === "solidworks" ? "solidworks" : raw.target === "fusion" ? "fusion" : null;
-      if (!target || raw.schema !== REQUEST_SCHEMA || raw.jobId !== id || typeof raw.features !== "string") {
-        await finish(target ?? "fusion", failure("EXECUTOR_FAILED", "The transfer request has a wrong schema, job id, target, or features path."));
+      if (!target || raw.schema !== REQUEST_SCHEMA || raw.jobId !== id
+        || (raw.kind === "assembly" ? typeof raw.assembly !== "string" : typeof raw.features !== "string")) {
+        await finish(target ?? "fusion", failure("EXECUTOR_FAILED", "The transfer request has a wrong schema, job id, target, or features or assembly path."));
         return;
       }
       if (await io.exists(`${SPOOL_DIR}/cancel/${id}`)) {
@@ -282,7 +292,9 @@ export class CadTransferService {
         } catch { /* An unreadable status file does not block the job. */ }
       }
       await this.runJob({
-        jobId: id, target, features: raw.features, native: String(raw.native ?? ""),
+        jobId: id, target,
+        ...(raw.kind === "assembly" ? { kind: "assembly" as const, assembly: raw.assembly as string } : { features: raw.features as string }),
+        native: String(raw.native ?? ""),
         checkStep: typeof raw.checkStep === "string" ? raw.checkStep : undefined,
         check: raw.check !== false, timeoutS: typeof raw.timeoutS === "number" ? raw.timeoutS : undefined,
       }, io);
@@ -308,6 +320,13 @@ export class CadTransferService {
     }
     if (typeof request.features === "string" && !isProjectRelative(request.features)) {
       return early(failure("EXECUTOR_FAILED", "The features path must stay inside the project."));
+    }
+    if (typeof request.assembly === "string" && !isProjectRelative(request.assembly)) {
+      return early(failure("EXECUTOR_FAILED", "The assembly path must stay inside the project."));
+    }
+    const isAssembly = request.kind === "assembly";
+    if (isAssembly ? request.assembly === undefined : request.features === undefined) {
+      return early(failure("EXECUTOR_FAILED", isAssembly ? "The assembly request has no assembly." : "The request has no features."));
     }
     return new Promise<SpoolResult>((resolve) => {
       const ctx: JobContext = {
@@ -414,13 +433,15 @@ export class CadTransferService {
       return this.finish(ctx, failure("TARGET_NOT_READY", status.detail, { step: status.state }), {}, {});
     }
 
+    const isAssembly = request.kind === "assembly";
     let features: Record<string, unknown>;
     try {
-      if (typeof request.features === "string") {
-        const text = await io.readText(request.features);
-        if (text === null) throw new Error(`Reify cannot read ${request.features}.`);
+      const source = (isAssembly ? request.assembly : request.features)!;
+      if (typeof source === "string") {
+        const text = await io.readText(source);
+        if (text === null) throw new Error(`Reify cannot read ${source}.`);
         features = JSON.parse(text) as Record<string, unknown>;
-      } else features = request.features;
+      } else features = source;
     } catch (error) {
       return this.finish(ctx, failure("EXECUTOR_FAILED", `The feature file is not usable: ${String((error as Error).message ?? error)}`), {}, {});
     }
@@ -430,8 +451,9 @@ export class CadTransferService {
     const timeoutS = Math.min(MAX_TIMEOUT_S, Math.max(1, request.timeoutS ?? DEFAULT_TIMEOUT_S));
     const check = request.check !== false;
     const job = {
-      schema: JOB_SCHEMA, jobId, target: request.target, features,
-      output: { native: `part.${nativeExtension(request.target)}`, check_step: "check.step" },
+      schema: JOB_SCHEMA, jobId, target: request.target,
+      ...(isAssembly ? { kind: "assembly", assembly: features } : { features }),
+      output: { native: `part.${nativeExtension(request.target, isAssembly)}`, check_step: "check.step" },
       check, timeoutS,
     };
     const jobText = `${JSON.stringify(job)}\n`;
@@ -520,6 +542,18 @@ export class CadTransferService {
         await io.copyIn(checkSource, checkTarget);
         files.check_step = checkTarget;
       }
+      if (Array.isArray(names.extra)) {
+        const extras: string[] = [];
+        for (const name of names.extra.slice(0, 200)) {
+          if (typeof name !== "string" || !/^[^\\/]+$/.test(name) || name === ".." || name === ".") throw new Error("The CAD program listed an extra file with a bad name.");
+          const source = p.join(folder, name);
+          if (!(await fs.exists(source))) throw new Error(`The CAD program did not write ${name}.`);
+          const target = posix.join(posix.dirname(request.native), name);
+          await io.copyIn(source, target);
+          extras.push(target);
+        }
+        if (extras.length) files.extra = extras;
+      }
     } catch (error) {
       return this.finish(ctx, failure("EXECUTOR_FAILED", `Reify cannot copy the result into the project: ${String((error as Error).message ?? error)}`), result, files);
     }
@@ -548,9 +582,12 @@ export class CadTransferService {
     const relative = artifactPath.replace(/\\/g, "/").replace(/^\.\//, "");
     if (/\.FCStd$/i.test(relative)) return relative;
     const stem = posix.basename(relative).replace(/\.[^.]+$/, "");
-    const candidates = [`parts/${stem}.FCStd`, `${stem}.FCStd`, `models/${stem}.FCStd`];
+    const candidates = [
+      `parts/${stem}.FCStd`, `${stem}.FCStd`, `models/${stem}.FCStd`,
+      `assembly/${stem}.FCStd`, `assemblies/${stem}.FCStd`,
+    ];
     for (const candidate of candidates) if (await io.exists(candidate)) return candidate;
-    throw new Error(`Reify cannot find the part file for ${posix.basename(relative)}. Only FreeCAD parts can go to a CAD program.`);
+    throw new Error(`Reify cannot find the part file for ${posix.basename(relative)}. Only FreeCAD parts and assemblies can go to a CAD program.`);
   }
 
   /**
@@ -612,7 +649,9 @@ export class CadTransferService {
         if (!io) throw new Error("Choose a project before an export.");
         const doc = await this.resolvePartDoc(artifactPath, io);
         this.agentJobs.delete(jobId);
-        await this.exportViaAgent(io, { jobId, target, doc, native: `exports/${stem}.${nativeExtension(target)}`, part: stem });
+        const assembly = isAssemblyDoc(doc);
+        const docStem = posix.basename(doc).replace(/\.[^.]+$/, "");
+        await this.exportViaAgent(io, { jobId, target, doc, native: `exports/${docStem}.${nativeExtension(target, assembly)}`, part: stem });
       } catch (error) {
         this.agentJobs.delete(jobId);
         const message = String((error as Error).message ?? error);

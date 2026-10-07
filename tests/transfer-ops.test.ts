@@ -173,6 +173,35 @@ test("a caller can choose the job id", async () => {
   await assert.rejects(handleTransferOperation(cwd, { ...exportRequest, jobId: "../x" } as never), (error: any) => error.code === "BAD_REQUEST");
 });
 
+test("an assembly document is exported as an assembly job with the default .SLDASM name", async () => {
+  await dispatcher({ fusion: "ready", solidworks: "ready" });
+  transferHooks.canonicalize = async () => ({ ...canonical, kind: "assembly", features: { schema: "reify.assembly/1", reference: { feature_volumes: [{ name: "plate/base", volume_mm3: 6000 }] } } });
+  let seen: any = null;
+  answer = async (request) => {
+    seen = request;
+    await mkdir(join(cwd, "exports"), { recursive: true });
+    await writeFile(join(cwd, request.native), "asm");
+    await writeFile(join(cwd, request.checkStep), "step");
+    return { ok: true, files: { native: request.native, check_step: request.checkStep }, features_built: 7, feature_volumes: [{ name: "plate/base", volume_mm3: 6000 }] };
+  };
+  const result = await handleTransferOperation(cwd, { schema: 1, op: "transfer-export", doc: "parts/plate.FCStd", target: "solidworks" } as never) as any;
+  assert.equal(result.file, "exports/plate.SLDASM");
+  assert.equal(seen.kind, "assembly");
+  assert.equal(typeof seen.assembly, "string");
+  assert.equal(seen.features, undefined);
+  await assert.rejects(
+    handleTransferOperation(cwd, { schema: 1, op: "transfer-export", doc: "parts/plate.FCStd", target: "solidworks", output: "exports/x.SLDPRT" } as never),
+    (error: any) => error.code === "BAD_REQUEST",
+  );
+});
+
+test("the dry run reports the kind of the document", async () => {
+  transferHooks.canonicalize = async () => ({ ...canonical, kind: "assembly" });
+  const result = await handleTransferOperation(cwd, { schema: 1, op: "transfer-features", doc: "parts/plate.FCStd" }) as any;
+  assert.equal(result.kind, "assembly");
+  assert.equal(result.path, "build/transfer/plate.assembly.json");
+});
+
 test("check=False skips the check and says so", async () => {
   await dispatcher({ fusion: "ready", solidworks: "not_installed" });
   transferHooks.inspect = async () => { throw new Error("must not inspect"); };

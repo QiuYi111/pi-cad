@@ -85,7 +85,7 @@ class CadTransferTests(unittest.TestCase):
 
         result = asyncio.run(scenario())
         request.assert_awaited_once_with(
-            "transfer-export", doc="parts/bracket.FCStd", target="fusion", output="exports/bracket.f3d", check=True,
+            "transfer-export", doc="parts/bracket.FCStd", target="fusion", check=True, output="exports/bracket.f3d",
         )
         self.assertEqual(
             repr(result), "TransferResult(target='fusion', file='exports/bracket.f3d', check='passed', features=7)"
@@ -102,8 +102,9 @@ class CadTransferTests(unittest.TestCase):
 
         asyncio.run(scenario())
         first, second = request.await_args_list
-        self.assertEqual(first.kwargs["output"], "exports/bracket.f3d")
-        self.assertEqual(second.kwargs["output"], "exports/bracket.SLDPRT")
+        # The sidecar picks the default name: it knows if the document is a part or an assembly.
+        self.assertNotIn("output", first.kwargs)
+        self.assertNotIn("output", second.kwargs)
         self.assertFalse(second.kwargs["check"])
 
     def test_skipped_check_is_reported(self) -> None:
@@ -126,6 +127,8 @@ class CadTransferTests(unittest.TestCase):
             asyncio.run(run(target="catia"))
         with self.assertRaisesRegex(cad.CadApiError, r"must end in \.f3d"):
             asyncio.run(run(target="fusion", output="exports/bracket.SLDPRT"))
+        with self.assertRaisesRegex(cad.CadApiError, "SLDPRT or .SLDASM"):
+            asyncio.run(run(target="solidworks", output="exports/bracket.f3d"))
         with self.assertRaisesRegex(cad.CadApiError, "escapes the project root"):
             asyncio.run(run(target="fusion", output="../bracket.f3d"))
         request.assert_not_awaited()
