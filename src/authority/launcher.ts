@@ -647,7 +647,9 @@ async function bootstrapPrimeKernel(primeRoot: string, primeAgentDir: string, pr
     PRIME_AGENT_KERNEL_VENV: primeKernelVenv,
   };
   delete env.PRIME_AGENT_KERNEL_PYTHON;
-  const result = await capturedChildExit(process.execPath, [join(primeRoot, "node_modules", "tsx", "dist", "cli.mjs"), join(primeRoot, "packages", "coding-agent", "src", "core", "kernel", "bootstrap-cli.ts")], env);
+  const packagedBootstrap = join(primeRoot, "packages", "coding-agent", "dist", "core", "kernel", "bootstrap-cli.js");
+  const bootstrapCli = existsSync(packagedBootstrap) ? packagedBootstrap : join(primeRoot, "packages", "coding-agent", "src", "core", "kernel", "bootstrap-cli.ts");
+  const result = await capturedChildExit(process.execPath, [join(primeRoot, "node_modules", "tsx", "dist", "cli.mjs"), bootstrapCli], env);
   if (result.code !== 0) {
     const failure = JSON.stringify({ primeSha: gitRevision(primeRoot), piCadSha: gitRevision(repository), venv: primeKernelVenv, executable: join(primeKernelVenv, "bin", "python"), prefix: "unavailable", stage: "bootstrap" });
     throw new Error(`PRIME_KERNEL_PROVENANCE_FAILURE ${failure}\nPrime kernel bootstrap failed: ${result.diagnostic.trim() || `exit code ${result.code}`}`);
