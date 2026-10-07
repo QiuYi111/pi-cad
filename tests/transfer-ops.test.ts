@@ -158,6 +158,21 @@ test("a good export is checked and returns the native file", async () => {
   assert.equal(result.features, 7);
 });
 
+test("a caller can choose the job id", async () => {
+  await dispatcher({ fusion: "ready", solidworks: "not_installed" });
+  let seen = "";
+  answer = async (request) => {
+    seen = request.jobId;
+    await mkdir(join(cwd, "exports"), { recursive: true });
+    await writeFile(join(cwd, request.native), "f3d");
+    await writeFile(join(cwd, request.checkStep), "step");
+    return { ok: true, files: { native: request.native, check_step: request.checkStep }, features_built: 7 };
+  };
+  await handleTransferOperation(cwd, { ...exportRequest, jobId: "ui-job-1" } as never);
+  assert.equal(seen, "ui-job-1");
+  await assert.rejects(handleTransferOperation(cwd, { ...exportRequest, jobId: "../x" } as never), (error: any) => error.code === "BAD_REQUEST");
+});
+
 test("check=False skips the check and says so", async () => {
   await dispatcher({ fusion: "ready", solidworks: "not_installed" });
   transferHooks.inspect = async () => { throw new Error("must not inspect"); };

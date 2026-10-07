@@ -233,7 +233,11 @@ async function exportOperation(cwd: string, request: Extract<TransferRequest, { 
     });
   }
 
-  const jobId = newJobId();
+  if (request.jobId !== undefined && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.jobId)) {
+    throw transferError("jobId must be 1 to 64 letters, digits, _ or -", "BAD_REQUEST", { detail: { jobId: request.jobId } });
+  }
+  // The desktop UI picks the id, so its progress events and its cancel button name the same job.
+  const jobId = request.jobId ?? newJobId();
   const workRel = join("build", "transfer", jobId);
   const referenceRel = projectRelativePath(cwd, join(workRel, "reference.step"));
   const featuresRel = projectRelativePath(cwd, join(workRel, "features.json"));
