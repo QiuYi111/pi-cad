@@ -31,7 +31,7 @@ class ExecError(Exception):
 
 
 def utc_now_iso(ts=None):
-    d = datetime.datetime.utcfromtimestamp(time.time() if ts is None else ts)
+    d = datetime.datetime.fromtimestamp(time.time() if ts is None else ts, datetime.timezone.utc)
     return d.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

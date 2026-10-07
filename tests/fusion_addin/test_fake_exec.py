@@ -25,7 +25,10 @@ class FakeExecTests(unittest.TestCase):
     def run_job(self, features=None, **fake_kw):
         app = fake_adsk.install(**fake_kw)
         import fusion_exec
-        job = {"schema": jobs.JOB_SCHEMA, "jobId": "j1", "target": "fusion", "features": features or _path.sample(),
+        if features is None:
+            features = _path.sample()
+            features.pop("parameters")  # value path; test_fake_p2p3 covers expression binding
+        job = {"schema": jobs.JOB_SCHEMA, "jobId": "j1", "target": "fusion", "features": features,
                "output": {"native": "part.f3d", "check_step": "check.step"}, "check": True, "timeoutS": 60}
         jobs.atomic_write_json(os.path.join(jobroot.inbox_dir(self.fdir), "j1.json"), job)
         res = jobs.process_job(self.fdir, "j1", fusion_exec.FusionExecutor(app), INFO)
@@ -92,6 +95,7 @@ class FakeExecTests(unittest.TestCase):
 
     def test_midplane_and_through_all(self):
         f = _path.sample()
+        f.pop("parameters")
         f["bodies"][0]["features"][0]["midplane"] = True
         f["bodies"][0]["features"][3]["extent"] = {"type": "through_all"}
         app, res = self.run_job(f)

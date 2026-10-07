@@ -40,6 +40,8 @@ class Vector3D(Point3D):
 
 
 class ValueInput(object):
+    text = None
+
     def __init__(self, v):
         self.value = v
 
@@ -334,7 +336,14 @@ class Sketches(object):
 
     def add(self, plane):
         assert hasattr(plane, "normal_t")
-        return Sketch(self.app, plane)
+        sk = Sketch(self.app, plane)
+        self.app.all_sketches.append(sk)
+        return sk
+
+
+def _val(vi):
+    """Plain number for createByReal inputs, the ValueInput itself for expression inputs."""
+    return vi if vi.text is not None else vi.value
 
 
 class ExtrudeInput(object):
@@ -343,10 +352,10 @@ class ExtrudeInput(object):
         self.extent = None
 
     def setOneSideExtent(self, edef, direction, taper=None):
-        self.extent = ("one_side", edef.distance.value, direction)
+        self.extent = ("one_side", _val(edef.distance), direction)
 
     def setSymmetricExtent(self, vi, full):
-        self.extent = ("symmetric", vi.value, full)
+        self.extent = ("symmetric", _val(vi), full)
 
     def setAllExtent(self, direction):
         self.extent = ("all", None, direction)
@@ -579,7 +588,12 @@ def _edge(otype, mid, length_mm, a, b):
 
 
 def make_plane_face(origin, normal, area_mm2):
-    f = Face(tuple(normal), tuple(c / 10 for c in origin), xdir=(1, 0, 0), ydir=(0, 1, 0))
+    n = [c / math.sqrt(sum(k * k for k in normal)) for c in normal]
+    ref = (0, 0, 1) if abs(n[2]) < 0.9 else (1, 0, 0)
+    x = [ref[1] * n[2] - ref[2] * n[1], ref[2] * n[0] - ref[0] * n[2], ref[0] * n[1] - ref[1] * n[0]]
+    x = [c / math.sqrt(sum(k * k for k in x)) for c in x]
+    y = [n[1] * x[2] - n[2] * x[1], n[2] * x[0] - n[0] * x[2], n[0] * x[1] - n[1] * x[0]]
+    f = Face(tuple(n), tuple(c / 10 for c in origin), xdir=tuple(x), ydir=tuple(y))
     f.geometry = types.SimpleNamespace(objectType="adsk::core::Plane", origin=Point3D(*[c / 10 for c in origin]),
                                        normal=Vector3D(*normal), )
     f.area = area_mm2 / 100.0
@@ -652,6 +666,7 @@ class FakeApp(object):
         self.no_material = no_material
         self.log, self.features, self.planes = [], [], []
         self.occurrences, self.brep_edges, self.brep_faces = [], [], []
+        self.all_sketches = []
         self.materialLibraries = _Coll([types.SimpleNamespace(materials=_Coll([types.SimpleNamespace(
             materialProperties=types.SimpleNamespace(itemById=lambda i: object()))]))])
         self.closed = False
@@ -699,3 +714,21 @@ def install(**kw):
 def uninstall():
     for k in ("adsk", "adsk.core", "adsk.fusion", "fusion_exec"):
         sys.modules.pop(k, None)
+
+
+def edge_from_ref(ref):
+    """Fake BRep edge that exactly matches a canonical edge_ref (world mm)."""
+    cm = lambda v: Point3D(*[c / 10 for c in v])
+    otype = {"line": "adsk::core::Line3D", "circle": "adsk::core::Circle3D", "arc": "adsk::core::Arc3D"}[ref["curve"]]
+    a = ref.get("start", ref["midpoint"])
+    b = ref.get("end", ref["midpoint"])
+    e = _edge(otype, ref["midpoint"], ref["length"], a, b)
+    if ref["curve"] != "line":
+        e.geometry.center, e.geometry.radius = cm(ref["centre"]), ref["radius"] / 10
+        n = ref.get("axis", (0, 0, 1))
+        e.geometry.normal = Vector3D(*n)
+    return e
+
+
+def face_from_ref(ref):
+    return make_plane_face(ref["origin"], ref["normal"], ref["area"])

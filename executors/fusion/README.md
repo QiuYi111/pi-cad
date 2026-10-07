@@ -1,6 +1,6 @@
 # ReifyExport: Autodesk Fusion add-in
 
-Executes Reify canonical feature JSON (`reify.features/1`) in Fusion and exports `.f3d` plus a STEP file for the equivalence check. The wire contract is `docs/cad-transfer/protocol.md` (sections 1 and 2). Version 0.1.0.
+Executes Reify canonical feature JSON (`reify.features/1`) in Fusion and exports `.f3d` plus a STEP file for the equivalence check. The wire contract is `docs/cad-transfer/protocol.md` (sections 1 and 2). Version 0.2.0 (P0 to P3).
 
 ## Install
 
@@ -32,20 +32,33 @@ Thin Fusion layer: `fusion_exec.py` (all `adsk` calls), `ReifyExport.py` (run/st
 
 Threading: the watcher thread only calls `app.fireCustomEvent`. The event handler runs on the Fusion main thread and does all API calls. The heartbeat thread uses a cached snapshot (refreshed by a tick event and after each job), so the heartbeat stays fresh while a long job blocks the main thread.
 
-## What it builds (0.1.0)
+## What it builds (0.2.0)
 
-- `pad` (length, midplane, reversed via `direction`), `pocket` (length or through_all): P0.
-- `hole` (through_all, plain; cut-extrude of circles of `diameter` at `positions`, or at the circle centres of the referenced sketch), `polar_pattern` (CircularPatternFeature): P1. Both live behind `plan.build_plan(..., enable_p1=...)` and `P1_TYPES`.
+Each group sits behind a flag of `plan.build_plan(enable_p1, enable_p2, enable_p3, native_holes, bind_params)` so it can be switched off.
+
+- P0: `pad` (length, midplane), `pocket` (length or through_all).
+- P1: extrude-cut `hole` of circles (used when `native_holes=False`), `polar_pattern` (CircularPatternFeature, origin axis X/Y/Z through the origin only).
+- P2: `linear_pattern` (RectangularPatternFeature, one direction along a world axis, spacing mode), `mirror` (MirrorFeature; plane must be parallel to XY/XZ/YZ: origin plane when through the origin, else an offset construction plane; tilted planes are `UNSUPPORTED_OP` naming the feature), sketch `dimensions`, top-level `material.density_kg_m3`, assembly jobs.
+- P3: user parameters, native `holeFeatures` (through/blind, counterbore, countersink, drill point flat/angled), `fillet`, `chamfer` (edges resolved by `edgematch.py`), `face_ref` (`facematch.py`) for sketches on tilted faces and for `pad` `up_to_face`.
 - Sketch geometry: line, arc, circle, polyline. Each profile region is chosen with the even-odd rule (see `profiles.py`); profiles are never selected blindly.
-- Anything else raises `UNSUPPORTED_OP` naming the feature (and the option). Nothing is skipped silently.
+- Anything else raises `UNSUPPORTED_OP` naming the feature (and the option) in the plan, before Fusion is touched. Nothing is skipped silently.
 
-Decisions and limits:
+Behaviour worth knowing:
 
-- A second `pad` joins the existing body (first pad is a new body). A `pocket`/`hole` before any body is an error. Only one body per file.
-- `polar_pattern` axis must be a world X, Y or Z axis through the origin (maps to a Fusion origin construction axis). Other axes are rejected. A pattern of a pattern is rejected. For angles below 360 the angle is the span from first to last occurrence (UNVERIFIED that Fusion agrees).
-- Level 1 builds with the evaluated `value`. The Reify `expr` is kept in the plan (`extent.expr`) for a later level that maps it to Fusion user parameters.
-- Distances are passed with `ValueInput.createByReal` in cm (the API unit), not as strings, to avoid locale decimal separator problems.
-- Sketch plane: base origin plane when the offset is 0, else a construction plane by offset. The offset sign and extrude direction are measured against the real Fusion plane normal at run time (the sketch point mapping uses `sketch.modelToSketchSpace`), so a flipped Fusion normal is handled.
+- **Parameters (level 2).** `parameters[]` become `design.userParameters`. A scalar `expr` is bound (as a Fusion expression string) only when it passes `params.py`: grammar of protocol section 7, known names, the expected unit dimension (length or angle), and it evaluates to the scalar's `value` (1e-6). A bare number next to a quantity adopts its unit (`=hole_d + 2` becomes `hole_d + 2 mm`). Anything else uses the value and adds `{feature, field, expr, reason}` to `result.json` `warnings`. If Fusion rejects an accepted expression at feature creation, the feature is rebuilt from the value and a warning `field: "expression"` is added. The feature is never skipped. Parameters are design-global, so assembly jobs do not create them (one warning per part).
+- **Warnings.** `result.json` always has `warnings` (a list). Besides expressions it carries: cosmetic thread not created, hole-sketch dimensions not added (the hole sketch is rebuilt from `positions`), a dimension skipped because Fusion's sketch axes are rotated against the canonical u/v (horizontal/vertical is undefined), and a density that could not be applied.
+- **Holes.** `native_holes=True` (default) uses `holeFeatures` with sketch points at `positions`. A `thread` is NOT created: a Fusion tapped hole changes the hole diameter, which would break the equivalence check, so the hole keeps its diameter and a warning is added. `thread.modeled: true` is `UNSUPPORTED_OP`.
+- **Sketch dimensions.** Added after the geometry is drawn: `distance` (aligned), `distance_x`/`distance_y` (horizontal/vertical), `radius`, `diameter`, `angle`. A dimension that the API rejects fails the job with `EXECUTOR_FAILED`, `step: "dimension"`, and the message names the sketch. If the dimension carries a valid parameter expression, it is bound to the dimension.
+- **Edge and face refs.** Edges are matched by curve type, midpoint, length (and radius/centre/axis/start/end when given) with tolerance `1e-4 x max(part diagonal in mm, 1)`. Zero or several matches fail with `step: "edge_ref"` / `"face_ref"` naming the feature. The tolerance reading of "1e-4 mm times the part diagonal" is ours (protocol section 7 is ambiguous).
+- **Assemblies.** `job.kind == "assembly"` with `assembly` inline. One new design, one component per occurrence (`addNewComponent(matrix)`, matrix columns are the rotation columns, origin in cm), each built with the part's feature plan. The STEP and the single `part.f3d` contain the whole assembly. `feature_volumes` has one entry per occurrence name. Mirrored (det < 0) transforms are `UNSUPPORTED_OP`. `files.extra` is not produced.
+- **Material.** The density is set by copying a library material (`design.materials.addByCopy`), setting `structural_Density` (kg/cm^3) and assigning it to the bodies. If anything fails it is a warning, never a failed job.
+
+Other decisions and limits (from 0.1.0):
+
+- A second `pad` joins the existing body (first pad is a new body). A `pocket`/`hole`/`fillet`/`chamfer` before any body is an error. Only one body per part.
+- `polar_pattern` and `linear_pattern` need a world axis; `mirror` accepts patterns as originals, patterns do not. For angles below 360 the angle is the span from first to last occurrence.
+- Distances are passed with `ValueInput.createByReal` in cm (the API unit), or `createByString(expression)` when a parameter is bound.
+- Sketch plane: base origin plane when the offset is 0, else a construction plane by offset. Offset sign and extrude direction are measured against the real Fusion plane normal at run time (point mapping uses `sketch.modelToSketchSpace`), so a flipped Fusion normal is handled.
 - Reify is Z-up. The add-in forces `defaultModelingOrientation = ZUp` while creating the document and restores the preference afterwards.
 
 ## Unsaved and cloud documents (read this)
@@ -71,6 +84,21 @@ UNVERIFIED - check on a real install (each becomes a PR risk):
 12. The add-in runs on Fusion's bundled Python; only the standard library is used.
 13. A custom-event handler that runs for a long time (a minute or more) does not make Fusion show "not responding" or kill the add-in.
 14. Through-all cut with `setAllExtent` cuts all material on the chosen side only (sketch plane is the top face in the sample).
+
+### New UNVERIFIED items for P2 and P3
+
+15. `features.rectangularPatternFeatures.createInput(entities, axis, quantity, distance, SpacingPatternDistanceType)` accepts an origin construction axis and feature entities; a negative distance reverses the direction.
+16. `features.mirrorFeatures.createInput(features, plane)` accepts origin planes and offset `ConstructionPlane`s for feature mirroring.
+17. `sketch.sketchDimensions.addDistanceDimension / addRadialDimension / addDiameterDimension / addAngularDimension` signatures (point/entity, text position), `DimensionOrientations` enum names, and that setting `dimension.parameter.expression` to a parameter expression does not move the geometry. Dimensions on a point of a mirrored sketch, and `originPoint` use.
+18. `holeFeatures.createSimpleInput / createCounterboreInput / createCountersinkInput`, `setPositionBySketchPoints`, `setAllExtent(direction)`, `setDistanceExtent`, `isDefaultDirection` (assumed: default direction is opposite to the sketch normal), `tipAngle` (assumed: 0 means flat bottom, 118 deg default). Hole depth semantics (to the full diameter shoulder) versus FreeCAD.
+19. Cosmetic threads are not created at all (see Holes above). A real implementation needs `HoleFeatureInput` tapped-hole options and a check that the hole diameter is unchanged.
+20. `filletFeatures.createInput().addConstantRadiusEdgeSet(edges, radius, isTangentChain=False)` and `chamferFeatures.createInput2().chamferEdgeSets.addEqualDistanceChamferEdgeSet(edges, distance, False)`. If Fusion propagates the fillet along tangent edges anyway, the volume check will show it.
+21. `BRepEdge.geometry.objectType` strings (`adsk::core::Line3D`, `Circle3D`, `Arc3D`), `BRepEdge.evaluator.getPointAtParameter` at the parameter midpoint equals the arc-length midpoint, `BRepEdge.length` in cm, `BRepFace.geometry.objectType == "adsk::core::Plane"`, `BRepFace.area` in cm^2, `BRepBody.boundingBox`.
+22. `sketches.add(BRepFace)` for a sketch on a tilted face, and that `modelToSketchSpace` on it maps as assumed. `ExtrudeFeatureInput.setOneSideToExtent(face, matchShape, offsetDistance, directionHint)` signature (we pass `directionHint` by keyword).
+23. `design.userParameters.add(name, ValueInput, units, comment)` with `createByReal` in internal units (cm, radians) for `mm`/`deg` and with an expression string; Fusion's reserved names (we reject a short list in `params.RESERVED`); `createByString("thickness - 2 mm")` style expressions evaluate in the units we assume.
+24. Material: `app.materialLibraries`, `design.materials.addByCopy`, the property id `structural_Density` and its unit (assumed kg/cm^3), assigning `body.material`.
+25. Assemblies: `rootComponent.occurrences.addNewComponent(Matrix3D)` and `Matrix3D.setWithCoordinateSystem(origin, x, y, z)`; whether `sketch.modelToSketchSpace` inside an occurrence's component uses component-local space (assumed) or assembly space; whether features of different components stay independent in one parametric design; the single `.f3d` and the root STEP export contain all occurrences at their transforms.
+26. A pattern of a hole feature in a component, and a mirror of a pattern feature, recompute without error.
 
 ## Tests
 

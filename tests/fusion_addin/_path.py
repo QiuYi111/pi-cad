@@ -13,3 +13,9 @@ def sample():
     import json
     with open(os.path.join(FIXTURES, "sample_plate.features.json")) as fh:
         return json.load(fh)
+
+
+def fixture(name):
+    import json
+    with open(os.path.join(FIXTURES, name)) as fh:
+        return json.load(fh)

@@ -6,7 +6,7 @@
   "description": {
     "": "Executes Reify canonical feature JSON jobs (cad.transfer) and exports .f3d and STEP."
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "runOnStartup": false,
   "supportedOS": "windows|mac",
   "editEnabled": true
