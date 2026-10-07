@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace Reify.Export.SolidWorks
+namespace Reify.Export.Sw
 {
     /// <summary>Marshal.GetActiveObject does not exist on .NET (Core) 5+, so call the OLE function directly.</summary>
     internal static class ComHelper

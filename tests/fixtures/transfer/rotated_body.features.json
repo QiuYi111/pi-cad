@@ -1,0 +1,227 @@
+{
+  "schema": "reify.features/1",
+  "units": "mm",
+  "part": "part",
+  "source": {
+    "doc": "part.FCStd"
+  },
+  "bodies": [
+    {
+      "name": "part",
+      "sketches": [
+        {
+          "name": "part/profile",
+          "frame": {
+            "origin": [
+              10.0,
+              20.0,
+              30.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "n": [
+              0.0,
+              -1.0,
+              0.0
+            ]
+          },
+          "plane": {
+            "base": "XZ",
+            "offset": 20.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                -20.0,
+                -15.0
+              ],
+              "end": [
+                20.0,
+                -15.0
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                20.0,
+                -15.0
+              ],
+              "end": [
+                20.0,
+                15.0
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                20.0,
+                15.0
+              ],
+              "end": [
+                -20.0,
+                15.0
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -20.0,
+                15.0
+              ],
+              "end": [
+                -20.0,
+                -15.0
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 1200.0
+            }
+          ]
+        },
+        {
+          "name": "part/hole_profile",
+          "frame": {
+            "origin": [
+              10.0,
+              15.0,
+              30.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "n": [
+              0.0,
+              -1.0,
+              0.0
+            ]
+          },
+          "plane": {
+            "base": "XZ",
+            "offset": 15.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                10.0,
+                5.0
+              ],
+              "radius": 2.0
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 12.566371
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "name": "part/base",
+          "type": "pad",
+          "sketch": "part/profile",
+          "direction": [
+            0.0,
+            -1.0,
+            0.0
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 5.0
+            }
+          },
+          "midplane": false,
+          "reversed": false
+        },
+        {
+          "name": "part/bore",
+          "type": "hole",
+          "sketch": "part/hole_profile",
+          "direction": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "extent": {
+            "type": "through_all"
+          },
+          "diameter": {
+            "value": 4.0
+          },
+          "positions": [
+            [
+              10.0,
+              5.0
+            ]
+          ],
+          "reversed": false
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "volume_mm3": 5937.168147,
+    "bbox": {
+      "min": [
+        -10.0,
+        15.0,
+        15.0
+      ],
+      "max": [
+        30.0,
+        20.0,
+        45.0
+      ]
+    },
+    "feature_volumes": [
+      {
+        "name": "part/base",
+        "volume_mm3": 6000.0
+      },
+      {
+        "name": "part/bore",
+        "volume_mm3": 5937.168147
+      }
+    ]
+  }
+}

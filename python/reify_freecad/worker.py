@@ -114,6 +114,14 @@ class Worker:
         session.sync_links()
         return session.tree()
 
+    def cmd_export_features(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
+        """Canonical feature JSON of the recomputed document (read only: no revision, no history)."""
+        from . import transfer
+
+        session = self._session(doc)
+        session.sync_links()
+        return transfer.export_features(session, args.get("output"), args.get("referenceStep"))
+
     def cmd_query(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
         from . import queries
 
@@ -185,7 +193,7 @@ class Worker:
                 return {"id": request_id, "ok": True, "result": {"pid": os.getpid()}}
             if not isinstance(doc, str) or not doc:
                 raise ReifyOpError("BAD_REQUEST", "request needs 'doc'")
-            method = getattr(self, f"cmd_{op}", None)
+            method = getattr(self, f"cmd_{str(op).replace('-', '_')}", None)
             if method is None:
                 raise ReifyOpError("BAD_REQUEST", f"unknown command {op!r}")
             if op in {"check", "sweep"}:

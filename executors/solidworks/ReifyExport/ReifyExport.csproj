@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ImplicitUsings>disable</ImplicitUsings>
-    <RootNamespace>Reify.Export.SolidWorks</RootNamespace>
+    <RootNamespace>Reify.Export.Sw</RootNamespace>
     <AssemblyName>ReifyExport</AssemblyName>
     <Version>0.1.0</Version>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>

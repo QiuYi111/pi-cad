@@ -71,6 +71,18 @@
       }
     ],
     "win": {
+      "extraResources": [
+        {
+          "from": "../../executors/fusion/ReifyExport",
+          "to": "executors/fusion/ReifyExport",
+          "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
+        },
+        {
+          "from": "../../executors/solidworks/publish",
+          "to": "executors/solidworks",
+          "filter": ["**/*", "!**/*.pdb"]
+        }
+      ],
       "icon": "build/icon.ico",
       "target": [
         "nsis",
@@ -90,6 +102,13 @@
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "target": ["dmg", "zip"],
+      "extraResources": [
+        {
+          "from": "../../executors/fusion/ReifyExport",
+          "to": "executors/fusion/ReifyExport",
+          "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
+        }
+      ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",

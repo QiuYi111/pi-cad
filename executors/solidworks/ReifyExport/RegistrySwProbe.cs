@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Microsoft.Win32;
 
-namespace Reify.Export.SolidWorks
+namespace Reify.Export.Sw
 {
     /// <summary>Real registry probe for --check. UNVERIFIED: key layout HKLM\SOFTWARE\SolidWorks\SOLIDWORKS 20xx.</summary>
     internal sealed class RegistrySwProbe : ISwProbe

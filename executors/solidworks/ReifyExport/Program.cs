@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 
-namespace Reify.Export.SolidWorks
+namespace Reify.Export.Sw
 {
     internal static class Program
     {

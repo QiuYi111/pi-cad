@@ -1,0 +1,255 @@
+{
+  "schema": "reify.features/1",
+  "units": "mm",
+  "part": "part",
+  "source": {
+    "doc": "part.FCStd"
+  },
+  "bodies": [
+    {
+      "name": "part",
+      "sketches": [
+        {
+          "name": "part/profile",
+          "frame": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "n": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 0.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                -40.0,
+                -40.0
+              ],
+              "end": [
+                40.0,
+                -40.0
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                40.0,
+                -40.0
+              ],
+              "end": [
+                40.0,
+                40.0
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                40.0,
+                40.0
+              ],
+              "end": [
+                -40.0,
+                40.0
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -40.0,
+                40.0
+              ],
+              "end": [
+                -40.0,
+                -40.0
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 6400.0
+            }
+          ]
+        },
+        {
+          "name": "part/hole_profile",
+          "frame": {
+            "origin": [
+              0.0,
+              0.0,
+              6.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "n": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 6.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                20.0,
+                0.0
+              ],
+              "radius": 2.5
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 19.634954
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "name": "part/base",
+          "type": "pad",
+          "sketch": "part/profile",
+          "direction": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 6.0
+            }
+          },
+          "midplane": false,
+          "reversed": false
+        },
+        {
+          "name": "part/bolt",
+          "type": "hole",
+          "sketch": "part/hole_profile",
+          "direction": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "extent": {
+            "type": "through_all"
+          },
+          "diameter": {
+            "value": 5.0
+          },
+          "positions": [
+            [
+              20.0,
+              0.0
+            ]
+          ],
+          "reversed": false
+        },
+        {
+          "name": "part/ring",
+          "type": "polar_pattern",
+          "originals": [
+            "part/bolt"
+          ],
+          "axis": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "direction": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "angle": {
+            "value": 360.0
+          },
+          "occurrences": 4,
+          "full_circle": true
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "volume_mm3": 37928.761102,
+    "bbox": {
+      "min": [
+        -40.0,
+        -40.0,
+        0.0
+      ],
+      "max": [
+        40.0,
+        40.0,
+        6.0
+      ]
+    },
+    "feature_volumes": [
+      {
+        "name": "part/base",
+        "volume_mm3": 38400.0
+      },
+      {
+        "name": "part/bolt",
+        "volume_mm3": 38282.190275
+      },
+      {
+        "name": "part/ring",
+        "volume_mm3": 37928.761102
+      }
+    ]
+  }
+}

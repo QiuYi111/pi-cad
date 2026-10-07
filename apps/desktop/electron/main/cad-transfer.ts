@@ -73,6 +73,11 @@ interface JobContext {
   cancelled: boolean;
   process?: RunningProcess;
   resolve: (result: SpoolResult) => void;
+  startedAt?: number;
+  logHost?: string;
+  logProject?: string;
+  /** Status writes of one job run in order. */
+  writes: Promise<void>;
 }
 
 const EXECUTOR_CODES = new Set<CadTransferErrorCode>(["EXECUTOR_FAILED", "UNSUPPORTED_OP", "BUSY"]);
@@ -129,6 +134,7 @@ export class CadTransferService {
   private beatTimer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
   private readonly seen = new Set<string>();
+  private readonly logHosts = new Map<string, string>();
   private readonly jobs = new Map<string, JobContext>();
   private readonly queues: Record<CadTransferTarget, JobContext[]> = { fusion: [], solidworks: [] };
   private readonly busy: Record<CadTransferTarget, boolean> = { fusion: false, solidworks: false };
@@ -295,7 +301,7 @@ export class CadTransferService {
     }
     return new Promise<SpoolResult>((resolve) => {
       const ctx: JobContext = {
-        jobId, request, io, cancelled: false, resolve,
+        jobId, request, io, cancelled: false, resolve, writes: Promise.resolve(),
         job: { jobId, target: request.target, state: "queued", message: "Waiting for the CAD program.", updatedAt: "", part: request.part },
       };
       this.jobs.set(jobId, ctx);
@@ -336,9 +342,9 @@ export class CadTransferService {
   private async setPhase(ctx: JobContext, state: CadTransferJobPhase, message: string, patch: Partial<CadTransferJob> = {}): Promise<void> {
     ctx.job = { ...ctx.job, ...patch, state, message, updatedAt: new Date(this.deps.clock.now()).toISOString() };
     this.deps.emit?.({ type: "job", job: ctx.job });
-    await ctx.io.writeTextAtomic(`${SPOOL_DIR}/status/${ctx.jobId}.json`, `${JSON.stringify({
-      jobId: ctx.jobId, state, message, updatedAt: ctx.job.updatedAt,
-    }, null, 2)}\n`).catch(() => undefined);
+    const text = `${JSON.stringify({ jobId: ctx.jobId, state, message, updatedAt: ctx.job.updatedAt }, null, 2)}\n`;
+    ctx.writes = ctx.writes.then(() => ctx.io.writeTextAtomic(`${SPOOL_DIR}/status/${ctx.jobId}.json`, text).catch(() => undefined));
+    await ctx.writes;
   }
 
   private resultOf(
@@ -365,8 +371,12 @@ export class CadTransferService {
     let nativeFolder: string | undefined;
     if (files.native) nativeFolder = await ctx.io.toHostPath(posix.dirname(files.native)).catch(() => undefined);
     await ctx.io.writeTextAtomic(`${SPOOL_DIR}/results/${ctx.jobId}.json`, `${JSON.stringify(result, null, 2)}\n`).catch(() => undefined);
+    if (ctx.logHost) {
+      this.logHosts.set(ctx.jobId, ctx.logHost);
+      if (this.logHosts.size > 50) this.logHosts.delete(this.logHosts.keys().next().value as string);
+    }
     await this.setPhase(ctx, phase, message, {
-      error, ...(files.native ? { native: files.native } : {}), ...(nativeFolder ? { nativeFolder } : {}),
+      error, ...(ctx.logHost ? { logPath: ctx.logHost } : {}), ...(files.native ? { native: files.native } : {}), ...(nativeFolder ? { nativeFolder } : {}),
     });
     this.jobs.delete(ctx.jobId);
     ctx.resolve(result);
@@ -423,13 +433,14 @@ export class CadTransferService {
     }
 
     // Wait for the executor.
-    let stderr = "";
-    let exitCode: number | null = null;
-    let exited = false;
+    const exit = { done: false, code: null as number | null, stderr: "" };
     if (request.target === "solidworks") {
       const exe = this.deps.bundledSolidworksExe!;
       ctx.process = this.deps.runner.start(exe, ["--job", folder]);
-      void ctx.process.done.then((r) => { exited = true; exitCode = r.code; stderr = r.stderr; }, (e) => { exited = true; exitCode = -1; stderr = String(e); });
+      void ctx.process.done.then(
+        (r) => { exit.done = true; exit.code = r.code; exit.stderr = r.stderr; },
+        (e) => { exit.done = true; exit.code = -1; exit.stderr = String(e); },
+      );
     }
     let resultText: string | null = null;
     let parsed: Record<string, unknown> | null = null;
@@ -440,19 +451,18 @@ export class CadTransferService {
       if (resultText) {
         try { parsed = JSON.parse(resultText) as Record<string, unknown>; break; } catch { /* The executor may still write. */ }
       }
-      if (exited && !parsed) {
+      if (exit.done && !parsed) {
         // The program ended. Read once more, then give up.
         resultText = await fs.readText(resultFile);
         try { parsed = resultText ? JSON.parse(resultText) as Record<string, unknown> : null; } catch { parsed = null; }
         if (!parsed) {
-          const tail = stderr.trim().split(/\r?\n/).slice(-3).join(" ").slice(0, 300);
-          outcome = failure("EXECUTOR_FAILED", `ReifyExport ended with code ${exitCode} and wrote no result.${tail ? ` ${tail}` : ""}`);
+          const tail = exit.stderr.trim().split(/\r?\n/).slice(-3).join(" ").slice(0, 300);
+          outcome = failure("EXECUTOR_FAILED", `ReifyExport ended with code ${exit.code} and wrote no result.${tail ? ` ${tail}` : ""}`);
         }
         break;
       }
       if (clock.now() >= deadline) { outcome = failure("TIMEOUT", `The CAD program did not finish in ${timeoutS} s.`); break; }
       await Promise.race([clock.sleep(EXECUTOR_POLL_MS), ctx.process?.done.then(() => undefined, () => undefined) ?? new Promise<void>(() => undefined)]);
-      if (exited) await clock.sleep(0);
     }
     if (outcome) {
       ctx.process?.kill();
@@ -597,16 +607,15 @@ export class CadTransferService {
       native: `build/transfer-test/plate-${stamp}.${nativeExtension(target)}`,
       checkStep: `build/transfer-test/plate-${stamp}.check.step`,
     }, io);
-    const host = result.files.log ? await io.toHostPath(result.files.log).catch(() => undefined) : undefined;
-    const logPath = this.jobs.get(result.jobId)?.logHost ?? host;
+    const logPath = this.logHosts.get(result.jobId);
     steps.push({ name: "CAD program exported", ok: result.ok, detail: result.error?.message });
     if (!result.ok) {
-      return done(false, result.error?.message ?? "The export failed.", { logPath: host, failedFeature: result.error?.feature });
+      return done(false, result.error?.message ?? "The export failed.", { logPath, failedFeature: result.error?.feature });
     }
     const mismatch = firstVolumeMismatch(features, result);
     steps.push({ name: "Feature volumes match", ok: !mismatch, detail: mismatch ? `Feature ${mismatch}` : undefined });
-    if (mismatch) return done(false, `The volume after feature ${mismatch} differs from Reify.`, { logPath: host ?? logPath, failedFeature: mismatch });
-    return done(true, "Test export passed.", { logPath: host ?? logPath });
+    if (mismatch) return done(false, `The volume after feature ${mismatch} differs from Reify.`, { logPath, failedFeature: mismatch });
+    return done(true, "Test export passed.", { logPath });
   }
 }
 

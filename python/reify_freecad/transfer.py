@@ -22,7 +22,7 @@ from typing import Any
 import FreeCAD as App
 
 from . import transfer_geometry as tg
-from .core import bodies, get_path, is_feature, is_sketch, path_index
+from .core import bodies, get_path, is_feature, is_sketch
 from .errors import ReifyOpError
 
 SCHEMA = "reify.features/1"
@@ -85,7 +85,7 @@ def _check_support(sketch: Any, feature: Any) -> None:
         owner, subs = entry[0], entry[1]
         if owner.TypeId == "App::Plane":
             continue
-        if not ALLOW_FACE_SKETCHES and any(subs) or owner.isDerivedFrom("PartDesign::Feature"):
+        if not ALLOW_FACE_SKETCHES and (any(subs) or owner.isDerivedFrom("PartDesign::Feature")):
             raise _unsupported(_name(sketch), "sketch", "attached_to_face",
                                f"sketch {_name(sketch)} is attached to a face of {_name(owner)}; use an origin plane with an offset")
         raise _unsupported(_name(sketch), "sketch", "attachment", f"sketch is attached to {owner.TypeId}, only origin planes are supported")
@@ -288,7 +288,70 @@ def _bbox(shape: Any) -> Any:
         return shape.BoundBox
 
 
+def _reject_unsupported_objects(doc: Any) -> None:
+    for obj in doc.Objects:
+        path = get_path(obj)
+        if obj.TypeId in ("App::Part", "App::Link") or "OccurrenceKind" in obj.PropertiesList:
+            raise _unsupported(path or obj.Label, "assembly", "occurrence", "assemblies and occurrences are not supported by cad.transfer")
+        if path and obj.TypeId == "Part::Feature":
+            raise _unsupported(path, "import", "imported_solid", "imported solids are not supported by cad.transfer")
+
+
 def canonicalize(session: Any) -> dict[str, Any]:
-    """Canonical feature JSON for every body of the open session's document."""
-    from .export import _sha256 if False else None  # noqa: placeholder removed below
-    raise NotImplementedError
+    """Canonical feature JSON (``reify.features/1``) for every body of the session's document."""
+    from .session import _sha256
+
+    doc = session.doc
+    _reject_unsupported_objects(doc)
+    body_objs = bodies(doc)
+    if not body_objs:
+        raise _unsupported(None, "document", "no_body", "the document has no body")
+    entries, all_volumes = [], []
+    volume = 0.0
+    box = None
+    for body in body_objs:
+        entry, volumes = _body_entry(body)
+        entries.append(entry)
+        all_volumes += volumes
+        if not body.Shape.isNull():
+            volume += body.Shape.Volume
+            bb = _bbox(body.Shape)
+            if box is None:
+                box = App.BoundBox(bb)
+            else:
+                box.add(bb)
+    root = Path(session.root)
+    try:
+        source_doc = Path(session.fcstd).relative_to(root).as_posix()
+    except ValueError:
+        source_doc = Path(session.fcstd).as_posix()
+    part = _name(body_objs[0]) if len(body_objs) == 1 else Path(session.fcstd).stem
+    return {
+        "schema": SCHEMA, "units": "mm", "part": part,
+        "source": {"doc": source_doc, "sha256": _sha256(Path(session.fcstd))},
+        "bodies": entries,
+        "reference": {
+            "volume_mm3": _r(volume),
+            "bbox": {"min": [_r(box.XMin), _r(box.YMin), _r(box.ZMin)], "max": [_r(box.XMax), _r(box.YMax), _r(box.ZMax)]} if box else None,
+            "feature_volumes": all_volumes,
+        },
+    }
+
+
+def export_features(session: Any, output: str | None = None, reference_step: str | None = None) -> dict[str, Any]:
+    """Worker result: the canonical JSON plus bookkeeping; optionally write the JSON and a reference STEP."""
+    data = canonicalize(session)
+    result: dict[str, Any] = {
+        "features": data, "featureCount": sum(len(b["features"]) for b in data["bodies"]), "part": data["part"],
+    }
+    if output:
+        target = Path(output)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        result["path"] = str(target)
+    if reference_step:
+        from . import export as export_module
+
+        export_module.write_step(session, Path(reference_step))
+        result["referenceStep"] = str(reference_step)
+    return result
