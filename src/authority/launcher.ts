@@ -284,7 +284,7 @@ function bindAtOriginalPath(args: string[], path: string): void {
 }
 
 function passEnvironment(args: string[], name: string, value: string | undefined): void {
-  if (value !== undefined) args.push("--setenv", name, value);
+  if (value !== undefined && value !== "") args.push("--setenv", name, value);
 }
 
 export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], permission: "workspace" | "read-only" = "workspace"): string[] {
