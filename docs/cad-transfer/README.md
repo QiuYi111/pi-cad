@@ -81,30 +81,39 @@ Sidecar operations: `transfer-status`, `transfer-features`, `transfer-export`. I
 
 The coordinate system stays Z up. A Y-up option is a later change. If it is added, it must also apply to STEP and assemblies.
 
-## Supported features (P0 and P1)
+## Supported features
 
 | Reify feature | Fusion | SolidWorks |
 |---|---|---|
-| `pad` (length, `midplane`, `reversed`) | yes | yes |
+| `pad` (length, `midplane`, `reversed`, `up_to_face` on a planar face) | yes | yes |
 | `pocket` (length or `through_all`) | yes | yes |
-| `hole` (`through_all`, plain) | yes, as a cut-extrude of circles | yes, as a cut-extrude of circles |
-| `polar_pattern` (axis along X, Y or Z through the origin) | yes | yes |
+| `hole`: through, blind, counterbore, countersink, drill point | yes (native hole) | yes (Hole Wizard) |
+| `hole`: cosmetic thread | no (a warning is written; the diameter stays) | yes |
+| `fillet`, `chamfer` (constant size, edges found by geometry) | yes | yes |
+| `polar_pattern`, `linear_pattern` (axis along X, Y or Z) | yes | yes |
+| `mirror` (origin plane or offset plane) | yes | base or offset plane |
 | Sketch geometry: line, arc, circle | yes | yes |
-| Sketch plane: XY, XZ, YZ plus offset, Body placement | yes | yes |
-| Island inside a pocket loop (nesting depth 2 or more) | yes (even-odd rule) | **no** |
+| Sketch plane: XY, XZ, YZ plus offset, Body placement; sketches on planar faces | yes | yes |
+| Sketch dimensions (level 1: values) | yes | yes |
+| Reify parameters (level 2: user parameters / equations) | yes | yes |
+| Density | yes (warning if the API cannot set it) | mass override only (always a warning) |
+| Assemblies: part positions only | yes (one `.f3d`) | yes (`.SLDASM` plus part files) |
+| Island inside a loop (nesting depth 2 or more) | yes (even-odd rule) | **no** |
 
-Everything else stops the export with `TRANSFER_UNSUPPORTED_OP`, and the error names the feature: `fillet`, `chamfer`, `linear_pattern`, `mirror`, blind, counterbore, countersink and threaded holes, `up_to_face`, sketches attached to a face, tilted sketch planes, assemblies, suppressed features. Reify never skips a feature silently.
+When an expression is outside the supported grammar (numbers, parameter names, `+ - * /`, parentheses, `mm`, `deg`), the executor uses the value and writes an entry in `result.json` `warnings`. It never skips a feature.
+
+Everything else stops the export with `TRANSFER_UNSUPPORTED_OP`, and the error names the feature: modeled threads, taper, midplane pockets, pad `up_to_last`/`two_lengths`, variable fillets, non-planar faces, bought-in STEP units in an assembly, joints and mates. Reify never skips a feature silently. The canonicalizer deviations are in [protocol.md](protocol.md) section 8.
 
 ## Known limits
 
 - The two executors have not run against a real Fusion or SolidWorks yet. Both READMEs list every API assumption that needs a real install: [Fusion](../../executors/fusion/README.md), [SolidWorks](../../executors/solidworks/README.md). The SolidWorks executor has not been compiled.
-- Level-1 only: dimensions are values. The JSON carries the Reify expression (`expr`), but the executors do not use it yet. A dimension change in Fusion or SolidWorks changes the feature, not the Reify parameter.
+- A dimension change in Fusion or SolidWorks changes that file only. It does not change the Reify parameter. Parameters that Reify exports become user parameters (Fusion) or equations (SolidWorks), so one change there rebuilds all features that use it.
+- The highest-risk unverified parts are the assembly code (both targets) and the SolidWorks Hole Wizard call. Its constants are placeholders. Record a macro in SolidWorks and replace them.
 - Fusion shows the new document tab during a job. The add-in closes the document without a cloud save (`close(False)`). Check on a real install that nothing reaches the cloud project.
 - The Fusion and SolidWorks API versions that were tested are not pinned yet. Record them after the manual checks.
 - SolidWorks runs only on the customer's licensed copy.
 - The C# executor needs a code signature, or Windows SmartScreen warns the user. The signing step is a hook in `apps/desktop/scripts/package-windows.mjs`. It does nothing until the signing variables are set.
 
-## Later phases
+## Phases
 
-- **P2:** level-1 sketch constraints, density to material, assemblies (part positions only), `linear_pattern`, `mirror`.
-- **P3:** level-2 parameters (expressions as user parameters or equations), blind/counterbore/countersink/threaded holes, fillet and chamfer (edge references), sketches on faces, `up_to_face`.
+P0 and P1 (parts, through holes, polar patterns) and P2/P3 (the table above) are written. Nothing in the executors has run against a real Fusion or SolidWorks. Treat P2 and P3 as unverified until the manual checks in the issue pass.

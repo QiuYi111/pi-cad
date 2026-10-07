@@ -152,11 +152,16 @@ result = await job.result()    # TransferResult(..., check='passed', ...)
 
 - Run `features` first. It needs no CAD program. It raises
   `TRANSFER_UNSUPPORTED_OP` and names the feature (`target`) that the targets
-  cannot build yet. Supported: `pad`, `pocket`, through-all `hole`,
-  `polar_pattern`. Not supported: fillet, chamfer, `linear_pattern`, `mirror`,
-  blind, counterbore, countersink and threaded holes, and sketches on a face.
-  Tell the user which feature blocks the export. Do not change the model only
-  to make an export pass.
+  cannot build yet. Supported: `pad` (also up to a planar face), `pocket`,
+  `hole` (through, blind, counterbore, countersink, drill point, cosmetic
+  thread), `fillet`, `chamfer`, `polar_pattern`, `linear_pattern`, `mirror`,
+  sketch dimensions, Reify parameters, density, sketches on planar faces, and
+  assemblies (part positions only; a bought-in STEP is not supported). Not
+  supported: modeled threads, taper, midplane pockets, variable fillets,
+  non-planar faces, joints and mates. Tell the user which feature blocks the
+  export. Do not change the model only to make an export pass.
+- `features` on an assembly document returns `kind='assembly'`. A SolidWorks
+  assembly export ends in `.SLDASM`; leave `output` out and the tool picks the name.
 - `status()` shows if a target is ready. `export` reads the committed document and
   never changes it. `check=True` compares the exported shape with the Reify
   STEP. Never give the user a file from a failed check.
