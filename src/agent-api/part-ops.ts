@@ -35,7 +35,7 @@ type Validation = "auto" | "fast" | "full";
 const HISTORY_DIR = ".pi-cad/cache/part-history";
 const TRY_DIR = ".pi-cad/cache/part-try";
 
-interface PartPaths {
+export interface PartPaths {
   docRel: string;
   docAbs: string;
   outputRel: string;
@@ -67,7 +67,7 @@ export function resolvePartPaths(cwd: string, doc: string, output?: string): Par
 export const partOpsHooks = { bindIdentity };
 
 /** Every worker request carries the arguments that open its document, so a restarted sidecar can reopen it. */
-function partRequest(cwd: string, paths: PartPaths, request: Omit<Parameters<typeof runPartCommand>[1], "doc" | "ensureOpen">, body?: string) {
+export function partRequest(cwd: string, paths: PartPaths, request: Omit<Parameters<typeof runPartCommand>[1], "doc" | "ensureOpen">, body?: string) {
   return runPartCommand(cwd, {
     ...request,
     doc: paths.docAbs,

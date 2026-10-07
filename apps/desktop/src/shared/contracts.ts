@@ -443,6 +443,68 @@ export interface SimulationComponentStatus {
   estimatedSize: string;
 }
 export interface BlenderScene { source: string; sha256?: string; scene: string; cameras: string[]; activeCamera: string | null; objectCount: number; frame: number; frameStart: number; frameEnd: number }
+export type CadTransferTarget = "fusion" | "solidworks";
+export type CadTransferState =
+  | "ready" | "not_installed" | "addin_missing" | "addin_not_running"
+  | "executor_missing" | "unsupported_platform" | "unavailable";
+export interface CadTransferTargetStatus {
+  target: CadTransferTarget;
+  state: CadTransferState;
+  /** False when the Settings page must hide this target (SolidWorks on macOS and Linux). */
+  visible: boolean;
+  /** One short sentence for the person. */
+  detail: string;
+  /** Extra note, for example the WSL note. */
+  note?: string;
+  appVersion?: string;
+  addinInstalledVersion?: string;
+  addinBundledVersion?: string;
+  updateAvailable?: boolean;
+  heartbeatAgeS?: number;
+  signedIn?: boolean;
+  executorVersion?: string;
+  minimumVersion?: number;
+}
+export interface CadTransferStatus {
+  platform: string;
+  /** The runtime and the project live in WSL, the executors run on Windows. */
+  projectInWsl: boolean;
+  dispatcherActive: boolean;
+  jobRoot: string;
+  checkedAt: string;
+  targets: Record<CadTransferTarget, CadTransferTargetStatus>;
+}
+export type CadTransferJobPhase = "queued" | "running" | "done" | "failed" | "cancelled";
+export type CadTransferErrorCode =
+  | "TARGET_NOT_READY" | "EXECUTOR_FAILED" | "TIMEOUT" | "CANCELLED" | "UNSUPPORTED_OP" | "BUSY" | "BAD_REQUEST";
+export interface CadTransferError { code: CadTransferErrorCode; message: string; feature?: string; step?: string }
+export interface CadTransferJob {
+  jobId: string;
+  target: CadTransferTarget;
+  state: CadTransferJobPhase;
+  message: string;
+  updatedAt: string;
+  part?: string;
+  /** Project-relative native file, set when the job is done. */
+  native?: string;
+  /** Folder (host path) that holds the native file. */
+  nativeFolder?: string;
+  /** Host path of the executor log. */
+  logPath?: string;
+  error?: CadTransferError | null;
+}
+export interface CadTransferTestResult {
+  ok: boolean;
+  target: CadTransferTarget;
+  message: string;
+  logPath?: string;
+  steps: Array<{ name: string; ok: boolean; detail?: string }>;
+  failedFeature?: string;
+  job?: CadTransferJob;
+}
+export type CadTransferEvent =
+  | { type: "status"; status: CadTransferStatus }
+  | { type: "job"; job: CadTransferJob };
 export interface BlenderRender { path: string; camera: string; dataUrl: string }
 
 export type ExtensionUiRequest =
@@ -551,6 +613,15 @@ export interface DesktopApi {
     adoptCandidate(jobPath: string): Promise<unknown>;
   };
   approvals: { list(): Promise<HumanApproval[]>; approve(commitId: string, scope: string, rationale: string): Promise<HumanApproval>; revoke(id: string, reason: string): Promise<HumanApproval>; release(commitId: string, approvalId: string): Promise<ReleaseResult | null>; publishRemote(release: ReleaseResult, remote: string, tag: string): Promise<RemotePublishResult> };
+  cadTransfer: {
+    status(refresh?: boolean): Promise<CadTransferStatus>;
+    installFusionAddin(): Promise<CadTransferStatus>;
+    openFolder(target: CadTransferTarget, path?: string): Promise<void>;
+    exportPart(target: CadTransferTarget, artifactPath: string): Promise<CadTransferJob>;
+    cancel(jobId: string): Promise<void>;
+    testExport(target: CadTransferTarget): Promise<CadTransferTestResult>;
+    onEvent(listener: (event: CadTransferEvent) => void): () => void;
+  };
   shell: { reveal(path: string): Promise<void> };
 }
 
@@ -634,5 +705,12 @@ export const IPC = {
   approvalsRevoke: "approvals:revoke",
   approvalsRelease: "approvals:release",
   approvalsPublishRemote: "approvals:publish-remote",
+  cadTransferStatus: "cad-transfer:status",
+  cadTransferInstallFusionAddin: "cad-transfer:install-fusion-addin",
+  cadTransferOpenFolder: "cad-transfer:open-folder",
+  cadTransferExportPart: "cad-transfer:export-part",
+  cadTransferCancel: "cad-transfer:cancel",
+  cadTransferTestExport: "cad-transfer:test-export",
+  cadTransferEvent: "cad-transfer:event",
   shellReveal: "shell:reveal",
 } as const;

@@ -42,6 +42,10 @@ PartDocument.tree() -> dict
 PartDocument.query(target: str, what: list[str] | None = None) -> dict
 PartDocument.check(kind: str, *, budget_s: float | None = None, **args) -> dict
 PartDocument.sweep(param: str, range: tuple[float, float], *, step: float, check: tuple[str, dict], refine: bool = False, budget_s: float | None = None) -> dict
+cad.transfer.status() -> TransferStatus
+cad.transfer.features(doc: str | Path | PartDocument) -> TransferFeatures
+cad.transfer.export(doc: str | Path | PartDocument, *, target: str, output: str | Path | None = None, check: bool = True) -> TransferJob
+TransferJob.result() -> TransferResult
 cad.model.build(   # build123d compatibility path
     source: str | Path,
     output: str | Path | None = None,
@@ -133,6 +137,35 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
   error codes, and worked examples. The copyable starting points are the
   `freecad-part` and `freecad-assembly` assets of the `parametric-cad-modeling`
   skill.
+
+## Fusion and SolidWorks files: `cad.transfer`
+
+Use `cad.transfer` only when the user asks for a Fusion (`.f3d`) or SolidWorks
+(`.SLDPRT`) file with feature history. For a plain exchange file, export a STEP.
+The CAD program runs on the user's computer and the Reify desktop app starts it.
+
+```python
+features = await cad.transfer.features("parts/bracket.FCStd")   # dry run first
+job = await cad.transfer.export("parts/bracket.FCStd", target="fusion", output="exports/bracket.f3d")
+result = await job.result()    # TransferResult(..., check='passed', ...)
+```
+
+- Run `features` first. It needs no CAD program. It raises
+  `TRANSFER_UNSUPPORTED_OP` and names the feature (`target`) that the targets
+  cannot build yet. Supported: `pad`, `pocket`, through-all `hole`,
+  `polar_pattern`. Not supported: fillet, chamfer, `linear_pattern`, `mirror`,
+  blind, counterbore, countersink and threaded holes, and sketches on a face.
+  Tell the user which feature blocks the export. Do not change the model only
+  to make an export pass.
+- `status()` shows if a target is ready. `export` reads the committed document and
+  never changes it. `check=True` compares the exported shape with the Reify
+  STEP. Never give the user a file from a failed check.
+- Error codes: `TRANSFER_TARGET_NOT_READY` (tell the user to open Settings, CAD
+  exports), `TRANSFER_UNSUPPORTED_OP`, `TRANSFER_EXECUTOR_FAILED`,
+  `TRANSFER_CHECK_FAILED` (`detail` names the first feature that differs),
+  `TRANSFER_TIMEOUT`, `TRANSFER_UNAVAILABLE` (no desktop app: offer a STEP).
+- The coordinate system stays Z up in the exported file. Use `check='skipped'`
+  results (`check=False`) only to debug.
 
 ## build123d compatibility
 

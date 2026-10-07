@@ -8,6 +8,7 @@ import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { executeCadProbe } from "../modules/probe/tool.ts";
 import { observeCandidate, projectRelativePath } from "./observe.ts";
 import { handlePartOperation } from "./part-ops.ts";
+import { handleTransferOperation } from "./transfer-ops.ts";
 import { artifactPathForKind, buildStep, envelopeArtifactHash, FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
 import { executeMechanicalRecipeV7 } from "../domains/mechanical/recipe-actions-v7.ts";
 import { cadStartSnapshot } from "../harness/kernel.ts";
@@ -318,6 +319,8 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
     case "part-open": case "part-apply": case "part-undo": case "part-try":
     case "part-tree": case "part-query": case "part-check": case "part-sweep":
       return handlePartOperation(cwd, request);
+    case "transfer-status": case "transfer-features": case "transfer-export":
+      return handleTransferOperation(cwd, request);
     case "simulation-run": {
       const executed = await executeMechanicalRecipeV7({ cwd, kind: "simulation", recipe: request.recipe, action: request.action, obligationRef: request.obligationRef, outputs: request.outputs });
       return jsonValue({

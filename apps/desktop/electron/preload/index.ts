@@ -102,6 +102,15 @@ const api: DesktopApi = {
     release: (commitId, approvalId) => ipcRenderer.invoke(IPC.approvalsRelease, commitId, approvalId),
     publishRemote: (release, remote, tag) => ipcRenderer.invoke(IPC.approvalsPublishRemote, release.releaseId, remote, tag),
   },
+  cadTransfer: {
+    status: (refresh) => ipcRenderer.invoke(IPC.cadTransferStatus, refresh),
+    installFusionAddin: () => ipcRenderer.invoke(IPC.cadTransferInstallFusionAddin),
+    openFolder: (target, path) => ipcRenderer.invoke(IPC.cadTransferOpenFolder, target, path),
+    exportPart: (target, artifactPath) => ipcRenderer.invoke(IPC.cadTransferExportPart, target, artifactPath),
+    cancel: (jobId) => ipcRenderer.invoke(IPC.cadTransferCancel, jobId),
+    testExport: (target) => ipcRenderer.invoke(IPC.cadTransferTestExport, target),
+    onEvent: (listener) => subscribe(IPC.cadTransferEvent, listener),
+  },
   shell: { reveal: (path) => ipcRenderer.invoke(IPC.shellReveal, path) },
 };
 

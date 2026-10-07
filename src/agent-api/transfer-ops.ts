@@ -1,0 +1,318 @@
+/**
+ * Agent API operations of `cad.transfer`: `transfer-status`, `transfer-features`, `transfer-export`.
+ *
+ * The FreeCAD worker builds the canonical feature JSON from the recomputed
+ * document (read only). The CAD program (Fusion, SolidWorks) runs on the user's
+ * machine and is started by the Reify desktop app. This sidecar cannot call the
+ * desktop app, so both sides use a spool folder in the project:
+ *
+ *   .pi-cad/transfer/dispatcher.json         the desktop app writes it every 5 s
+ *   .pi-cad/transfer/requests/<job>.json     this module writes a request
+ *   .pi-cad/transfer/status/<job>.json       the desktop app writes progress
+ *   .pi-cad/transfer/results/<job>.json      the desktop app writes the result
+ *   .pi-cad/transfer/cancel/<job>            this module creates it to cancel
+ *
+ * The wire formats are in docs/cad-transfer/protocol.md.
+ */
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
+
+import { jsonValue, type JsonValue } from "../harness/canonical.ts";
+import { inspectGeometry } from "../shared/capability.ts";
+import { PartOpError } from "../shared/freecad-worker.ts";
+import type { GeometryPayload } from "../shared/protocol.ts";
+import { partRequest, resolvePartPaths } from "./part-ops.ts";
+import type { AgentApiRequest } from "./protocol.ts";
+import { projectRelativePath } from "./observe.ts";
+import { compareEquivalence, type FeatureVolume } from "./transfer-check.ts";
+
+type TransferRequest = Extract<AgentApiRequest, { op: `transfer-${string}` }>;
+
+export const TRANSFER_DIR = ".pi-cad/transfer";
+export const DISPATCHER_STALE_MS = 15_000;
+export const DEFAULT_TIMEOUT_S = 300;
+/** Longest features JSON the agent gets back inline; the file is always written. */
+const INLINE_FEATURES_BYTES = 1024 * 1024;
+const SETTINGS_HINT = "Open Settings > CAD exports in the Reify desktop app and finish the steps for this target.";
+
+const TARGETS = ["fusion", "solidworks"] as const;
+type Target = (typeof TARGETS)[number];
+const SUFFIX: Record<Target, RegExp> = { fusion: /\.f3d$/i, solidworks: /\.sldprt$/i };
+
+/** Test seams: the clock, the poll delay and the geometry inspector. */
+export const transferHooks = {
+  now: () => Date.now(),
+  sleep: (ms: number) => new Promise<void>((accept) => setTimeout(accept, ms)),
+  pollMs: 500,
+  /** Run `export_features` in the FreeCAD worker. */
+  canonicalize: async (cwd: string, doc: string, referenceStepAbs?: string): Promise<unknown> =>
+    partRequest(cwd, resolvePartPaths(cwd, doc), {
+      op: "export_features",
+      args: referenceStepAbs ? { referenceStep: referenceStepAbs } : {},
+    }),
+  inspect: async (cwd: string, artifactRel: string, outputRel: string): Promise<GeometryPayload> => {
+    const envelope = await inspectGeometry(cwd, artifactRel, outputRel);
+    if (!envelope.ok) {
+      throw new PartOpError(String((envelope.payload as { error?: string } | undefined)?.error ?? "geometry inspection failed"), {
+        code: "TRANSFER_CHECK_FAILED", detail: { artifact: artifactRel },
+      });
+    }
+    return envelope.payload as GeometryPayload;
+  },
+};
+
+interface DispatcherFile {
+  schema?: number;
+  pid?: number;
+  updatedAt?: string;
+  targets?: Partial<Record<Target, string>>;
+  detail?: Record<string, unknown>;
+}
+
+interface SpoolResult {
+  jobId: string;
+  ok: boolean;
+  target: Target;
+  files?: { native?: string; check_step?: string; log?: string };
+  features_built?: number;
+  feature_volumes?: FeatureVolume[];
+  error?: { code: string; message?: string; feature?: string; step?: string } | null;
+}
+
+function transferError(message: string, code: string, extra: { target?: string; detail?: Record<string, unknown>; hints?: string[] } = {}): PartOpError {
+  return new PartOpError(message, { code, ...extra });
+}
+
+async function readJson<T>(path: string): Promise<T | null> {
+  try { return JSON.parse(await readFile(path, "utf8")) as T; }
+  catch { return null; }
+}
+
+async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(temporary, path);
+}
+
+/** The dispatcher file, or the reason there is none. */
+async function readDispatcher(cwd: string): Promise<{ alive: true; file: DispatcherFile } | { alive: false; reason: "absent" | "stale"; file?: DispatcherFile }> {
+  const file = await readJson<DispatcherFile>(resolve(cwd, TRANSFER_DIR, "dispatcher.json"));
+  if (!file) return { alive: false, reason: "absent" };
+  const updated = Date.parse(file.updatedAt ?? "");
+  if (!Number.isFinite(updated) || transferHooks.now() - updated > DISPATCHER_STALE_MS) return { alive: false, reason: "stale", file };
+  return { alive: true, file };
+}
+
+function unavailable(reason: "absent" | "stale"): PartOpError {
+  return transferError(
+    "cad.transfer needs the Reify desktop app. The desktop app starts Fusion and SolidWorks on the user's computer, and it is not running for this project.",
+    "TRANSFER_UNAVAILABLE",
+    {
+      detail: { dispatcher: reason },
+      hints: ["Use cad.transfer.features(...) for a dry run. It does not need the desktop app.", "Ask the user to open the project in the Reify desktop app, or to export a STEP file."],
+    },
+  );
+}
+
+export async function transferStatus(cwd: string): Promise<JsonValue> {
+  const dispatcher = await readDispatcher(cwd);
+  if (!dispatcher.alive) {
+    return jsonValue({ fusion: "unavailable", solidworks: "unavailable", detail: { dispatcher: dispatcher.reason } } as never);
+  }
+  const targets = dispatcher.file.targets ?? {};
+  return jsonValue({
+    fusion: targets.fusion ?? "unavailable",
+    solidworks: targets.solidworks ?? "unavailable",
+    detail: dispatcher.file.detail ?? {},
+  } as never);
+}
+
+interface WorkerFeatures {
+  features: { part?: string; bodies?: Array<{ features?: unknown[] }>; reference?: { feature_volumes?: FeatureVolume[] } };
+  featureCount: number;
+  part: string;
+  referenceStep?: string;
+}
+
+function documentPaths(cwd: string, doc: string) {
+  return resolvePartPaths(cwd, doc);
+}
+
+async function canonicalize(cwd: string, doc: string, referenceStepAbs?: string): Promise<WorkerFeatures> {
+  const result = await transferHooks.canonicalize(cwd, doc, referenceStepAbs) as WorkerFeatures;
+  if (!result?.features || typeof result.featureCount !== "number") {
+    throw transferError("the FreeCAD worker returned no feature JSON", "TRANSFER_EXECUTOR_FAILED", { detail: { doc } });
+  }
+  return result;
+}
+
+async function featuresOperation(cwd: string, request: Extract<TransferRequest, { op: "transfer-features" }>): Promise<JsonValue> {
+  const paths = documentPaths(cwd, request.doc);
+  const result = await canonicalize(cwd, request.doc);
+  const stem = basename(paths.docRel, extname(paths.docRel));
+  const pathRel = projectRelativePath(cwd, join("build", "transfer", `${stem}.features.json`));
+  await writeJsonAtomic(resolve(cwd, pathRel), result.features);
+  const text = JSON.stringify(result.features);
+  return jsonValue({
+    part: result.part, features: result.featureCount, path: pathRel,
+    ...(Buffer.byteLength(text) <= INLINE_FEATURES_BYTES ? { data: result.features } : {}),
+  } as never);
+}
+
+function newJobId(): string {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\..*$/, "").replace("T", "-");
+  return `${stamp}-${randomBytes(3).toString("hex")}`;
+}
+
+function validateExport(request: Extract<TransferRequest, { op: "transfer-export" }>): { target: Target; outputRel: string } {
+  if (!TARGETS.includes(request.target as Target)) {
+    throw transferError(`target must be "fusion" or "solidworks", got ${JSON.stringify(request.target)}`, "BAD_REQUEST");
+  }
+  const target = request.target as Target;
+  if (typeof request.output !== "string" || !SUFFIX[target].test(request.output)) {
+    throw transferError(`a ${target} export must end in ${target === "fusion" ? ".f3d" : ".SLDPRT"}`, "BAD_REQUEST", { detail: { output: request.output } });
+  }
+  return { target, outputRel: request.output };
+}
+
+/** Executor error code on the spool -> `CadApiError.code` of the Agent API. */
+function mapExecutorError(result: SpoolResult, target: Target): PartOpError {
+  const error = result.error ?? { code: "EXECUTOR_FAILED" };
+  const detail = { target, feature: error.feature ?? null, step: error.step ?? null, ...(result.files?.log ? { log: result.files.log } : {}) };
+  const message = error.message || `${target} could not build the part`;
+  switch (error.code) {
+    case "TARGET_NOT_READY":
+      return transferError(message, "TRANSFER_TARGET_NOT_READY", { detail, hints: [SETTINGS_HINT] });
+    case "TIMEOUT":
+      return transferError(message || `${target} did not finish in time`, "TRANSFER_TIMEOUT", { detail, ...(error.feature ? { target: error.feature } : {}) });
+    case "UNSUPPORTED_OP":
+      return transferError(message, "TRANSFER_UNSUPPORTED_OP", { detail, ...(error.feature ? { target: error.feature } : {}) });
+    default:
+      return transferError(message, "TRANSFER_EXECUTOR_FAILED", { detail, ...(error.feature ? { target: error.feature } : {}) });
+  }
+}
+
+async function waitForResult(cwd: string, jobId: string, timeoutS: number): Promise<SpoolResult> {
+  const resultPath = resolve(cwd, TRANSFER_DIR, "results", `${jobId}.json`);
+  const deadline = transferHooks.now() + (timeoutS + 60) * 1000;
+  let silentSince: number | null = null;
+  for (;;) {
+    const result = await readJson<SpoolResult>(resultPath);
+    if (result) return result;
+    const now = transferHooks.now();
+    if (now > deadline) {
+      await mkdir(resolve(cwd, TRANSFER_DIR, "cancel"), { recursive: true });
+      await writeFile(resolve(cwd, TRANSFER_DIR, "cancel", jobId), "", "utf8");
+      throw transferError(`the export did not finish in ${timeoutS} s`, "TRANSFER_TIMEOUT", { detail: { jobId } });
+    }
+    // The desktop app stopped: no heartbeat, and no job in progress.
+    const dispatcher = await readDispatcher(cwd);
+    if (dispatcher.alive) silentSince = null;
+    else {
+      silentSince ??= now;
+      if (now - silentSince > DISPATCHER_STALE_MS) throw unavailable(dispatcher.reason);
+    }
+    await transferHooks.sleep(transferHooks.pollMs);
+  }
+}
+
+async function exportOperation(cwd: string, request: Extract<TransferRequest, { op: "transfer-export" }>): Promise<JsonValue> {
+  const { target, outputRel } = validateExport(request);
+  const check = request.check !== false;
+  const paths = documentPaths(cwd, request.doc);
+  projectRelativePath(cwd, outputRel);
+
+  const dispatcher = await readDispatcher(cwd);
+  if (!dispatcher.alive) throw unavailable(dispatcher.reason);
+  const state = dispatcher.file.targets?.[target] ?? "unavailable";
+  if (state !== "ready") {
+    throw transferError(`${target} is not ready on this computer (${state}).`, "TRANSFER_TARGET_NOT_READY", {
+      detail: { target, state }, hints: [SETTINGS_HINT],
+    });
+  }
+
+  const jobId = newJobId();
+  const workRel = join("build", "transfer", jobId);
+  const referenceRel = projectRelativePath(cwd, join(workRel, "reference.step"));
+  const featuresRel = projectRelativePath(cwd, join(workRel, "features.json"));
+  await mkdir(resolve(cwd, workRel), { recursive: true });
+
+  const canonical = await canonicalize(cwd, request.doc, resolve(cwd, referenceRel));
+  await writeJsonAtomic(resolve(cwd, featuresRel), canonical.features);
+
+  const checkStepRel = projectRelativePath(cwd, join(workRel, "check.step"));
+  await mkdir(dirname(resolve(cwd, outputRel)), { recursive: true });
+  await writeJsonAtomic(resolve(cwd, TRANSFER_DIR, "requests", `${jobId}.json`), {
+    schema: "reify.transfer.request/1", jobId, target, doc: paths.docRel, features: featuresRel,
+    native: outputRel, checkStep: checkStepRel, check, timeoutS: DEFAULT_TIMEOUT_S,
+  });
+
+  let result: SpoolResult;
+  try {
+    result = await waitForResult(cwd, jobId, DEFAULT_TIMEOUT_S);
+  } finally {
+    // A cancel file must stay: the dispatcher reads it after this module gave up.
+    await rm(resolve(cwd, TRANSFER_DIR, "requests", `${jobId}.json`), { force: true });
+  }
+  await Promise.all(["status", "results"].map((folder) => rm(resolve(cwd, TRANSFER_DIR, folder, `${jobId}.json`), { force: true })));
+  if (!result.ok) throw mapExecutorError(result, target);
+
+  const nativeRel = result.files?.native ?? outputRel;
+  try { await stat(resolve(cwd, nativeRel)); }
+  catch {
+    throw transferError(`the executor reported success but ${nativeRel} does not exist`, "TRANSFER_EXECUTOR_FAILED", { detail: { target, file: nativeRel } });
+  }
+  const logRel = result.files?.log ?? null;
+  const features = result.features_built ?? canonical.featureCount;
+
+  if (!check) {
+    return jsonValue({ target, file: nativeRel, checkStep: result.files?.check_step ?? null, check: "skipped", features, log: logRel, detail: null } as never);
+  }
+
+  const executorStepRel = result.files?.check_step ?? checkStepRel;
+  const executorStepExists = await stat(resolve(cwd, executorStepRel)).then(() => true, () => false);
+  if (!executorStepExists) {
+    throw transferError("the executor wrote no verification STEP, so the export cannot be checked", "TRANSFER_CHECK_FAILED", {
+      detail: { target, file: nativeRel, checkStep: executorStepRel, log: logRel },
+      hints: ["Run the export again. Use check=False only to debug the executor."],
+    });
+  }
+  const [referenceGeometry, executorGeometry] = await Promise.all([
+    transferHooks.inspect(cwd, referenceRel, join(workRel, "reference.geometry.json")),
+    transferHooks.inspect(cwd, executorStepRel, join(workRel, "check.geometry.json")),
+  ]);
+  const report = compareEquivalence(referenceGeometry, executorGeometry, {
+    reference: canonical.features.reference?.feature_volumes,
+    executor: result.feature_volumes,
+  });
+  if (!report.passed) {
+    const first = report.firstDifferingFeature;
+    throw transferError(
+      `${target} built a different shape: ${report.failures.join("; ")}${first ? `. The first feature that differs is ${first.name}.` : ""}`,
+      "TRANSFER_CHECK_FAILED",
+      {
+        ...(first ? { target: first.name } : {}),
+        detail: { target, file: nativeRel, checkStep: executorStepRel, referenceStep: referenceRel, log: logRel, report: report as never },
+        hints: ["The files are kept for debugging. Do not give them to the user as a good result."],
+      },
+    );
+  }
+  return jsonValue({ target, file: nativeRel, checkStep: executorStepRel, check: "passed", features, log: logRel, detail: null } as never);
+}
+
+export async function handleTransferOperation(cwd: string, request: TransferRequest): Promise<JsonValue> {
+  switch (request.op) {
+    case "transfer-status": return transferStatus(cwd);
+    case "transfer-features": return featuresOperation(cwd, request);
+    case "transfer-export": return exportOperation(cwd, request);
+  }
+}
+
+/** For tests and the desktop app: remove a finished job's spool entries. */
+export async function clearSpoolJob(cwd: string, jobId: string): Promise<void> {
+  for (const [folder, suffix] of [["requests", ".json"], ["status", ".json"], ["results", ".json"], ["cancel", ""]] as const) {
+    await rm(resolve(cwd, TRANSFER_DIR, folder, `${jobId}${suffix}`), { force: true });
+  }
+}

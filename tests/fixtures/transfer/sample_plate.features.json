@@ -1,0 +1,372 @@
+{
+  "schema": "reify.features/1",
+  "units": "mm",
+  "part": "plate",
+  "source": {
+    "doc": "parts/plate.FCStd",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "bodies": [
+    {
+      "name": "plate",
+      "sketches": [
+        {
+          "name": "plate/base_profile",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 0.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                -20,
+                -15
+              ],
+              "end": [
+                20,
+                -15
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                20,
+                -15
+              ],
+              "end": [
+                20,
+                15
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                20,
+                15
+              ],
+              "end": [
+                -20,
+                15
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -20,
+                15
+              ],
+              "end": [
+                -20,
+                -15
+              ]
+            },
+            {
+              "id": 4,
+              "type": "circle",
+              "center": [
+                0,
+                0
+              ],
+              "radius": 10
+            },
+            {
+              "id": 5,
+              "type": "circle",
+              "center": [
+                0,
+                0
+              ],
+              "radius": 4
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 1200.0
+            },
+            {
+              "id": 1,
+              "geometry": [
+                4
+              ],
+              "closed": true,
+              "depth": 1,
+              "area": 314.159
+            },
+            {
+              "id": 2,
+              "geometry": [
+                5
+              ],
+              "closed": true,
+              "depth": 2,
+              "area": 50.265
+            }
+          ]
+        },
+        {
+          "name": "plate/hole_sketch",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 0.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                15,
+                0
+              ],
+              "radius": 1.5
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 7.07
+            }
+          ]
+        },
+        {
+          "name": "plate/pocket_profile",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              5
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 5.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                -18,
+                8
+              ],
+              "end": [
+                -13,
+                8
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                -13,
+                8
+              ],
+              "end": [
+                -13,
+                13
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                -13,
+                13
+              ],
+              "end": [
+                -18,
+                13
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -18,
+                13
+              ],
+              "end": [
+                -18,
+                8
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 25.0
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "name": "plate/base",
+          "type": "pad",
+          "sketch": "plate/base_profile",
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 5,
+              "expr": "=thickness"
+            }
+          },
+          "midplane": false,
+          "reversed": false
+        },
+        {
+          "name": "plate/holes",
+          "type": "hole",
+          "sketch": "plate/hole_sketch",
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "extent": {
+            "type": "through_all"
+          },
+          "diameter": {
+            "value": 3
+          }
+        },
+        {
+          "name": "plate/ring",
+          "type": "polar_pattern",
+          "originals": [
+            "plate/holes"
+          ],
+          "axis": {
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "direction": [
+              0,
+              0,
+              1
+            ]
+          },
+          "angle": {
+            "value": 360
+          },
+          "occurrences": 2,
+          "full_circle": true
+        },
+        {
+          "name": "plate/pocket",
+          "type": "pocket",
+          "sketch": "plate/pocket_profile",
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 2
+            }
+          },
+          "reversed": false
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "volume_mm3": null,
+    "bbox": null,
+    "feature_volumes": []
+  }
+}
