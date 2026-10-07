@@ -108,11 +108,6 @@ export const REFERENCE_PLATE_OPS = [
   { op: "pocket", name: "plate/pocket", sketch: "plate/pocket_profile", depth: 2 },
 ];
 
-/** A document in assembly/ or assemblies/ is an assembly. The sidecar makes the final decision from the document. */
-export function isAssemblyDoc(doc: string): boolean {
-  return /^(assembly|assemblies)\//i.test(doc.replace(/\\/g, "/"));
-}
-
 export function nativeExtension(target: CadTransferTarget, assembly = false): string {
   return target === "fusion" ? "f3d" : assembly ? "SLDASM" : "SLDPRT";
 }
@@ -596,7 +591,7 @@ export class CadTransferService {
    * comes from the agent answer, because only the sidecar knows the result of the shape check.
    */
   private async exportViaAgent(
-    io: ProjectIO, args: { jobId: string; target: CadTransferTarget; doc: string; native: string; part?: string },
+    io: ProjectIO, args: { jobId: string; target: CadTransferTarget; doc: string; native?: string; part?: string },
   ): Promise<{ job: CadTransferJob; response?: Record<string, unknown> }> {
     const { jobId, target, doc, native, part } = args;
     const base = (state: CadTransferJobPhase, message: string, extra: Partial<CadTransferJob> = {}): CadTransferJob =>
@@ -606,8 +601,9 @@ export class CadTransferService {
     let response: Record<string, unknown> | undefined;
     try {
       if (!this.deps.agent) throw new Error("The Reify runtime is not ready.");
-      response = await this.deps.agent({ op: "transfer-export", doc, target, output: native, check: true, jobId }, AGENT_EXPORT_TIMEOUT_MS) as Record<string, unknown>;
+      response = await this.deps.agent({ op: "transfer-export", doc, target, ...(native ? { output: native } : {}), check: true, jobId }, AGENT_EXPORT_TIMEOUT_MS) as Record<string, unknown>;
       const file = typeof response.file === "string" ? response.file : native;
+      if (!file) throw new Error("The export gave no file path.");
       const log = typeof response.log === "string" ? response.log : undefined;
       const nativeFolder = await io.toHostPath(posix.dirname(file)).catch(() => undefined);
       const logPath = log ? await io.toHostPath(log).catch(() => log) : undefined;
@@ -649,9 +645,8 @@ export class CadTransferService {
         if (!io) throw new Error("Choose a project before an export.");
         const doc = await this.resolvePartDoc(artifactPath, io);
         this.agentJobs.delete(jobId);
-        const assembly = isAssemblyDoc(doc);
-        const docStem = posix.basename(doc).replace(/\.[^.]+$/, "");
-        await this.exportViaAgent(io, { jobId, target, doc, native: `exports/${docStem}.${nativeExtension(target, assembly)}`, part: stem });
+        // No `output`: the sidecar picks exports/<stem>.<ext> from the real document kind.
+        await this.exportViaAgent(io, { jobId, target, doc, part: stem });
       } catch (error) {
         this.agentJobs.delete(jobId);
         const message = String((error as Error).message ?? error);

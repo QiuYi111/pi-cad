@@ -315,7 +315,7 @@ describe("status and test export", () => {
       h.project.files.set(`build/transfer/${id}/features.json`, JSON.stringify(FEATURES));
       h.project.files.set(`${root}/requests/${id}.json`, JSON.stringify({
         schema: "reify.transfer.request/1", jobId: id, target: body.target, features: `build/transfer/${id}/features.json`,
-        native: body.output, checkStep: `build/transfer/${id}/check.step`, check: true, timeoutS: 300,
+        native: body.output ?? `exports/${String(body.doc).split("/").pop()!.replace(/\.FCStd$/i, "")}.f3d`, checkStep: `build/transfer/${id}/check.step`, check: true, timeoutS: 300,
       }));
       let result: Record<string, any> | null = null;
       for (let i = 0; i < 2000 && !result; i++) {
@@ -406,7 +406,8 @@ describe("status and test export", () => {
     const job = service.startExport("fusion", "build/bracket.step");
     expect(job.state).toBe("queued");
     for (let i = 0; i < 2000 && !h.events.some((e) => e.type === "job" && e.job.jobId === job.jobId && e.job.state === "done" && e.job.native); i++) await new Promise((r) => setTimeout(r, 1));
-    expect(calls[0]).toMatchObject({ op: "transfer-export", doc: "parts/bracket.FCStd", output: "exports/bracket.f3d", jobId: job.jobId, check: true });
+    expect(calls[0]).toMatchObject({ op: "transfer-export", doc: "parts/bracket.FCStd", jobId: job.jobId, check: true });
+    expect(calls[0]).not.toHaveProperty("output");
     expect(h.project.files.get("exports/bracket.f3d")).toBe("F3D");
     const missing = service.startExport("fusion", "build/unknown.step");
     for (let i = 0; i < 100 && !h.events.some((e) => e.type === "job" && e.job.jobId === missing.jobId && e.job.state === "failed"); i++) await new Promise((r) => setTimeout(r, 1));
@@ -495,19 +496,24 @@ describe("assemblies (P2)", () => {
     expect(bad.error?.message).toMatch(/bad name/);
   });
 
-  it("startExport accepts assembly documents and uses .SLDASM for SolidWorks", async () => {
+  it("startExport accepts assembly documents, sends no output, and shows the file from the answer", async () => {
     const h = harness();
     h.project.files.set("assembly/gearbox.FCStd", "x");
     const calls: Array<Record<string, unknown>> = [];
-    const service = new CadTransferService({ ...h.deps, pid: 1, emit: (e) => h.events.push(e), agent: async (b) => { calls.push(b); return { file: String(b.output), check: "passed" }; } });
+    const service = new CadTransferService({
+      ...h.deps, pid: 1, emit: (e) => h.events.push(e),
+      agent: async (b) => { calls.push(b); return { file: "exports/gearbox.SLDASM", check: "passed" }; },
+    });
     service.setProject(h.project);
-    service.startExport("solidworks", "build/gearbox.step");
+    const job = service.startExport("solidworks", "build/gearbox.step");
     service.startExport("fusion", "assembly/gearbox.FCStd");
     for (let i = 0; i < 100 && calls.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
-    expect(calls.map((c) => [c.target, c.doc, c.output])).toEqual(expect.arrayContaining([
-      ["solidworks", "assembly/gearbox.FCStd", "exports/gearbox.SLDASM"],
-      ["fusion", "assembly/gearbox.FCStd", "exports/gearbox.f3d"],
+    expect(calls.map((c) => [c.target, c.doc])).toEqual(expect.arrayContaining([
+      ["solidworks", "assembly/gearbox.FCStd"], ["fusion", "assembly/gearbox.FCStd"],
     ]));
+    for (const call of calls) expect(call).not.toHaveProperty("output");
+    for (let i = 0; i < 100 && !h.events.some((e) => e.type === "job" && e.job.jobId === job.jobId && e.job.state === "done"); i++) await new Promise((r) => setTimeout(r, 1));
+    expect(h.events.find((e) => e.type === "job" && e.job.jobId === job.jobId && e.job.state === "done")).toMatchObject({ job: { native: "exports/gearbox.SLDASM" } });
   });
 });
 
