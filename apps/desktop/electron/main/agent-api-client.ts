@@ -4,7 +4,15 @@ import { withCanonicalProjectEnvironment, type RuntimeBridge } from "./runtime-b
 interface AgentApiEnvelope<T> {
   ok: boolean;
   result?: T;
-  error?: { message?: string };
+  error?: { message?: string; code?: string; target?: string; detail?: Record<string, unknown>; hints?: string[] };
+}
+
+/** An Agent API error with its stable code, target and detail (for example TRANSFER_CHECK_FAILED). */
+export class AgentApiError extends Error {
+  constructor(message: string, readonly code?: string, readonly target?: string, readonly detail?: Record<string, unknown>, readonly hints?: string[]) {
+    super(message);
+    this.name = "AgentApiError";
+  }
 }
 
 /**
@@ -47,7 +55,10 @@ export class AgentApiClient {
       timeout,
     );
     const response = JSON.parse(stdout) as AgentApiEnvelope<T>;
-    if (!response.ok) throw new Error(response.error?.message || "Reify rejected the request.");
+    if (!response.ok) {
+      const error = response.error;
+      throw new AgentApiError(error?.message || "Reify rejected the request.", error?.code, error?.target, error?.detail, error?.hints);
+    }
     return response.result as T;
   }
 }

@@ -477,7 +477,7 @@ export interface CadTransferStatus {
 export type CadTransferJobPhase = "queued" | "running" | "done" | "failed" | "cancelled";
 export type CadTransferErrorCode =
   | "TARGET_NOT_READY" | "EXECUTOR_FAILED" | "TIMEOUT" | "CANCELLED" | "UNSUPPORTED_OP" | "BUSY" | "BAD_REQUEST";
-export interface CadTransferError { code: CadTransferErrorCode; message: string; feature?: string; step?: string }
+export interface CadTransferError { code: CadTransferErrorCode | `TRANSFER_${string}`; message: string; feature?: string; step?: string }
 export interface CadTransferJob {
   jobId: string;
   target: CadTransferTarget;

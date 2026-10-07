@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { CadTransferService, evaluateDispatcherFile, firstVolumeMismatch, type DispatchRequest } from "../electron/main/cad-transfer";
+import { CadTransferService, evaluateDispatcherFile, type DispatchRequest } from "../electron/main/cad-transfer";
 import { BridgeProjectIO } from "../electron/main/cad-transfer-project-io";
 import { layoutFor } from "../electron/main/cad-transfer-paths";
 import type { CadTransferEvent } from "../src/shared/contracts";
@@ -267,9 +267,10 @@ describe("spool", () => {
       schema: "reify.transfer.request/1", jobId: "spool-2", target: "fusion", features: ".pi-cad/transfer/f.json", native: "exports/x.f3d",
     }));
     h.project.files.set(".pi-cad/transfer/f.json", JSON.stringify(FEATURES));
-    await h.service.pollSpool();
-    for (let i = 0; i < 20 && !h.service["jobs"].has("spool-2"); i++) await new Promise((r) => setTimeout(r, 1));
-    h.project.files.set(".pi-cad/transfer/cancel/spool-2", "");
+    let ticks = 0;
+    h.deps.clock.hooks.push(async () => {
+      if (++ticks === 2) { h.project.files.set(".pi-cad/transfer/cancel/spool-2", ""); await h.service.pollSpool(); }
+    });
     await h.service.pollSpool();
     for (let i = 0; i < 100 && !h.project.files.has(".pi-cad/transfer/results/spool-2.json"); i++) await new Promise((r) => setTimeout(r, 1));
     expect(h.project.json(".pi-cad/transfer/results/spool-2.json").error.code).toBe("CANCELLED");
@@ -304,36 +305,86 @@ describe("status and test export", () => {
     expect(h.events.filter((e) => e.type === "status")).toHaveLength(1);
   });
 
-  it("builds the reference plate, exports it, and checks the feature volumes", async () => {
+  /** A stub of the real sidecar: transfer-export writes a spool request, waits for the dispatcher, answers like transfer-ops.ts. */
+  function sidecar(h: Harness, service: () => CadTransferService, opts: { checkFails?: boolean; calls?: Array<Record<string, unknown>> } = {}) {
+    return async (body: Record<string, unknown>) => {
+      opts.calls?.push(body);
+      if (body.op !== "transfer-export") return {};
+      const id = String(body.jobId);
+      const root = ".pi-cad/transfer";
+      h.project.files.set(`build/transfer/${id}/features.json`, JSON.stringify(FEATURES));
+      h.project.files.set(`${root}/requests/${id}.json`, JSON.stringify({
+        schema: "reify.transfer.request/1", jobId: id, target: body.target, features: `build/transfer/${id}/features.json`,
+        native: body.output, checkStep: `build/transfer/${id}/check.step`, check: true, timeoutS: 300,
+      }));
+      let result: Record<string, any> | null = null;
+      for (let i = 0; i < 2000 && !result; i++) {
+        await service().pollSpool();
+        result = h.project.files.has(`${root}/results/${id}.json`) ? h.project.json(`${root}/results/${id}.json`) : null;
+        if (!result) await new Promise((r) => setTimeout(r, 1));
+      }
+      h.project.files.delete(`${root}/requests/${id}.json`);
+      if (!result!.ok) {
+        throw Object.assign(new Error(result!.error.message), {
+          code: "TRANSFER_EXECUTOR_FAILED", target: result!.error.feature, detail: { target: body.target, feature: result!.error.feature ?? null, log: result!.files?.log },
+        });
+      }
+      if (opts.checkFails) {
+        throw Object.assign(new Error("fusion built a different shape: volume differs. The first feature that differs is plate/base."), {
+          code: "TRANSFER_CHECK_FAILED", target: "plate/base", detail: { log: result!.files.log },
+        });
+      }
+      return { target: body.target, file: result!.files.native, checkStep: result!.files.check_step, check: "passed", features: 1, log: result!.files.log, detail: null };
+    };
+  }
+
+  async function activeService(h: Harness, opts: Parameters<typeof sidecar>[2] = {}) {
+    let service!: CadTransferService;
+    service = new CadTransferService({ ...h.deps, pid: 1, emit: (e) => h.events.push(e), random: () => 0.5, agent: sidecar(h, () => service, opts) });
+    await service.start(h.project);
+    return service;
+  }
+
+  it("test export builds the plate and sends transfer-export with the UI job id; the final state comes from the agent", async () => {
     const h = harness();
     const calls: Array<Record<string, unknown>> = [];
-    const service = new CadTransferService({
-      ...h.deps, pid: 1, emit: () => undefined, random: () => 0.5,
-      agent: async (body) => {
-        calls.push(body);
-        if (body.op === "transfer-features") return { features: FEATURES };
-        return {};
-      },
-    });
-    service.setProject(h.project);
+    const service = await activeService(h, { calls });
     const result = await service.testExport("fusion");
+    await service.stop();
     expect(result).toMatchObject({ ok: true, message: "Test export passed." });
-    expect(calls.map((c) => c.op)).toEqual(["part-open", "part-apply", "transfer-features"]);
+    expect(calls.map((c) => c.op)).toEqual(["part-open", "part-apply", "transfer-export"]);
     const ops = (calls[1]!.ops as Array<{ op: string }>).map((o) => o.op);
     expect(ops).toEqual(["sketch", "pad", "sketch", "hole", "sketch", "pocket"]);
-    expect(result.logPath).toMatch(/log\.txt$/);
-    expect(result.steps.every((s) => s.ok)).toBe(true);
+    const exportCall = calls[2]!;
+    expect(exportCall).toMatchObject({ target: "fusion", check: true });
+    expect(exportCall.output).toMatch(/^build\/transfer-test\/plate-\d+\.f3d$/);
+    expect(String(exportCall.jobId)).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/);
+    expect(result.logPath).toBeTruthy();
+    // One id for the dispatcher events and the agent: no `done` before the agent returns, then the final done.
+    const states = h.events.filter((e) => e.type === "job" && e.job.jobId === exportCall.jobId).map((e) => e.type === "job" ? `${e.job.state}:${e.job.message}` : "");
+    expect(states).toContain("running:Checking the shape.");
+    expect(states.filter((x) => x.startsWith("done:"))).toHaveLength(1);
+    expect(states.at(-1)).toMatch(/^done:Export done\. The shape check passed/);
   });
 
-  it("fails the test with the feature name when volumes differ or the export fails", async () => {
+  it("surfaces TRANSFER_CHECK_FAILED with the failing feature", async () => {
     const h = harness();
-    const agent = async (body: Record<string, unknown>) => body.op === "transfer-features"
-      ? { features: { ...FEATURES, reference: { feature_volumes: [{ name: "plate/base", volume_mm3: 5000 }] } } } : {};
-    const service = new CadTransferService({ ...h.deps, pid: 1, agent });
-    service.setProject(h.project);
-    expect(await service.testExport("fusion")).toMatchObject({ ok: false, failedFeature: "plate/base" });
+    const service = await activeService(h, { checkFails: true });
+    const result = await service.testExport("fusion");
+    await service.stop();
+    expect(result).toMatchObject({ ok: false, failedFeature: "plate/base" });
+    expect(result.message).toMatch(/^TRANSFER_CHECK_FAILED/);
+    expect(result.job?.error).toMatchObject({ code: "TRANSFER_CHECK_FAILED", feature: "plate/base" });
+  });
+
+  it("surfaces the executor error code and feature from the sidecar", async () => {
+    const h = harness();
     h.addin.mode = "fail";
-    expect(await service.testExport("fusion")).toMatchObject({ ok: false, failedFeature: "plate/base", message: "extrude failed" });
+    const service = await activeService(h);
+    const result = await service.testExport("fusion");
+    await service.stop();
+    expect(result).toMatchObject({ ok: false, failedFeature: "plate/base" });
+    expect(result.job?.error).toMatchObject({ code: "TRANSFER_EXECUTOR_FAILED", message: "extrude failed", feature: "plate/base" });
   });
 
   it("does not run when the target is not ready", async () => {
@@ -347,26 +398,40 @@ describe("status and test export", () => {
     expect(result.steps[0]).toMatchObject({ name: "CAD program ready", ok: false });
   });
 
-  it("startExport finds the part document, asks for features, and queues the job", async () => {
+  it("startExport finds the part document and exports through the agent", async () => {
     const h = harness();
     h.project.files.set("parts/bracket.FCStd", "x");
-    const service = new CadTransferService({
-      ...h.deps, pid: 1, emit: (e) => h.events.push(e), agent: async (b) => b.op === "transfer-features" ? { features: FEATURES } : {},
-    });
-    service.setProject(h.project);
+    const calls: Array<Record<string, unknown>> = [];
+    const service = await activeService(h, { calls });
     const job = service.startExport("fusion", "build/bracket.step");
     expect(job.state).toBe("queued");
-    for (let i = 0; i < 100 && !h.events.some((e) => e.type === "job" && e.job.state === "done"); i++) await new Promise((r) => setTimeout(r, 1));
+    for (let i = 0; i < 2000 && !h.events.some((e) => e.type === "job" && e.job.jobId === job.jobId && e.job.state === "done" && e.job.native); i++) await new Promise((r) => setTimeout(r, 1));
+    expect(calls[0]).toMatchObject({ op: "transfer-export", doc: "parts/bracket.FCStd", output: "exports/bracket.f3d", jobId: job.jobId, check: true });
     expect(h.project.files.get("exports/bracket.f3d")).toBe("F3D");
     const missing = service.startExport("fusion", "build/unknown.step");
-    for (let i = 0; i < 50 && !h.events.some((e) => e.type === "job" && e.job.jobId === missing.jobId && e.job.state === "failed"); i++) await new Promise((r) => setTimeout(r, 1));
+    for (let i = 0; i < 100 && !h.events.some((e) => e.type === "job" && e.job.jobId === missing.jobId && e.job.state === "failed"); i++) await new Promise((r) => setTimeout(r, 1));
     expect(h.events.find((e) => e.type === "job" && e.job.jobId === missing.jobId && e.job.state === "failed")).toMatchObject({ job: { message: expect.stringMatching(/cannot find the part file/) } });
+    await service.stop();
   });
 
-  it("finds the first volume mismatch", () => {
-    const result = { feature_volumes: [{ name: "a", volume_mm3: 1 }, { name: "b", volume_mm3: 2.1 }] } as never;
-    expect(firstVolumeMismatch({ reference: { feature_volumes: [{ name: "a", volume_mm3: 1 }, { name: "b", volume_mm3: 2 }] } }, result)).toBe("b");
-    expect(firstVolumeMismatch({}, result)).toBeNull();
+  it("cancel works before the sidecar has written the request", async () => {
+    const h = harness();
+    h.project.files.set("parts/bracket.FCStd", "x");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let service!: CadTransferService;
+    const inner = sidecar(h, () => service);
+    service = new CadTransferService({ ...h.deps, pid: 1, emit: (e) => h.events.push(e), agent: async (b) => { await gate; return inner(b); } });
+    await service.start(h.project);
+    const job = service.startExport("fusion", "build/bracket.step");
+    await new Promise((r) => setTimeout(r, 5));
+    expect(service.cancel(job.jobId)).toBe(true);
+    expect(h.project.files.has(`.pi-cad/transfer/cancel/${job.jobId}`)).toBe(true);
+    release();
+    for (let i = 0; i < 2000 && !h.events.some((e) => e.type === "job" && e.job.jobId === job.jobId && e.job.state === "cancelled"); i++) await new Promise((r) => setTimeout(r, 1));
+    expect(h.events.some((e) => e.type === "job" && e.job.jobId === job.jobId && e.job.state === "cancelled")).toBe(true);
+    expect(h.addin.seen).toEqual([]);
+    await service.stop();
   });
 });
 

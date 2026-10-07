@@ -30,6 +30,8 @@ const HEARTBEAT_MS = 5000;
 const STATUS_CACHE_MS = 2000;
 const TARGETS: CadTransferTarget[] = ["fusion", "solidworks"];
 const DISPATCHER_MAX_AGE_S = 15;
+/** Sidecar waits up to timeoutS + 60 s, then runs the shape check. */
+const AGENT_EXPORT_TIMEOUT_MS = 8 * 60_000;
 
 export interface DispatchRequest {
   jobId?: string;
@@ -134,6 +136,9 @@ export class CadTransferService {
   private beatTimer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
   private readonly seen = new Set<string>();
+  /** Jobs that an agent call owns: their final state comes from the agent answer. */
+  private readonly agentJobs = new Set<string>();
+  private readonly cancelledJobs = new Set<string>();
   private readonly logHosts = new Map<string, string>();
   private readonly jobs = new Map<string, JobContext>();
   private readonly queues: Record<CadTransferTarget, JobContext[]> = { fusion: [], solidworks: [] };
@@ -261,6 +266,11 @@ export class CadTransferService {
         await finish(target ?? "fusion", failure("EXECUTOR_FAILED", "The transfer request has a wrong schema, job id, target, or features path."));
         return;
       }
+      if (await io.exists(`${SPOOL_DIR}/cancel/${id}`)) {
+        await finish(target, failure("CANCELLED", "The export was cancelled."));
+        await io.remove(`${SPOOL_DIR}/cancel/${id}`).catch(() => undefined);
+        return;
+      }
       const status = await io.readText(`${SPOOL_DIR}/status/${id}.json`);
       if (status) {
         try {
@@ -314,7 +324,14 @@ export class CadTransferService {
   /** Cancel a queued or running job. Returns false for an unknown job. */
   cancel(jobId: string): boolean {
     const ctx = this.jobs.get(jobId);
-    if (!ctx) return false;
+    if (!ctx) {
+      if (!this.agentJobs.has(jobId)) return false;
+      // The sidecar has not written the request yet. Leave a cancel file for the spool.
+      this.cancelledJobs.add(jobId);
+      void this.project?.writeTextAtomic(`${SPOOL_DIR}/cancel/${jobId}`, "").catch(() => undefined);
+      return true;
+    }
+    if (this.agentJobs.has(jobId)) this.cancelledJobs.add(jobId);
     ctx.cancelled = true;
     ctx.process?.kill();
     const queue = this.queues[ctx.request.target];
@@ -341,7 +358,11 @@ export class CadTransferService {
 
   private async setPhase(ctx: JobContext, state: CadTransferJobPhase, message: string, patch: Partial<CadTransferJob> = {}): Promise<void> {
     ctx.job = { ...ctx.job, ...patch, state, message, updatedAt: new Date(this.deps.clock.now()).toISOString() };
-    this.deps.emit?.({ type: "job", job: ctx.job });
+    // The executor part is done, but the agent still checks the shape: the final state comes from the agent.
+    this.deps.emit?.({
+      type: "job",
+      job: state === "done" && this.agentJobs.has(ctx.jobId) ? { ...ctx.job, state: "running", message: "Checking the shape." } : ctx.job,
+    });
     const text = `${JSON.stringify({ jobId: ctx.jobId, state, message, updatedAt: ctx.job.updatedAt }, null, 2)}\n`;
     ctx.writes = ctx.writes.then(() => ctx.io.writeTextAtomic(`${SPOOL_DIR}/status/${ctx.jobId}.json`, text).catch(() => undefined));
     await ctx.writes;
@@ -532,14 +553,48 @@ export class CadTransferService {
     throw new Error(`Reify cannot find the part file for ${posix.basename(relative)}. Only FreeCAD parts can go to a CAD program.`);
   }
 
-  private async requestFeatures(doc: string): Promise<Record<string, unknown>> {
-    if (!this.deps.agent) throw new Error("The Reify runtime is not ready.");
-    const answer = await this.deps.agent({ op: "transfer-features", doc }, 120_000) as Record<string, unknown> | null;
-    const features = (answer && typeof answer === "object" && "features" in answer ? answer.features : answer) as Record<string, unknown> | null;
-    if (!features || typeof features !== "object" || features.schema !== "reify.features/1") {
-      throw new Error("Reify could not read the features of the part.");
+  /**
+   * Export through the agent (`transfer-export`), the same path the agent uses. The sidecar writes the spool
+   * request and this dispatcher serves it, so progress, cancel and the queue use one job id. The final state
+   * comes from the agent answer, because only the sidecar knows the result of the shape check.
+   */
+  private async exportViaAgent(
+    io: ProjectIO, args: { jobId: string; target: CadTransferTarget; doc: string; native: string; part?: string },
+  ): Promise<{ job: CadTransferJob; response?: Record<string, unknown> }> {
+    const { jobId, target, doc, native, part } = args;
+    const base = (state: CadTransferJobPhase, message: string, extra: Partial<CadTransferJob> = {}): CadTransferJob =>
+      ({ jobId, target, state, message, part, updatedAt: new Date(this.deps.clock.now()).toISOString(), ...extra });
+    this.agentJobs.add(jobId);
+    let job: CadTransferJob;
+    let response: Record<string, unknown> | undefined;
+    try {
+      if (!this.deps.agent) throw new Error("The Reify runtime is not ready.");
+      response = await this.deps.agent({ op: "transfer-export", doc, target, output: native, check: true, jobId }, AGENT_EXPORT_TIMEOUT_MS) as Record<string, unknown>;
+      const file = typeof response.file === "string" ? response.file : native;
+      const log = typeof response.log === "string" ? response.log : undefined;
+      const nativeFolder = await io.toHostPath(posix.dirname(file)).catch(() => undefined);
+      const logPath = log ? await io.toHostPath(log).catch(() => log) : undefined;
+      job = base("done", response.check === "passed" ? "Export done. The shape check passed." : "Export done.", {
+        native: file, ...(nativeFolder ? { nativeFolder } : {}), ...(logPath ? { logPath } : {}), error: null,
+      });
+    } catch (error) {
+      const e = error as { message?: string; code?: string; target?: string; detail?: { feature?: unknown; log?: unknown } };
+      const feature = typeof e.target === "string" ? e.target : typeof e.detail?.feature === "string" ? e.detail.feature : undefined;
+      const code = (e.code && /^(TRANSFER_[A-Z_]+|BAD_REQUEST)$/.test(e.code) ? e.code : "TRANSFER_EXECUTOR_FAILED") as CadTransferError["code"];
+      const message = String(e.message ?? error);
+      const log = typeof e.detail?.log === "string" ? e.detail.log : undefined;
+      const logPath = log ? await io.toHostPath(log).catch(() => log) : this.logHosts.get(jobId);
+      const cancelled = this.cancelledJobs.has(jobId);
+      job = base(cancelled ? "cancelled" : "failed", cancelled ? "The export was cancelled." : feature ? `${message} (feature ${feature})` : message, {
+        error: cancelled ? failure("CANCELLED", "The export was cancelled.") : { code, message, ...(feature ? { feature } : {}) },
+        ...(logPath ? { logPath } : {}),
+      });
+    } finally {
+      this.agentJobs.delete(jobId);
+      this.cancelledJobs.delete(jobId);
     }
-    return features;
+    this.deps.emit?.({ type: "job", job });
+    return { job, response };
   }
 
   /** Start an export for the Workbench. Returns the queued job at once. Progress arrives as events. */
@@ -550,29 +605,27 @@ export class CadTransferService {
     const job: CadTransferJob = {
       jobId, target, state: "queued", message: "Preparing the export.", updatedAt: new Date(this.deps.clock.now()).toISOString(), part: stem,
     };
+    this.agentJobs.add(jobId); // cancel() works from the first second
     this.deps.emit?.({ type: "job", job });
     void (async () => {
       try {
         if (!io) throw new Error("Choose a project before an export.");
         const doc = await this.resolvePartDoc(artifactPath, io);
-        const features = await this.requestFeatures(doc);
-        await this.runJob({
-          jobId, target, features, part: stem,
-          native: `exports/${stem}.${nativeExtension(target)}`,
-          checkStep: `build/transfer/${jobId}/check.step`, check: true,
-        }, io);
+        this.agentJobs.delete(jobId);
+        await this.exportViaAgent(io, { jobId, target, doc, native: `exports/${stem}.${nativeExtension(target)}`, part: stem });
       } catch (error) {
+        this.agentJobs.delete(jobId);
+        const message = String((error as Error).message ?? error);
         this.deps.emit?.({
           type: "job",
-          job: { ...job, state: "failed", message: String((error as Error).message ?? error), updatedAt: new Date(this.deps.clock.now()).toISOString(),
-            error: failure("EXECUTOR_FAILED", String((error as Error).message ?? error)) },
+          job: { ...job, state: "failed", message, updatedAt: new Date(this.deps.clock.now()).toISOString(), error: failure("EXECUTOR_FAILED", message) },
         });
       }
     })();
     return job;
   }
 
-  /** Build the reference plate in the project and send it through the real export path. */
+  /** Build the reference plate in the project and send it through the real export path (`transfer-export`). */
   async testExport(target: CadTransferTarget): Promise<CadTransferTestResult> {
     const steps: CadTransferTestResult["steps"] = [];
     const done = (ok: boolean, message: string, extra: Partial<CadTransferTestResult> = {}): CadTransferTestResult =>
@@ -594,40 +647,17 @@ export class CadTransferService {
       steps.push({ name: "Reference plate built", ok: false, detail: String((error as Error).message ?? error) });
       return done(false, `Reify could not build the reference plate. ${String((error as Error).message ?? error)}`);
     }
-    let features: Record<string, unknown>;
-    try {
-      features = await this.requestFeatures(doc);
-      steps.push({ name: "Features read", ok: true });
-    } catch (error) {
-      steps.push({ name: "Features read", ok: false, detail: String((error as Error).message ?? error) });
-      return done(false, String((error as Error).message ?? error));
+    const jobId = newJobId(this.deps.clock.now(), this.deps.random);
+    this.deps.emit?.({ type: "job", job: { jobId, target, state: "queued", message: "Preparing the export.", part: "Reference plate", updatedAt: new Date(this.deps.clock.now()).toISOString() } });
+    const { job } = await this.exportViaAgent(io, {
+      jobId, target, doc, native: `build/transfer-test/plate-${stamp}.${nativeExtension(target)}`, part: "Reference plate",
+    });
+    const logPath = job.logPath ?? this.logHosts.get(jobId);
+    steps.push({ name: "CAD program exported", ok: job.state === "done", detail: job.error?.message });
+    if (job.state !== "done") {
+      return done(false, `${job.error?.code ?? "FAILED"}: ${job.error?.message ?? job.message}`, { logPath, failedFeature: job.error?.feature, job });
     }
-    const result = await this.runJob({
-      target, features, part: "Reference plate", check: true,
-      native: `build/transfer-test/plate-${stamp}.${nativeExtension(target)}`,
-      checkStep: `build/transfer-test/plate-${stamp}.check.step`,
-    }, io);
-    const logPath = this.logHosts.get(result.jobId);
-    steps.push({ name: "CAD program exported", ok: result.ok, detail: result.error?.message });
-    if (!result.ok) {
-      return done(false, result.error?.message ?? "The export failed.", { logPath, failedFeature: result.error?.feature });
-    }
-    const mismatch = firstVolumeMismatch(features, result);
-    steps.push({ name: "Feature volumes match", ok: !mismatch, detail: mismatch ? `Feature ${mismatch}` : undefined });
-    if (mismatch) return done(false, `The volume after feature ${mismatch} differs from Reify.`, { logPath, failedFeature: mismatch });
-    return done(true, "Test export passed.", { logPath });
+    steps.push({ name: "Shape check passed", ok: true });
+    return done(true, "Test export passed.", { logPath, job });
   }
-}
-
-/** Name of the first feature whose volume differs from the Reify reference by more than 1e-6 (relative). */
-export function firstVolumeMismatch(features: Record<string, unknown>, result: SpoolResult): string | null {
-  const reference = ((features.reference ?? {}) as { feature_volumes?: Array<{ name: string; volume_mm3: number }> }).feature_volumes ?? [];
-  const built = new Map((result.feature_volumes ?? []).map((entry) => [entry.name, entry.volume_mm3]));
-  for (const entry of reference) {
-    const value = built.get(entry.name);
-    if (value === undefined) continue;
-    const scale = Math.max(Math.abs(entry.volume_mm3), 1e-12);
-    if (Math.abs(value - entry.volume_mm3) / scale > 1e-6) return entry.name;
-  }
-  return null;
 }

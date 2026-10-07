@@ -1,8 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { buildSolidworksExecutor } from "./build-solidworks-executor.mjs";
 import { signExecutors } from "./sign-executors.mjs";
 import { forwardWslInteropEnvironment } from "./wsl-interop-environment.mjs";
 
 const builder = "./node_modules/electron-builder/out/cli/cli.js";
+
+// Build the SolidWorks executor first (needs the .NET SDK; fails with a clear message when it is missing).
+try { buildSolidworksExecutor(); } catch (error) { console.error(error.message); process.exit(1); }
 
 // Signing hook for the bundled CAD executors (executors/solidworks/publish). It is a no-op unless
 // REIFY_SIGN_PFX or REIFY_SIGN_CERT_SHA1 is set. See scripts/sign-executors.mjs for the variables.
