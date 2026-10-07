@@ -79,8 +79,8 @@ Rules:
 
 Canonicalizer details (as built):
 
-- `plane.offset` is the coordinate of the frame origin along the positive world axis of the base plane (XY: z, XZ: y, YZ: x), even when the sketch normal points the other way (the XZ plane's normal is -Y). Executors place the sketch from `frame`, not from `plane`.
-- Geometry `id`s are the FreeCAD sketch geometry indices (construction geometry is skipped, so ids can have gaps). Arc angles are in `[0, 360)`; the arc runs counter-clockwise from `start_angle`, sweep = `(end_angle - start_angle) mod 360`. A sketch used by a hole may also contain `{ "id", "type": "point", "at": [u,v] }`.
+- `plane.offset` is the coordinate of the frame origin along the positive world axis of the base plane (XY: z, XZ: y, YZ: x), not along `frame.n`; it is the same sign convention even when the normal points the other way (the XZ plane's normal is -Y). Executors place the sketch from `frame`, not from `plane`.
+- Geometry `id`s are the FreeCAD sketch geometry indices (construction geometry is skipped, so ids can have gaps). Arc angles are in `[0, 360)`; the arc runs counter-clockwise from `start_angle`, sweep = `(end_angle - start_angle) mod 360`. Only line, arc and circle are emitted (points of a hole sketch appear only in `positions`).
 - `sketches` lists only sketches used by an exported feature, in document order.
 - `hole` also has `positions: [[u,v], ...]` (circle centres and points of its sketch, sketch coordinates; the executor drills at these with the hole's own `diameter`) and `reversed`. Loop checks are not applied to hole sketches (circles may overlap).
 - Directions verified in FreeCAD 1.1 with `n` = sketch normal: pad adds along `+n` (`reversed`: `-n`), pocket and hole remove along `-n` (`reversed`: `+n`). `direction` already includes `reversed`. `midplane` pad is symmetric; `direction` then only fixes the sign of the extrusion.

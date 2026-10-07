@@ -91,7 +91,7 @@ def _check_support(sketch: Any, feature: Any) -> None:
         raise _unsupported(_name(sketch), "sketch", "attachment", f"sketch is attached to {owner.TypeId}, only origin planes are supported")
 
 
-def _geometry(sketch: Any, with_points: bool) -> tuple[list[dict[str, Any]], list[list[float]]]:
+def _geometry(sketch: Any) -> tuple[list[dict[str, Any]], list[list[float]]]:
     items: list[dict[str, Any]] = []
     positions: list[list[float]] = []
     for index, g in enumerate(sketch.Geometry):
@@ -114,25 +114,22 @@ def _geometry(sketch: Any, with_points: bool) -> tuple[list[dict[str, Any]], lis
                           "start_angle": _r(a0), "end_angle": _r(a1),
                           "start": [_r(start.x), _r(start.y)], "end": [_r(end.x), _r(end.y)]})
         elif kind == "Part::GeomPoint":
-            positions.append([_r(g.X), _r(g.Y)])
-            if with_points:
-                items.append({"id": index, "type": "point", "at": [_r(g.X), _r(g.Y)]})
+            positions.append([_r(g.X), _r(g.Y)])  # points only feed hole positions; geometry stays line/arc/circle
         else:
             raise _unsupported(_name(sketch), "sketch", f"geometry:{kind.split('::')[-1]}", f"sketch geometry {kind} is not line, arc or circle")
     return items, positions
 
 
-def _sketch_entry(sketch: Any, strict: bool, with_points: bool) -> tuple[dict[str, Any], list[list[float]]]:
+def _sketch_entry(sketch: Any, strict: bool) -> tuple[dict[str, Any], list[list[float]]]:
     path = _name(sketch)
     frame = _frame(sketch)
     plane = tg.detect_plane(frame)
     if plane is None:
         raise _unsupported(path, "sketch", "tilted_plane", f"sketch normal {frame['n']} is not parallel to a world axis")
     plane["offset"] = _r(plane["offset"])
-    items, positions = _geometry(sketch, with_points)
-    curves = [g for g in items if g["type"] != "point"]
+    items, positions = _geometry(sketch)
     try:
-        loops = tg.analyse_sketch(curves, strict=strict)
+        loops = tg.analyse_sketch(items, strict=strict)
     except tg.LoopError as error:
         raise ReifyOpError(
             "TRANSFER_INVALID_SKETCH", f"sketch {path}: {error.message}", target=path,
@@ -269,7 +266,7 @@ def _body_entry(body: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             _check_support(sketch, obj)
             key = _name(sketch)
             if key not in sketches:
-                sketches[key], positions_of[key] = _sketch_entry(sketch, strict=op != "hole", with_points=op == "hole")
+                sketches[key], positions_of[key] = _sketch_entry(sketch, strict=op != "hole")
                 sketches[key]["_sketch"] = sketch
             features.append(_hole(obj, sketches[key], positions_of[key]) if op == "hole" else _pad_or_pocket(obj, op, sketches[key]))
         exported.add(name)

@@ -167,6 +167,28 @@ class TransferFeatureTests(unittest.TestCase):
         self.h.apply([{"op": "set", "target": "part/ring", "prop": "Reversed", "value": True}])
         self.assertEqual(self.features()["bodies"][0]["features"][-1]["axis"]["direction"], [-1, 0, 0])
 
+    def test_plane_offset_is_along_the_positive_world_axis(self) -> None:
+        # XZ plane: FreeCAD's normal is -Y, so a sketch offset 7 along n sits at y = -7.
+        self.h.apply([
+            {"op": "sketch", "name": "part/xz", "plane": "XZ", "offset": 7, "shapes": [{"rect": {"center": [0, 0], "size": [10, 10]}}]},
+            {"op": "pad", "name": "part/base", "sketch": "part/xz", "length": 4},
+        ])
+        sketch = self.features()["bodies"][0]["sketches"][0]
+        self.assertEqual((sketch["plane"], sketch["frame"]["origin"], sketch["frame"]["n"]), ({"base": "XZ", "offset": -7.0}, [0, -7, 0], [0, -1, 0]))
+        # flipped normal: the body turned 180 degrees about X puts the XY sketch normal on -Z
+        self.h.close()
+        self.h = Harness()
+        self.h.apply([
+            rect_sketch("part/xy", [10, 10], offset=3), {"op": "pad", "name": "part/base", "sketch": "part/xy", "length": 4},
+            {"op": "placement", "target": "part", "position": [0, 0, 20], "rotation": {"axis": [1, 0, 0], "angle": 180}},
+        ])
+        data = self.features()
+        sketch, pad = data["bodies"][0]["sketches"][0], data["bodies"][0]["features"][0]
+        self.assertEqual((sketch["plane"], sketch["frame"]["n"], pad["direction"]), ({"base": "XY", "offset": 17.0}, [0, 0, -1], [0, 0, -1]))
+        self.assertTrue(all(g["type"] in ("line", "arc", "circle") for g in sketch["geometry"]))
+        self.assertAlmostEqual(data["reference"]["bbox"]["min"][2], 13.0, places=6)
+        self.assertAlmostEqual(data["reference"]["bbox"]["max"][2], 17.0, places=6)
+
     def test_several_bodies_and_arcs(self) -> None:
         self.h.apply(plate_ops())
         self.h.apply([

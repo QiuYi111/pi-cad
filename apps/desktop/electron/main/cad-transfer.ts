@@ -190,7 +190,7 @@ export class CadTransferService {
     this.beatTimer = setInterval(() => { void this.writeHeartbeat(); }, HEARTBEAT_MS);
   }
 
-  /** Stop the timers and tell the sidecar that no dispatcher is running. */
+  /** Stop the timers. The old updatedAt makes the sidecar see "no dispatcher" at once. */
   async stop(): Promise<void> {
     if (this.pollTimer) clearInterval(this.pollTimer);
     if (this.beatTimer) clearInterval(this.beatTimer);
@@ -201,7 +201,7 @@ export class CadTransferService {
     if (io && wasActive) {
       const targets = { fusion: "unavailable", solidworks: "unavailable" };
       await io.writeTextAtomic(`${SPOOL_DIR}/dispatcher.json`, JSON.stringify({
-        schema: DISPATCHER_SCHEMA, pid: this.deps.pid, updatedAt: new Date(this.deps.clock.now()).toISOString(), targets,
+        schema: DISPATCHER_SCHEMA, pid: this.deps.pid, updatedAt: new Date(0).toISOString(), stopped: true, targets,
         detail: { fusion: STATE_TEXT.fusion.unavailable, solidworks: STATE_TEXT.solidworks.unavailable },
       }, null, 2)).catch(() => undefined);
     }
