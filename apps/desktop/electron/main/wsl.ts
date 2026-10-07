@@ -421,9 +421,17 @@ export class WslBridge implements RuntimeBridge {
       if (probe.stdout.trim().endsWith("cadpython=ready")) return;
       await this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif test -d python/.venv && ! test -x python/.venv/bin/python; then rm -rf python/.venv; fi\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000);
     });
-    await runStep("Preparing Blender system libraries…", 0.84, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "DEBIAN_FRONTEND=noninteractive apt-get install -y libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
-      encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
-    }).then(() => undefined));
+    await runStep("Preparing Blender system libraries…", 0.84, async () => {
+      const libraries = ["libsm6", "libxext6", "libxrender1", "libx11-6", "libxi6", "libxfixes3", "libxxf86vm1", "libxkbcommon0", "libgl1", "libegl1"];
+      const installed = libraries.map((name) => `dpkg -s ${name} >/dev/null 2>&1 || exit 1`).join("; ");
+      try {
+        await execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", installed], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+        return;
+      } catch {}
+      await execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", `DEBIAN_FRONTEND=noninteractive apt-get install -y ${libraries.join(" ")}`], {
+        encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+      });
+    });
     await runStep("Preparing the managed Blender runtime…", 0.88,
       () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\ncd ${JSON.stringify(paths.piCadRepo)}\nnode scripts/install-blender.mjs\n`, 30 * 60_000));
     await runStep("Connecting Prime Agent to Reify…", 0.94, () => this.pipe(["bash", "-s"], [
