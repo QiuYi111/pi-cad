@@ -56,9 +56,10 @@ class FakeExecTests(unittest.TestCase):
         self.assertEqual(base.input.op, "NewBodyFeatureOperation")
         self.assertEqual(base.input.extent[0:2], ("one_side", 0.5))  # 5 mm -> 0.5 cm
         self.assertEqual(base.input.extent[2], "PositiveExtentDirection")
-        self.assertEqual(holes.input.op, "CutFeatureOperation")
-        self.assertEqual(holes.input.extent[0], "all")
-        self.assertEqual(holes.input.extent[2], "NegativeExtentDirection")
+        self.assertEqual(holes.input.kind, "simple")
+        self.assertEqual(holes.input.extent, ("all", "NegativeExtentDirection"))
+        self.assertAlmostEqual(holes.input.args[0].value, 0.3)  # 3 mm
+        self.assertEqual(len(holes.input.positions), 1)
         self.assertEqual(ring.input.quantity.value, 2)
         self.assertAlmostEqual(ring.input.totalAngle.value, 2 * 3.141592653589793)
         self.assertEqual(ring.input.axis.label, "Z")
@@ -100,7 +101,7 @@ class FakeExecTests(unittest.TestCase):
 
     def test_unsupported_feature_never_opens_document(self):
         f = _path.sample()
-        f["bodies"][0]["features"].append({"name": "plate/fillet", "type": "fillet"})
+        f["bodies"][0]["features"].append({"name": "plate/fillet", "type": "shell"})
         app, res = self.run_job(f)
         self.assertEqual(res["error"]["code"], "UNSUPPORTED_OP")
         self.assertEqual(res["error"]["feature"], "plate/fillet")

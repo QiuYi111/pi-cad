@@ -1,0 +1,793 @@
+{
+  "schema": "reify.assembly/1",
+  "units": "mm",
+  "name": "arm",
+  "source": {
+    "doc": "assembly/arm.FCStd"
+  },
+  "parts": [
+    {
+      "ref": "parts/base.FCStd",
+      "name": "base",
+      "features": {
+        "schema": "reify.features/1",
+        "units": "mm",
+        "part": "base",
+        "source": {
+          "doc": "parts/base.FCStd"
+        },
+        "bodies": [
+          {
+            "name": "base",
+            "sketches": [
+              {
+                "name": "base/plate_profile",
+                "frame": {
+                  "origin": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "u": [
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  "v": [
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  "n": [
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                },
+                "plane": {
+                  "base": "XY",
+                  "offset": 0.0
+                },
+                "geometry": [
+                  {
+                    "id": 0,
+                    "type": "line",
+                    "start": [
+                      -25.0,
+                      -25.0
+                    ],
+                    "end": [
+                      25.0,
+                      -25.0
+                    ]
+                  },
+                  {
+                    "id": 1,
+                    "type": "line",
+                    "start": [
+                      25.0,
+                      -25.0
+                    ],
+                    "end": [
+                      25.0,
+                      25.0
+                    ]
+                  },
+                  {
+                    "id": 2,
+                    "type": "line",
+                    "start": [
+                      25.0,
+                      25.0
+                    ],
+                    "end": [
+                      -25.0,
+                      25.0
+                    ]
+                  },
+                  {
+                    "id": 3,
+                    "type": "line",
+                    "start": [
+                      -25.0,
+                      25.0
+                    ],
+                    "end": [
+                      -25.0,
+                      -25.0
+                    ]
+                  }
+                ],
+                "loops": [
+                  {
+                    "id": 0,
+                    "geometry": [
+                      0,
+                      1,
+                      2,
+                      3
+                    ],
+                    "closed": true,
+                    "depth": 0,
+                    "area": 2500.0
+                  }
+                ],
+                "dimensions": [
+                  {
+                    "name": "s0_w",
+                    "kind": "distance_x",
+                    "refs": [
+                      [
+                        0,
+                        1
+                      ],
+                      [
+                        0,
+                        2
+                      ]
+                    ],
+                    "value": {
+                      "value": 50.0
+                    }
+                  },
+                  {
+                    "name": "s0_h",
+                    "kind": "distance_y",
+                    "refs": [
+                      [
+                        1,
+                        1
+                      ],
+                      [
+                        1,
+                        2
+                      ]
+                    ],
+                    "value": {
+                      "value": 50.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_x",
+                    "kind": "distance_x",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        1
+                      ]
+                    ],
+                    "value": {
+                      "value": -25.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_y",
+                    "kind": "distance_y",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        1
+                      ]
+                    ],
+                    "value": {
+                      "value": -25.0
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "base/pivot_profile",
+                "frame": {
+                  "origin": [
+                    0.0,
+                    0.0,
+                    6.0
+                  ],
+                  "u": [
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  "v": [
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  "n": [
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                },
+                "plane": {
+                  "base": "XY",
+                  "offset": 6.0
+                },
+                "geometry": [
+                  {
+                    "id": 0,
+                    "type": "circle",
+                    "center": [
+                      0.0,
+                      0.0
+                    ],
+                    "radius": 4.0
+                  }
+                ],
+                "loops": [
+                  {
+                    "id": 0,
+                    "geometry": [
+                      0
+                    ],
+                    "closed": true,
+                    "depth": 0,
+                    "area": 50.265482
+                  }
+                ],
+                "dimensions": [
+                  {
+                    "name": "s0_d",
+                    "kind": "diameter",
+                    "refs": [
+                      [
+                        0,
+                        0
+                      ]
+                    ],
+                    "value": {
+                      "value": 8.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_x",
+                    "kind": "distance_x",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        3
+                      ]
+                    ],
+                    "value": {
+                      "value": 0.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_y",
+                    "kind": "distance_y",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        3
+                      ]
+                    ],
+                    "value": {
+                      "value": 0.0
+                    }
+                  }
+                ]
+              }
+            ],
+            "features": [
+              {
+                "name": "base/plate",
+                "type": "pad",
+                "sketch": "base/plate_profile",
+                "direction": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "extent": {
+                  "type": "length",
+                  "length": {
+                    "value": 6.0
+                  }
+                },
+                "midplane": false,
+                "reversed": false
+              },
+              {
+                "name": "base/pivot",
+                "type": "hole",
+                "sketch": "base/pivot_profile",
+                "direction": [
+                  0.0,
+                  0.0,
+                  -1.0
+                ],
+                "extent": {
+                  "type": "through_all"
+                },
+                "diameter": {
+                  "value": 8.0
+                },
+                "positions": [
+                  [
+                    0.0,
+                    0.0
+                  ]
+                ],
+                "reversed": false
+              }
+            ]
+          }
+        ],
+        "reference": {
+          "volume_mm3": 14698.407105,
+          "bbox": {
+            "min": [
+              -25.0,
+              -25.0,
+              0.0
+            ],
+            "max": [
+              25.0,
+              25.0,
+              6.0
+            ]
+          },
+          "feature_volumes": [
+            {
+              "name": "base/plate",
+              "volume_mm3": 15000.0
+            },
+            {
+              "name": "base/pivot",
+              "volume_mm3": 14698.407105
+            }
+          ]
+        }
+      }
+    },
+    {
+      "ref": "parts/link.FCStd",
+      "name": "link",
+      "features": {
+        "schema": "reify.features/1",
+        "units": "mm",
+        "part": "link",
+        "source": {
+          "doc": "parts/link.FCStd"
+        },
+        "bodies": [
+          {
+            "name": "link",
+            "sketches": [
+              {
+                "name": "link/arm_profile",
+                "frame": {
+                  "origin": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "u": [
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  "v": [
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  "n": [
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                },
+                "plane": {
+                  "base": "XY",
+                  "offset": 0.0
+                },
+                "geometry": [
+                  {
+                    "id": 0,
+                    "type": "line",
+                    "start": [
+                      -40.0,
+                      -5.0
+                    ],
+                    "end": [
+                      40.0,
+                      -5.0
+                    ]
+                  },
+                  {
+                    "id": 1,
+                    "type": "line",
+                    "start": [
+                      40.0,
+                      -5.0
+                    ],
+                    "end": [
+                      40.0,
+                      5.0
+                    ]
+                  },
+                  {
+                    "id": 2,
+                    "type": "line",
+                    "start": [
+                      40.0,
+                      5.0
+                    ],
+                    "end": [
+                      -40.0,
+                      5.0
+                    ]
+                  },
+                  {
+                    "id": 3,
+                    "type": "line",
+                    "start": [
+                      -40.0,
+                      5.0
+                    ],
+                    "end": [
+                      -40.0,
+                      -5.0
+                    ]
+                  }
+                ],
+                "loops": [
+                  {
+                    "id": 0,
+                    "geometry": [
+                      0,
+                      1,
+                      2,
+                      3
+                    ],
+                    "closed": true,
+                    "depth": 0,
+                    "area": 800.0
+                  }
+                ],
+                "dimensions": [
+                  {
+                    "name": "s0_w",
+                    "kind": "distance_x",
+                    "refs": [
+                      [
+                        0,
+                        1
+                      ],
+                      [
+                        0,
+                        2
+                      ]
+                    ],
+                    "value": {
+                      "value": 80.0
+                    }
+                  },
+                  {
+                    "name": "s0_h",
+                    "kind": "distance_y",
+                    "refs": [
+                      [
+                        1,
+                        1
+                      ],
+                      [
+                        1,
+                        2
+                      ]
+                    ],
+                    "value": {
+                      "value": 10.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_x",
+                    "kind": "distance_x",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        1
+                      ]
+                    ],
+                    "value": {
+                      "value": -40.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_y",
+                    "kind": "distance_y",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        1
+                      ]
+                    ],
+                    "value": {
+                      "value": -5.0
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "link/bearing_profile",
+                "frame": {
+                  "origin": [
+                    0.0,
+                    0.0,
+                    6.0
+                  ],
+                  "u": [
+                    1.0,
+                    0.0,
+                    0.0
+                  ],
+                  "v": [
+                    0.0,
+                    1.0,
+                    0.0
+                  ],
+                  "n": [
+                    0.0,
+                    0.0,
+                    1.0
+                  ]
+                },
+                "plane": {
+                  "base": "XY",
+                  "offset": 6.0
+                },
+                "geometry": [
+                  {
+                    "id": 0,
+                    "type": "circle",
+                    "center": [
+                      0.0,
+                      0.0
+                    ],
+                    "radius": 4.0
+                  }
+                ],
+                "loops": [
+                  {
+                    "id": 0,
+                    "geometry": [
+                      0
+                    ],
+                    "closed": true,
+                    "depth": 0,
+                    "area": 50.265482
+                  }
+                ],
+                "dimensions": [
+                  {
+                    "name": "s0_d",
+                    "kind": "diameter",
+                    "refs": [
+                      [
+                        0,
+                        0
+                      ]
+                    ],
+                    "value": {
+                      "value": 8.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_x",
+                    "kind": "distance_x",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        3
+                      ]
+                    ],
+                    "value": {
+                      "value": 0.0
+                    }
+                  },
+                  {
+                    "name": "s0_c_y",
+                    "kind": "distance_y",
+                    "refs": [
+                      [
+                        -1,
+                        1
+                      ],
+                      [
+                        0,
+                        3
+                      ]
+                    ],
+                    "value": {
+                      "value": 0.0
+                    }
+                  }
+                ]
+              }
+            ],
+            "features": [
+              {
+                "name": "link/arm",
+                "type": "pad",
+                "sketch": "link/arm_profile",
+                "direction": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "extent": {
+                  "type": "length",
+                  "length": {
+                    "value": 6.0
+                  }
+                },
+                "midplane": false,
+                "reversed": false
+              },
+              {
+                "name": "link/bearing",
+                "type": "hole",
+                "sketch": "link/bearing_profile",
+                "direction": [
+                  0.0,
+                  0.0,
+                  -1.0
+                ],
+                "extent": {
+                  "type": "through_all"
+                },
+                "diameter": {
+                  "value": 8.0
+                },
+                "positions": [
+                  [
+                    0.0,
+                    0.0
+                  ]
+                ],
+                "reversed": false
+              }
+            ]
+          }
+        ],
+        "reference": {
+          "volume_mm3": 4498.407105,
+          "bbox": {
+            "min": [
+              -40.0,
+              -5.0,
+              0.0
+            ],
+            "max": [
+              40.0,
+              5.0,
+              6.0
+            ]
+          },
+          "feature_volumes": [
+            {
+              "name": "link/arm",
+              "volume_mm3": 4800.0
+            },
+            {
+              "name": "link/bearing",
+              "volume_mm3": 4498.407105
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "occurrences": [
+    {
+      "name": "arm/base",
+      "part": "parts/base.FCStd",
+      "transform": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation": [
+          [
+            1.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.0,
+            1.0,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "arm/link",
+      "part": "parts/link.FCStd",
+      "transform": {
+        "origin": [
+          0.0,
+          0.0,
+          6.0
+        ],
+        "rotation": [
+          [
+            -0.866025,
+            0.5,
+            0.0
+          ],
+          [
+            -0.5,
+            -0.866025,
+            0.0
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ]
+      }
+    }
+  ],
+  "reference": {
+    "volume_mm3": 19196.814211,
+    "bbox": {
+      "min": [
+        -37.141016,
+        -25.0,
+        0.0
+      ],
+      "max": [
+        37.141016,
+        25.0,
+        12.0
+      ]
+    },
+    "feature_volumes": [
+      {
+        "name": "arm/base",
+        "volume_mm3": 14698.407105
+      },
+      {
+        "name": "arm/link",
+        "volume_mm3": 4498.407105
+      }
+    ]
+  }
+}

@@ -101,7 +101,13 @@ def load_job(path, job_id):
         raise JobError("jobId %r does not match file name %r" % (job.get("jobId"), job_id))
     if job.get("target") != "fusion":
         raise JobError("target must be 'fusion', got %r" % job.get("target"))
-    if not isinstance(job.get("features"), dict):
+    kind = job.get("kind", "part")
+    if kind not in ("part", "assembly"):
+        raise JobError("job.kind must be 'part' or 'assembly', got %r" % kind)
+    if kind == "assembly":
+        if not isinstance(job.get("assembly"), dict):
+            raise JobError("job.assembly missing")
+    elif not isinstance(job.get("features"), dict):
         raise JobError("job.features missing")
     out = job.get("output") or {}
     native = out.get("native", "part.f3d")
@@ -114,7 +120,7 @@ def load_job(path, job_id):
     timeout = job.get("timeoutS", 300)
     if not isinstance(timeout, (int, float)) or timeout <= 0:
         raise JobError("timeoutS must be a positive number")
-    return {"job": job, "native": native, "check_step": check_step,
+    return {"job": job, "kind": kind, "native": native, "check_step": check_step,
             "check": bool(job.get("check", True)), "timeout": float(timeout)}
 
 
@@ -143,11 +149,11 @@ class JobLog(object):
             pass
 
 
-def build_result(job_id, ok, info, files=None, built=0, volumes=None, error=None):
+def build_result(job_id, ok, info, files=None, built=0, volumes=None, error=None, warnings=None):
     return {"schema": RESULT_SCHEMA, "jobId": job_id, "ok": ok, "target": "fusion",
             "executor": {"name": EXECUTOR_NAME, "version": info["version"], "app": info["app"]},
             "files": files or {"native": None, "check_step": None, "log": "log.txt"},
-            "features_built": built, "feature_volumes": volumes or [], "error": error}
+            "features_built": built, "feature_volumes": volumes or [], "warnings": warnings or [], "error": error}
 
 
 def process_job(fdir, job_id, executor, info, busy=False):
@@ -169,13 +175,18 @@ def process_job(fdir, job_id, executor, info, busy=False):
         if busy:
             raise JobError("add-in is busy with another job", code="BUSY")
         spec = load_job(dst, job_id)
-        built_plan = planmod.build_plan(spec["job"]["features"])
-        log("plan: %d steps" % len(built_plan["steps"]))
+        if spec["kind"] == "assembly":
+            built_plan = planmod.build_assembly_plan(spec["job"]["assembly"])
+            log("plan: assembly with %d occurrences" % len(built_plan["occurrences"]))
+        else:
+            built_plan = planmod.build_plan(spec["job"]["features"])
+            log("plan: %d steps" % len(built_plan["steps"]))
         deadline = time.time() + spec["timeout"]
         res = executor.run(built_plan, out, spec["native"], spec["check_step"] if spec["check"] else None,
                            log, deadline, progress)
         files = {"native": spec["native"], "check_step": spec["check_step"] if spec["check"] else None, "log": "log.txt"}
-        result = build_result(job_id, True, info, files, res["features_built"], res["feature_volumes"])
+        warnings = list(built_plan.get("warnings", [])) + list(res.get("warnings", []))
+        result = build_result(job_id, True, info, files, res["features_built"], res["feature_volumes"], warnings=warnings)
         log("done ok")
     except Exception as e:  # noqa: BLE001 - every failure must become a result.json
         err = error_from_exception(e, progress["feature"])

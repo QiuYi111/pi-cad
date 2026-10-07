@@ -17,6 +17,8 @@ namespace Reify.Export
         [JsonPropertyName("native")] public string? Native { get; set; }
         [JsonPropertyName("check_step")] public string? CheckStep { get; set; }
         [JsonPropertyName("log")] public string Log { get; set; } = "log.txt";
+        /// <summary>Extra files written in the job dir (assembly jobs: the per-part .SLDPRT files), plain file names.</summary>
+        [JsonPropertyName("extra")] public List<string> Extra { get; set; } = new List<string>();
     }
 
     public sealed class JobResult
@@ -29,6 +31,7 @@ namespace Reify.Export
         [JsonPropertyName("files")] public ResultFiles Files { get; set; } = new ResultFiles();
         [JsonPropertyName("features_built")] public int FeaturesBuilt { get; set; }
         [JsonPropertyName("feature_volumes")] public List<FeatureVolume> FeatureVolumes { get; set; } = new List<FeatureVolume>();
+        [JsonPropertyName("warnings")] public List<WarningInfo> Warnings { get; set; } = new List<WarningInfo>();
         [JsonPropertyName("error")] public ErrorInfo? Error { get; set; }
     }
 

@@ -101,7 +101,7 @@ class ProcessTests(Base):
 
     def test_unsupported_op_mapping(self):
         f = _path.sample()
-        f["bodies"][0]["features"].append({"name": "plate/chamfer", "type": "chamfer"})
+        f["bodies"][0]["features"].append({"name": "plate/chamfer", "type": "shell"})
         self.put(features=f)
         res = jobs.process_job(self.fdir, "j1", OkExecutor(), INFO)
         self.assertEqual((res["error"]["code"], res["error"]["feature"], res["error"]["step"]), ("UNSUPPORTED_OP", "plate/chamfer", "plan"))

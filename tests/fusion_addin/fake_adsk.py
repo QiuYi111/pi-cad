@@ -10,6 +10,12 @@ types/overloads, real profile generation (the fake makes one profile per closed 
 OUTER loop), real timeline behaviour, name restrictions, locale/units behaviour, STEP/F3D content,
 and the real orientation of origin planes (the fake lets tests choose). Every member used here was
 written from documentation, not from a running Fusion.
+
+P2/P3 additions: user parameters (recorded, expression strings are NOT evaluated), sketch dimensions
+(recorded), hole/fillet/chamfer/rectangular-pattern/mirror features (recorded, no geometry), occurrences
+(a component per addNewComponent, transform recorded, never applied), materials, and a BRep that the
+TEST supplies (app.brep_edges / app.brep_faces) because the fake has no solid modelling. The fake does
+not know that a feature changed the body, so edge/face matching is only as real as the test fixture.
 """
 import math
 import sys
@@ -41,6 +47,22 @@ class ValueInput(object):
     def createByReal(v):
         return ValueInput(v)
 
+    @staticmethod
+    def createByString(t):
+        assert isinstance(t, str)
+        v = ValueInput(None)
+        v.text = t
+        return v
+
+
+class Matrix3D(object):
+    @staticmethod
+    def create():
+        return Matrix3D()
+
+    def setWithCoordinateSystem(self, origin, x, y, z):
+        self.origin, self.axes = origin, (x, y, z)
+
 
 class ObjectCollection(object):
     def __init__(self):
@@ -68,7 +90,6 @@ class _Enum(object):
 
 
 class Named(object):
-    reject_slash = False
 
     def __setattr__(self, k, v):
         if k == "name" and "/" in v and FakeApp.current.reject_slash:
@@ -83,6 +104,10 @@ class Plane(Named):
         self.xdir, self.ydir = xdir, ydir
         self.label = label
         self.geometry = types.SimpleNamespace(normal=Vector3D(*normal))
+
+
+class Face(Plane):
+    """Planar BRep face (also usable as a sketch plane). Built by make_plane_face()."""
 
 
 class PlaneInput(object):
@@ -113,11 +138,47 @@ class _Curves(object):
         self.sketchArcs = types.SimpleNamespace(addByThreePoints=sk._arc)
 
 
+class SkPoint(object):
+    def __init__(self, x, y, z=0.0):
+        self.geometry = Point3D(x, y, z)
+
+
+class SkLine(object):
+    def __init__(self, a, b):
+        self.startSketchPoint, self.endSketchPoint = SkPoint(a.x, a.y), SkPoint(b.x, b.y)
+
+
+class SkCircle(object):
+    def __init__(self, c, r):
+        self.centerSketchPoint, self.radius = SkPoint(c.x, c.y), r
+
+
+class SkArc(object):
+    def __init__(self, s, m, e):
+        sp, ep, c, r, _a, _sw = _arc3(s, m, e)
+        self.startSketchPoint, self.endSketchPoint = SkPoint(*sp), SkPoint(*ep)
+        self.centerSketchPoint, self.radius = SkPoint(*c), r
+
+
+class Dim(object):
+    def __init__(self, kind, *args):
+        self.kind, self.args = kind, args
+        self.parameter = types.SimpleNamespace(expression=None)
+
+
 class Sketch(Named):
     def __init__(self, app, plane):
         self.app = app
         self.plane = plane
         self.lines, self.circles, self.arcs = [], [], []
+        self.dims, self.points = [], []
+        self.originPoint = SkPoint(0, 0)
+        self.sketchPoints = types.SimpleNamespace(add=self._point)
+        self.sketchDimensions = types.SimpleNamespace(
+            addDistanceDimension=lambda p1, p2, orient, txt: self._dim("distance", p1, p2, orient),
+            addRadialDimension=lambda e, txt: self._dim("radius", e),
+            addDiameterDimension=lambda e, txt: self._dim("diameter", e),
+            addAngularDimension=lambda a, b, txt: self._dim("angle", a, b))
         self._deferred = False
         self.sketchCurves = _Curves(self)
         self.app.log.append("sketch.add")
@@ -140,15 +201,30 @@ class Sketch(Named):
     def _line(self, a, b):
         self._chk(a, b)
         self.lines.append((a, b))
+        return SkLine(a, b)
 
     def _circle(self, c, r):
         self._chk(c)
         assert r > 0
         self.circles.append((c, r))
+        return SkCircle(c, r)
 
     def _arc(self, s, m, e):
         self._chk(s, m, e)
         self.arcs.append((s, m, e))
+        return SkArc(s, m, e)
+
+    def _point(self, p):
+        self._chk(p)
+        sp = SkPoint(p.x, p.y)
+        self.points.append(sp)
+        return sp
+
+    def _dim(self, kind, *args):
+        assert not self._deferred
+        d = Dim(kind, *args)
+        self.dims.append(d)
+        return d
 
     def _chk(self, *pts):
         assert self._deferred, "curves must be drawn while compute is deferred"
@@ -257,7 +333,7 @@ class Sketches(object):
         self.app = app
 
     def add(self, plane):
-        assert isinstance(plane, Plane)
+        assert hasattr(plane, "normal_t")
         return Sketch(self.app, plane)
 
 
@@ -275,14 +351,18 @@ class ExtrudeInput(object):
     def setAllExtent(self, direction):
         self.extent = ("all", None, direction)
 
+    def setOneSideToExtent(self, entity, match, offsetDistance=None, directionHint=None):
+        assert isinstance(entity, Face)
+        self.extent = ("to_face", entity, directionHint)
+
 
 class _Feature(Named):
     pass
 
 
 class ExtrudeFeatures(object):
-    def __init__(self, app):
-        self.app = app
+    def __init__(self, app, comp):
+        self.app, self.comp = app, comp
 
     def createInput(self, coll, op):
         assert isinstance(coll, ObjectCollection) and coll.count > 0
@@ -292,6 +372,7 @@ class ExtrudeFeatures(object):
         assert inp.extent is not None, "extent not set"
         f = _Feature()
         f.input = inp
+        self.comp.feature_list.append(f)
         self.app.features.append(f)
         self.app.log.append("extrude %s" % inp.op)
         return f
@@ -305,8 +386,8 @@ class PatternInput(object):
 
 
 class PatternFeatures(object):
-    def __init__(self, app):
-        self.app = app
+    def __init__(self, app, comp):
+        self.app, self.comp = app, comp
 
     def createInput(self, ents, axis):
         for i in range(ents.count):
@@ -317,23 +398,119 @@ class PatternFeatures(object):
         assert inp.quantity is not None and inp.totalAngle is not None
         f = _Feature()
         f.input = inp
+        self.comp.feature_list.append(f)
         self.app.features.append(f)
         self.app.log.append("pattern")
         return f
 
 
 class Body(object):
-    def __init__(self, app):
-        self.app = app
+    def __init__(self, comp):
+        self.comp = comp
 
     @property
     def physicalProperties(self):
-        return types.SimpleNamespace(volume=0.5 * len(self.app.features))  # fake: 0.5 cm3 per feature
+        return types.SimpleNamespace(volume=0.5 * len(self.comp.feature_list))  # fake: 0.5 cm3 per feature
+
+    @property
+    def edges(self):
+        return _Coll(self.comp.app.brep_edges)
+
+    @property
+    def faces(self):
+        return _Coll(self.comp.app.brep_faces)
+
+    @property
+    def boundingBox(self):
+        return types.SimpleNamespace(minPoint=Point3D(0, 0, 0), maxPoint=Point3D(10, 10, 10))  # 100 mm cube diagonal ~173
 
 
-class Root(object):
-    def __init__(self, app):
+class _Rec(Named):
+    pass
+
+
+class _FeatureColl(object):
+    """Generic recording collection for create*/add feature APIs."""
+
+    def __init__(self, comp, label):
+        self.comp, self.label = comp, label
+
+    def add(self, inp):
+        f = _Feature()
+        f.input = inp
+        f.label = self.label
+        self.comp.feature_list.append(f)
+        self.comp.app.features.append(f)
+        self.comp.app.log.append(self.label)
+        return f
+
+
+class HoleInput(object):
+    def __init__(self, kind, args):
+        self.kind, self.args = kind, args
+        self.positions = self.extent = self.tipAngle = self.isDefaultDirection = None
+
+    def setPositionBySketchPoints(self, coll):
+        assert coll.count > 0
+        self.positions = [coll.item(i) for i in range(coll.count)]
+
+    def setAllExtent(self, direction):
+        self.extent = ("all", direction)
+
+    def setDistanceExtent(self, vi):
+        self.extent = ("distance", vi)
+
+
+class HoleFeatures(_FeatureColl):
+    def createSimpleInput(self, d):
+        return HoleInput("simple", (d,))
+
+    def createCounterboreInput(self, d, cd, cdepth):
+        return HoleInput("counterbore", (d, cd, cdepth))
+
+    def createCountersinkInput(self, d, csd, ang):
+        return HoleInput("countersink", (d, csd, ang))
+
+    def add(self, inp):
+        assert inp.positions and inp.extent
+        return _FeatureColl.add(self, inp)
+
+
+class FilletInput(object):
+    def __init__(self):
+        self.sets = []
+        self.chamferEdgeSets = types.SimpleNamespace(addEqualDistanceChamferEdgeSet=lambda coll, d, chain: self.sets.append((coll, d, chain)))
+
+    def addConstantRadiusEdgeSet(self, coll, r, chain):
+        self.sets.append((coll, r, chain))
+
+
+class EdgeFeatures(_FeatureColl):
+    def createInput(self):
+        return FilletInput()
+
+    createInput2 = createInput
+
+    def add(self, inp):
+        assert inp.sets and inp.sets[0][0].count > 0
+        return _FeatureColl.add(self, inp)
+
+
+class SimpleInput(object):
+    def __init__(self, *a):
+        self.args = a
+
+
+class SimpleFeatures(_FeatureColl):
+    def createInput(self, *a):
+        return SimpleInput(*a)
+
+
+class Component(Named):
+    def __init__(self, app, name="root"):
         self.app = app
+        self.feature_list = []
+        self.name = name
         s = -1 if app.flip_xy else 1
         # XY: normal +/-Z. XZ: normal -Y (x=X, y=Z). YZ: normal +X (x=Y, y=Z).
         self.xYConstructionPlane = Plane((0, 0, s), xdir=(1, 0, 0), ydir=(0, s, 0), label="XY")
@@ -344,12 +521,69 @@ class Root(object):
         self.zConstructionAxis = types.SimpleNamespace(label="Z")
         self.constructionPlanes = ConstructionPlanes(app)
         self.sketches = Sketches(app)
-        self.features = types.SimpleNamespace(extrudeFeatures=ExtrudeFeatures(app),
-                                              circularPatternFeatures=PatternFeatures(app))
+        self.occurrences = types.SimpleNamespace(addNewComponent=self._add_comp)
+        self.features = types.SimpleNamespace(
+            extrudeFeatures=ExtrudeFeatures(app, self), circularPatternFeatures=PatternFeatures(app, self),
+            holeFeatures=HoleFeatures(self, "hole"), filletFeatures=EdgeFeatures(self, "fillet"),
+            chamferFeatures=EdgeFeatures(self, "chamfer"), rectangularPatternFeatures=RectPatterns(self, "rect_pattern"),
+            mirrorFeatures=SimpleFeatures(self, "mirror"))
+
+    def _add_comp(self, matrix):
+        occ = types.SimpleNamespace(component=Component(self.app, "Component"), transform=matrix)
+        self.app.occurrences.append(occ)
+        self.app.log.append("occurrence")
+        return occ
 
     @property
     def bRepBodies(self):
-        return _Coll([Body(self.app)] if self.app.features else [])
+        return _Coll([Body(self)] if self.feature_list else [])
+
+
+class RectPatterns(_FeatureColl):
+    def createInput(self, ents, axis, qty, dist, dtype):
+        for i in range(ents.count):
+            assert isinstance(ents.item(i), _Feature)
+        return SimpleInput(ents, axis, qty, dist, dtype)
+
+
+Root = Component
+
+
+def make_line_edge(a, b):
+    mid = [(x + y) / 2 for x, y in zip(a, b)]
+    length = sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+    return _edge("adsk::core::Line3D", mid, length, a, b)
+
+
+def make_circle_edge(center, r, normal=(0, 0, 1)):
+    mid = [center[0] + r, center[1], center[2]]
+    e = _edge("adsk::core::Circle3D", mid, 2 * math.pi * r, mid, mid)
+    e.geometry.center, e.geometry.radius = Point3D(*[c / 10 for c in center]), r / 10
+    e.geometry.normal = Vector3D(*normal)
+    return e
+
+
+def _edge(otype, mid, length_mm, a, b):
+    cm = lambda v: Point3D(*[c / 10 for c in v])
+
+    class Ev(object):
+        def getParameterExtents(self):
+            return True, 0.0, 1.0
+
+        def getPointAtParameter(self, t):
+            return True, cm(mid)
+
+    e = types.SimpleNamespace(geometry=types.SimpleNamespace(objectType=otype), evaluator=Ev(), length=length_mm / 10,
+                              startVertex=types.SimpleNamespace(geometry=cm(a)), endVertex=types.SimpleNamespace(geometry=cm(b)))
+    return e
+
+
+def make_plane_face(origin, normal, area_mm2):
+    f = Face(tuple(normal), tuple(c / 10 for c in origin), xdir=(1, 0, 0), ydir=(0, 1, 0))
+    f.geometry = types.SimpleNamespace(objectType="adsk::core::Plane", origin=Point3D(*[c / 10 for c in origin]),
+                                       normal=Vector3D(*normal), )
+    f.area = area_mm2 / 100.0
+    return f
 
 
 class ExportManager(object):
@@ -376,8 +610,28 @@ class Design(object):
         self.app = app
         self.designType = None
         self.fusionUnitsManager = types.SimpleNamespace(distanceDisplayUnits=None)
-        self.rootComponent = Root(app)
+        self.rootComponent = Component(app)
+        self.userParameters = types.SimpleNamespace(add=self._param)
+        self.materials = types.SimpleNamespace(addByCopy=self._copy_mat)
+        self.params = []
         self.exportManager = ExportManager(app)
+
+
+def _design_param(self, name, vi, units, comment):
+    self.params.append((name, vi, units))
+    return types.SimpleNamespace(name=name)
+
+
+def _design_copy_mat(self, base, name):
+    m = types.SimpleNamespace(name=name, materialProperties=types.SimpleNamespace(
+        itemById=lambda i: self.density_prop if i == "structural_Density" else None))
+    self.density_prop = types.SimpleNamespace(value=None)
+    self.material = m
+    return m
+
+
+Design._param = _design_param
+Design._copy_mat = _design_copy_mat
 
 
 class Doc(object):
@@ -393,9 +647,13 @@ class Doc(object):
 class FakeApp(object):
     current = None
 
-    def __init__(self, flip_xy=False, reject_slash=False, fail_step=False):
+    def __init__(self, flip_xy=False, reject_slash=False, fail_step=False, no_material=False):
         self.flip_xy, self.reject_slash, self.fail_step = flip_xy, reject_slash, fail_step
+        self.no_material = no_material
         self.log, self.features, self.planes = [], [], []
+        self.occurrences, self.brep_edges, self.brep_faces = [], [], []
+        self.materialLibraries = _Coll([types.SimpleNamespace(materials=_Coll([types.SimpleNamespace(
+            materialProperties=types.SimpleNamespace(itemById=lambda i: object()))]))])
         self.closed = False
         self.close_args = None
         self.version = "2.0.test"
@@ -419,6 +677,7 @@ def install(**kw):
     app = FakeApp(**kw)
     core = types.ModuleType("adsk.core")
     core.Point3D, core.Vector3D, core.ValueInput, core.ObjectCollection = Point3D, Vector3D, ValueInput, ObjectCollection
+    core.Matrix3D = Matrix3D
     core.Application = types.SimpleNamespace(get=lambda: app)
     core.DocumentTypes = _Enum("FusionDesignDocumentType")
     core.DefaultModelingOrientations = _Enum("ZUpModelingOrientation", "YUpModelingOrientation")
@@ -426,6 +685,8 @@ def install(**kw):
     fus.Design = types.SimpleNamespace(cast=lambda x: x)
     fus.DesignTypes = _Enum("ParametricDesignType", "DirectDesignType")
     fus.DistanceUnits = _Enum("MillimeterDistanceUnits")
+    fus.PatternDistanceType = _Enum("SpacingPatternDistanceType", "ExtentPatternDistanceType")
+    fus.DimensionOrientations = _Enum("AlignedDimensionOrientation", "HorizontalDimensionOrientation", "VerticalDimensionOrientation")
     fus.FeatureOperations = _Enum("NewBodyFeatureOperation", "JoinFeatureOperation", "CutFeatureOperation")
     fus.ExtentDirections = _Enum("PositiveExtentDirection", "NegativeExtentDirection", "SymmetricExtentDirection")
     fus.DistanceExtentDefinition = types.SimpleNamespace(create=lambda vi: types.SimpleNamespace(distance=vi))

@@ -5,18 +5,6 @@
   "source": {
     "doc": "part.FCStd"
   },
-  "parameters": [
-    {
-      "name": "hole_d",
-      "value": 4.0,
-      "unit": "mm"
-    },
-    {
-      "name": "width",
-      "value": 40.0,
-      "unit": "mm"
-    }
-  ],
   "bodies": [
     {
       "name": "part",
@@ -128,8 +116,7 @@
                 ]
               ],
               "value": {
-                "value": 40.0,
-                "expr": "=width"
+                "value": 40.0
               }
             },
             {
@@ -163,8 +150,7 @@
                 ]
               ],
               "value": {
-                "value": -20.0,
-                "expr": "=-0.5*width"
+                "value": -20.0
               }
             },
             {
@@ -187,12 +173,12 @@
           ]
         },
         {
-          "name": "part/hole_profile",
+          "name": "part/dimple_profile",
           "frame": {
             "origin": [
               0.0,
-              0.0,
-              5.0
+              -8.5,
+              8.5
             ],
             "u": [
               1.0,
@@ -201,19 +187,16 @@
             ],
             "v": [
               0.0,
-              1.0,
-              0.0
+              0.707107,
+              0.707107
             ],
             "n": [
               0.0,
-              0.0,
-              1.0
+              -0.707107,
+              0.707107
             ]
           },
-          "plane": {
-            "base": "XY",
-            "offset": 5.0
-          },
+          "plane": null,
           "geometry": [
             {
               "id": 0,
@@ -236,6 +219,19 @@
               "area": 12.566371
             }
           ],
+          "face_ref": {
+            "origin": [
+              0.0,
+              -13.5,
+              3.5
+            ],
+            "normal": [
+              0.0,
+              -0.707107,
+              0.707107
+            ],
+            "area": 169.705627
+          },
           "dimensions": [
             {
               "name": "s0_d",
@@ -247,8 +243,7 @@
                 ]
               ],
               "value": {
-                "value": 4.0,
-                "expr": "=hole_d"
+                "value": 4.0
               }
             },
             {
@@ -301,42 +296,62 @@
           "extent": {
             "type": "length",
             "length": {
-              "value": 5.0,
-              "expr": "=width/8"
+              "value": 5.0
             }
           },
           "midplane": false,
           "reversed": false
         },
         {
-          "name": "part/bore",
-          "type": "hole",
-          "sketch": "part/hole_profile",
+          "name": "part/slope",
+          "type": "chamfer",
+          "edges": [
+            {
+              "curve": "line",
+              "midpoint": [
+                0.0,
+                -15.0,
+                5.0
+              ],
+              "length": 40.0,
+              "start": [
+                -20.0,
+                -15.0,
+                5.0
+              ],
+              "end": [
+                20.0,
+                -15.0,
+                5.0
+              ]
+            }
+          ],
+          "size": {
+            "value": 3.0
+          }
+        },
+        {
+          "name": "part/dimple",
+          "type": "pocket",
+          "sketch": "part/dimple_profile",
           "direction": [
             0.0,
-            0.0,
-            -1.0
+            0.707107,
+            -0.707107
           ],
           "extent": {
-            "type": "through_all"
+            "type": "length",
+            "length": {
+              "value": 1.0
+            }
           },
-          "diameter": {
-            "value": 6.0,
-            "expr": "=hole_d + 2"
-          },
-          "positions": [
-            [
-              0.0,
-              0.0
-            ]
-          ],
           "reversed": false
         }
       ]
     }
   ],
   "reference": {
-    "volume_mm3": 5858.628331,
+    "volume_mm3": 5820.0,
     "bbox": {
       "min": [
         -20.0,
@@ -355,8 +370,12 @@
         "volume_mm3": 6000.0
       },
       {
-        "name": "part/bore",
-        "volume_mm3": 5858.628331
+        "name": "part/slope",
+        "volume_mm3": 5820.0
+      },
+      {
+        "name": "part/dimple",
+        "volume_mm3": 5820.0
       }
     ]
   }

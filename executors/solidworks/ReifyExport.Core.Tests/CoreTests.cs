@@ -86,12 +86,14 @@ namespace Reify.Export.Tests
         [Fact]
         public void HoleIsThroughAllCutAndReversedPerConvention()
         {
-            var ex = (ExtrudeStep)Planner.Build(Sample()).Steps[1];
-            Assert.True(ex.Cut);
-            Assert.Equal(EndCondition.ThroughAll, ex.End);
+            var ex = (HoleStep)Planner.Build(Sample()).Steps[1];
+            Assert.True(ex.Through);
+            Assert.Equal(0.006, ex.DiameterM, 12);
+            Assert.Single(ex.CentersWorldM);
             Assert.Equal(0.005, ex.Sketch.OffsetM, 12);   // sketch plane at z = +5 mm
-            // cut removes toward -Z and the convention says cuts default to -normal => no reverse
+            // hole removes toward -Z and the convention says cuts default to -normal => no reverse
             Assert.False(ex.Reverse);
+            Assert.True(ex.IsPlain);
         }
 
         [Fact]
@@ -202,21 +204,39 @@ namespace Reify.Export.Tests
     {
         public List<string> Calls = new List<string>();
         public string? FailOn;
-        double _vol;
-        public string Begin(string n) { Calls.Add("begin"); return "FAKE 1.0"; }
-        public void BuildSketch(SketchPlan s) { Calls.Add("sketch:" + s.Name); }
+        public bool FailBind;
+        public List<EdgeInfo> Edges = new List<EdgeInfo>();
+        public List<FaceInfo> Faces = new List<FaceInfo>();
+        public double Diagonal = 100.0;
+        public double Vol;
+        public IList<WarningInfo> Warnings { get; } = new List<WarningInfo>();
+        public string Begin(string n) { Calls.Add("begin:" + n); Vol = 0; return "FAKE 1.0"; }
+        public string BeginAssembly(string n) { Calls.Add("begin_asm:" + n); return "FAKE 1.0"; }
+        public bool AddParameter(ParameterPlan p) { Calls.Add("param:" + p.Name); return true; }
+        public bool BindDimension(string f, string e) { Calls.Add("bind:" + f + "=" + e); return !FailBind; }
+        public void BuildSketch(SketchPlan s, FaceInfo? face) { Calls.Add("sketch:" + s.Name + (face != null ? "@face" + face.Index : "")); }
         public void ReuseSketch(string n) { Calls.Add("reuse:" + n); }
-        public void Extrude(ExtrudeStep s)
+        public virtual void Extrude(ExtrudeStep s, FaceInfo? upTo)
         {
-            Calls.Add("extrude:" + s.FeatureName);
+            Calls.Add("extrude:" + s.FeatureName + (upTo != null ? "@face" + upTo.Index : ""));
             if (FailOn == s.FeatureName) throw new InvalidOperationException("boom");
-            _vol += s.Cut ? -100 : 1000;
+            Vol += s.Cut ? -100 : 1000;
         }
-        public void Pattern(PatternStep s) { Calls.Add("pattern:" + s.FeatureName); _vol -= 300; }
-        public double VolumeMm3() => _vol;
-        public void SaveNative(string p) { Calls.Add("save"); File.WriteAllText(p, "x"); }
+        public virtual void Hole(HoleStep s, FaceInfo? face) { Calls.Add("hole:" + s.FeatureName); if (FailOn == s.FeatureName) throw new InvalidOperationException("boom"); Vol -= 100; }
+        public void Pattern(PatternStep s) { Calls.Add("pattern:" + s.FeatureName); Vol -= 300; }
+        public void LinearPattern(LinearPatternStep s) { Calls.Add("linear:" + s.FeatureName); Vol -= 50; }
+        public void Mirror(MirrorStep s) { Calls.Add("mirror:" + s.FeatureName); Vol -= 10; }
+        public void Fillet(FilletStep s, IReadOnlyList<EdgeInfo> e) { Calls.Add("fillet:" + s.FeatureName + ":" + string.Join(",", e.Select(x => x.Index))); Vol -= 1; }
+        public void Chamfer(ChamferStep s, IReadOnlyList<EdgeInfo> e) { Calls.Add("chamfer:" + s.FeatureName + ":" + string.Join(",", e.Select(x => x.Index))); Vol -= 1; }
+        public IReadOnlyList<EdgeInfo> GetEdges() => Edges;
+        public IReadOnlyList<FaceInfo> GetFaces() => Faces;
+        public double DiagonalMm() => Diagonal;
+        public double VolumeMm3() => Vol;
+        public bool SetDensity(double d) { Calls.Add("density:" + d); return true; }
+        public void SaveNative(string p) { Calls.Add("save:" + Path.GetFileName(p)); File.WriteAllText(p, "x"); }
         public void ExportStep(string p) { Calls.Add("step"); File.WriteAllText(p, "x"); }
         public void Close() { Calls.Add("close"); }
+        public void AddComponent(string path, OccurrencePlan o) { Calls.Add("component:" + o.Name + ":" + Path.GetFileName(path)); }
     }
 
     public class RunnerTests : IDisposable
@@ -238,7 +258,7 @@ namespace Reify.Export.Tests
             var r = Run(fb, JobLoader.Parse(Samples.Job(Samples.Features)));
             Assert.True(r.Ok);
             Assert.Equal(3, r.FeaturesBuilt);
-            Assert.Equal(new[] { "begin", "sketch:bracket/base_profile", "extrude:bracket/base", "sketch:bracket/hole_sketch", "extrude:bracket/holes", "pattern:bracket/ring", "save", "step", "close" }, fb.Calls.ToArray());
+            Assert.Equal(new[] { "begin:bracket", "sketch:bracket/base_profile", "extrude:bracket/base", "hole:bracket/holes", "pattern:bracket/ring", "save:part.SLDPRT", "step", "close" }, fb.Calls.ToArray());
             using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(_dir, "result.json")));
             var root = doc.RootElement;
             Assert.Equal("reify.transfer.result/1", root.GetProperty("schema").GetString());
@@ -251,6 +271,8 @@ namespace Reify.Export.Tests
             var vols = root.GetProperty("feature_volumes");
             Assert.Equal(3, vols.GetArrayLength());
             Assert.Equal(1000.0, vols[0].GetProperty("volume_mm3").GetDouble());
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("warnings").ValueKind);
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("files").GetProperty("extra").ValueKind);
             Assert.True(File.Exists(Path.Combine(_dir, "part.SLDPRT")));
         }
 
@@ -262,7 +284,7 @@ namespace Reify.Export.Tests
             Assert.False(r.Ok);
             Assert.Equal(ErrorCodes.ExecutorFailed, r.Error!.Code);
             Assert.Equal("bracket/holes", r.Error.Feature);
-            Assert.Equal("extrude", r.Error.Step);
+            Assert.Equal("hole", r.Error.Step);
             Assert.Equal(1, r.FeaturesBuilt);
             Assert.Contains("close", fb.Calls);
             using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(_dir, "result.json")));
@@ -297,7 +319,6 @@ namespace Reify.Export.Tests
         [Fact]
         public void CutThatRemovesNothingIsAnError()
         {
-            var f = JsonSerializer.Deserialize<FeatureFile>(Samples.Features, JsonDefaults.Read)!;
             var fb = new NoOpCutBuilder();
             using var log = new JobLog(null);
             var job = JobLoader.Parse(Samples.Job(Samples.Features));
@@ -307,18 +328,9 @@ namespace Reify.Export.Tests
             Assert.Contains("removed no material", r.Error.Message);
         }
 
-        sealed class NoOpCutBuilder : IPartBuilder
+        sealed class NoOpCutBuilder : FakeBuilder
         {
-            double _v;
-            public string Begin(string n) => "x";
-            public void BuildSketch(SketchPlan s) { }
-            public void ReuseSketch(string n) { }
-            public void Extrude(ExtrudeStep s) { if (!s.Cut) _v += 100; }
-            public void Pattern(PatternStep s) { }
-            public double VolumeMm3() => _v;
-            public void SaveNative(string p) { }
-            public void ExportStep(string p) { }
-            public void Close() { }
+            public override void Hole(HoleStep s, FaceInfo? face) { Calls.Add("hole:" + s.FeatureName); }
         }
     }
 

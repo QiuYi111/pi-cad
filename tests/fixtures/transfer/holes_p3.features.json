@@ -42,11 +42,11 @@
               "id": 0,
               "type": "line",
               "start": [
-                -20.0,
+                -40.0,
                 -15.0
               ],
               "end": [
-                20.0,
+                40.0,
                 -15.0
               ]
             },
@@ -54,11 +54,11 @@
               "id": 1,
               "type": "line",
               "start": [
-                20.0,
+                40.0,
                 -15.0
               ],
               "end": [
-                20.0,
+                40.0,
                 15.0
               ]
             },
@@ -66,11 +66,11 @@
               "id": 2,
               "type": "line",
               "start": [
-                20.0,
+                40.0,
                 15.0
               ],
               "end": [
-                -20.0,
+                -40.0,
                 15.0
               ]
             },
@@ -78,11 +78,11 @@
               "id": 3,
               "type": "line",
               "start": [
-                -20.0,
+                -40.0,
                 15.0
               ],
               "end": [
-                -20.0,
+                -40.0,
                 -15.0
               ]
             }
@@ -98,7 +98,7 @@
               ],
               "closed": true,
               "depth": 0,
-              "area": 1200.0
+              "area": 2400.0
             }
           ],
           "dimensions": [
@@ -116,7 +116,7 @@
                 ]
               ],
               "value": {
-                "value": 40.0
+                "value": 80.0
               }
             },
             {
@@ -150,7 +150,7 @@
                 ]
               ],
               "value": {
-                "value": -20.0
+                "value": -40.0
               }
             },
             {
@@ -173,12 +173,12 @@
           ]
         },
         {
-          "name": "part/hole_profile",
+          "name": "part/blind_profile",
           "frame": {
             "origin": [
               0.0,
               0.0,
-              5.0
+              8.0
             ],
             "u": [
               1.0,
@@ -198,44 +198,17 @@
           },
           "plane": {
             "base": "XY",
-            "offset": 5.0
+            "offset": 8.0
           },
           "geometry": [
             {
               "id": 0,
               "type": "circle",
               "center": [
-                -15.0,
-                -10.0
+                -30.0,
+                0.0
               ],
-              "radius": 2.0
-            },
-            {
-              "id": 1,
-              "type": "circle",
-              "center": [
-                15.0,
-                -10.0
-              ],
-              "radius": 2.0
-            },
-            {
-              "id": 2,
-              "type": "circle",
-              "center": [
-                15.0,
-                10.0
-              ],
-              "radius": 2.0
-            },
-            {
-              "id": 3,
-              "type": "circle",
-              "center": [
-                -15.0,
-                10.0
-              ],
-              "radius": 2.0
+              "radius": 3.0
             }
           ],
           "loops": [
@@ -246,34 +219,7 @@
               ],
               "closed": true,
               "depth": 0,
-              "area": 12.566371
-            },
-            {
-              "id": 1,
-              "geometry": [
-                1
-              ],
-              "closed": true,
-              "depth": 0,
-              "area": 12.566371
-            },
-            {
-              "id": 2,
-              "geometry": [
-                2
-              ],
-              "closed": true,
-              "depth": 0,
-              "area": 12.566371
-            },
-            {
-              "id": 3,
-              "geometry": [
-                3
-              ],
-              "closed": true,
-              "depth": 0,
-              "area": 12.566371
+              "area": 28.274334
             }
           ],
           "dimensions": [
@@ -287,7 +233,7 @@
                 ]
               ],
               "value": {
-                "value": 4.0
+                "value": 6.0
               }
             },
             {
@@ -304,7 +250,7 @@
                 ]
               ],
               "value": {
-                "value": -15.0
+                "value": -30.0
               }
             },
             {
@@ -321,159 +267,18 @@
                 ]
               ],
               "value": {
-                "value": -10.0
-              }
-            },
-            {
-              "name": "s1_d",
-              "kind": "diameter",
-              "refs": [
-                [
-                  1,
-                  0
-                ]
-              ],
-              "value": {
-                "value": 4.0
-              }
-            },
-            {
-              "name": "s1_c_x",
-              "kind": "distance_x",
-              "refs": [
-                [
-                  -1,
-                  1
-                ],
-                [
-                  1,
-                  3
-                ]
-              ],
-              "value": {
-                "value": 15.0
-              }
-            },
-            {
-              "name": "s1_c_y",
-              "kind": "distance_y",
-              "refs": [
-                [
-                  -1,
-                  1
-                ],
-                [
-                  1,
-                  3
-                ]
-              ],
-              "value": {
-                "value": -10.0
-              }
-            },
-            {
-              "name": "s2_d",
-              "kind": "diameter",
-              "refs": [
-                [
-                  2,
-                  0
-                ]
-              ],
-              "value": {
-                "value": 4.0
-              }
-            },
-            {
-              "name": "s2_c_x",
-              "kind": "distance_x",
-              "refs": [
-                [
-                  -1,
-                  1
-                ],
-                [
-                  2,
-                  3
-                ]
-              ],
-              "value": {
-                "value": 15.0
-              }
-            },
-            {
-              "name": "s2_c_y",
-              "kind": "distance_y",
-              "refs": [
-                [
-                  -1,
-                  1
-                ],
-                [
-                  2,
-                  3
-                ]
-              ],
-              "value": {
-                "value": 10.0
-              }
-            },
-            {
-              "name": "s3_d",
-              "kind": "diameter",
-              "refs": [
-                [
-                  3,
-                  0
-                ]
-              ],
-              "value": {
-                "value": 4.0
-              }
-            },
-            {
-              "name": "s3_c_x",
-              "kind": "distance_x",
-              "refs": [
-                [
-                  -1,
-                  1
-                ],
-                [
-                  3,
-                  3
-                ]
-              ],
-              "value": {
-                "value": -15.0
-              }
-            },
-            {
-              "name": "s3_c_y",
-              "kind": "distance_y",
-              "refs": [
-                [
-                  -1,
-                  1
-                ],
-                [
-                  3,
-                  3
-                ]
-              ],
-              "value": {
-                "value": 10.0
+                "value": 0.0
               }
             }
           ]
         },
         {
-          "name": "part/pocket_profile",
+          "name": "part/tap_profile",
           "frame": {
             "origin": [
               0.0,
               0.0,
-              5.0
+              8.0
             ],
             "u": [
               1.0,
@@ -493,105 +298,42 @@
           },
           "plane": {
             "base": "XY",
-            "offset": 5.0
+            "offset": 8.0
           },
           "geometry": [
             {
               "id": 0,
-              "type": "line",
-              "start": [
-                -5.0,
-                -4.0
+              "type": "circle",
+              "center": [
+                -15.0,
+                0.0
               ],
-              "end": [
-                5.0,
-                -4.0
-              ]
-            },
-            {
-              "id": 1,
-              "type": "line",
-              "start": [
-                5.0,
-                -4.0
-              ],
-              "end": [
-                5.0,
-                4.0
-              ]
-            },
-            {
-              "id": 2,
-              "type": "line",
-              "start": [
-                5.0,
-                4.0
-              ],
-              "end": [
-                -5.0,
-                4.0
-              ]
-            },
-            {
-              "id": 3,
-              "type": "line",
-              "start": [
-                -5.0,
-                4.0
-              ],
-              "end": [
-                -5.0,
-                -4.0
-              ]
+              "radius": 3.0
             }
           ],
           "loops": [
             {
               "id": 0,
               "geometry": [
-                0,
-                1,
-                2,
-                3
+                0
               ],
               "closed": true,
               "depth": 0,
-              "area": 80.0
+              "area": 28.274334
             }
           ],
           "dimensions": [
             {
-              "name": "s0_w",
-              "kind": "distance_x",
+              "name": "s0_d",
+              "kind": "diameter",
               "refs": [
                 [
                   0,
-                  1
-                ],
-                [
-                  0,
-                  2
+                  0
                 ]
               ],
               "value": {
-                "value": 10.0
-              }
-            },
-            {
-              "name": "s0_h",
-              "kind": "distance_y",
-              "refs": [
-                [
-                  1,
-                  1
-                ],
-                [
-                  1,
-                  2
-                ]
-              ],
-              "value": {
-                "value": 8.0
+                "value": 6.0
               }
             },
             {
@@ -604,11 +346,11 @@
                 ],
                 [
                   0,
-                  1
+                  3
                 ]
               ],
               "value": {
-                "value": -5.0
+                "value": -15.0
               }
             },
             {
@@ -621,11 +363,311 @@
                 ],
                 [
                   0,
-                  1
+                  3
                 ]
               ],
               "value": {
-                "value": -4.0
+                "value": 0.0
+              }
+            }
+          ]
+        },
+        {
+          "name": "part/cbore_profile",
+          "frame": {
+            "origin": [
+              0.0,
+              0.0,
+              8.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "n": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 8.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                0.0,
+                0.0
+              ],
+              "radius": 3.0
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 28.274334
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  0,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 6.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            }
+          ]
+        },
+        {
+          "name": "part/csink_profile",
+          "frame": {
+            "origin": [
+              0.0,
+              0.0,
+              8.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "n": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 8.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                15.0,
+                0.0
+              ],
+              "radius": 3.0
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 28.274334
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  0,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 6.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 15.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            }
+          ]
+        },
+        {
+          "name": "part/flat_profile",
+          "frame": {
+            "origin": [
+              0.0,
+              0.0,
+              8.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "n": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 8.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                30.0,
+                0.0
+              ],
+              "radius": 3.0
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 28.274334
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  0,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 6.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 30.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
               }
             }
           ]
@@ -644,16 +686,82 @@
           "extent": {
             "type": "length",
             "length": {
-              "value": 5.0
+              "value": 8.0
             }
           },
           "midplane": false,
           "reversed": false
         },
         {
-          "name": "part/holes",
+          "name": "part/blind",
           "type": "hole",
-          "sketch": "part/hole_profile",
+          "sketch": "part/blind_profile",
+          "direction": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "extent": {
+            "type": "blind",
+            "depth": {
+              "value": 5.0
+            }
+          },
+          "diameter": {
+            "value": 6.0
+          },
+          "drill_point": {
+            "type": "angled",
+            "angle_deg": 118.0
+          },
+          "positions": [
+            [
+              -30.0,
+              0.0
+            ]
+          ],
+          "reversed": false
+        },
+        {
+          "name": "part/tap",
+          "type": "hole",
+          "sketch": "part/tap_profile",
+          "direction": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "extent": {
+            "type": "blind",
+            "depth": {
+              "value": 5.0
+            }
+          },
+          "diameter": {
+            "value": 5.0
+          },
+          "thread": {
+            "standard": "ISO",
+            "size": "M6",
+            "pitch_mm": 1.0,
+            "modeled": false
+          },
+          "drill_point": {
+            "type": "angled",
+            "angle_deg": 118.0
+          },
+          "positions": [
+            [
+              -15.0,
+              0.0
+            ]
+          ],
+          "reversed": false
+        },
+        {
+          "name": "part/cbore",
+          "type": "hole",
+          "sketch": "part/cbore_profile",
           "direction": [
             0.0,
             0.0,
@@ -663,74 +771,124 @@
             "type": "through_all"
           },
           "diameter": {
-            "value": 4.0
+            "value": 6.0
+          },
+          "counterbore": {
+            "diameter": {
+              "value": 10.0
+            },
+            "depth": {
+              "value": 2.0
+            }
           },
           "positions": [
             [
-              -15.0,
-              -10.0
-            ],
-            [
-              15.0,
-              -10.0
-            ],
-            [
-              15.0,
-              10.0
-            ],
-            [
-              -15.0,
-              10.0
+              0.0,
+              0.0
             ]
           ],
           "reversed": false
         },
         {
-          "name": "part/pocket",
-          "type": "pocket",
-          "sketch": "part/pocket_profile",
+          "name": "part/csink",
+          "type": "hole",
+          "sketch": "part/csink_profile",
           "direction": [
             0.0,
             0.0,
             -1.0
           ],
           "extent": {
-            "type": "length",
-            "length": {
-              "value": 2.0
+            "type": "through_all"
+          },
+          "diameter": {
+            "value": 6.0
+          },
+          "countersink": {
+            "diameter": {
+              "value": 12.0
+            },
+            "angle_deg": 90.0
+          },
+          "positions": [
+            [
+              15.0,
+              0.0
+            ]
+          ],
+          "reversed": false
+        },
+        {
+          "name": "part/flat",
+          "type": "hole",
+          "sketch": "part/flat_profile",
+          "direction": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "extent": {
+            "type": "blind",
+            "depth": {
+              "value": 4.0
             }
           },
+          "diameter": {
+            "value": 6.0
+          },
+          "drill_point": {
+            "type": "flat",
+            "angle_deg": 180.0
+          },
+          "positions": [
+            [
+              30.0,
+              0.0
+            ]
+          ],
           "reversed": false
         }
       ]
     }
   ],
   "reference": {
-    "volume_mm3": 5588.672588,
+    "volume_mm3": 18154.518089,
     "bbox": {
       "min": [
-        -20.0,
+        -40.0,
         -15.0,
         0.0
       ],
       "max": [
-        20.0,
+        40.0,
         15.0,
-        5.0
+        8.0
       ]
     },
     "feature_volumes": [
       {
         "name": "part/base",
-        "volume_mm3": 6000.0
+        "volume_mm3": 19200.0
       },
       {
-        "name": "part/holes",
-        "volume_mm3": 5748.672588
+        "name": "part/blind",
+        "volume_mm3": 19041.639397
       },
       {
-        "name": "part/pocket",
-        "volume_mm3": 5588.672588
+        "name": "part/tap",
+        "volume_mm3": 18933.633068
+      },
+      {
+        "name": "part/cbore",
+        "volume_mm3": 18606.907432
+      },
+      {
+        "name": "part/csink",
+        "volume_mm3": 18267.615425
+      },
+      {
+        "name": "part/flat",
+        "volume_mm3": 18154.518089
       }
     ]
   }

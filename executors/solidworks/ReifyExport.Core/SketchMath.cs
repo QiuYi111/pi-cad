@@ -102,5 +102,30 @@ namespace Reify.Export
         /// </summary>
         public static short ArcDirection(double ux, double uy, double vx, double vy) =>
             (ux * vy - uy * vx) >= 0 ? (short)1 : (short)-1;
+
+        /// <summary>
+        /// For distance_x / distance_y: is the canonical dimension horizontal in SolidWorks sketch space?
+        /// u', v' are the sketch-space images of the canonical U and V axes (they are axis aligned for sketches on
+        /// base planes). distance_x measures along canonical U, distance_y along canonical V.
+        /// </summary>
+        public static bool IsHorizontalInSketch(string kind, double ux, double uy, double vx, double vy)
+        {
+            bool uHorizontal = Math.Abs(ux) >= Math.Abs(uy);
+            if (kind == "distance_x") return uHorizontal;
+            // distance_y: V is horizontal only if U is not
+            bool vHorizontal = Math.Abs(vx) > Math.Abs(vy);
+            return vHorizontal;
+        }
+
+        /// <summary>
+        /// Value SolidWorks reports for a dimension created on the given geometry (SI). A circle is dimensioned by
+        /// diameter, an arc by radius, whatever the canonical kind says.
+        /// </summary>
+        public static double ExpectedSwDimensionValue(string kind, string sourceType, double valueSi)
+        {
+            if (kind == "radius") return sourceType == "circle" ? valueSi * 2 : valueSi;
+            if (kind == "diameter") return sourceType == "arc" ? valueSi / 2 : valueSi;
+            return valueSi;
+        }
     }
 }

@@ -122,6 +122,13 @@ class Worker:
         session.sync_links()
         return transfer.export_features(session, args.get("output"), args.get("referenceStep"))
 
+    def cmd_export_assembly(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
+        """``reify.assembly/1`` of an assembly document (read only)."""
+        from . import transfer
+
+        session = self._session(doc)
+        return transfer.export_assembly(session, args.get("output"), args.get("referenceStep"))
+
     def cmd_query(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
         from . import queries
 

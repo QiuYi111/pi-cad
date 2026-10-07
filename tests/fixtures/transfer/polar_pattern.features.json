@@ -100,6 +100,76 @@
               "depth": 0,
               "area": 6400.0
             }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 80.0
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 80.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -40.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -40.0
+              }
+            }
           ]
         },
         {
@@ -150,6 +220,55 @@
               "closed": true,
               "depth": 0,
               "area": 19.634954
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  0,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 5.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 20.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
             }
           ]
         }

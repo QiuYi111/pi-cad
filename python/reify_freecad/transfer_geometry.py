@@ -419,11 +419,16 @@ def clean_expression(text: str, unit: str | None = None) -> str:
       any other kind (``cm``, ``in``, ...) make the whole expression keep its unit tokens
       untouched, since dropping only some of them would change the value;
     * spaces around ``*`` and ``/`` are removed and runs of spaces collapse; spaces around
-      ``+`` and ``-`` are kept for readability.
+      ``+`` and ``-`` are kept for readability;
+    * generated-binding noise is dropped: a leading ``1 *``, a leading ``0 mm +`` and ``+ -`` (``1 * 0 mm + -0.5 * Params.width`` -> ``=-0.5*width``).
     """
     body = _PARAMS.sub("", text.strip())
     if unit and not _OTHER_UNITS.search(body):
         body = re.sub(rf"(?<=[\d.)])\s*\b{re.escape(unit)}\b(?!\s*[\w(^])", "", body)
+    # noise FreeCAD keeps from generated bindings: "1 * x", "0 mm + x", "+ -y"
+    body = re.sub(r"(?<![\w.])1 \* (?=[\w(])", "", body)
+    body = re.sub(r"^0(\.0)?( mm| deg)? \+ ", "", body)
+    body = re.sub(r"\+ -(?=[\w(.])", "- ", body)
     body = re.sub(r"\s*([*/])\s*", r"\1", body)
     body = re.sub(r"\s+", " ", body).strip()
     return "=" + body

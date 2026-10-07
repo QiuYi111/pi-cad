@@ -5,18 +5,6 @@
   "source": {
     "doc": "part.FCStd"
   },
-  "parameters": [
-    {
-      "name": "hole_d",
-      "value": 4.0,
-      "unit": "mm"
-    },
-    {
-      "name": "width",
-      "value": 40.0,
-      "unit": "mm"
-    }
-  ],
   "bodies": [
     {
       "name": "part",
@@ -128,8 +116,7 @@
                 ]
               ],
               "value": {
-                "value": 40.0,
-                "expr": "=width"
+                "value": 40.0
               }
             },
             {
@@ -163,8 +150,7 @@
                 ]
               ],
               "value": {
-                "value": -20.0,
-                "expr": "=-0.5*width"
+                "value": -20.0
               }
             },
             {
@@ -222,7 +208,7 @@
                 0.0,
                 0.0
               ],
-              "radius": 2.0
+              "radius": 3.0
             }
           ],
           "loops": [
@@ -233,7 +219,7 @@
               ],
               "closed": true,
               "depth": 0,
-              "area": 12.566371
+              "area": 28.274334
             }
           ],
           "dimensions": [
@@ -247,8 +233,7 @@
                 ]
               ],
               "value": {
-                "value": 4.0,
-                "expr": "=hole_d"
+                "value": 6.0
               }
             },
             {
@@ -301,8 +286,7 @@
           "extent": {
             "type": "length",
             "length": {
-              "value": 5.0,
-              "expr": "=width/8"
+              "value": 5.0
             }
           },
           "midplane": false,
@@ -321,8 +305,7 @@
             "type": "through_all"
           },
           "diameter": {
-            "value": 6.0,
-            "expr": "=hole_d + 2"
+            "value": 6.0
           },
           "positions": [
             [
@@ -331,12 +314,126 @@
             ]
           ],
           "reversed": false
+        },
+        {
+          "name": "part/outer_round",
+          "type": "fillet",
+          "edges": [
+            {
+              "curve": "line",
+              "midpoint": [
+                0.0,
+                -15.0,
+                5.0
+              ],
+              "length": 40.0,
+              "start": [
+                -20.0,
+                -15.0,
+                5.0
+              ],
+              "end": [
+                20.0,
+                -15.0,
+                5.0
+              ]
+            },
+            {
+              "curve": "line",
+              "midpoint": [
+                -20.0,
+                0.0,
+                5.0
+              ],
+              "length": 30.0,
+              "start": [
+                -20.0,
+                15.0,
+                5.0
+              ],
+              "end": [
+                -20.0,
+                -15.0,
+                5.0
+              ]
+            },
+            {
+              "curve": "line",
+              "midpoint": [
+                20.0,
+                0.0,
+                5.0
+              ],
+              "length": 30.0,
+              "start": [
+                20.0,
+                -15.0,
+                5.0
+              ],
+              "end": [
+                20.0,
+                15.0,
+                5.0
+              ]
+            },
+            {
+              "curve": "line",
+              "midpoint": [
+                0.0,
+                15.0,
+                5.0
+              ],
+              "length": 40.0,
+              "start": [
+                20.0,
+                15.0,
+                5.0
+              ],
+              "end": [
+                -20.0,
+                15.0,
+                5.0
+              ]
+            }
+          ],
+          "radius": {
+            "value": 1.5
+          }
+        },
+        {
+          "name": "part/bore_edge",
+          "type": "chamfer",
+          "edges": [
+            {
+              "curve": "circle",
+              "midpoint": [
+                -3.0,
+                0.0,
+                5.0
+              ],
+              "length": 18.849556,
+              "centre": [
+                0.0,
+                0.0,
+                5.0
+              ],
+              "radius": 3.0,
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ]
+            }
+          ],
+          "size": {
+            "value": 0.5
+          }
         }
       ]
     }
   ],
   "reference": {
-    "volume_mm3": 5858.628331,
+    "volume_mm3": 5789.835907,
     "bbox": {
       "min": [
         -20.0,
@@ -357,6 +454,14 @@
       {
         "name": "part/bore",
         "volume_mm3": 5858.628331
+      },
+      {
+        "name": "part/outer_round",
+        "volume_mm3": 5792.323002
+      },
+      {
+        "name": "part/bore_edge",
+        "volume_mm3": 5789.835907
       }
     ]
   }

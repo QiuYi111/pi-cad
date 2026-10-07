@@ -5,18 +5,6 @@
   "source": {
     "doc": "part.FCStd"
   },
-  "parameters": [
-    {
-      "name": "hole_d",
-      "value": 4.0,
-      "unit": "mm"
-    },
-    {
-      "name": "width",
-      "value": 40.0,
-      "unit": "mm"
-    }
-  ],
   "bodies": [
     {
       "name": "part",
@@ -128,8 +116,7 @@
                 ]
               ],
               "value": {
-                "value": 40.0,
-                "expr": "=width"
+                "value": 40.0
               }
             },
             {
@@ -163,8 +150,7 @@
                 ]
               ],
               "value": {
-                "value": -20.0,
-                "expr": "=-0.5*width"
+                "value": -20.0
               }
             },
             {
@@ -187,7 +173,7 @@
           ]
         },
         {
-          "name": "part/hole_profile",
+          "name": "part/pocket_profile",
           "frame": {
             "origin": [
               0.0,
@@ -217,38 +203,100 @@
           "geometry": [
             {
               "id": 0,
-              "type": "circle",
-              "center": [
-                0.0,
-                0.0
+              "type": "line",
+              "start": [
+                -5.0,
+                -5.0
               ],
-              "radius": 2.0
+              "end": [
+                5.0,
+                -5.0
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                5.0,
+                -5.0
+              ],
+              "end": [
+                5.0,
+                5.0
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                5.0,
+                5.0
+              ],
+              "end": [
+                -5.0,
+                5.0
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -5.0,
+                5.0
+              ],
+              "end": [
+                -5.0,
+                -5.0
+              ]
             }
           ],
           "loops": [
             {
               "id": 0,
               "geometry": [
-                0
+                0,
+                1,
+                2,
+                3
               ],
               "closed": true,
               "depth": 0,
-              "area": 12.566371
+              "area": 100.0
             }
           ],
           "dimensions": [
             {
-              "name": "s0_d",
-              "kind": "diameter",
+              "name": "s0_w",
+              "kind": "distance_x",
               "refs": [
                 [
                   0,
-                  0
+                  1
+                ],
+                [
+                  0,
+                  2
                 ]
               ],
               "value": {
-                "value": 4.0,
-                "expr": "=hole_d"
+                "value": 10.0
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 10.0
               }
             },
             {
@@ -261,11 +309,11 @@
                 ],
                 [
                   0,
-                  3
+                  1
                 ]
               ],
               "value": {
-                "value": 0.0
+                "value": -5.0
               }
             },
             {
@@ -278,11 +326,11 @@
                 ],
                 [
                   0,
-                  3
+                  1
                 ]
               ],
               "value": {
-                "value": 0.0
+                "value": -5.0
               }
             }
           ]
@@ -301,42 +349,34 @@
           "extent": {
             "type": "length",
             "length": {
-              "value": 5.0,
-              "expr": "=width/8"
+              "value": 5.0
             }
           },
           "midplane": false,
           "reversed": false
         },
         {
-          "name": "part/bore",
-          "type": "hole",
-          "sketch": "part/hole_profile",
+          "name": "part/pocket",
+          "type": "pocket",
+          "sketch": "part/pocket_profile",
           "direction": [
             0.0,
             0.0,
             -1.0
           ],
           "extent": {
-            "type": "through_all"
+            "type": "length",
+            "length": {
+              "value": 2.0
+            }
           },
-          "diameter": {
-            "value": 6.0,
-            "expr": "=hole_d + 2"
-          },
-          "positions": [
-            [
-              0.0,
-              0.0
-            ]
-          ],
           "reversed": false
         }
       ]
     }
   ],
   "reference": {
-    "volume_mm3": 5858.628331,
+    "volume_mm3": 5800.0,
     "bbox": {
       "min": [
         -20.0,
@@ -355,8 +395,8 @@
         "volume_mm3": 6000.0
       },
       {
-        "name": "part/bore",
-        "volume_mm3": 5858.628331
+        "name": "part/pocket",
+        "volume_mm3": 5800.0
       }
     ]
   }

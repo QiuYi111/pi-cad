@@ -136,6 +136,170 @@
               "depth": 2,
               "area": 78.539816
             }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 60.0
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 40.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -30.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -20.0
+              }
+            },
+            {
+              "name": "s1_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  4,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 30.0
+              }
+            },
+            {
+              "name": "s1_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  4,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            },
+            {
+              "name": "s1_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  4,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            },
+            {
+              "name": "s2_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  5,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 10.0
+              }
+            },
+            {
+              "name": "s2_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  5,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            },
+            {
+              "name": "s2_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  5,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            }
           ]
         },
         {
@@ -228,6 +392,76 @@
               "closed": true,
               "depth": 0,
               "area": 200.0
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 50.0
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 4.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -25.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -2.0
+              }
             }
           ]
         }

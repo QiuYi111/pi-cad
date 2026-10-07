@@ -140,6 +140,9 @@ class ExpressionTests(unittest.TestCase):
             ("Params.a + 2 cm", "mm", "=a + 2 cm"),
             ("Params.a * 2 mm", None, "=a*2 mm"),
             ("Params.hole_d", "mm", "=hole_d"),
+            ("1 * Params.width", "mm", "=width"),
+            ("1 * 0 mm + -0.5 * Params.width", "mm", "=-0.5*width"),
+            ("2 * Params.a + 1 * Params.b", "mm", "=2*a + b"),
         ]
         for text, unit, expected in cases:
             with self.subTest(text=text):

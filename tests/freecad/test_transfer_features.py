@@ -283,62 +283,275 @@ class TransferFeatureTests(unittest.TestCase):
         self.assertNotIn("path", self.export())
 
     # ------------------------------------------------------------ negative cases
-    def test_fillet_and_chamfer_are_unsupported(self) -> None:
-        self.h.apply(plate_ops())
-        self.h.apply([{"op": "fillet", "name": "part/round_top", "edges": {"feature": "part/base", "role": "top_outer"}, "radius": 1}])
-        self.unsupported("fillet", None, "part/round_top")
-        self.h.close()
-        self.h = Harness()
-        self.h.apply(plate_ops())
-        self.h.apply([{"op": "chamfer", "name": "part/edge_cut", "edges": {"feature": "part/base", "role": "top_outer"}, "size": 1}])
-        self.unsupported("chamfer", None, "part/edge_cut")
-
+    # ------------------------------------------------------------ P2: patterns, dimensions, material
     def hole_part(self, **hole: Any) -> None:
         self.h.apply(plate_ops())
         self.h.apply([circles("part/hole_profile", [[-10, 0]], 4, offset=5)])
-        self.h.apply([{"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 4, **hole}])
+        self.h.apply([{"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 4, "type": "through_all", **hole}])
 
-    def test_linear_pattern_and_mirror_are_unsupported(self) -> None:
-        self.hole_part(type="through_all")
-        self.h.apply([{"op": "linear_pattern", "name": "part/row", "features": ["part/bore"], "direction": "X", "length": 20, "count": 2}])
-        self.unsupported("linear_pattern", None, "part/row")
-        self.h.close()
-        self.h = Harness()
-        self.hole_part(type="through_all")
-        self.h.apply([{"op": "mirror", "name": "part/twin", "features": ["part/bore"], "plane": "YZ"}])
-        self.unsupported("mirror", None, "part/twin")
+    def test_linear_pattern(self) -> None:
+        self.h.apply([
+            rect_sketch("part/profile", [100, 20]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 5},
+            circles("part/hole_profile", [[-30, 0]], 4, offset=5),
+            {"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 4, "type": "through_all"},
+            {"op": "linear_pattern", "name": "part/row", "features": ["part/bore"], "direction": "X", "length": 40, "count": 3},
+        ])
+        data = self.golden("linear_pattern")
+        row = data["bodies"][0]["features"][-1]
+        self.assertEqual((row["originals"], row["direction"], row["occurrences"], row["spacing"], row["length"]), (["part/bore"], [1, 0, 0], 3, {"value": 20.0}, {"value": 40.0}))
 
-    def test_hole_options_are_named(self) -> None:
-        cases = [
-            ({"depth": 3}, "blind"),
-            ({"depth": 3, "thread": "M4"}, "thread"),
-            ({"type": "through_all", "counterbore": {"diameter": 8, "depth": 2}}, "counterbore"),
-            ({"type": "through_all", "countersink": {"diameter": 8, "angle": 90}}, "countersink"),
+        def centres() -> list[float]:
+            return sorted(round(f.CenterOfMass.x, 2) for f in self.h.body_shape().Faces if type(f.Surface).__name__ == "Cylinder")
+
+        self.assertEqual(centres(), [-30.0, -10.0, 10.0])  # first instance + length / (n - 1) steps along direction
+        self.h.apply([{"op": "set", "target": "part/row", "prop": "Reversed", "value": True}])
+        row = self.features()["bodies"][0]["features"][-1]
+        self.assertEqual((row["direction"], row["reversed"]), ([-1, 0, 0], True))
+        self.assertLess(centres()[0], -40)  # instances now run towards -X
+
+    def test_linear_pattern_in_a_rotated_body_and_symbolic_length(self) -> None:
+        self.h.apply([
+            {"op": "param", "name": "pitch", "value": 15, "unit": "mm"},
+            rect_sketch("part/profile", [100, 20]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 5},
+            circles("part/hole_profile", [[-30, 0]], 4, offset=5),
+            {"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 4, "type": "through_all"},
+            {"op": "linear_pattern", "name": "part/row", "features": ["part/bore"], "direction": "Y", "length": "=pitch * 2", "count": 3},
+            {"op": "placement", "target": "part", "rotation": {"axis": [0, 0, 1], "angle": 90}},
+        ])
+        row = self.features()["bodies"][0]["features"][-1]
+        self.assertEqual(row["direction"], [-1, 0, 0])
+        self.assertEqual(row["length"], {"value": 30.0, "expr": "=pitch*2"})
+        self.assertEqual(row["spacing"], {"value": 15.0})
+
+    def test_mirror(self) -> None:
+        self.h.apply([
+            rect_sketch("part/profile", [100, 20]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 5},
+            circles("part/hole_profile", [[-30, 5]], 4, offset=5),
+            {"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 4, "type": "through_all"},
+            {"op": "mirror", "name": "part/twin", "features": ["part/bore"], "plane": "XZ"},
+        ])
+        data = self.golden("mirror")
+        twin = data["bodies"][0]["features"][-1]
+        self.assertEqual((twin["originals"], twin["plane"]["origin"], twin["plane"]["normal"]), (["part/bore"], [0, 0, 0], [0, -1, 0]))
+        self.h.apply([{"op": "placement", "target": "part", "position": [1, 2, 3], "rotation": {"axis": [0, 0, 1], "angle": 90}}])
+        twin = self.features()["bodies"][0]["features"][-1]
+        self.assertEqual((twin["plane"]["origin"], twin["plane"]["normal"]), ([1, 2, 3], [1, 0, 0]))
+
+    def test_sketch_dimensions(self) -> None:
+        import Sketcher
+        import math
+
+        self.h.apply([
+            {"op": "param", "name": "width", "value": 40, "unit": "mm"},
+            rect_sketch("part/profile", ["=width", 30]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 5},
+            circles("part/hole_profile", [[0, 0]], 6, offset=5),
+            {"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 6, "type": "through_all"},
+        ])
+        profile = {d["name"]: d for d in self.features()["bodies"][0]["sketches"][0]["dimensions"]}
+        self.assertEqual(profile["s0_w"], {"name": "s0_w", "kind": "distance_x", "refs": [[0, 1], [0, 2]], "value": {"value": 40.0, "expr": "=width"}})
+        self.assertEqual(profile["s0_h"]["kind"], "distance_y")
+        self.assertEqual(profile["s0_c_x"]["refs"], [[-1, 1], [0, 1]])
+        self.assertNotIn("Coincident", json.dumps(profile))
+        sketch = self.feature_obj("part/hole_profile")
+        index = sketch.addGeometry(__import__("Part").LineSegment(*[__import__("FreeCAD").Vector(*v) for v in ((3, 3, 0), (6, 7, 0))]), False)
+        sketch.addConstraint(Sketcher.Constraint("Distance", index, 5.0))
+        sketch.renameConstraint(sketch.ConstraintCount - 1, "len")
+        sketch.addConstraint(Sketcher.Constraint("Angle", index, math.atan2(4, 3)))
+        sketch.renameConstraint(sketch.ConstraintCount - 1, "tilt")
+        dims = {d["name"]: d for d in self.features()["bodies"][0]["sketches"][1]["dimensions"]}
+        self.assertEqual(dims["len"], {"name": "len", "kind": "distance", "refs": [[index, 0]], "value": {"value": 5.0}})
+        self.assertEqual(dims["tilt"]["kind"], "angle")
+        self.assertAlmostEqual(dims["tilt"]["value"]["value"], 53.130102, places=5)
+        self.assertEqual(next(d for d in dims.values() if d["kind"] == "diameter")["value"], {"value": 6.0})
+
+    def test_material_only_when_density_is_declared(self) -> None:
+        self.h.apply(plate_ops())
+        self.assertNotIn("material", self.features())
+        self.h.apply([{"op": "param", "name": "density", "value": 7.85}])
+        data = self.features()
+        self.assertEqual(data["material"], {"density_kg_m3": 7850.0})
+        self.assertIn({"name": "density", "value": 7.85, "unit": ""}, data["parameters"])
+
+    # ------------------------------------------------------------ P3: parameters, holes, dressups, faces
+    def test_parameters_block(self) -> None:
+        self.h.apply([
+            {"op": "param", "name": "width", "value": 40, "unit": "mm"},
+            {"op": "param", "name": "half", "value": "=width / 2", "unit": "mm"},
+            {"op": "param", "name": "turn", "value": 90, "unit": "deg"},
+            {"op": "param", "name": "count", "value": 3},
+        ] + plate_ops())
+        self.assertEqual(self.features()["parameters"], [
+            {"name": "count", "value": 3.0, "unit": ""},
+            {"name": "half", "value": 20.0, "unit": "mm", "expr": "=width/2"},
+            {"name": "turn", "value": 90.0, "unit": "deg"},
+            {"name": "width", "value": 40.0, "unit": "mm"},
+        ])  # sorted by name
+
+    def test_hole_variants(self) -> None:
+        self.h.apply([rect_sketch("part/profile", [80, 30]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 8}])
+        specs = [
+            ("blind", -30, {"depth": 5}),
+            ("tap", -15, {"depth": 5, "thread": "M6"}),
+            ("cbore", 0, {"type": "through_all", "counterbore": {"diameter": 10, "depth": 2}}),
+            ("csink", 15, {"type": "through_all", "countersink": {"diameter": 12, "angle": 90}}),
+            ("flat", 30, {"depth": 4}),
         ]
-        for extra, option in cases:
-            with self.subTest(option=option):
-                self.h.close()
-                self.h = Harness()
-                self.hole_part(**extra)
-                self.unsupported("hole", option, "part/bore")
+        for name, x, extra in specs:
+            self.h.apply([
+                {"op": "sketch", "name": f"part/{name}_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"circle": {"center": [x, 0], "diameter": 6}}]},
+                {"op": "hole", "name": f"part/{name}", "sketch": f"part/{name}_profile", "diameter": 6, **extra},
+            ])
+        flat = self.feature_obj("part/flat")
+        flat.DrillPoint = "Flat"
+        self.h.session().recompute()
+        data = self.golden("holes_p3")
+        holes = {f["name"]: f for f in data["bodies"][0]["features"] if f["type"] == "hole"}
+        self.assertEqual(holes["part/blind"]["extent"], {"type": "blind", "depth": {"value": 5.0}})
+        self.assertEqual(holes["part/blind"]["drill_point"], {"type": "angled", "angle_deg": 118.0})
+        self.assertEqual(holes["part/flat"]["drill_point"]["type"], "flat")
+        self.assertEqual(holes["part/tap"]["thread"], {"standard": "ISO", "size": "M6", "pitch_mm": 1.0, "modeled": False})
+        self.assertEqual(holes["part/cbore"]["counterbore"], {"diameter": {"value": 10.0}, "depth": {"value": 2.0}})
+        self.assertEqual(holes["part/csink"]["countersink"], {"diameter": {"value": 12.0}, "angle_deg": 90.0})
+        self.assertNotIn("drill_point", holes["part/cbore"])
+        self.assertEqual(holes["part/cbore"]["extent"], {"type": "through_all"})
 
-    def test_pad_up_to_face_is_unsupported(self) -> None:
+    def test_fillet_and_chamfer_edge_refs(self) -> None:
+        self.h.apply(plate_ops() + [
+            circles("part/hole_profile", [[0, 0]], 6, offset=5),
+            {"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 6, "type": "through_all"},
+            {"op": "fillet", "name": "part/outer_round", "edges": {"feature": "part/base", "role": "top_outer"}, "radius": 1.5},
+            {"op": "chamfer", "name": "part/bore_edge", "edges": {"feature": "part/bore", "role": "rim"}, "size": 0.5},
+        ])
+        data = self.golden("fillet_chamfer")
+        fillet, chamfer = data["bodies"][0]["features"][-2:]
+        self.assertEqual((fillet["type"], fillet["radius"], len(fillet["edges"])), ("fillet", {"value": 1.5}, 4))
+        self.assertTrue(all(e["curve"] == "line" and e["midpoint"][2] == 5.0 for e in fillet["edges"]))
+        self.assertEqual((chamfer["type"], chamfer["size"]), ("chamfer", {"value": 0.5}))
+        self.assertEqual({e["curve"] for e in chamfer["edges"]}, {"circle"})
+        # resolved in the state BEFORE the feature: the chamfer's edge is on the plate top at z = 5 with radius 3 (hole not yet rounded)
+        circle = chamfer["edges"][0]
+        self.assertEqual((circle["radius"], circle["centre"], circle["axis"]), (3.0, [0, 0, 5], circle["axis"]))
+
+    def test_fillet_edges_in_a_rotated_body_are_world_coordinates(self) -> None:
+        self.h.apply(plate_ops() + [
+            {"op": "fillet", "name": "part/outer_round", "edges": {"feature": "part/base", "role": "top_outer"}, "radius": 1},
+            {"op": "placement", "target": "part", "position": [100, 0, 0], "rotation": {"axis": [1, 0, 0], "angle": 90}},
+        ])
+        fillet = self.features()["bodies"][0]["features"][-1]
+        # top (z = 5) maps to y = -5 after a +90 degree turn about X
+        self.assertTrue(all(abs(e["midpoint"][1] + 5.0) < 1e-6 for e in fillet["edges"]), fillet["edges"])
+        self.assertTrue(all(e["midpoint"][0] > 79 for e in fillet["edges"]))
+
+    def test_ambiguous_edges_are_rejected(self) -> None:
+        self.h.apply([
+            rect_sketch("part/profile", [100, 100]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 0.005},
+            {"op": "fillet", "name": "part/edge_round", "edges": {"feature": "part/base", "role": "top_outer"}, "radius": 0.001},
+        ])
+        self.unsupported("fillet", "ambiguous_edge", "part/edge_round")
+
+    def test_dressup_variants_that_stay_unsupported(self) -> None:
+        self.h.apply(plate_ops() + [{"op": "chamfer", "name": "part/edge_cut", "edges": {"feature": "part/base", "role": "top_outer"}, "size": 1}])
+        self.feature_obj("part/edge_cut").ChamferType = "Two distances"
+        self.h.session().recompute()
+        self.unsupported("chamfer", "chamfer_type", "part/edge_cut")
+
+    def test_sketch_on_a_planar_face_exports_as_plane_and_offset(self) -> None:
+        self.h.apply(plate_ops())
+        self.h.apply([
+            {"op": "sketch", "name": "part/pocket_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"rect": {"center": [0, 0], "size": [10, 10]}}]},
+            {"op": "pocket", "name": "part/pocket", "sketch": "part/pocket_profile", "depth": 2},
+        ])
+        data = self.golden("sketch_on_face")
+        sketch = data["bodies"][0]["sketches"][1]
+        self.assertEqual((sketch["plane"], "face_ref" in sketch), ({"base": "XY", "offset": 5.0}, False))
+        self.assertEqual(data["bodies"][0]["features"][1]["direction"], [0, 0, -1])
+
+    def test_sketch_on_a_tilted_face_carries_a_face_ref(self) -> None:
+        self.h.apply(plate_ops())
+        self.h.apply([{"op": "chamfer", "name": "part/slope", "edges": {"between": [{"feature": "part/base", "role": "top"}, {"feature": "part/base", "role": "side.0"}]}, "size": 3}])
+        self.h.apply([
+            {"op": "sketch", "name": "part/dimple_profile", "on": {"feature": "part/slope", "role": "bevel"}, "shapes": [{"circle": {"center": [0, 0], "diameter": 4}}]},
+            {"op": "pocket", "name": "part/dimple", "sketch": "part/dimple_profile", "depth": 1},
+        ])
+        data = self.golden("sketch_on_tilted_face")
+        sketch = data["bodies"][0]["sketches"][1]
+        self.assertIsNone(sketch["plane"])
+        ref = sketch["face_ref"]
+        self.assertAlmostEqual(abs(ref["normal"][0]) + abs(ref["normal"][1]) + abs(ref["normal"][2]), 2 ** 0.5, places=6)
+        n = sketch["frame"]["n"]
+        self.assertAlmostEqual(sum(a * b for a, b in zip(n, ref["normal"])), 1.0, places=6)  # outward normal = sketch normal
+        self.assertAlmostEqual(sum((a - b) * c for a, b, c in zip(sketch["frame"]["origin"], ref["origin"], ref["normal"])), 0.0, places=6)
+        pocket = data["bodies"][0]["features"][-1]
+        self.assertEqual(pocket["direction"], [-c for c in n])
+
+    def test_sketch_on_a_non_planar_face_is_unsupported(self) -> None:
+        self.hole_part()
+        bore = self.feature_obj("part/bore")
+        wall = next(f"Face{i + 1}" for i, f in enumerate(bore.Shape.Faces) if type(f.Surface).__name__ == "Cylinder")
+        self.h.apply([rect_sketch("part/on_wall", [2, 2], offset=5), {"op": "pad", "name": "part/rib", "sketch": "part/on_wall", "length": 2}])
+        sketch = self.feature_obj("part/on_wall")
+        sketch.MapMode = "Deactivated"
+        sketch.AttachmentSupport = [(bore, [wall])]
+        self.unsupported("sketch", "non_planar_face", "part/on_wall")
+
+    def test_pad_up_to_face(self) -> None:
+        self.h.apply(plate_ops())
+        self.h.apply([
+            {"op": "sketch", "name": "part/tower_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"rect": {"center": [10, 0], "size": [10, 10]}}]},
+            {"op": "pad", "name": "part/tower", "sketch": "part/tower_profile", "length": 7},
+            {"op": "sketch", "name": "part/bridge_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"rect": {"center": [-10, 0], "size": [10, 10]}}]},
+            {"op": "pad", "name": "part/bridge", "sketch": "part/bridge_profile", "length": 1, "type": "up_to_face", "face": {"feature": "part/tower", "role": "top"}},
+        ])
+        data = self.golden("pad_up_to_face")
+        bridge = data["bodies"][0]["features"][-1]
+        self.assertEqual(bridge["direction"], [0, 0, 1])  # FreeCAD pads along +n up to the face
+        self.assertEqual(bridge["extent"], {"type": "up_to_face", "face_ref": {"origin": [10, 0, 12], "normal": [0, 0, 1], "area": 100.0}})
+        self.assertAlmostEqual(self.h.body_shape().BoundBox.ZMax, 12.0, places=6)
+
+    def test_pad_up_to_a_curved_face_or_offset_is_unsupported(self) -> None:
         self.h.apply(plate_ops())
         self.h.apply([
             rect_sketch("part/tower_profile", [10, 10], center=[10, 0], offset=5), {"op": "pad", "name": "part/tower", "sketch": "part/tower_profile", "length": 7},
             rect_sketch("part/bridge_profile", [10, 10], center=[-10, 0], offset=5),
             {"op": "pad", "name": "part/bridge", "sketch": "part/bridge_profile", "length": 1, "type": "up_to_face", "face": {"feature": "part/tower", "role": "top"}},
         ])
-        self.unsupported("pad", "up_to_face", "part/bridge")
+        bridge = self.feature_obj("part/bridge")
+        bridge.Offset = 1.0
+        self.h.session().recompute()
+        self.unsupported("pad", "offset", "part/bridge")
 
-    def test_sketch_on_a_face_is_unsupported(self) -> None:
+    # ------------------------------------------------------------ what stays unsupported
+    def test_hole_options_that_stay_unsupported(self) -> None:
+        for prop, value, option in [("ModelThread", True, "modeled_thread"), ("Tapered", True, "tapered"), ("Midplane", True, "midplane")]:
+            with self.subTest(option=option):
+                self.h.close()
+                self.h = Harness()
+                self.hole_part(**({"depth": 3, "thread": "M4"} if prop == "ModelThread" else {}))
+                setattr(self.feature_obj("part/bore"), prop, value)
+                self.unsupported("hole", option, "part/bore")
+
+    def test_pocket_and_pad_options_that_stay_unsupported(self) -> None:
         self.h.apply(plate_ops())
-        self.h.apply([
-            {"op": "sketch", "name": "part/pocket_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"rect": {"center": [0, 0], "size": [10, 10]}}]},
-            {"op": "pocket", "name": "part/pocket", "sketch": "part/pocket_profile", "depth": 2},
-        ])
-        error = self.unsupported("sketch", "attached_to_face", "part/pocket_profile")
-        self.assertIn("part/base", error["message"])
+        self.h.apply([rect_sketch("part/cut_profile", [4, 4], offset=5), {"op": "pocket", "name": "part/cut", "sketch": "part/cut_profile", "depth": 1}])
+        cut = self.feature_obj("part/cut")
+        cut.Type = "UpToFirst"
+        self.unsupported("pocket", "up_to_first", "part/cut")
+        cut.Type = "Length"
+        cut.Midplane = True
+        self.unsupported("pocket", "midplane", "part/cut")
+
+    def test_linear_pattern_and_mirror_options_that_stay_unsupported(self) -> None:
+        self.hole_part()
+        self.h.apply([{"op": "linear_pattern", "name": "part/row", "features": ["part/bore"], "direction": "X", "length": 20, "count": 2}])
+        self.feature_obj("part/row").Mode = "Spacing"
+        self.unsupported("linear_pattern", "spacing_mode", "part/row")
+        self.h.close()
+        self.h = Harness()
+        self.hole_part()
+        self.h.apply([{"op": "mirror", "name": "part/twin", "features": ["part/bore"], "plane": "YZ"}])
+        twin = self.feature_obj("part/twin")
+        twin.MirrorPlane = (self.feature_obj("part/profile"), [""])
+        self.unsupported("mirror", "plane", "part/twin")
 
     def test_tilted_sketch_plane_is_unsupported(self) -> None:
         self.h.apply(plate_ops() + [{"op": "placement", "target": "part", "rotation": {"axis": [1, 0, 0], "angle": 30}}])
@@ -370,13 +583,12 @@ class TransferFeatureTests(unittest.TestCase):
         sketch.addGeometry(Part.LineSegment(App.Vector(0, 0, 0), App.Vector(5, 5, 0)), False)
         self.assertEqual(self.h.error("export_features")["detail"]["reason"], "open_loop")
 
-    def test_unknown_document_state_errors_have_wire_shape(self) -> None:
-        self.h.apply(plate_ops())
-        self.h.apply([{"op": "fillet", "name": "part/round_top", "edges": {"feature": "part/base", "role": "top_outer"}, "radius": 1}])
+    def test_error_shape_is_wire_compatible(self) -> None:
+        self.hole_part(depth=3, thread="M4")
+        self.feature_obj("part/bore").ModelThread = True
         error = self.h.error("export_features")
         self.assertEqual(set(error) & {"code", "message", "target", "detail", "rolledBack"}, {"code", "message", "target", "detail", "rolledBack"})
         self.assertEqual(set(error["detail"]), {"op", "option", "reason"})
-
 
 if __name__ == "__main__":
     unittest.main()

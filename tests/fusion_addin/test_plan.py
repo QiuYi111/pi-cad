@@ -14,7 +14,7 @@ class PlanTests(unittest.TestCase):
         kinds = [(s["kind"], s["name"]) for s in p["steps"]]
         self.assertEqual(kinds, [
             ("sketch", "plate/base_profile"), ("extrude", "plate/base"),
-            ("sketch", "plate/hole_sketch"), ("extrude", "plate/holes"),
+            ("sketch", "plate/hole_sketch"), ("hole", "plate/holes"),
             ("polar_pattern", "plate/ring"),
             ("sketch", "plate/pocket_profile"), ("extrude", "plate/pocket")])
         self.assertEqual(p["feature_names"], ["plate/base", "plate/holes", "plate/ring", "plate/pocket"])
@@ -27,10 +27,15 @@ class PlanTests(unittest.TestCase):
         pocket = st["plate/pocket"]
         self.assertEqual((pocket["operation"], pocket["direction_sign"], pocket["extent"]["distance_mm"]), ("cut", -1, 2.0))
         holes = st["plate/holes"]
-        self.assertEqual((holes["operation"], holes["extent"]["type"], holes["diameter_mm"]), ("cut", "all", 3.0))
+        self.assertEqual((holes["kind"], holes["hole_type"], holes["extent"]["type"], holes["diameter_mm"]), ("hole", "simple", "all", 3.0))
         self.assertEqual(holes["positions"], [[15.0, 0.0]])
-        hs = st["plate/hole_sketch"]
-        self.assertEqual(hs["geometry"][0]["radius"], 1.5)  # diameter 3 overrides the sketch circle
+        self.assertEqual(st["plate/hole_sketch"]["points"], [[15.0, 0.0]])
+
+    def test_extrude_cut_holes_mode(self):
+        st = {s["name"]: s for s in plan.build_plan(self.f, native_holes=False)["steps"]}
+        holes = st["plate/holes"]
+        self.assertEqual((holes["kind"], holes["operation"], holes["extent"]["type"], holes["diameter_mm"]), ("extrude", "cut", "all", 3.0))
+        self.assertEqual(st["plate/hole_sketch"]["geometry"][0]["radius"], 1.5)  # diameter 3 overrides the sketch circle
 
     def test_plane_offset_and_axis(self):
         st = {s["name"]: s for s in plan.build_plan(self.f)["steps"]}
@@ -65,19 +70,19 @@ class PlanTests(unittest.TestCase):
 
     def test_unsupported_names_feature(self):
         f = copy.deepcopy(self.f)
-        f["bodies"][0]["features"][1] = {"name": "plate/fillet1", "type": "fillet"}
+        f["bodies"][0]["features"][1] = {"name": "plate/fillet1", "type": "shell"}
         with self.assertRaises(plan.PlanError) as cm:
             plan.build_plan(f)
         e = cm.exception
         self.assertEqual((e.code, e.feature), ("UNSUPPORTED_OP", "plate/fillet1"))
         self.assertIn("plate/fillet1", e.message)
-        self.assertEqual(e.detail["op"], "fillet")
+        self.assertEqual(e.detail["op"], "shell")
 
     def test_unsupported_options_and_extents(self):
         for mut, option in (
             (lambda f: f.update(extent={"type": "through_all"}), "extent.type"),   # pad through_all
             (lambda f: f.update(taper_angle=3), "taper_angle"),
-            (lambda f: f.update(extent={"type": "up_to_face"}), "extent.type"),
+            (lambda f: f.update(extent={"type": "up_to_vertex"}), "extent.type"),
         ):
             f = copy.deepcopy(self.f)
             mut(f["bodies"][0]["features"][0])
@@ -92,6 +97,11 @@ class PlanTests(unittest.TestCase):
         with self.assertRaises(plan.PlanError) as cm:
             plan.build_plan(f)
         self.assertEqual(cm.exception.feature, "plate/holes")
+        f["bodies"][0]["features"][1].pop("counterbore")
+        f["bodies"][0]["features"][1]["counterbore"] = {"diameter": {"value": 6}, "depth": {"value": 2}}
+        self.assertEqual(plan.build_plan(f)["steps"][3]["hole_type"], "counterbore")  # P3 supports it
+        with self.assertRaises(plan.PlanError):
+            plan.build_plan(f, native_holes=False)
 
     def test_p1_can_be_disabled(self):
         with self.assertRaises(plan.PlanError) as cm:
