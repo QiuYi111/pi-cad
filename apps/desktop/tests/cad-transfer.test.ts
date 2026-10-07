@@ -435,6 +435,82 @@ describe("status and test export", () => {
   });
 });
 
+describe("assemblies (P2)", () => {
+  const ASSEMBLY = { schema: "reify.assembly/1", units: "mm", name: "asm", parts: [{ ref: "parts/axle.FCStd", name: "axle", features: FEATURES }], occurrences: [] };
+
+  it("serves a spool request with kind assembly: job.json has assembly in place of features, extras are copied", async () => {
+    const h = harness();
+    let jobText = "";
+    h.deps.clock.hooks.unshift(async () => {
+      const text = await h.deps.fs.readText(`${L(h.deps).fusionInbox}\\asm-1.json`);
+      if (text) jobText = text;
+    });
+    // The add-in also writes extra files and lists them.
+    h.deps.clock.hooks.push(async () => {
+      const out = `${L(h.deps).fusionOutbox}\\asm-1`;
+      const text = await h.deps.fs.readText(`${out}\\result.json`);
+      if (text && !text.includes('"extra"')) {
+        h.deps.fs.put(`${out}\\axle.f3d`, "AXLE");
+        h.deps.fs.put(`${out}\\result.json`, JSON.stringify({ ...JSON.parse(text), files: { ...JSON.parse(text).files, extra: ["axle.f3d"] } }));
+      }
+    });
+    await h.service.start(h.project);
+    h.project.files.set("build/transfer/asm-1/assembly.json", JSON.stringify(ASSEMBLY));
+    h.project.files.set(".pi-cad/transfer/requests/asm-1.json", JSON.stringify({
+      schema: "reify.transfer.request/1", jobId: "asm-1", target: "fusion", kind: "assembly", assembly: "build/transfer/asm-1/assembly.json",
+      native: "exports/asm.f3d", checkStep: "build/transfer/asm-1/check.step", check: true,
+    }));
+    await h.service.pollSpool();
+    for (let i = 0; i < 100 && !h.project.files.has(".pi-cad/transfer/results/asm-1.json"); i++) await new Promise((r) => setTimeout(r, 1));
+    await h.service.stop();
+    const job = JSON.parse(jobText);
+    expect(job).toMatchObject({ kind: "assembly", assembly: { schema: "reify.assembly/1" } });
+    expect(job.features).toBeUndefined();
+    const result = h.project.json(".pi-cad/transfer/results/asm-1.json");
+    expect(result.ok).toBe(true);
+    expect(result.files.extra).toEqual(["exports/axle.f3d"]);
+    expect(h.project.files.get("exports/axle.f3d")).toBe("AXLE");
+  });
+
+  it("part jobs keep their old job.json shape (features, no kind)", async () => {
+    const h = harness();
+    let jobText = "";
+    h.deps.clock.hooks.unshift(async () => { jobText ||= (await h.deps.fs.readText(`${L(h.deps).fusionInbox}\\job-1.json`)) ?? ""; });
+    await h.service.runJob(request());
+    const job = JSON.parse(jobText);
+    expect(job.kind).toBeUndefined();
+    expect(job.features).toBeDefined();
+  });
+
+  it("rejects bad assembly paths and bad extra file names", async () => {
+    const h = harness();
+    expect((await h.service.runJob({ jobId: "a1", target: "fusion", kind: "assembly", assembly: "../x.json", native: "exports/a.f3d" })).ok).toBe(false);
+    expect((await h.service.runJob({ jobId: "a2", target: "fusion", kind: "assembly", native: "exports/a.f3d" })).error?.message).toMatch(/no assembly/);
+    h.deps.clock.hooks.push(async () => {
+      const out = `${L(h.deps).fusionOutbox}\\a3`;
+      const text = await h.deps.fs.readText(`${out}\\result.json`);
+      if (text) h.deps.fs.put(`${out}\\result.json`, JSON.stringify({ ...JSON.parse(text), files: { ...JSON.parse(text).files, extra: ["..\\evil"] } }));
+    });
+    const bad = await h.service.runJob({ jobId: "a3", target: "fusion", kind: "assembly", assembly: ASSEMBLY, native: "exports/a.f3d" });
+    expect(bad.error?.message).toMatch(/bad name/);
+  });
+
+  it("startExport accepts assembly documents and uses .SLDASM for SolidWorks", async () => {
+    const h = harness();
+    h.project.files.set("assembly/gearbox.FCStd", "x");
+    const calls: Array<Record<string, unknown>> = [];
+    const service = new CadTransferService({ ...h.deps, pid: 1, emit: (e) => h.events.push(e), agent: async (b) => { calls.push(b); return { file: String(b.output), check: "passed" }; } });
+    service.setProject(h.project);
+    service.startExport("solidworks", "build/gearbox.step");
+    service.startExport("fusion", "assembly/gearbox.FCStd");
+    for (let i = 0; i < 100 && calls.length < 2; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(calls.map((c) => [c.target, c.doc, c.output])).toEqual(expect.arrayContaining([
+      ["solidworks", "assembly/gearbox.FCStd", "exports/gearbox.SLDASM"],
+      ["fusion", "assembly/gearbox.FCStd", "exports/gearbox.f3d"],
+    ]));
+  });
+});
+
 describe("WSL project", () => {
   it("converts paths with wslpath through the bridge and copies results into the distro", async () => {
     const calls: string[][] = [];

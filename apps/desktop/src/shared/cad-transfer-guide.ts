@@ -8,7 +8,7 @@
 import type { CadTransferState, CadTransferTarget } from "./contracts.js";
 
 export const CAD_EXPORTS_TITLE = "CAD exports";
-export const CAD_EXPORTS_INTRO = "Send a Reify part to Autodesk Fusion or SolidWorks. Reify builds the part again in the CAD program. It then checks that the new part has the same shape.";
+export const CAD_EXPORTS_INTRO = "Send a Reify part or assembly to Autodesk Fusion or SolidWorks. Reify builds it again in the CAD program. It then checks that the new shape is the same.";
 
 export const FUSION_GUIDE = {
   title: "Autodesk Fusion",
