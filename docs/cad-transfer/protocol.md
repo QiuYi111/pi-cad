@@ -77,9 +77,23 @@ Rules:
 - `plane.base` is `XY`, `XZ` or `YZ`. The canonicalizer rejects a sketch whose normal is not parallel to a world axis.
 - Supported ops, P0 + P1: `pad` (length, midplane, reversed), `pocket` (length or through_all), `hole` (through_all, no thread, no counterbore, no countersink), `polar_pattern`. Sketch geometry: line, arc, circle (and polyline = lines). Everything else stops the export with `UNSUPPORTED_OP`.
 
+Canonicalizer details (as built):
+
+- `plane.offset` is the coordinate of the frame origin along the positive world axis of the base plane (XY: z, XZ: y, YZ: x), even when the sketch normal points the other way (the XZ plane's normal is -Y). Executors place the sketch from `frame`, not from `plane`.
+- Geometry `id`s are the FreeCAD sketch geometry indices (construction geometry is skipped, so ids can have gaps). Arc angles are in `[0, 360)`; the arc runs counter-clockwise from `start_angle`, sweep = `(end_angle - start_angle) mod 360`. A sketch used by a hole may also contain `{ "id", "type": "point", "at": [u,v] }`.
+- `sketches` lists only sketches used by an exported feature, in document order.
+- `hole` also has `positions: [[u,v], ...]` (circle centres and points of its sketch, sketch coordinates; the executor drills at these with the hole's own `diameter`) and `reversed`. Loop checks are not applied to hole sketches (circles may overlap).
+- Directions verified in FreeCAD 1.1 with `n` = sketch normal: pad adds along `+n` (`reversed`: `-n`), pocket and hole remove along `-n` (`reversed`: `+n`). `direction` already includes `reversed`. `midplane` pad is symmetric; `direction` then only fixes the sign of the extrusion.
+- `polar_pattern.axis.direction` is the body-placed origin axis, negated when FreeCAD's `Reversed` is set. With `full_circle`, FreeCAD spaces occurrences by `angle / occurrences`, otherwise `angle / (occurrences - 1)`.
+- Sketches attached to a face of another feature (`sketch.on`) are rejected; use an origin plane with an offset. Pocket `midplane`, taper, custom direction vectors, two-sided and up-to extents, suppressed features, a body with a base feature, and features after the body Tip are rejected too.
+
 ### Canonicalizer error
 
-The worker command returns an error with `code: "TRANSFER_UNSUPPORTED_OP"`, `target` = semantic path of the feature, `detail: { "op": "<type>", "option": "<name or null>", "reason": "..." }`.
+The worker command returns an error with `code: "TRANSFER_UNSUPPORTED_OP"`, `target` = semantic path of the feature, `detail: { "op": "<type>", "option": "<name or null>", "reason": "..." }`. A tilted sketch plane uses `target` = the sketch path, `op: "sketch"`, `option: "tilted_plane"`; a face-attached sketch uses `option: "attached_to_face"`; hole options are `blind`, `thread`, `counterbore`, `countersink`.
+
+Open, intersecting or touching loops return `code: "TRANSFER_INVALID_SKETCH"`, `target` = sketch path, `detail: { "reason": "open_loop" | "intersecting_loops" | "touching_loops" | "self_intersecting_loop" | "degenerate_geometry", "geometry": [ids] }`.
+
+Worker command `export_features` (alias `export-features`), args `{ "output"?: path, "referenceStep"?: path }`, result `{ "features": <json>, "featureCount", "part", "path"?, "referenceStep"? }`. Read only.
 
 ## 2. Job folder (desktop <-> executor)
 
