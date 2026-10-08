@@ -1,0 +1,1435 @@
+{
+  "schema": "reify.features/1",
+  "units": "mm",
+  "part": "battery_tray",
+  "source": {
+    "doc": "aircraft/parts/acc/battery_tray.FCStd",
+    "sha256": "6d67dedf06d17ffdc2299b1dea3b6c158b95364c8e9cde8251859128f3505c15"
+  },
+  "bodies": [
+    {
+      "name": "battery_tray",
+      "sketches": [
+        {
+          "name": "battery_tray/plate_sk",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              14
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 14
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                190,
+                -24
+              ],
+              "end": [
+                420,
+                -24
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                420,
+                -24
+              ],
+              "end": [
+                420,
+                24
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                420,
+                24
+              ],
+              "end": [
+                190,
+                24
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                190,
+                24
+              ],
+              "end": [
+                190,
+                -24
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 11040
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 230
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 48
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 190
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -24
+              }
+            }
+          ]
+        },
+        {
+          "name": "battery_tray/rails_sk",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              9.4
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 9.4
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                190,
+                13
+              ],
+              "end": [
+                420,
+                13
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                420,
+                13
+              ],
+              "end": [
+                420,
+                19
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                420,
+                19
+              ],
+              "end": [
+                190,
+                19
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                190,
+                19
+              ],
+              "end": [
+                190,
+                13
+              ]
+            },
+            {
+              "id": 4,
+              "type": "line",
+              "start": [
+                190,
+                -19
+              ],
+              "end": [
+                420,
+                -19
+              ]
+            },
+            {
+              "id": 5,
+              "type": "line",
+              "start": [
+                420,
+                -19
+              ],
+              "end": [
+                420,
+                -13
+              ]
+            },
+            {
+              "id": 6,
+              "type": "line",
+              "start": [
+                420,
+                -13
+              ],
+              "end": [
+                190,
+                -13
+              ]
+            },
+            {
+              "id": 7,
+              "type": "line",
+              "start": [
+                190,
+                -13
+              ],
+              "end": [
+                190,
+                -19
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 1380
+            },
+            {
+              "id": 1,
+              "geometry": [
+                4,
+                5,
+                6,
+                7
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 1380
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 230
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 6
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 190
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 13
+              }
+            },
+            {
+              "name": "s1_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  4,
+                  1
+                ],
+                [
+                  4,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 230
+              }
+            },
+            {
+              "name": "s1_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  5,
+                  1
+                ],
+                [
+                  5,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 6
+              }
+            },
+            {
+              "name": "s1_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  4,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 190
+              }
+            },
+            {
+              "name": "s1_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  4,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -19
+              }
+            }
+          ]
+        },
+        {
+          "name": "battery_tray/slots_sk",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              16
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 16
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                253,
+                8
+              ],
+              "end": [
+                277,
+                8
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                277,
+                8
+              ],
+              "end": [
+                277,
+                12
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                277,
+                12
+              ],
+              "end": [
+                253,
+                12
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                253,
+                12
+              ],
+              "end": [
+                253,
+                8
+              ]
+            },
+            {
+              "id": 4,
+              "type": "line",
+              "start": [
+                253,
+                -12
+              ],
+              "end": [
+                277,
+                -12
+              ]
+            },
+            {
+              "id": 5,
+              "type": "line",
+              "start": [
+                277,
+                -12
+              ],
+              "end": [
+                277,
+                -8
+              ]
+            },
+            {
+              "id": 6,
+              "type": "line",
+              "start": [
+                277,
+                -8
+              ],
+              "end": [
+                253,
+                -8
+              ]
+            },
+            {
+              "id": 7,
+              "type": "line",
+              "start": [
+                253,
+                -8
+              ],
+              "end": [
+                253,
+                -12
+              ]
+            },
+            {
+              "id": 8,
+              "type": "line",
+              "start": [
+                373,
+                8
+              ],
+              "end": [
+                397,
+                8
+              ]
+            },
+            {
+              "id": 9,
+              "type": "line",
+              "start": [
+                397,
+                8
+              ],
+              "end": [
+                397,
+                12
+              ]
+            },
+            {
+              "id": 10,
+              "type": "line",
+              "start": [
+                397,
+                12
+              ],
+              "end": [
+                373,
+                12
+              ]
+            },
+            {
+              "id": 11,
+              "type": "line",
+              "start": [
+                373,
+                12
+              ],
+              "end": [
+                373,
+                8
+              ]
+            },
+            {
+              "id": 12,
+              "type": "line",
+              "start": [
+                373,
+                -12
+              ],
+              "end": [
+                397,
+                -12
+              ]
+            },
+            {
+              "id": 13,
+              "type": "line",
+              "start": [
+                397,
+                -12
+              ],
+              "end": [
+                397,
+                -8
+              ]
+            },
+            {
+              "id": 14,
+              "type": "line",
+              "start": [
+                397,
+                -8
+              ],
+              "end": [
+                373,
+                -8
+              ]
+            },
+            {
+              "id": 15,
+              "type": "line",
+              "start": [
+                373,
+                -8
+              ],
+              "end": [
+                373,
+                -12
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 96
+            },
+            {
+              "id": 1,
+              "geometry": [
+                4,
+                5,
+                6,
+                7
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 96
+            },
+            {
+              "id": 2,
+              "geometry": [
+                8,
+                9,
+                10,
+                11
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 96
+            },
+            {
+              "id": 3,
+              "geometry": [
+                12,
+                13,
+                14,
+                15
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 96
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 24
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 4
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 253
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 8
+              }
+            },
+            {
+              "name": "s1_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  4,
+                  1
+                ],
+                [
+                  4,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 24
+              }
+            },
+            {
+              "name": "s1_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  5,
+                  1
+                ],
+                [
+                  5,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 4
+              }
+            },
+            {
+              "name": "s1_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  4,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 253
+              }
+            },
+            {
+              "name": "s1_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  4,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -12
+              }
+            },
+            {
+              "name": "s2_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  8,
+                  1
+                ],
+                [
+                  8,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 24
+              }
+            },
+            {
+              "name": "s2_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  9,
+                  1
+                ],
+                [
+                  9,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 4
+              }
+            },
+            {
+              "name": "s2_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  8,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 373
+              }
+            },
+            {
+              "name": "s2_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  8,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 8
+              }
+            },
+            {
+              "name": "s3_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  12,
+                  1
+                ],
+                [
+                  12,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 24
+              }
+            },
+            {
+              "name": "s3_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  13,
+                  1
+                ],
+                [
+                  13,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 4
+              }
+            },
+            {
+              "name": "s3_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  12,
+                  1
+                ]
+              ],
+              "value": {
+                "value": 373
+              }
+            },
+            {
+              "name": "s3_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  12,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -12
+              }
+            }
+          ]
+        },
+        {
+          "name": "battery_tray/holes_sk",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              9.4
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              -1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              -1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 9.4
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                206,
+                16
+              ],
+              "radius": 1.6
+            },
+            {
+              "id": 1,
+              "type": "circle",
+              "center": [
+                206,
+                -16
+              ],
+              "radius": 1.6
+            },
+            {
+              "id": 2,
+              "type": "circle",
+              "center": [
+                406,
+                16
+              ],
+              "radius": 1.6
+            },
+            {
+              "id": 3,
+              "type": "circle",
+              "center": [
+                406,
+                -16
+              ],
+              "radius": 1.6
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 8.042477193
+            },
+            {
+              "id": 1,
+              "geometry": [
+                1
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 8.042477193
+            },
+            {
+              "id": 2,
+              "geometry": [
+                2
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 8.042477193
+            },
+            {
+              "id": 3,
+              "geometry": [
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 8.042477193
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  0,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 3.2
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 206
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 16
+              }
+            },
+            {
+              "name": "s1_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  1,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 3.2
+              }
+            },
+            {
+              "name": "s1_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  1,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 206
+              }
+            },
+            {
+              "name": "s1_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  1,
+                  3
+                ]
+              ],
+              "value": {
+                "value": -16
+              }
+            },
+            {
+              "name": "s2_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  2,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 3.2
+              }
+            },
+            {
+              "name": "s2_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  2,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 406
+              }
+            },
+            {
+              "name": "s2_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  2,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 16
+              }
+            },
+            {
+              "name": "s3_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  3,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 3.2
+              }
+            },
+            {
+              "name": "s3_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  3,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 406
+              }
+            },
+            {
+              "name": "s3_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  3,
+                  3
+                ]
+              ],
+              "value": {
+                "value": -16
+              }
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "name": "battery_tray/plate",
+          "type": "pad",
+          "sketch": "battery_tray/plate_sk",
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 2
+            }
+          },
+          "midplane": false,
+          "reversed": false
+        },
+        {
+          "name": "battery_tray/rails",
+          "type": "pad",
+          "sketch": "battery_tray/rails_sk",
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 4.6
+            }
+          },
+          "midplane": false,
+          "reversed": false
+        },
+        {
+          "name": "battery_tray/velcro_slots",
+          "type": "pocket",
+          "sketch": "battery_tray/slots_sk",
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 2.2
+            }
+          },
+          "reversed": false
+        },
+        {
+          "name": "battery_tray/mount_holes",
+          "type": "hole",
+          "sketch": "battery_tray/holes_sk",
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "extent": {
+            "type": "through_all"
+          },
+          "diameter": {
+            "value": 3.2
+          },
+          "positions": [
+            [
+              206,
+              16
+            ],
+            [
+              206,
+              -16
+            ],
+            [
+              406,
+              16
+            ],
+            [
+              406,
+              -16
+            ]
+          ],
+          "reversed": false
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "volume_mm3": 33795.6786021,
+    "bbox": {
+      "min": [
+        190,
+        -24,
+        9.4
+      ],
+      "max": [
+        420,
+        24,
+        16
+      ]
+    },
+    "feature_volumes": [
+      {
+        "name": "battery_tray/plate",
+        "volume_mm3": 22080
+      },
+      {
+        "name": "battery_tray/rails",
+        "volume_mm3": 34776
+      },
+      {
+        "name": "battery_tray/velcro_slots",
+        "volume_mm3": 34008
+      },
+      {
+        "name": "battery_tray/mount_holes",
+        "volume_mm3": 33795.6786021
+      }
+    ]
+  }
+}

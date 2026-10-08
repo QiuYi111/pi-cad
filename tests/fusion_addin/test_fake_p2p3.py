@@ -283,3 +283,27 @@ class LiveFusionFindings(Base):
         self.assertAlmostEqual(sum(c * c for c in y), 1.0, places=12)
         self.assertAlmostEqual(sum(a * b for a, b in zip(x, y)), 0.0, places=12)
 
+    def test_a_redundant_dimension_is_a_warning(self):
+        """Fusion refuses a dimension on geometry it already holds in place (concentric circles share a centre)."""
+        def setup(app):
+            import fake_adsk as fa
+            orig = fa.Sketch._dim
+            seen = {"n": 0}
+
+            def picky(self, kind, *args):
+                seen["n"] += 1
+                if seen["n"] == 3:
+                    raise RuntimeError("3 : VCS_SKETCH_OVER_CONSTRAINTS - sketch geometry is over constrained")
+                return orig(self, kind, *args)
+            fa.Sketch._dim = picky
+            self.addCleanup(setattr, fa.Sketch, "_dim", orig)
+        app, res = self.run_job(_path.fixture("concentric_rings.features.json"), setup=setup)
+        self.assertTrue(res["ok"], res["error"])
+        redundant = [w for w in res["warnings"] if "redundant" in w["reason"]]
+        self.assertEqual(len(redundant), 1)
+        self.assertEqual(redundant[0]["field"], "sketch.dimensions")
+        # any other dimension error still fails the job
+        f = _path.fixture("fusion_p3.features.json")
+        f["bodies"][0]["sketches"][0]["dimensions"].append({"name": "bad", "kind": "diameter", "refs": [[0, 0]], "value": {"value": 40.0}})
+        self.assertFalse(self.run_job(f)[1]["ok"])
+

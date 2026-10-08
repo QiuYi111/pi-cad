@@ -113,6 +113,7 @@ Items 5, 7, 9, 14, 15, 16, 20, 21, 22 (sketch on a tilted face), 23 and 25 held.
 - A rotation rounded to 6 decimals is rejected by `addNewComponent`; the frame is orthonormalized first.
 - The midpoint of a full circle is where the kernel's seam is, so circle edge references match on centre, radius and axis.
 - The equivalence check places cylinders and cones by axis, not by centroid, for the same reason.
+- Fusion refuses a dimension on geometry it already holds in place (`VCS_SKETCH_OVER_CONSTRAINTS`): the second of two concentric circles, rectangles that line up with each other. The dimension is skipped with a warning; the equivalence check still proves the shape.
 
 Still UNVERIFIED: items 1 to 4, 6, 8, 10 to 13, 17, 19, 24, 26.
 

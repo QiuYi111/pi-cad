@@ -476,6 +476,13 @@ class FusionExecutor(object):
                 bc.warn(step["feature"], "sketch.dimensions", d.get("name"),
                         "dimension %r of sketch %r not added: %s" % (d["name"], step["name"], e))
             except Exception as e:  # noqa: BLE001
+                if "OVER_CONSTRAINT" in str(e):
+                    # Fusion already holds this geometry in place (for example concentric circles share their centre,
+                    # and aligned rectangles inherit constraints from each other). The dimension adds nothing: the
+                    # sketch is already where the canonical geometry puts it, and the equivalence check proves it.
+                    bc.warn(step["feature"], "sketch.dimensions", d.get("name"),
+                            "dimension %r of sketch %r is redundant: Fusion already constrains that geometry" % (d["name"], step["name"]))
+                    continue
                 raise ExecError("sketch %r: dimension %r (%s) failed: %s" % (step["name"], d["name"], d["kind"], e),
                                 feature=step["feature"], step="dimension")
 
