@@ -158,4 +158,4 @@ Everything below was written without running SolidWorks or compiling.
 21. (P3) `FeatureFillet3` (14-argument recorded form with Options 195) and `InsertFeatureChamfer(0, 4 = equal distance, size, ...)`.
 22. (P3) Body queries: `PartDoc.GetBodies2`, `Body2.GetBodyBox/GetEdges/GetFaces`, `Edge.GetCurve`, `Curve.GetEndParams/Evaluate2/GetLength3/IsLine/IsCircle/CircleParams`, `Face2.GetSurface/Normal/GetArea` (m2), `Surface.PlaneParams` layout `[nx,ny,nz,px,py,pz]`, `Entity.Select4` on edges and faces, `SelectionMgr.CreateSelectData().Mark`.
 23. (P3) Sketch on a selected planar face: the sketch normal equals the face's outward normal (the reverse flag logic relies on it), and `swEndCondUpToSurface` with a mark-1 face for a boss.
-24. Not handled: the exported STEP is whatever SolidWorks writes; the equivalence check is done by the desktop with cadctl.
+24. Not handled: the exported STEP is whatever SolidWorks writes; the equivalence check is done afterwards by the Reify sidecar with cadctl (`src/agent-api/transfer-check.ts`).
