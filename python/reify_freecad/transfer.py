@@ -700,6 +700,11 @@ def canonicalize_assembly(session: Any) -> dict[str, Any]:
             ref = ref_path if len(per_doc[ref_path]) == 1 else f"{ref_path}#{body_path}"
             parts[key] = {"ref": ref, "name": body_path, "features": canonicalize(owner, body_path)}
         placement = unit.placement
+        if unit.kind == OCCURRENCE:
+            # A linked occurrence holds the body shape without the part's Body placement (occurrence_shape),
+            # while parts[].features are in the part's world frame, which includes that placement.
+            # world = pose * local = pose * B^-1 * features.
+            placement = placement.multiply(unit.body.Placement.inverse())
         rows = placement.Rotation.toMatrix()
         occurrences.append({
             "name": unit.path, "part": parts[key]["ref"],

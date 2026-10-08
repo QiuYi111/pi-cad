@@ -213,3 +213,7 @@ Whenever the worker writes a model STEP (open, apply, export; not `try` outputs)
 - `stale_step`: the sidecar is fine but the part's current `.FCStd` hash differs from `fcstdSha256`. Hint: rebuild the part so Reify rewrites its STEP, then import again (or `link` the part).
 
 `ambiguous_edge` errors now say which other edge matched: `detail: { op, option, reason, edge: "Edge7", matches: [{ edge, curve, midpoint, length, radius? }] }`, the message lists the same, and `hints` suggests a different selector. Inner and outer circles of a ring are not ambiguous (radius and length differ); only edges equal in curve, midpoint and length within `1e-4 x diagonal` are.
+
+### Occurrence transform and Body placement (assemblies)
+
+`parts[].features` are always in the part's own world frame, i.e. the Body placement of the part document is already applied to every sketch frame, direction, edge and face reference. `occurrences[].transform` maps exactly those coordinates to assembly world coordinates. For a `link` occurrence FreeCAD keeps the shape without the Body placement `B` under the pose `P`, so the emitted transform is `P * B^-1` (identity `B` gives `P`, as before). For an own-STEP `import_step` the STEP already contains `B`, so the transform is the import placement. A test (`test_occurrence_transform_composes_with_a_placed_body`) rebuilds the 8 pad corners from the JSON alone and matches the assembly shape's bounding box and the named flat STEP for both kinds.

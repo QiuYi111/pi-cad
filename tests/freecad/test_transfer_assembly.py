@@ -178,6 +178,68 @@ class TransferAssemblyTests(unittest.TestCase):
         sidecar.write_text(kept.replace('"stepSha256": "', '"stepSha256": "0'))
         self.assertEqual(self.p.error(ASM, "export_assembly")["detail"]["option"], "unknown_step_source")
 
+    # ------------------------------------------------------------ Body placement vs occurrence transform
+    @staticmethod
+    def apply_transform(transform: dict[str, Any], point: list[float]) -> list[float]:
+        r, o = transform["rotation"], transform["origin"]
+        return [sum(r[i][j] * point[j] for j in range(3)) + o[i] for i in range(3)]
+
+    @classmethod
+    def world_corners(cls, part: dict[str, Any], transform: dict[str, Any]) -> list[list[float]]:
+        """The 8 corners of a rectangular pad, from the emitted JSON only (sketch frame + extent + direction)."""
+        body = part["features"]["bodies"][0]
+        pad = body["features"][0]
+        sketch = next(s for s in body["sketches"] if s["name"] == pad["sketch"])
+        us = [p for g in sketch["geometry"] for p in (g["start"][0], g["end"][0])]
+        vs = [p for g in sketch["geometry"] for p in (g["start"][1], g["end"][1])]
+        frame, length, d = sketch["frame"], pad["extent"]["length"]["value"], pad["direction"]
+        corners = []
+        for u in (min(us), max(us)):
+            for v in (min(vs), max(vs)):
+                base = [frame["origin"][i] + u * frame["u"][i] + v * frame["v"][i] for i in range(3)]
+                for t in (0.0, length):
+                    corners.append(cls.apply_transform(transform, [base[i] + t * d[i] for i in range(3)]))
+        return corners
+
+    def test_occurrence_transform_composes_with_a_placed_body(self) -> None:
+        import math
+
+        self.p.open("parts/block.FCStd", "block")
+        self.p.call("parts/block.FCStd", "apply", ops=[
+            {"op": "sketch", "name": "block/profile", "plane": "XY", "shapes": [{"rect": {"center": [5, 3], "size": [10, 6]}}]},
+            {"op": "pad", "name": "block/slab", "sketch": "block/profile", "length": 7},
+            {"op": "placement", "target": "block", "position": [11, -4, 2], "rotation": {"axis": [0, 0, 1], "angle": 90}},
+        ])
+        self.p.call(ASM, "apply", ops=[
+            {"op": "link", "name": "arm/linked", "part": "parts/block.FCStd", "body": "block", "position": [100, 20, 5], "rotation": {"axis": [1, 0, 0], "angle": 90}},
+            {"op": "import_step", "name": "arm/stepped", "file": "build/block.step", "position": [-60, 10, 0], "rotation": {"axis": [0, 1, 0], "angle": 90}},
+        ])
+        step = self.p.root / "transfer" / "asm.step"
+        data = self.p.call(ASM, "export_assembly", referenceStep=str(step))["assembly"]
+        parts = {p["ref"]: p for p in data["parts"]}
+        self.assertEqual(list(parts), ["parts/block.FCStd"])
+        session = self.p.worker.sessions[self.p.path(ASM)]
+        from reify_freecad.assembly import unit_by_path
+
+        boxes = []
+        for occ in data["occurrences"]:
+            corners = self.world_corners(parts[occ["part"]], occ["transform"])
+            lo = [min(c[i] for c in corners) for i in range(3)]
+            hi = [max(c[i] for c in corners) for i in range(3)]
+            box = unit_by_path(session, occ["name"]).shape().BoundBox
+            for got, want in zip(lo + hi, [box.XMin, box.YMin, box.ZMin, box.XMax, box.YMax, box.ZMax]):
+                self.assertAlmostEqual(got, want, delta=1e-6 * 10, msg=f"{occ['name']} bbox from JSON vs assembly shape")
+            self.assertAlmostEqual(unit_by_path(session, occ["name"]).shape().Volume, 10 * 6 * 7, places=6)
+            boxes.append((lo, hi))
+        # and against the flat named STEP written next to it
+        shape = Part.Shape()
+        shape.read(str(step))
+        union_lo = [min(b[0][i] for b in boxes) for i in range(3)]
+        union_hi = [max(b[1][i] for b in boxes) for i in range(3)]
+        for got, want in zip(union_lo + union_hi, [shape.BoundBox.XMin, shape.BoundBox.YMin, shape.BoundBox.ZMin, shape.BoundBox.XMax, shape.BoundBox.YMax, shape.BoundBox.ZMax]):
+            self.assertAlmostEqual(got, want, delta=1e-5)
+        del math
+
     def test_try_does_not_leave_a_sidecar_for_its_step(self) -> None:
         self.post_step()
         scratch = self.p.root / "build" / "try.step"
