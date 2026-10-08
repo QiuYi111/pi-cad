@@ -231,7 +231,7 @@ export class WslBridge implements RuntimeBridge {
       child.once("exit", (code) => {
         clearTimeout(timer);
         if (code === 0) accept({ stdout, stderr });
-        else reject(new Error(stderr.trim() || `WSL command exited with code ${code}`));
+        else reject(Object.assign(new Error(stderr.trim() || `WSL command exited with code ${code}`), { stdout, stderr, code }));
       });
     });
   }

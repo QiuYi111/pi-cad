@@ -49,11 +49,20 @@ export class AgentApiClient {
     const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) throw new Error("Choose a project before reading Reify state.");
     const node = await this.bridge.commandPath("node");
-    const { stdout } = await this.bridge.pipe(
-      await withCanonicalProjectEnvironment(this.bridge, projectPath, [node, `${piCadRepo}/scripts/pi-cad-agent-api.mjs`, "agent-api", projectPath]),
-      JSON.stringify({ schema: 1, ...body }),
-      timeout,
-    );
+    let stdout: string;
+    try {
+      ({ stdout } = await this.bridge.pipe(
+        await withCanonicalProjectEnvironment(this.bridge, projectPath, [node, `${piCadRepo}/scripts/pi-cad-agent-api.mjs`, "agent-api", projectPath]),
+        JSON.stringify({ schema: 1, ...body }),
+        timeout,
+      ));
+    } catch (error) {
+      // The Agent API exits non-zero on a request error but still prints the error envelope on stdout. Without it the
+      // user would only see stderr, which is usually a Node warning.
+      const printed = (error as { stdout?: unknown }).stdout;
+      if (typeof printed !== "string" || !printed.trim().startsWith("{")) throw error;
+      stdout = printed;
+    }
     const response = JSON.parse(stdout) as AgentApiEnvelope<T>;
     if (!response.ok) {
       const error = response.error;
