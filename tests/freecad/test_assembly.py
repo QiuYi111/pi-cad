@@ -295,6 +295,23 @@ class SplitFaceTests(unittest.TestCase):
         both = self.p.call("parts/shaft.FCStd", "query", target="shaft/cyl/side.0", what=["faces"])["faces"]
         self.assertEqual(len(both), 2, "the logical face name still selects every piece")
 
+    def test_the_declarations_name_each_piece_once(self) -> None:
+        self.p.open("assembly/twin.FCStd", "twin")
+        result = self.p.call("assembly/twin.FCStd", "apply", ops=[
+            {"op": "link", "name": "twin/left", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "twin/right", "part": "parts/shaft.FCStd", "body": "shaft", "position": [30, 0, 0]},
+        ])
+        entities = json.loads(Path(result["declarations"]).read_text())["entities"]
+        paths = [e["path"] for e in entities]
+        self.assertEqual(len(paths), len(set(paths)), "every declared path is unique")
+        faces = {e["path"]: e for e in entities if e["call"] == "faces"}
+        for unit in ("twin/left", "twin/right"):
+            for piece in ("side.0~0", "side.0~1"):
+                entity = faces[f"{unit}/cyl/{piece}"]
+                self.assertEqual((entity["expect"], entity["selector"]["type"]), ("one", "cylinder"))
+                self.assertIn("bboxCenter", entity["selector"], "the pieces of one cylinder are told apart by position")
+        self.assertNotEqual(faces["twin/left/cyl/side.0~0"]["selector"]["bboxCenter"], faces["twin/left/cyl/side.0~1"]["selector"]["bboxCenter"])
+
     def test_the_names_survive_dimension_edits(self) -> None:
         self.p.call("parts/shaft.FCStd", "apply", ops=[
             {"op": "set", "target": "shaft/cyl", "prop": "Length", "value": 60},
@@ -311,9 +328,9 @@ class SplitFaceTests(unittest.TestCase):
         halves[1].rotate(App.Vector(), App.Vector(0, 0, 1), 180)
         sides = [next(f for f in half.Faces if isinstance(f.Surface, Part.Cylinder)) for half in halves]
         keys = [_order_key(face, frame) for face in sides]
-        self.assertAlmostEqual(keys[0][1], keys[1][1], places=6)
-        self.assertAlmostEqual(keys[0][2], 90.0, places=3)
-        self.assertAlmostEqual(keys[1][2], 270.0, places=3)
+        self.assertAlmostEqual(keys[0][3], keys[1][3], places=6)
+        self.assertAlmostEqual(keys[0][4], 90.0, places=3)
+        self.assertAlmostEqual(keys[1][4], 270.0, places=3)
 
     def test_the_same_part_can_be_linked_twice(self) -> None:
         self.p.open("assembly/twin.FCStd", "twin")

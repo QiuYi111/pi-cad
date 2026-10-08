@@ -104,3 +104,73 @@ test("FreeCAD part: a concurrent batch over several documents keeps every docume
     await rm(canonical, { recursive: true, force: true });
   }
 });
+
+test("FreeCAD part: failures and a worker restart inside a concurrent batch hurt only their own document; undo never empties a part by accident", { skip: !installed && "FreeCAD runtime is not installed" }, async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-part-conc2-canonical-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-part-conc2-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  try {
+    await new HarnessProjectStoreV7(cwd).startRun({ workflow: buildWorkflow(), registryContract: buildRegistryContract(mechanicalRegistries) });
+    const batch = ["motor", "gear", "axle", "chassis"];
+    const docOf = (name: string) => `parts/${name}.FCStd`;
+    await Promise.all(batch.map((name) => handleAgentApi(cwd, { schema: 1, op: "part-open", doc: docOf(name), create: true, body: name })));
+
+    // gear fails (fillet too large), axle outlives its budget (the worker is killed and restarted), the others succeed.
+    process.env.PI_CAD_PART_KILL_GRACE_S = "0.2";
+    const settled = await Promise.allSettled(batch.map((name) => {
+      if (name === "gear") {
+        return handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: docOf(name), ops: [
+          ...plate(name),
+          { op: "fillet", name: `${name}/too_round`, edges: { feature: `${name}/body`, role: "top_outer" }, radius: 500 },
+        ] as never });
+      }
+      if (name === "axle") {
+        return handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: docOf(name), budgetS: 1, ops: [
+          ...plate(name),
+          { op: "linear_pattern", name: `${name}/row`, features: [`${name}/body`], direction: "X", length: 25, count: 4000 },
+        ] as never });
+      }
+      return handleAgentApi(cwd, { schema: 1, op: "part-apply", doc: docOf(name), ops: plate(name) as never });
+    }));
+    delete process.env.PI_CAD_PART_KILL_GRACE_S;
+
+    const [motor, gear, axle, chassis] = settled;
+    assert.equal(gear!.status, "rejected");
+    const gearError = (gear as PromiseRejectedResult).reason as PartOpError;
+    assert.equal(gearError.code, "FILLET_FAILED");
+    assert.equal(gearError.rolledBack, true);
+    assert.match(gearError.message, /revision 0/);
+    assert.match(gearError.message, /Do NOT call undo/);
+    assert.equal(axle!.status, "rejected");
+    assert.equal(((axle as PromiseRejectedResult).reason as PartOpError).code, "BUDGET_EXCEEDED");
+    for (const [name, outcome] of [["motor", motor], ["chassis", chassis]] as const) {
+      assert.equal(outcome!.status, "fulfilled", name);
+      const value = (outcome as PromiseFulfilledResult<any>).value;
+      assert.ok(Math.abs(value.changes.volumeMm3.after - sizes[name]!.reduce((a, b) => a * b, 1)) < 1e-3, `${name} volume`);
+    }
+
+    // After the restart every document is at the right revision with the right content.
+    const trees = await Promise.all(batch.map((name) => handleAgentApi(cwd, { schema: 1, op: "part-tree", doc: docOf(name) }))) as any[];
+    assert.deepEqual(trees.map((tree) => tree.rev), [1, 0, 0, 1]);
+    assert.deepEqual(trees[0].bodies[0].objects.map((item: any) => item.path), ["motor/profile", "motor/body"]);
+    assert.deepEqual(trees[3].bodies[0].objects.map((item: any) => item.path), ["chassis/profile", "chassis/body"]);
+    assert.deepEqual(trees[1].bodies[0].objects, []);
+
+    // Undo of the only revision needs an explicit argument.
+    await assert.rejects(
+      handleAgentApi(cwd, { schema: 1, op: "part-undo", doc: docOf("motor") }),
+      (error: unknown) => error instanceof PartOpError && error.code === "UNDO_WOULD_EMPTY",
+    );
+    assert.equal(((await handleAgentApi(cwd, { schema: 1, op: "part-tree", doc: docOf("motor") })) as any).rev, 1);
+    const emptied = await handleAgentApi(cwd, { schema: 1, op: "part-undo", doc: docOf("motor"), toEmpty: true }) as any;
+    assert.equal(emptied.part.rev, 0);
+  } finally {
+    delete process.env.PI_CAD_PART_KILL_GRACE_S;
+    shutdownPartWorkers();
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});

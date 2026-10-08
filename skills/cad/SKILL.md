@@ -37,7 +37,7 @@ cad.plan.update(*, variables: dict | None = None, artifacts: list | None = None)
 cad.part.open(path: str | Path, *, output: str | Path | None = None, create: bool = False, body: str | None = None, validation: str = "auto") -> PartDocument
 PartDocument.apply(ops: list[dict], *, message: str | None = None, validation: str = "auto", budget_s: float | None = None) -> PartResult
 PartDocument.try_(ops: list[dict], *, budget_s: float | None = None) -> PartResult
-PartDocument.undo() -> PartResult
+PartDocument.undo(*, to_empty: bool = False, validation: str = "auto") -> PartResult
 PartDocument.tree() -> dict
 PartDocument.query(target: str, what: list[str] | None = None) -> dict
 PartDocument.check(kind: str, *, budget_s: float | None = None, **args) -> dict
@@ -112,7 +112,15 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
   next edit.
 - `apply` is one transaction. If an op or the recompute fails, nothing changed:
   the `CadApiError` carries `code`, `target`, `detail`, `hints` and
-  `rolled_back`. Fix the named op and send the batch again.
+  `rolled_back`. The message states the revision the document is at. Fix the
+  named op and send the batch again. **Do not call `undo` after a failed
+  `apply`**: it is already rolled back, and `undo` would remove the last good
+  revision. `undo` of the only revision raises `UNDO_WOULD_EMPTY` unless you pass
+  `to_empty=True` (start over from an empty document).
+- Part requests are processed one at a time per project, so
+  `asyncio.gather(d.apply(...))` over several documents is safe; each document
+  keeps its own geometry. It is not faster than awaiting them in a loop, and the
+  last document applied is the run's current candidate.
 - Faces and edges are named by role (`bracket/mount_hole/wall`, `top_outer`),
   never `Face12`. The names survive dimension edits and added features.
 - `FEATURE_NO_EFFECT` means a pad added no material, or a pocket or hole removed

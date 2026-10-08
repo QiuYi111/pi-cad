@@ -125,6 +125,29 @@ def face_within(inner: Any, outer: Any, tol: float) -> bool:
     return True
 
 
+def _boxes(faces: list[Any]) -> list[tuple[Any, Any]]:
+    """(face, bounding box) pairs: the box test below is much cheaper than ``same_surface`` and ``distToShape``."""
+    return [(face, face.BoundBox) for face in faces]
+
+
+def _within_box(inner_box: Any, outer_box: Any, margin: float) -> bool:
+    """False when ``inner`` cannot lie inside ``outer`` (``face_within`` accepts points up to ``margin`` away)."""
+    return not (
+        inner_box.XMax < outer_box.XMin - margin or inner_box.XMin > outer_box.XMax + margin
+        or inner_box.YMax < outer_box.YMin - margin or inner_box.YMin > outer_box.YMax + margin
+        or inner_box.ZMax < outer_box.ZMin - margin or inner_box.ZMin > outer_box.ZMax + margin
+    )
+
+
+def _lies_on(face: Any, candidates: list[tuple[Any, Any]], tol: float) -> bool:
+    """True when ``face`` has the surface of one of ``candidates`` and lies inside it."""
+    box = face.BoundBox
+    return any(
+        _within_box(box, other_box, tol * 10 + 1e-9) and same_surface(face, other, tol) and face_within(face, other, tol)
+        for other, other_box in candidates
+    )
+
+
 def contained_in_base(face: Any, base: Any | None, tol: float) -> bool:
     """True when ``face`` already existed in ``base``: same surface, and inside a face of it.
 
@@ -133,14 +156,105 @@ def contained_in_base(face: Any, base: Any | None, tol: float) -> bool:
     """
     if base is None or base.isNull():
         return False
-    return any(same_surface(face, other, tol) and face_within(face, other, tol) for other in base.Faces)
+    return _lies_on(face, _boxes(base.Faces), tol)
+
+
+#: (document name, feature name) -> (feature shape, base shape, tolerance, created faces, their indices).
+#: Finding the created faces costs a distance query per face and feature, and every recompute
+#: asked for all of them again: the cost of building a part grew with the square of its feature
+#: count. A feature that was not recomputed keeps its ``TopoDS`` shape, so ``isSame`` on the
+#: feature shape and on its base shape is an exact test that the cached answer still holds.
+_CREATED_CACHE: dict[tuple[str, str], tuple[Any, Any, float, list[Any], list[int]]] = {}
+_CREATED_CACHE_LIMIT = 4096
+CREATED_CACHE_SCHEMA = 1
+
+
+def _same_shape(a: Any, b: Any) -> bool:
+    if a is None or b is None:
+        return a is b
+    return a.isSame(b)
+
+
+def _close_tol(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-9 * max(1.0, abs(a), abs(b))
 
 
 def created_faces(feature: Any, tol: float) -> list[Any]:
     """Faces of ``feature.Shape`` that did not exist in its base shape."""
     base = getattr(feature, "BaseFeature", None)
     base_shape = base.Shape if base is not None else None
-    return [face for face in feature.Shape.Faces if not contained_in_base(face, base_shape, tol)]
+    shape = feature.Shape
+    key = (feature.Document.Name, feature.Name)
+    hit = _CREATED_CACHE.get(key)
+    if hit is not None and _close_tol(hit[2], tol) and _same_shape(hit[0], shape) and _same_shape(hit[1], base_shape):
+        return list(hit[3])
+    faces = list(shape.Faces)
+    if base_shape is None or base_shape.isNull():
+        indices = list(range(len(faces)))
+    else:
+        base_faces = _boxes(base_shape.Faces)  # once per feature, not once per face
+        indices = [i for i, face in enumerate(faces) if not _lies_on(face, base_faces, tol)]
+    created = [faces[i] for i in indices]
+    if len(_CREATED_CACHE) >= _CREATED_CACHE_LIMIT:
+        _CREATED_CACHE.clear()
+    _CREATED_CACHE[key] = (shape, base_shape, tol, created, indices)
+    return list(created)
+
+
+def _face_print(face: Any) -> list[float]:
+    centre = face.CenterOfMass
+    return [round(face.Area, 4), round(centre.x, 3), round(centre.y, 3), round(centre.z, 3)]
+
+
+def export_created_cache(doc: Any) -> dict[str, Any]:
+    """The created faces of every feature of ``doc`` that are still valid, as face indices with a fingerprint.
+
+    Saved next to the document so that reopening it (a restart of the worker, or the reload
+    after a rolled-back apply) does not find them again. Indices are only trusted when the
+    fingerprint of every face matches on import.
+    """
+    entries: dict[str, Any] = {}
+    for obj in doc.Objects:
+        hit = _CREATED_CACHE.get((doc.Name, obj.Name))
+        if hit is None or not _same_shape(hit[0], obj.Shape):
+            continue
+        base = getattr(obj, "BaseFeature", None)
+        if not _same_shape(hit[1], base.Shape if base is not None else None):
+            continue
+        faces = hit[0].Faces
+        entries[obj.Name] = {
+            "tol": hit[2], "faces": len(faces), "baseFaces": len(hit[1].Faces) if hit[1] is not None else None,
+            "created": hit[4], "prints": [_face_print(faces[i]) for i in hit[4]],
+        }
+    return {"schema": CREATED_CACHE_SCHEMA, "features": entries}
+
+
+def import_created_cache(doc: Any, data: dict[str, Any]) -> int:
+    """Seed the cache from ``export_created_cache`` of the same saved file; returns the entries accepted."""
+    if not isinstance(data, dict) or data.get("schema") != CREATED_CACHE_SCHEMA:
+        return 0
+    accepted = 0
+    for name, entry in (data.get("features") or {}).items():
+        try:
+            obj = doc.getObject(name)
+            if obj is None or obj.Shape.isNull():
+                continue
+            shape = obj.Shape
+            base = getattr(obj, "BaseFeature", None)
+            base_shape = base.Shape if base is not None else None
+            faces = shape.Faces
+            if len(faces) != entry["faces"] or (len(base_shape.Faces) if base_shape is not None else None) != entry["baseFaces"]:
+                continue
+            indices = [int(i) for i in entry["created"]]
+            if any(i < 0 or i >= len(faces) for i in indices):
+                continue
+            if any(_face_print(faces[i]) != print_ for i, print_ in zip(indices, entry["prints"])):
+                continue
+            _CREATED_CACHE[(doc.Name, name)] = (shape, base_shape, float(entry["tol"]), [faces[i] for i in indices], indices)
+            accepted += 1
+        except Exception:
+            continue
+    return accepted
 
 
 # ---------------------------------------------------------------- sketch helpers
@@ -282,8 +396,9 @@ def _hole_roles(feature: Any, created: list[Any], out: dict[str, list[Any]], ori
 def _final_faces(shape: Any, created: list[Any], tol: float) -> list[tuple[int, Any]]:
     """(1-based face index, face) of ``shape`` that lie on a created face."""
     matches: list[tuple[int, Any]] = []
+    sources = _boxes(created)
     for position, face in enumerate(shape.Faces, 1):
-        if any(same_surface(face, source, tol) and face_within(face, source, tol) for source in created):
+        if _lies_on(face, sources, tol):
             matches.append((position, face))
     return matches
 
@@ -347,8 +462,9 @@ def _feature_frame(feature: Any) -> tuple[Any, Any, Any, Any]:
 def _order_key(face: Any, frame: tuple[Any, Any, Any, Any]) -> tuple[float, ...]:
     """Geometric position of a face in the feature's frame; faces of one role are ordered by it.
 
-    A face of revolution is placed first, by (distance along its axis, angle of its centre about the axis
-    counted from the sketch u axis), so the two halves of a seam-split cylinder and the two bands
+    A face of revolution is placed first, by (where its axis crosses the sketch plane, distance along the
+    axis, angle of its centre about the axis counted from the sketch u axis), so four holes of one sketch,
+    the two halves of a seam-split cylinder and the two bands
     of a grooved shaft each get a fixed order. Any other face follows, placed by (normal, v, u).
     """
     origin, u, v, n = frame
@@ -374,15 +490,26 @@ def _order_key(face: Any, frame: tuple[Any, Any, Any, Any]) -> tuple[float, ...]
             angle = math.degrees(math.atan2(radial.dot(axis.cross(reference)), radial.dot(reference))) % 360.0
             if angle > 360.0 - 1e-3:
                 angle = 0.0
-        return (0.0, axial, angle)
+        return (0.0, (centre - origin).dot(u), (centre - origin).dot(v), axial, angle)
     offset = point - origin
     return (1.0, offset.dot(n), offset.dot(v), offset.dot(u))
 
 
-def _distinct_names(result: BodyRoles, features: dict[str, Any], tol: float) -> None:
-    """Give every face its own name: a role that holds several faces becomes ``role~0``, ``role~1``...
+def _shares_a_surface(entries: list[RoleFace], tol: float) -> bool:
+    """True when two faces of the role lie on one surface (or are of different kinds): not a group of equals.
 
-    A later feature splits one created face into pieces that all inherit its role (a groove
+    Four holes drilled from one sketch share the role ``wall`` on purpose (four different
+    cylinders); the two bands of a grooved shaft are one cylinder cut in two.
+    """
+    pairs = [(a.face, b.face) for i, a in enumerate(entries) for b in entries[i + 1:]]
+    return any(type(a.Surface) is not type(b.Surface) or same_surface(a, b, tol) for a, b in pairs)
+
+
+def _distinct_names(result: BodyRoles, features: dict[str, Any], tol: float) -> None:
+    """Give the pieces of a split face their own names: ``role~0``, ``role~1``...
+
+    A role that holds several faces on different surfaces (four holes of one sketch) is a group and
+    keeps its one name. A later feature splits one created face into pieces that all inherit its role (a groove
     cuts a shaft's side into two bands, and OCC cuts a cylinder at its seam), and a selector
     must be able to tell them apart. Pieces are numbered by ``_order_key``, so the numbers
     survive dimension edits that keep the topology. ``side.0`` still selects all of them.
@@ -390,7 +517,7 @@ def _distinct_names(result: BodyRoles, features: dict[str, Any], tol: float) -> 
     renamed: dict[str, list[RoleFace]] = {}
     for key, entries in result.faces.items():
         path, _, role = key.rpartition("/")
-        if len(entries) < 2 or role_base(role) in GROUP_ROLES:
+        if len(entries) < 2 or role_base(role) in GROUP_ROLES or not _shares_a_surface(entries, tol):
             renamed[key] = entries
             continue
         frame = _feature_frame(features.get(path))
@@ -609,12 +736,15 @@ def _entry_rim_edges(shape: Any, walls: list[Any], origin: Any, normal: Any, tol
     is the part of the wall nearest to the sketch plane's side.
     """
     openings: list[tuple[float, str]] = []
+    # The planes parallel to the sketch, with their edges, are found once: asking a face for
+    # its edges builds them again every time, and this loop ran it for every wall edge.
+    planes = [(other, other.Edges) for other in shape.Faces if isinstance(other.Surface, Part.Plane) and _parallel(other.Surface.Axis, normal)]
     for wall in walls:
         for edge in wall.Edges:
-            for other in shape.Faces:
-                if other.isSame(wall) or not isinstance(other.Surface, Part.Plane) or not _parallel(other.Surface.Axis, normal):
+            for other, other_edges in planes:
+                if other.isSame(wall):
                     continue
-                if any(edge.isSame(shared) for shared in other.Edges):
+                if any(edge.isSame(shared) for shared in other_edges):
                     name = _edge_name(shape, edge)
                     if name:
                         openings.append(((edge.CenterOfMass - origin).dot(normal), name))

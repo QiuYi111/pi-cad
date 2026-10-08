@@ -253,3 +253,25 @@ def drop_source(step: Path) -> None:
         source_sidecar(step).unlink()
     except FileNotFoundError:
         pass
+
+
+def step_is_current(session: Any, step: Path) -> bool:
+    """True when ``step`` (and its declarations) already show the saved ``.FCStd`` exactly.
+
+    Opening a saved part must not export it again. Only a plain part qualifies: an assembly's
+    STEP also depends on the parts it links, which this record does not cover.
+    """
+    import hashlib
+
+    try:
+        record = json.loads(source_sidecar(step).read_text(encoding="utf-8"))
+        if record.get("schema") != SOURCE_SCHEMA or record.get("kind") != "part":
+            return False
+        if not step.is_file() or not step.with_name(step.name + ".declarations.json").is_file() or not session.fcstd.is_file():
+            return False
+        return (
+            record.get("fcstdSha256") == hashlib.sha256(session.fcstd.read_bytes()).hexdigest()
+            and record.get("stepSha256") == hashlib.sha256(step.read_bytes()).hexdigest()
+        )
+    except (OSError, ValueError, AttributeError):
+        return False

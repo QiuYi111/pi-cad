@@ -103,6 +103,8 @@ against the in-memory build graph:
 
 `centroid` of a curved face is its parametric centre, which depends on where the seam sits. A producer that is not build123d (for example the FreeCAD part backend) should use `axisPoint` (a point the cylinder or cone axis passes through) or `bboxCenter` (centre of the tight bounding box) instead of `centroid` on curved faces.
 
+A producer that has to name the pieces of one split face (a groove cutting a shaft's side in two, a cylinder cut at its seam) declares one `faces` entity per piece, `<role>~0`, `<role>~1`, each with `expect: one`. The selector of a piece adds `bboxCenter` when its surface alone matches more than one face, so pieces of one cylinder resolve separately. The FreeCAD part backend numbers pieces by geometry, not by the order of the faces in the STEP, so the numbers survive dimension edits.
+
 Every numeric predicate is compared within `tolerance` (default `1e-6`).
 Selection is bounded on purpose: a shape that moved or disappeared produces "no
 candidate" instead of a nearest guess. Face normals are matched exactly, while

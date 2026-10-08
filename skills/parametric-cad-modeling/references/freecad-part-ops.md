@@ -14,7 +14,7 @@ If a `cad.part` call raises `CadApiError` with `code == "FREECAD_NOT_INSTALLED"`
 doc = await cad.part.open(path, *, output=None, create=False, body=None, validation="auto") -> PartDocument
 await doc.apply(ops, *, message=None, validation="auto", budget_s=None) -> PartResult
 await doc.try_(ops, *, budget_s=None) -> PartResult          # shows the result, then discards it
-await doc.undo() -> PartResult                               # back to the previous revision
+await doc.undo(*, to_empty=False) -> PartResult             # back to the previous revision; the only revision needs to_empty=True
 await doc.tree() -> dict                                     # parameters, sketches (dof), roles, requirements
 await doc.query(target, what=None) -> dict                   # what: params, bbox, volume, area, centroid, faces
 await doc.check(kind, *, budget_s=None, **args) -> dict      # clearance, interference, wall_thickness, mass
@@ -22,7 +22,9 @@ await doc.sweep(param, range, *, step, check, refine=False, budget_s=None) -> di
 ```
 
 - `path` is a project path ending in `.FCStd`. `output` defaults to `build/<stem>.step`. `body` is the semantic path of the first body (default: the file name).
-- `apply` runs all ops in **one transaction**. If any op or the recompute fails, nothing changes: the error says so (`rolled_back`) and names the failing op (`detail["failedOpIndex"]`). Send related edits together.
+- `apply` runs all ops in **one transaction**. If any op or the recompute fails, nothing changes: the error says so (`rolled_back`) and names the failing op (`detail["failedOpIndex"]`). Send related edits together. **A failed `apply` is already rolled back: its message says which revision the document is at. Do not `undo` it** (that removes the last good revision).
+- `undo` that would leave the document empty (revision 1 to 0) fails with `UNDO_WOULD_EMPTY` and changes nothing; pass `to_empty=True` to start over on purpose.
+- Requests are processed one at a time per project (one FreeCAD worker, and one open/apply/undo observation at a time). `asyncio.gather(d.apply(...))` over several documents is therefore safe and every document keeps its own geometry, but it runs in sequence: it is not faster than a loop, and the last document finished is the run's current candidate. A result that names another document fails with `DOCUMENT_MISMATCH`.
 - `PartResult` has `rev`, `artifact` (an `ArtifactRef` you can pass to `cad.probe.run`), `changes`, `features`, `params`, `intent`, `warnings`.
 - Every `open`, `apply`, `undo` and `try_` attaches the seven views. `CadApiError` carries `code`, `target`, `detail`, `hints` and `rolled_back`.
 
@@ -52,8 +54,11 @@ Faces are never named `Face12`. A face is `<feature path>/<role>`, found again a
 
 - `<k>` is the index of the sketch geometry that made the face. `rect` makes four lines in the order bottom (y-), right (x+), top (y+), left (x-): `side.0` faces -y, `side.1` faces +x, `side.2` faces +y, `side.3` faces -x. A circle is `side.0` or `wall.0`. `slot`: line, arc at the end point, line, arc at the start point. `polyline`: segment i is `.i`.
 - A role like `side` also covers `side.0`, `side.1` and so on. `wall` is exactly the first instance of a pattern; `wall@*` is every instance.
-- When a role holds several faces (four holes from one sketch) it still has one name; use `doc.query(path, ["faces"])` to see them.
+- When a role holds several faces on different surfaces (four holes from one sketch) it still has one name; use `doc.query(path, ["faces"])` to see them.
+- A face that is split into pieces keeps one name per piece: `side.0~0`, `side.0~1`. A groove cuts a shaft's side into two bands, and OCC also cuts a cylinder at its seam. The pieces are numbered by geometry (position of the axis in the sketch, then distance along the axis, then the angle of the piece about the axis counted from the sketch u axis), so `~0` is the lower band of a groove and the number does not change when a dimension changes. `side.0` still selects all pieces (a fillet or `between` takes them all); a joint or `up_to_face` needs one face, so name a piece (`TARGET_AMBIGUOUS` lists the piece names). The same part linked twice gives `arm/left/shaft/side.0~0` and `arm/right/shaft/side.0~0`.
+- The role words are reserved (`top`, `bottom`, `side`, `floor`, `wall`, `rim`, `round`, `bevel`, `top_outer`, `counterbore_floor`, `counterbore_wall`, `countersink`, and `side.<k>`, `wall.<k>`): a feature path may not end with one. `NAME_CONFLICT` puts a concrete name in `detail.suggested` and in `hints` (`body/floor` -> `body/floor_pan`). Safe endings are the role plus a noun: `floor_pan`, `top_plate`, `bottom_plate`, `wall_rib`, `side_block`, `rim_ring`, `round_edge`, `bevel_cut`.
 - Edge roles, for `fillet` and `chamfer`: `<pad>/top_outer` (outer edges of the top face), `<hole or pocket>/rim` (the edges where the wall meets the face the cut opens into), and `{"between": [selector, selector]}` (the edges two face roles share).
+- A ring (a pad of two concentric circles, a tyre, a washer) has an inner and an outer edge where `side` meets `top`. `between` and `top_outer` style edge selectors take `"which": "outer"` or `"inner"` (the larger or the smaller circular radius among the matches), `"which": "all"` (both, on purpose), and `"radius": {"min": 8, "max": 12}` in mm; a bare number means that radius. Without any of them, a selector that matches concentric circular edges of different radii fails with `TARGET_AMBIGUOUS`: `detail.candidates` has `edge`, `radius`, `length` and `center` for each, `detail.which` lists the values, and the hints name the radius of each choice. `which` and `radius` only look at circular edges (straight edges pass `which` and fail `radius`). Example: `{"between": [{"feature": "tire/ring", "role": "side"}, {"feature": "tire/ring", "role": "top"}], "which": "outer"}`.
 - If a selector matches nothing you get `TARGET_NOT_FOUND` with the nearest known names. If it matches several faces where one is needed, `TARGET_AMBIGUOUS` lists candidates with centres.
 
 ## Numbers and expressions
@@ -154,18 +159,22 @@ A check that runs past `budget_s` (default 30, at most 600) is stopped. Raise `b
 | `FREECAD_WORKER_RESTARTED` | the worker died; the request did not run to the end | `stderrTail` | `retry` |
 | `OP_SCHEMA_INVALID` | a malformed op; nothing ran | `opIndex`, `path`, `reason` | |
 | `TARGET_NOT_FOUND` | unknown path or role | `target`, `known` | |
-| `TARGET_AMBIGUOUS` | a selector matched several faces | `candidates` | `add role or between` |
-| `NAME_CONFLICT` | the path exists, or ends in a role name | | `rename or use set` |
+| `TARGET_AMBIGUOUS` | a selector matched several faces, or concentric edges of different radii | `candidates`, and for edges `which` | `add role or between`, `add which: outer or inner` |
+| `NAME_CONFLICT` | the path exists, or ends in a role name | `suggested`, `reservedNames` (role names) | `rename or use set`, `rename it to 'body/floor_pan'` |
 | `HAS_DEPENDENTS` | `delete` of something in use | `dependents` | `delete the dependents first` |
 | `FEATURE_NO_EFFECT` | a `pad`, `pocket`, `hole`, pattern or `mirror` recomputed but did not change the solid's volume (the apply is rolled back; the first pad of a body is never a no-effect) | `feature`, `volumeBefore`, `volumeAfter`, `expected`, `direction` | `try reversed=true`, `the sketch plane is on the opposite side of the material` |
 | `PROP_NOT_ALLOWED` | `set` of another property | `allowed` | |
 | `EXPRESSION_INVALID` | an unknown name, or a missing unit | `expression`, `reason`, `known` | `write units in expressions` |
 | `SKETCH_CONFLICTING`, `SKETCH_REDUNDANT`, `SKETCH_MALFORMED` | solver diagnostics, degenerate geometry | `constraints` (id and name) | |
 | `SKETCH_PROFILE_NOT_CLOSED` | the profile has a gap | | |
-| `FILLET_FAILED`, `CHAMFER_FAILED`, `HOLE_FAILED`, `PATTERN_FAILED`, `BOOLEAN_FAILED`, `FEATURE_FAILED` | a feature did not recompute | `feature`, `freecadStatus` | `reduce radius`, `fillet before pocket` ... |
+| `FILLET_FAILED`, `CHAMFER_FAILED`, `HOLE_FAILED`, `PATTERN_FAILED`, `BOOLEAN_FAILED`, `FEATURE_FAILED` | a feature did not recompute | `feature`, `freecadStatus` (the OCC text, for example `BRep_API: command not done`) | `reduce radius`, `fillet before pocket` ... |
+| `FILLET_FAILED`, `CHAMFER_FAILED` in particular | OCC gives no reason; the usual cause is a radius or size larger than the faces next to the edge | also `value`, `narrowestAdjacentFaceMm`, `shortestAdjacentEdgeMm` | `radius 30 mm does not fit: the narrowest face next to the edge is 4 mm wide ...; use a radius below 2 mm`, try the other kind, dress the edge before the pockets and holes, check that the edge still exists after later features |
 | `RESULT_NOT_SOLID`, `RESULT_MULTIPLE_SOLIDS` | a body is not one valid solid | `body`, `solids`, `validity` | |
 | `OP_SCHEMA_INVALID` on a linked feature | an op names a feature of an occurrence | `reason`, `source` | edit the part document, then apply again |
 | `IDENTITY_BIND_FAILED` | the STEP could not be bound to the names; the apply was undone (`detail.stepRegistered` says whether the restored STEP is registered, and `rolled_back` is true only if it is) | `paths` | |
+| `UNDO_WOULD_EMPTY` | `undo` of the only revision (it would leave an empty document); nothing changed | `rev` | `a failed apply is already rolled back: do not undo it`, `to start over, undo with to_empty=True` |
+| `NOTHING_TO_UNDO` | the document is at revision 0, or the older copy was pruned | `rev`, `kept` | |
+| `DOCUMENT_MISMATCH` | the worker answered for another document than the request named; nothing was used | `requested`, `answered` | `retry the request` |
 | `BUDGET_EXCEEDED`, `BUDGET_EXCEEDS_LIMIT`, `CANCELLED` | time limit, or an interrupted request | `budgetS`, `limitS` | `increase budget_s`, `split the check` |
 
 Under-constrained sketches are warnings (`SKETCH_UNDER_CONSTRAINED`, with the remaining degrees of freedom), not errors. Shapes from `sketch` are always fully constrained.

@@ -26,6 +26,7 @@ from .effects import check_feature_effect
 from .ops import handler_for, validate_ops
 from .ops.context import OpContext
 from .assembly import apply_joints, joint_objects, refresh_links, units
+from . import roles as roles_module
 from .roles import BodyRoles, compute_body_roles, label_anchor
 from .queries import DEFAULT_DENSITY_G_CM3
 
@@ -78,6 +79,8 @@ class DocumentSession:
         self.registry: Any = None
         self.root: Path = fcstd.parent
         self.loaded_sha = ""
+        #: Labels of the saved revision (``export_current``), kept with the role cache; reset by every load.
+        self.saved_annotations: list[dict[str, Any]] | None = None
         #: Occurrences refreshed from their part files since the last commit.
         self.refreshed: set[str] = set()
         #: occurrence container name -> (part sha the roles belong to, roles)
@@ -130,13 +133,41 @@ class DocumentSession:
                 App.closeDocument(known.Name)  # one in-memory copy of a file
         self.doc = App.openDocument(str(self.fcstd))
         self.doc.UndoMode = 1
+        self.loaded_sha = _sha256(self.fcstd)
+        self.saved_annotations = None
+        self._load_role_cache()  # before anything asks for roles: reopening a saved document finds nothing again
         self._ensure_scaffold()
         self.doc.recompute()
-        self.loaded_sha = _sha256(self.fcstd)
         self.refreshed.clear()
         self.occurrence_roles.clear()
         self._invalidate()
         self._after_recompute()
+
+    @property
+    def role_cache_path(self) -> Path:
+        return self.fcstd.with_name(self.fcstd.name + ".roles.json")
+
+    def _load_role_cache(self) -> None:
+        """Seed the created-faces cache from the file saved with this exact revision (see ``roles.export_created_cache``)."""
+        try:
+            data = json.loads(self.role_cache_path.read_text(encoding="utf-8"))
+            if data.get("fcstdSha256") == self.loaded_sha:
+                roles_module.import_created_cache(self.doc, data)
+                self.saved_annotations = data.get("annotations")
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    def _save_role_cache(self) -> None:
+        try:
+            data = roles_module.export_created_cache(self.doc)
+            data["fcstdSha256"] = self.loaded_sha
+            if self.saved_annotations is not None:
+                data["annotations"] = self.saved_annotations
+            temporary = self.role_cache_path.with_name(f".{self.role_cache_path.name}.{os.getpid()}.tmp")
+            temporary.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(temporary, self.role_cache_path)
+        except Exception:
+            pass  # a cache: never worth failing a commit
 
     def reload(self) -> None:
         """Throw away in-memory changes: reopen the last saved state."""
@@ -391,7 +422,8 @@ class DocumentSession:
         """A failed apply already restored the saved revision: say so, so the Agent does not undo a good one."""
         error.rolled_back = True
         error.detail.setdefault("rev", self.rev)
-        notice = f"Rolled back: the document is at revision {self.rev} and nothing was changed. Do NOT call undo (it would remove revision {self.rev})."
+        what = f"it would remove revision {self.rev}" if self.rev else "there is nothing to undo"
+        notice = f"Rolled back: the document is at revision {self.rev} and nothing was changed. Do NOT call undo ({what})."
         error.message = f"{error.message} [{notice}]"
         error.args = (error.message,)
         error.hints = [*error.hints, f"rolled back: the document is at revision {self.rev}; undo is not needed, fix the ops and apply again"]
@@ -446,9 +478,11 @@ class DocumentSession:
             labels.append({"text": feature.split("/")[-1], "at": [round(point.x, 4), round(point.y, 4), round(point.z, 4)]})
         return labels[: summary.MAX_ANNOTATIONS]
 
-    def _export(self, step: Path) -> dict[str, Any]:
+    def _export(self, step: Path, *, reuse: bool = False) -> dict[str, Any]:
         if not export_module.solid_units(self):
             return {"step": None, "declarations": None, "empty": True}
+        if reuse and export_module.step_is_current(self, step):
+            return {"step": str(step), "declarations": str(step.with_name(step.name + ".declarations.json")), "stepReused": True}
         export_module.write_step(self, step)
         declarations = export_module.write_declarations(self, step)
         try:
@@ -476,6 +510,8 @@ class DocumentSession:
         self.rev += 1
         self.refreshed.clear()
         self.loaded_sha = _sha256(self.fcstd)
+        self.saved_annotations = None
+        self._save_role_cache()
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"rev": self.rev, "ops": ops, "message": message, "fcstdSha256": _sha256(self.fcstd)}, ensure_ascii=False) + "\n")
         self._prune_history()
@@ -514,18 +550,26 @@ class DocumentSession:
                   "warnings": [], "highlight": {"paths": []}, "annotations": self._annotations([], []), "rev": self.rev,
                   "fcstd": str(self.fcstd), "fcstdSha256": _sha256(self.fcstd), "undone": True}
         result.update(self._export(self.output))
+        self._save_role_cache()
         result["elapsedMs"] = int((time.monotonic() - started) * 1000)
         return result
 
     # ------------------------------------------------------------ read-only views
     def export_current(self, output: Path | None = None) -> dict[str, Any]:
         changed = sorted(set(self.sync_links()) | self.refreshed)
+        # The labels of a plain saved part depend on nothing but the saved file; finding where to
+        # anchor them is the slowest part of opening a part with many features.
+        plain = not changed and all(unit.kind == "body" for unit in units(self))
+        annotations = self.saved_annotations if plain and self.saved_annotations is not None else self._annotations([], [])
+        if plain:
+            self.saved_annotations = annotations
         result = {
             "features": {"recomputed": changed, "added": [], "removed": []}, "params": {"changed": {}},
             "intent": intent_module.evaluate_all(OpContext(self)), "warnings": [], "highlight": {"paths": []},
-            "annotations": self._annotations([], []), "rev": self.rev, "fcstd": str(self.fcstd), "fcstdSha256": _sha256(self.fcstd),
+            "annotations": annotations, "rev": self.rev, "fcstd": str(self.fcstd), "fcstdSha256": _sha256(self.fcstd),
         }
-        result.update(self._export(output or self.output))
+        result.update(self._export(output or self.output, reuse=True))  # a saved, unchanged part is not exported again
+        self._save_role_cache()  # the roles are known now: the next open of this revision skips them
         return result
 
     def tree(self) -> dict[str, Any]:
