@@ -100,6 +100,8 @@ The coordinate system stays Z up. A Y-up option is a later change. If it is adde
 | Assemblies: part positions only | yes (one `.f3d`) | yes (`.SLDASM` plus part files) |
 | Island inside a loop (nesting depth 2 or more) | yes (even-odd rule) | **no** |
 
+In an assembly, a part can come in through `link` or through `import_step` of a STEP that Reify wrote from a project part. Reify records the source `.FCStd` and its hash in `<step>.source.json` when it writes the STEP. If the part changed since (`stale_step`), or the STEP has no record (`unknown_step_source`, for example a bought-in STEP), the export stops and names the unit. Use `link` for project parts.
+
 When an expression is outside the supported grammar (numbers, parameter names, `+ - * /`, parentheses, `mm`, `deg`), the executor uses the value and writes an entry in `result.json` `warnings`. It never skips a feature.
 
 Everything else stops the export with `TRANSFER_UNSUPPORTED_OP`, and the error names the feature: modeled threads, taper, midplane pockets, pad `up_to_last`/`two_lengths`, variable fillets, non-planar faces, bought-in STEP units in an assembly, joints and mates. Reify never skips a feature silently. The canonicalizer deviations are in [protocol.md](protocol.md) section 8.

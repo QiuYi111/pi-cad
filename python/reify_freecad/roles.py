@@ -167,6 +167,8 @@ def contained_in_base(face: Any, base: Any | None, tol: float) -> bool:
 _CREATED_CACHE: dict[tuple[str, str], tuple[Any, Any, float, list[Any], list[int]]] = {}
 _CREATED_CACHE_LIMIT = 4096
 CREATED_CACHE_SCHEMA = 1
+#: Searches done (cache misses) since the process started; the tests and slow-request diagnosis read it.
+STATS = {"created_searches": 0}
 
 
 def _same_shape(a: Any, b: Any) -> bool:
@@ -188,6 +190,7 @@ def created_faces(feature: Any, tol: float) -> list[Any]:
     hit = _CREATED_CACHE.get(key)
     if hit is not None and _close_tol(hit[2], tol) and _same_shape(hit[0], shape) and _same_shape(hit[1], base_shape):
         return list(hit[3])
+    STATS["created_searches"] += 1
     faces = list(shape.Faces)
     if base_shape is None or base_shape.isNull():
         indices = list(range(len(faces)))
