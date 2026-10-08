@@ -36,7 +36,11 @@ def tolerance(diagonal):
 def matches(ref, cand, tol):
     if ref["curve"] != cand["curve"]:
         return False
-    if _d(ref["midpoint"], cand["midpoint"]) > tol:
+    # A full circle's "midpoint" is wherever its seam is, which differs between kernels: centre, radius and axis
+    # identify it. Lines and arcs are pinned down by their midpoint.
+    full_circle = ref["curve"] == "circle" and ref.get("centre") is not None and cand.get("centre") is not None \
+        and ref.get("radius") is not None and cand.get("radius") is not None
+    if not full_circle and _d(ref["midpoint"], cand["midpoint"]) > tol:
         return False
     if abs(float(ref["length"]) - cand["length"]) > tol:
         return False

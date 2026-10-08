@@ -83,3 +83,13 @@ def dist_point_geometry(p, g):
     if t == "polyline":
         return min(dist_point_segment(p, a, b) for a, b in polyline_segments(g))
     raise ValueError("unknown geometry type %r" % t)
+
+
+def orthonormal_frame(x, y):
+    """Unit x axis and a y axis made orthogonal to it (Gram-Schmidt) from two rounded axis vectors."""
+    nx = math.sqrt(sum(c * c for c in x)) or 1.0
+    x = [c / nx for c in x]
+    d = sum(a * b for a, b in zip(x, y))
+    y = [b - d * a for a, b in zip(x, y)]
+    ny = math.sqrt(sum(c * c for c in y)) or 1.0
+    return x, [c / ny for c in y]

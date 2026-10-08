@@ -72,9 +72,32 @@ function unitDot(a: readonly number[], b: readonly number[]): number {
   return a.reduce((sum, value, index) => sum + value * (b[index] ?? 0), 0) / (na * nb);
 }
 
-function compatible(a: FaceFingerprint, b: FaceFingerprint, diagonal: number): number | null {
+export interface MatchOptions {
+  /**
+   * Cylinders and cones are placed by their axis line and axial centre, not by the centroid. The centroid of a
+   * full cylinder or cone face sits wherever the seam of the kernel that wrote the STEP is, so two kernels
+   * disagree on it for the very same hole.
+   */
+  cylindersByAxis?: boolean;
+}
+
+function axisGap(a: FaceFingerprint, b: FaceFingerprint): number | null {
+  if (!a.ax || !b.ax || !a.ap || !b.ap) return null;
+  const norm = Math.sqrt(a.ax.reduce((sum, value) => sum + value * value, 0));
+  if (norm < 1e-12) return null;
+  const unit = a.ax.map((value) => value / norm);
+  const dot = (u: readonly number[], v: readonly number[]) => u.reduce((sum, value, index) => sum + value * (v[index] ?? 0), 0);
+  const offset = a.ap.map((value, index) => (b.ap![index] ?? 0) - value);
+  const along = dot(offset, unit);
+  const perpendicular = Math.sqrt(offset.reduce((sum, value, index) => sum + (value - along * unit[index]!) ** 2, 0));
+  const centres = a.c.map((value, index) => b.c[index]! - value);
+  return Math.hypot(perpendicular, dot(centres, unit));
+}
+
+function compatible(a: FaceFingerprint, b: FaceFingerprint, diagonal: number, options?: MatchOptions): number | null {
   if (a.type !== b.type) return null;
-  const gap = distance(a.c, b.c);
+  const byAxis = options?.cylindersByAxis && (a.type === "CYLINDER" || a.type === "CONE") ? axisGap(a, b) : null;
+  const gap = byAxis ?? distance(a.c, b.c);
   if (gap > CENTROID_TOLERANCE * diagonal) return null;
   if (Math.abs(a.a - b.a) > AREA_TOLERANCE * Math.max(Math.abs(a.a), Math.abs(b.a), 1e-12)) return null;
   if (a.type === "PLANE" && a.n && b.n) {
@@ -88,10 +111,10 @@ function compatible(a: FaceFingerprint, b: FaceFingerprint, diagonal: number): n
 }
 
 /** Greedy one-to-one matching by ascending centroid distance. */
-export function matchFaces(before: readonly FaceFingerprint[], after: readonly FaceFingerprint[], diagonal: number): FaceMatch {
+export function matchFaces(before: readonly FaceFingerprint[], after: readonly FaceFingerprint[], diagonal: number, options?: MatchOptions): FaceMatch {
   const candidates: Array<[number, number, number]> = [];
   before.forEach((a, i) => after.forEach((b, j) => {
-    const gap = compatible(a, b, diagonal);
+    const gap = compatible(a, b, diagonal, options);
     if (gap !== null) candidates.push([gap, i, j]);
   }));
   candidates.sort((x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2]);

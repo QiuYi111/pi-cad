@@ -141,7 +141,7 @@ class P3Tests(Base):
         self.assertEqual((rnd.label, rnd.input.sets[0][0].count, rnd.input.sets[0][1].value), ("fillet", 2, 0.1))
         self.assertEqual(chamfer.label, "chamfer")
         self.assertEqual(boss.input.extent[0], "to_face")
-        self.assertEqual(boss.input.extent[2].z, 1.0)                       # direction hint
+        self.assertEqual(boss.input.extent[2], "PositiveExtentDirection")  # along the sketch normal
         self.assertEqual([w["field"] for w in res["warnings"]], ["thread"])
         self.assertEqual(app.design.material.name, "Steel")
         self.assertAlmostEqual(app.design.density_prop.value, 7.85e-3)
@@ -153,7 +153,7 @@ class P3Tests(Base):
             orig = fa.ExtrudeInput.setOneSideExtent
 
             def picky(self, edef, direction, taper=None):
-                if getattr(edef.distance, "text", None):
+                if getattr(getattr(edef, "distance", None), "text", None):
                     raise RuntimeError("expression not allowed")
                 return orig(self, edef, direction, taper)
             fa.ExtrudeInput.setOneSideExtent = picky
@@ -258,3 +258,28 @@ class GoldenTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveFusionFindings(Base):
+    """Behaviours measured in a real Fusion 2705 (see executors/fusion/README.md)."""
+
+    def test_flat_drill_point_is_180_degrees(self):
+        f = _path.fixture("holes_p3.features.json")
+        app, res = self.run_job(f)
+        self.assertTrue(res["ok"], res["error"])
+        flat = [x for x in app.features if x.name == "part/flat"][0]
+        self.assertAlmostEqual(flat.input.tipAngle.value, 3.141592653589793)  # 0 is rejected by Fusion
+
+    def test_negative_dimension_expression_is_not_bound(self):
+        f = _path.fixture("param_expressions.features.json")
+        app, res = self.run_job(f)
+        self.assertTrue(res["ok"], res["error"])
+        self.assertIn("s0_c_x", [w["expr"] for w in res["warnings"]])
+
+    def test_orthonormal_frame_repairs_rounded_axes(self):
+        import geom
+        x, y = geom.orthonormal_frame([-0.866025, -0.5, 0.0], [0.5, -0.866025, 0.0])
+        self.assertAlmostEqual(sum(c * c for c in x), 1.0, places=12)
+        self.assertAlmostEqual(sum(c * c for c in y), 1.0, places=12)
+        self.assertAlmostEqual(sum(a * b for a, b in zip(x, y)), 0.0, places=12)
+

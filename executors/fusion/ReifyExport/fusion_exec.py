@@ -187,8 +187,11 @@ class FusionExecutor(object):
     def _matrix(self, tr):
         R, o = tr["rotation"], tr["origin"]
         m = adsk.core.Matrix3D.create()
-        col = lambda j: adsk.core.Vector3D.create(R[0][j], R[1][j], R[2][j])  # columns = images of the part axes
-        m.setWithCoordinateSystem(adsk.core.Point3D.create(_cm(o[0]), _cm(o[1]), _cm(o[2])), col(0), col(1), col(2))
+        # The JSON rotation is rounded to 6 decimals; Fusion rejects a frame that is not orthonormal.
+        x, y = geom.orthonormal_frame([R[0][0], R[1][0], R[2][0]], [R[0][1], R[1][1], R[2][1]])
+        z = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]]  # columns = images of the part axes
+        vec = lambda c: adsk.core.Vector3D.create(c[0], c[1], c[2])
+        m.setWithCoordinateSystem(adsk.core.Point3D.create(_cm(o[0]), _cm(o[1]), _cm(o[2])), vec(x), vec(y), vec(z))
         return m
 
     def _run_steps(self, bc, comp, plan, per_feature_volumes):
@@ -301,7 +304,8 @@ class FusionExecutor(object):
         ents, descs = [], []
         for body in _items(comp.bRepBodies):
             for e in _items(body.edges):
-                curve = _CURVE_OF.get(e.geometry.objectType)
+                g = e.geometry  # None for edges Fusion cannot express as a curve (e.g. some seams)
+                curve = _CURVE_OF.get(g.objectType) if g is not None else None
                 if curve is None:
                     continue
                 ev = e.evaluator
@@ -348,6 +352,13 @@ class FusionExecutor(object):
             entity = _plane_entity(comp, plane, step["name"] + "_plane", bc.log)
         sk = comp.sketches.add(entity)
         _set_name(sk, step["name"], bc.log)
+        # Fusion can auto-project the edges of the face it sketches on (a preference); they would become
+        # extra profiles that match no canonical loop.
+        for c in [c for c in _items(sk.sketchCurves) if getattr(c, "isReference", False)]:
+            try:
+                c.deleteMe()
+            except Exception:  # noqa: BLE001
+                bc.warn(step["feature"], "sketch", None, "could not remove an auto-projected edge from sketch %r" % step["name"])
 
         fr = step["frame"]
         o, u, v, n = fr["origin"], fr["u"], fr["v"], fr["n"]
@@ -454,7 +465,12 @@ class FusionExecutor(object):
                     a = l1.startSketchPoint.geometry
                     dim = dims.addAngularDimension(l1, l2, P(a.x + 0.5, a.y + 0.5, 0))
                 if d.get("fx"):
-                    dim.parameter.expression = d["fx"]
+                    if kind != "angle" and (d.get("value") or 0) < 0:
+                        # Fusion keeps a dimension's magnitude, so a negative expression would flip the geometry.
+                        bc.warn(step["feature"], "sketch.dimensions", d.get("name"),
+                                "dimension %r is negative; its expression is not bound" % d["name"])
+                    else:
+                        dim.parameter.expression = d["fx"]
             except _SkipDimension as e:
                 # Not a failure: Fusion chose sketch axes that are rotated against ours (typical on tilted faces).
                 bc.warn(step["feature"], "sketch.dimensions", d.get("name"),
@@ -521,9 +537,8 @@ class FusionExecutor(object):
             inp.setAllExtent(d.SymmetricExtentDirection if step["midplane"] else direction)
         elif ext["type"] == "to_face":
             face = self._find_face(comp, ext["face_ref"], step["name"])
-            w = step["direction"]
-            # UNVERIFIED signature: setOneSideToExtent(toEntity, matchShape, offsetDistance, directionHint)
-            inp.setOneSideToExtent(face, False, directionHint=adsk.core.Vector3D.create(w[0], w[1], w[2]))
+            # ExtrudeFeatureInput has no setOneSideToExtent (only holes and revolves do): use the extent definition.
+            inp.setOneSideExtent(adsk.fusion.ToEntityExtentDefinition.create(face, False), direction)
         else:
             # Level 1 uses the evaluated value; level 2 (use_fx) binds the Reify expression through
             # user parameters. createByReal is in cm (locale independent).
@@ -560,17 +575,20 @@ class FusionExecutor(object):
                 coll.add(p)
             inp.setPositionBySketchPoints(coll)
             ext = step["extent"]
-            direction = self._direction(step, ctx)
+            # Verified in Fusion 2705: a hole's default direction is opposite to the sketch normal,
+            # and PositiveExtentDirection means that default direction (not the normal's).
+            against_normal = (step["direction_sign"] * ctx["flip"]) < 0
             if ext["type"] == "all":
-                inp.setAllExtent(direction)
+                d = adsk.fusion.ExtentDirections
+                inp.setAllExtent(d.PositiveExtentDirection if against_normal else d.NegativeExtentDirection)
             else:
                 inp.setDistanceExtent(self._len(ext["distance_mm"], ext.get("fx"), use_fx))
-                # UNVERIFIED: the default hole direction is opposite to the sketch normal.
-                inp.isDefaultDirection = (step["direction_sign"] * ctx["flip"]) < 0
+                inp.isDefaultDirection = against_normal
             dp = step.get("drill_point")
             if dp:
-                # UNVERIFIED: flat bottom == tipAngle 0; angled == tipAngle (default 118 deg).
-                inp.tipAngle = adsk.core.ValueInput.createByReal(math.radians(dp["angle_deg"] or 0.0))
+                # Verified in Fusion 2705: a flat bottom is tipAngle 180 deg (0 is rejected); angled is the cone angle.
+                tip = 180.0 if dp["type"] == "flat" else dp["angle_deg"]
+                inp.tipAngle = adsk.core.ValueInput.createByReal(math.radians(tip))
             feat = holes.add(inp)
         except Exception as e:  # noqa: BLE001
             raise ExecError("hole failed: %s" % e, feature=step["name"], step="hole")

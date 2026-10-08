@@ -138,6 +138,7 @@ class _Curves(object):
         self.sketchLines = types.SimpleNamespace(addByTwoPoints=sk._line)
         self.sketchCircles = types.SimpleNamespace(addByCenterRadius=sk._circle)
         self.sketchArcs = types.SimpleNamespace(addByThreePoints=sk._arc)
+        self.count = 0  # no auto-projected (reference) curves in the fake
 
 
 class SkPoint(object):
@@ -352,6 +353,10 @@ class ExtrudeInput(object):
         self.extent = None
 
     def setOneSideExtent(self, edef, direction, taper=None):
+        if hasattr(edef, "entity"):  # ToEntityExtentDefinition (the real ExtrudeFeatureInput has no setOneSideToExtent)
+            assert isinstance(edef.entity, Face)
+            self.extent = ("to_face", edef.entity, direction)
+            return
         self.extent = ("one_side", _val(edef.distance), direction)
 
     def setSymmetricExtent(self, vi, full):
@@ -359,10 +364,6 @@ class ExtrudeInput(object):
 
     def setAllExtent(self, direction):
         self.extent = ("all", None, direction)
-
-    def setOneSideToExtent(self, entity, match, offsetDistance=None, directionHint=None):
-        assert isinstance(entity, Face)
-        self.extent = ("to_face", entity, directionHint)
 
 
 class _Feature(Named):
@@ -704,6 +705,7 @@ def install(**kw):
     fus.DimensionOrientations = _Enum("AlignedDimensionOrientation", "HorizontalDimensionOrientation", "VerticalDimensionOrientation")
     fus.FeatureOperations = _Enum("NewBodyFeatureOperation", "JoinFeatureOperation", "CutFeatureOperation")
     fus.ExtentDirections = _Enum("PositiveExtentDirection", "NegativeExtentDirection", "SymmetricExtentDirection")
+    fus.ToEntityExtentDefinition = types.SimpleNamespace(create=lambda entity, chained, offset=None: types.SimpleNamespace(entity=entity))
     fus.DistanceExtentDefinition = types.SimpleNamespace(create=lambda vi: types.SimpleNamespace(distance=vi))
     pkg = types.ModuleType("adsk")
     pkg.core, pkg.fusion = core, fus

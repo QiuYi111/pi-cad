@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+import traceback
 
 import jobroot
 import plan as planmod
@@ -190,6 +191,8 @@ def process_job(fdir, job_id, executor, info, busy=False):
         log("done ok")
     except Exception as e:  # noqa: BLE001 - every failure must become a result.json
         err = error_from_exception(e, progress["feature"])
+        if not isinstance(e, (planmod.PlanError, JobError, ExecError)):
+            log("unexpected %s" % traceback.format_exc())
         log("FAILED %s" % json.dumps(err))
         result = build_result(job_id, False, info, error=err)
     finally:

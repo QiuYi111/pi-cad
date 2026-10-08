@@ -60,7 +60,7 @@ class FakeExecTests(unittest.TestCase):
         self.assertEqual(base.input.extent[0:2], ("one_side", 0.5))  # 5 mm -> 0.5 cm
         self.assertEqual(base.input.extent[2], "PositiveExtentDirection")
         self.assertEqual(holes.input.kind, "simple")
-        self.assertEqual(holes.input.extent, ("all", "NegativeExtentDirection"))
+        self.assertEqual(holes.input.extent, ("all", "PositiveExtentDirection"))  # Fusion: positive = against the sketch normal
         self.assertAlmostEqual(holes.input.args[0].value, 0.3)  # 3 mm
         self.assertEqual(len(holes.input.positions), 1)
         self.assertEqual(ring.input.quantity.value, 2)

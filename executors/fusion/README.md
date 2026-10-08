@@ -100,6 +100,24 @@ UNVERIFIED - check on a real install (each becomes a PR risk):
 25. Assemblies: `rootComponent.occurrences.addNewComponent(Matrix3D)` and `Matrix3D.setWithCoordinateSystem(origin, x, y, z)`; whether `sketch.modelToSketchSpace` inside an occurrence's component uses component-local space (assumed) or assembly space; whether features of different components stay independent in one parametric design; the single `.f3d` and the root STEP export contain all occurrences at their transforms.
 26. A pattern of a hole feature in a component, and a mirror of a pattern feature, recompute without error.
 
+## Verified in a live Fusion (2705.1.25)
+
+Items 5, 7, 9, 14, 15, 16, 20, 21, 22 (sketch on a tilted face), 23 and 25 held. These did not, and the code now follows what Fusion does:
+
+- Hole direction: a hole's default direction is opposite to the sketch normal, and `PositiveExtentDirection` means that default direction. `isDefaultDirection` follows the same rule (item 18).
+- Flat drill point: `tipAngle` 180 deg. 0 is rejected (item 18).
+- `ExtrudeFeatureInput` has no `setOneSideToExtent`. Pad up to a face uses `setOneSideExtent(ToEntityExtentDefinition.create(face, False), direction)` (item 22).
+- A sketch created on a face can come with auto-projected reference curves. They are deleted, otherwise they become extra profiles.
+- `BRepEdge.geometry` can be `None`. Such edges are skipped when matching edge references.
+- A negative dimension expression flips the sketch geometry, so it is not bound.
+- A rotation rounded to 6 decimals is rejected by `addNewComponent`; the frame is orthonormalized first.
+- The midpoint of a full circle is where the kernel's seam is, so circle edge references match on centre, radius and axis.
+- The equivalence check places cylinders and cones by axis, not by centroid, for the same reason.
+
+Still UNVERIFIED: items 1 to 4, 6, 8, 10 to 13, 17, 19, 24, 26.
+
+How it was run: the "Fusion MCP Addin" `execute_api_script` tool, loading the add-in sources from a copy and calling `jobs.process_job` per fixture. That reproduces a job without restarting the add-in.
+
 ## Tests
 
 `python3 -m unittest discover -s tests/fusion_addin -v` (plain `unittest`, no Fusion).

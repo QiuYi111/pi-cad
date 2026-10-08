@@ -73,7 +73,7 @@ export function compareEquivalence(
   const referenceFaces = reference.faceFingerprints ?? [];
   const executorFaces = executor.faceFingerprints ?? [];
   const diagonal = Math.max(Math.hypot(...(referenceBox ?? [0, 0, 0])), Math.hypot(...(executorBox ?? [0, 0, 0])), 1e-9);
-  const match = matchFaces(referenceFaces, executorFaces, diagonal);
+  const match = matchFaces(referenceFaces, executorFaces, diagonal, { cylindersByAxis: true });
   const facesOk = referenceFaces.length > 0 && match.unmatchedBefore.length === 0 && match.unmatchedAfter.length === 0;
   if (!facesOk) {
     failures.push(referenceFaces.length === 0 || executorFaces.length === 0

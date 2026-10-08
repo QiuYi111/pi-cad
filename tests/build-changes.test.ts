@@ -132,3 +132,23 @@ test("changed faces are named from the identity manifest", () => {
   assert.deepEqual(labels, [{ text: "mount_hole", at: [10, 0, 0] }]);
   assert.deepEqual(annotationsForChangedFaces(null, changedFaces(before, after)), []);
 });
+
+test("transfer check places a cylinder by its axis, because kernels put the centroid of a full cylinder at different seams", () => {
+  // FreeCAD reports the hole centroid on the -X side, Fusion on the +X side, 4 mm apart; the hole is the same.
+  const freecad: FaceFingerprint = { type: "CYLINDER", c: [-17, -10, 2.5], a: 62.8319, ax: [0, 0, -1], ap: [-15, -10, 5], r: 2 };
+  const fusion: FaceFingerprint = { type: "CYLINDER", c: [-13, -10, 2.5], a: 62.8319, ax: [0, 0, -1], ap: [-15, -10, 2.25], r: 2 };
+  assert.equal(matchFaces([freecad], [fusion], 50).pairs.length, 0, "the build-change rule stays centroid based");
+  assert.deepEqual(matchFaces([freecad], [fusion], 50, { cylindersByAxis: true }).pairs, [[0, 0]]);
+  // A cylinder on another axis, or at another height, is still a different face.
+  const moved = { ...fusion, ap: [-14, -10, 2.25] };
+  assert.equal(matchFaces([freecad], [moved], 50, { cylindersByAxis: true }).pairs.length, 0);
+  const lower = { ...fusion, c: [-13, -10, 1.5] };
+  assert.equal(matchFaces([freecad], [lower], 50, { cylindersByAxis: true }).pairs.length, 0);
+});
+
+test("transfer check places a cone by its axis as well", () => {
+  const freecad: FaceFingerprint = { type: "CONE", c: [-5.25, 0, 4.75], a: 23.3251, ax: [0, 0, 1], ap: [0, 0, 4.5] };
+  const fusion: FaceFingerprint = { type: "CONE", c: [5.25, 0, 4.75], a: 23.3251, ax: [0, 0, 1], ap: [0, 0, 4.75] };
+  assert.equal(matchFaces([freecad], [fusion], 50).pairs.length, 0);
+  assert.deepEqual(matchFaces([freecad], [fusion], 50, { cylindersByAxis: true }).pairs, [[0, 0]]);
+});

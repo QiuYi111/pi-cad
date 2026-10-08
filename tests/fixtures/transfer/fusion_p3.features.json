@@ -420,17 +420,17 @@
             {
               "curve": "circle",
               "midpoint": [
-                13,
+                15,
                 0,
                 5
               ],
-              "length": 18.85,
+              "length": 31.42,
               "centre": [
                 10,
                 0,
                 5
               ],
-              "radius": 3.0,
+              "radius": 5.0,
               "axis": [
                 0,
                 0,
