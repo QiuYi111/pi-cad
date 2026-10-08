@@ -59,9 +59,11 @@ class TransferFeatures:
     path: str
     data: dict[str, Any] = field(default_factory=dict, compare=False)
     kind: str = field(default="part", compare=False)  # "part" or "assembly"
+    notes: tuple[str, ...] = field(default=(), compare=False)
 
     def __repr__(self) -> str:
-        return f"TransferFeatures(part={self.part!r}, features={self.features}, path={self.path!r})"
+        notes = f", notes={list(self.notes)!r}" if self.notes else ""
+        return f"TransferFeatures(part={self.part!r}, features={self.features}, path={self.path!r}{notes})"
 
 
 @dataclass(frozen=True, repr=False)
@@ -75,9 +77,12 @@ class TransferResult:
     features: int
     log: str | None = None
     detail: dict[str, Any] | None = None
+    #: Things to tell the user, for example that an assembly's joints were not exported.
+    notes: tuple[str, ...] = ()
 
     def __repr__(self) -> str:
-        return f"TransferResult(target={self.target!r}, file={self.file!r}, check={self.check!r}, features={self.features})"
+        notes = f", notes={list(self.notes)!r}" if self.notes else ""
+        return f"TransferResult(target={self.target!r}, file={self.file!r}, check={self.check!r}, features={self.features}{notes})"
 
 
 @dataclass(frozen=True, repr=False)
@@ -109,6 +114,7 @@ def _result_from_wire(payload: dict[str, Any]) -> TransferResult:
         features=int(payload["features"]),
         log=payload.get("log"),
         detail=payload.get("detail"),
+        notes=tuple(payload.get("notes") or ()),
     )
 
 
@@ -122,7 +128,8 @@ async def features(doc: str | Path | PartDocument) -> TransferFeatures:
     """Dry run: build the canonical feature JSON. Raises ``TRANSFER_UNSUPPORTED_OP`` for an op the targets cannot build."""
     response = await request("transfer-features", doc=_doc_path(doc))
     data = response.get("data") or {}
-    return TransferFeatures(response["part"], int(response["features"]), response["path"], data, response.get("kind", "part"))
+    return TransferFeatures(response["part"], int(response["features"]), response["path"], data, response.get("kind", "part"),
+                            tuple(response.get("notes") or ()))
 
 
 async def export(
@@ -157,7 +164,7 @@ snapshot.register(
     "cad.transfer",
     lambda value: {
         "target": value.target, "file": value.file, "checkStep": value.check_step, "check": value.check,
-        "features": value.features, "log": value.log, "detail": value.detail,
+        "features": value.features, "log": value.log, "detail": value.detail, "notes": list(value.notes),
     },
     _result_from_wire,
 )

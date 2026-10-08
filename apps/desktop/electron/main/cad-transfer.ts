@@ -607,7 +607,9 @@ export class CadTransferService {
       const log = typeof response.log === "string" ? response.log : undefined;
       const nativeFolder = await io.toHostPath(posix.dirname(file)).catch(() => undefined);
       const logPath = log ? await io.toHostPath(log).catch(() => log) : undefined;
-      job = base("done", response.check === "passed" ? "Export done. The shape check passed." : "Export done.", {
+      const notes = Array.isArray(response.notes) ? response.notes.filter((note): note is string => typeof note === "string") : [];
+      const outcome = response.check === "passed" ? "Export done. The shape check passed." : "Export done.";
+      job = base("done", notes.length ? `${outcome} Joints were not exported; the parts keep the pose they had.` : outcome, {
         native: file, ...(nativeFolder ? { nativeFolder } : {}), ...(logPath ? { logPath } : {}), error: null,
       });
     } catch (error) {

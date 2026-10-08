@@ -195,6 +195,32 @@ test("an assembly document is exported as an assembly job with the default .SLDA
   );
 });
 
+const arm = [{ path: "arm/j1", type: "revolute", value: 30 }];
+
+test("an assembly with joints says that the joints were not exported", async () => {
+  await dispatcher({ fusion: "ready", solidworks: "ready" });
+  transferHooks.canonicalize = async () => ({ ...canonical, kind: "assembly", joints: arm, features: { schema: "reify.assembly/1", reference: { feature_volumes: [{ name: "plate/base", volume_mm3: 6000 }] } } });
+  answer = async (request) => {
+    await mkdir(join(cwd, "exports"), { recursive: true });
+    await writeFile(join(cwd, request.native), "f3d");
+    await writeFile(join(cwd, request.checkStep), "step");
+    return { ok: true, files: { native: request.native, check_step: request.checkStep }, features_built: 7, feature_volumes: [{ name: "plate/base", volume_mm3: 6000 }] };
+  };
+  const exported = await handleTransferOperation(cwd, { schema: 1, op: "transfer-export", doc: "assembly/arm.FCStd", target: "fusion" } as never) as any;
+  assert.equal(exported.notes.length, 1);
+  assert.match(exported.notes[0], /arm\/j1 \(revolute at 30\)/);
+  assert.match(exported.notes[0], /not exported/);
+  const dry = await handleTransferOperation(cwd, { schema: 1, op: "transfer-features", doc: "assembly/arm.FCStd" }) as any;
+  assert.equal(dry.notes.length, 1);
+  assert.deepEqual(dry.joints, arm);
+});
+
+test("a part or an assembly without joints has no notes", async () => {
+  transferHooks.canonicalize = async () => ({ ...canonical, kind: "assembly", joints: [] });
+  const dry = await handleTransferOperation(cwd, { schema: 1, op: "transfer-features", doc: "assembly/arm.FCStd" }) as any;
+  assert.equal("notes" in dry, false);
+});
+
 test("the dry run reports the kind of the document", async () => {
   transferHooks.canonicalize = async () => ({ ...canonical, kind: "assembly" });
   const result = await handleTransferOperation(cwd, { schema: 1, op: "transfer-features", doc: "parts/plate.FCStd" }) as any;

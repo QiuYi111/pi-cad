@@ -56,6 +56,20 @@ class CadTransferTests(unittest.TestCase):
         asyncio.run(cad.transfer.features(handle))
         request.assert_awaited_with("transfer-features", doc="parts/axle.FCStd")
 
+    def test_joint_notes_reach_the_agent_in_features_and_in_the_result(self) -> None:
+        note = "The exported assembly keeps the pose the joints solved to (arm/j1 (revolute at 30))."
+        self._patch_request({"part": "arm", "features": 2, "path": "build/transfer/arm.assembly.json", "kind": "assembly", "notes": [note]})
+        dry = asyncio.run(cad.transfer.features("assembly/arm.FCStd"))
+        self.assertEqual(dry.notes, (note,))
+        self.assertIn("notes=", repr(dry))
+        wire = {"target": "fusion", "file": "exports/arm.f3d", "checkStep": "build/transfer/x/check.step", "check": "passed", "features": 4, "notes": [note]}
+        result = self.transfer_module._result_from_wire(wire)
+        self.assertEqual(result.notes, (note,))
+        self.assertIn(note, repr(result))
+        plain = self.transfer_module._result_from_wire({**wire, "notes": None})
+        self.assertEqual(plain.notes, ())
+        self.assertNotIn("notes", repr(plain))
+
     def test_features_rejects_other_documents_and_paths_outside_the_project(self) -> None:
         self._patch_request({})
         with self.assertRaises(cad.CadApiError) as raised:

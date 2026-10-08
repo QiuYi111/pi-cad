@@ -72,6 +72,8 @@ class TransferAssemblyTests(unittest.TestCase):
         self.assertAlmostEqual(link["origin"][2], 6.0, places=6)
         self.assertAlmostEqual(abs(link["rotation"][0][0]), math.cos(math.radians(30)), places=6)
         self.assertAlmostEqual(abs(link["rotation"][0][1]), math.sin(math.radians(30)), places=6)
+        # the joint itself is not exported, but the worker reports it so the user can be told
+        self.assertEqual(result["joints"], [{"path": "arm/j1", "type": "revolute", "value": 30.0}])
         ref = data["reference"]
         self.assertEqual([v["name"] for v in ref["feature_volumes"]], ["arm/base", "arm/link"])
         self.assertAlmostEqual(ref["feature_volumes"][0]["volume_mm3"], 50 * 50 * 6 - 3.141592653589793 * 16 * 6, places=3)

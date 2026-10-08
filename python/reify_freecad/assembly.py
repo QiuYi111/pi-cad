@@ -421,6 +421,15 @@ def _same_placement(a: Any, b: Any) -> bool:
     return (a.Base - b.Base).Length < 1e-9 and a.Rotation.isSame(b.Rotation, 1e-12)
 
 
+def joint_summary(session: Any) -> list[dict[str, Any]]:
+    """Every joint with its current value. The transfer exports the pose these joints solved to, not the joints."""
+    out = []
+    for item in joint_objects(session):
+        value = round(float(item.Value.Value), 6) if "Value" in item.PropertiesList else None
+        out.append({"path": get_path(item), "type": item.JointType, "value": value})
+    return out
+
+
 def joint_status(session: Any) -> list[dict[str, Any]]:
     """Joint values and limit results; a value outside its limits is a failed requirement."""
     out = []

@@ -104,7 +104,7 @@ In an assembly, a part can come in through `link` or through `import_step` of a 
 
 When an expression is outside the supported grammar (numbers, parameter names, `+ - * /`, parentheses, `mm`, `deg`), the executor uses the value and writes an entry in `result.json` `warnings`. It never skips a feature.
 
-Everything else stops the export with `TRANSFER_UNSUPPORTED_OP`, and the error names the feature: modeled threads, taper, midplane pockets, pad `up_to_last`/`two_lengths`, variable fillets, non-planar faces, bought-in STEP units in an assembly, joints and mates. Reify never skips a feature silently. The canonicalizer deviations are in [protocol.md](protocol.md) section 8.
+Everything else stops the export with `TRANSFER_UNSUPPORTED_OP`, and the error names the feature: modeled threads, taper, midplane pockets, pad `up_to_last`/`two_lengths`, variable fillets, non-planar faces, bought-in STEP units in an assembly. Joints and mates are not exported: an assembly goes out with the pose its joints solved to (the parts are placed, not jointed), and the result carries a `notes` entry that says so. Reify never skips a feature silently. The canonicalizer deviations are in [protocol.md](protocol.md) section 8.
 
 ## Known limits
 

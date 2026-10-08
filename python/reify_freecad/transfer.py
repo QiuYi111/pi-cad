@@ -736,7 +736,10 @@ def canonicalize_assembly(session: Any) -> dict[str, Any]:
 
 def export_assembly(session: Any, output: str | None = None, reference_step: str | None = None) -> dict[str, Any]:
     data = canonicalize_assembly(session)
-    result: dict[str, Any] = {"assembly": data, "partCount": len(data["parts"]), "occurrenceCount": len(data["occurrences"]), "part": data["name"]}
+    from .assembly import joint_summary
+
+    result: dict[str, Any] = {"assembly": data, "partCount": len(data["parts"]), "occurrenceCount": len(data["occurrences"]), "part": data["name"],
+                              "joints": joint_summary(session)}
     if output:
         result["path"] = _write_json(data, output)
     if reference_step:

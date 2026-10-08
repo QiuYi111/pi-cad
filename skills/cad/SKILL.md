@@ -178,8 +178,13 @@ result = await job.result()    # TransferResult(..., check='passed', ...)
   sketch dimensions, Reify parameters, density, sketches on planar faces, and
   assemblies (part positions only; a bought-in STEP is not supported). Not
   supported: modeled threads, taper, midplane pockets, variable fillets,
-  non-planar faces, joints and mates. Tell the user which feature blocks the
+  non-planar faces. Tell the user which feature blocks the
   export. Do not change the model only to make an export pass.
+- Joints and mates are not exported. An assembly with joints still exports, at
+  the pose the joints solved to, and the parts are placed, not jointed. The
+  `notes` of the `features` and `export` results say so when the assembly has
+  joints. Always tell the user, and that they must add joints in the CAD
+  program to move the parts. Never say the joints were kept.
 - `features` on an assembly document returns `kind='assembly'`. A SolidWorks
   assembly export ends in `.SLDASM`; leave `output` out and the tool picks the name.
 - `status()` shows if a target is ready. `export` reads the committed document and

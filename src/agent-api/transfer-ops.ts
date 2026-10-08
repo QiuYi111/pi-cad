@@ -58,11 +58,12 @@ export const transferHooks = {
       const failure = error as PartOpError;
       if (failure?.code !== "TRANSFER_UNSUPPORTED_OP" || failure.detail?.op !== "assembly") throw error;
       const assembly = await partRequest(cwd, paths, { op: "export_assembly", args }) as {
-        assembly: WorkerFeatures["features"]; occurrenceCount: number; part?: string; referenceStep?: string;
+        assembly: WorkerFeatures["features"]; occurrenceCount: number; part?: string; referenceStep?: string; joints?: JointSummary[];
       };
       return {
         kind: "assembly", features: assembly.assembly, featureCount: assembly.occurrenceCount,
         part: assembly.part ?? basename(paths.docRel, extname(paths.docRel)), referenceStep: assembly.referenceStep,
+        joints: assembly.joints ?? [],
       };
     }
   },
@@ -151,6 +152,17 @@ interface WorkerFeatures {
   featureCount: number;
   part: string;
   referenceStep?: string;
+  /** Assembly joints. The export carries the pose they solved to, not the joints. */
+  joints?: JointSummary[];
+}
+
+export interface JointSummary { path: string; type: string; value: number | null }
+
+/** What the user must hear when an assembly with joints goes to a CAD program. */
+export function jointNotes(joints: readonly JointSummary[] | undefined): string[] {
+  if (!joints?.length) return [];
+  const list = joints.map((joint) => `${joint.path} (${joint.type}${joint.value === null ? "" : ` at ${joint.value}`})`).join(", ");
+  return [`The exported assembly keeps the pose the joints solved to (${list}). The joints and their limits are not exported: the parts are placed, not jointed. Say so to the user; they must add joints in the CAD program if they want to move the parts.`];
 }
 
 function documentPaths(cwd: string, doc: string) {
@@ -175,6 +187,7 @@ async function featuresOperation(cwd: string, request: Extract<TransferRequest, 
   const text = JSON.stringify(result.features);
   return jsonValue({
     kind, part: result.part, features: result.featureCount, path: pathRel,
+    ...(jointNotes(result.joints).length ? { notes: jointNotes(result.joints), joints: result.joints } : {}),
     ...(Buffer.byteLength(text) <= INLINE_FEATURES_BYTES ? { data: result.features } : {}),
   } as never);
 }
@@ -300,9 +313,11 @@ async function exportOperation(cwd: string, request: Extract<TransferRequest, { 
   }
   const logRel = result.files?.log ?? null;
   const features = result.features_built ?? canonical.featureCount;
+  const notes = jointNotes(canonical.joints);
+  const notesField = notes.length ? { notes } : {};
 
   if (!check) {
-    return jsonValue({ target, file: nativeRel, checkStep: result.files?.check_step ?? null, check: "skipped", features, log: logRel, detail: null } as never);
+    return jsonValue({ target, file: nativeRel, checkStep: result.files?.check_step ?? null, check: "skipped", features, log: logRel, detail: null, ...notesField } as never);
   }
 
   const executorStepRel = result.files?.check_step ?? checkStepRel;
@@ -333,7 +348,7 @@ async function exportOperation(cwd: string, request: Extract<TransferRequest, { 
       },
     );
   }
-  return jsonValue({ target, file: nativeRel, checkStep: executorStepRel, check: "passed", features, log: logRel, detail: null } as never);
+  return jsonValue({ target, file: nativeRel, checkStep: executorStepRel, check: "passed", features, log: logRel, detail: null, ...notesField } as never);
 }
 
 export async function handleTransferOperation(cwd: string, request: TransferRequest): Promise<JsonValue> {
