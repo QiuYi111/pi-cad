@@ -114,6 +114,17 @@ Everything else stops the export with `TRANSFER_UNSUPPORTED_OP`, and the error n
 - SolidWorks runs only on the customer's licensed copy.
 - The C# executor needs a code signature, or Windows SmartScreen warns the user. The signing step is a hook in `apps/desktop/scripts/package-windows.mjs`. It does nothing until the signing variables are set.
 
+## Manual checks before the issue closes
+
+Record each result in the PR.
+
+1. Export `body_shell`, `axle`, `roller_screw` and the reference plate to Fusion (and to SolidWorks), once from the UI and once from the agent. The equivalence check must pass.
+2. The feature tree shows named features in the same order as Reify.
+3. Change one dimension in Fusion or SolidWorks. The model must rebuild.
+4. **WSL:** run one export from a project in WSL (`/mnt/c/Users/...` paths). The job folder crosses the Windows/WSL boundary, so check that the native file and the verification STEP come back into the project.
+5. An assembly of project parts: export once with `link` and once with `import_step` of the part STEPs (the second must work only while the STEPs are current).
+6. Record the Fusion and SolidWorks versions that were tested, and whether Fusion left anything in the cloud project.
+
 ## Phases
 
 P0 and P1 (parts, through holes, polar patterns) and P2/P3 (the table above) are written. Nothing in the executors has run against a real Fusion or SolidWorks. Treat P2 and P3 as unverified until the manual checks in the issue pass.

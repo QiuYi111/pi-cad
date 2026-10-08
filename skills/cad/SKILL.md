@@ -118,6 +118,10 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
 - `try_` shows an edit and discards it. `check` and `sweep` read the in-memory
   model (clearance, interference, wall thickness, mass, pose sweeps) without
   exporting a STEP.
+- In an assembly, use `link` for every part made in this project. Use `import_step`
+  only for bought-in or outside STEP files. A STEP that Reify built from a project
+  part has no semantic face names in the assembly, and `cad.transfer` can use it
+  only if it is current (the part document did not change since the STEP).
 - One part, one document. One assembly, one document. A part is
   `parts/<name>.FCStd` with one owner; the assembly is
   `assembly/<name>.FCStd` and links the parts with `link`, adds bought-in STEP
