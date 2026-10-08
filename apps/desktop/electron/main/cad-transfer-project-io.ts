@@ -1,5 +1,5 @@
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import type { RuntimeBridge } from "./runtime-bridge.js";
 import type { ProjectIO } from "./cad-transfer-paths.js";
 
@@ -26,6 +26,9 @@ export class NativeProjectIO implements ProjectIO {
   async toHostPath(relative: string) { return this.abs(relative); }
 }
 
+/** wsl.exe re-parses its arguments, so `sh -c '...$1...' name arg` loses `$1`: quote values into the script instead. */
+const q = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
 type BridgeSlice = Pick<RuntimeBridge, "exec" | "pipe" | "toRuntimePath" | "kind">;
 
 /**
@@ -39,18 +42,18 @@ export class BridgeProjectIO implements ProjectIO {
   private abs(relative: string) { return `${this.root.replace(/\/+$/, "")}/${relative}`; }
   async readText(relative: string) {
     try {
-      const { stdout } = await this.bridge.exec(["sh", "-c", 'if [ -f "$1" ]; then cat -- "$1"; else exit 3; fi', "reify", this.abs(relative)]);
+      const { stdout } = await this.bridge.exec(["sh", "-c", `if [ -f ${q(this.abs(relative))} ]; then cat -- ${q(this.abs(relative))}; else exit 3; fi`]);
       return stdout;
     } catch { return null; }
   }
   async writeTextAtomic(relative: string, text: string) {
     await this.bridge.pipe(
-      ["sh", "-c", 'mkdir -p -- "$(dirname -- "$1")" && cat > "$1.tmp" && mv -f -- "$1.tmp" "$1"', "reify", this.abs(relative)], text,
+      ["sh", "-c", `mkdir -p -- ${q(posix.dirname(this.abs(relative)))} && cat > ${q(`${this.abs(relative)}.tmp`)} && mv -f -- ${q(`${this.abs(relative)}.tmp`)} ${q(this.abs(relative))}`], text,
     );
   }
   async readdir(relative: string) {
     try {
-      const { stdout } = await this.bridge.exec(["sh", "-c", 'ls -1A -- "$1" 2>/dev/null || true', "reify", this.abs(relative)]);
+      const { stdout } = await this.bridge.exec(["sh", "-c", `ls -1A -- ${q(this.abs(relative))} 2>/dev/null || true`]);
       return stdout.split("\n").map((line) => line.replace(/\r$/, "")).filter(Boolean);
     } catch { return []; }
   }
@@ -61,7 +64,7 @@ export class BridgeProjectIO implements ProjectIO {
   async copyIn(hostFile: string, relative: string) {
     const source = await this.bridge.toRuntimePath(hostFile);
     await this.bridge.exec(
-      ["sh", "-c", 'mkdir -p -- "$(dirname -- "$2")" && cp -f -- "$1" "$2.tmp" && mv -f -- "$2.tmp" "$2"', "reify", source, this.abs(relative)],
+      ["sh", "-c", `mkdir -p -- ${q(posix.dirname(this.abs(relative)))} && cp -f -- ${q(source)} ${q(`${this.abs(relative)}.tmp`)} && mv -f -- ${q(`${this.abs(relative)}.tmp`)} ${q(this.abs(relative))}`],
       { timeout: 120_000 },
     );
   }

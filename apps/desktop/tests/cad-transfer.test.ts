@@ -533,11 +533,17 @@ describe("WSL project", () => {
     const io = new BridgeProjectIO(bridge, "/home/me/proj");
     await io.copyIn("C:\\Users\\me\\AppData\\Local\\Reify\\transfer\\fusion\\outbox\\j\\part.f3d", "exports/plate.f3d");
     const copy = calls.at(-1)!;
-    expect(copy.slice(-2)).toEqual(["/mnt/c/Users/me/AppData/Local/Reify/transfer/fusion/outbox/j/part.f3d", "/home/me/proj/exports/plate.f3d"]);
+    // wsl.exe re-parses argv, so the paths are quoted into the script, never passed as $1/$2.
+    expect(copy.slice(0, 2)).toEqual(["sh", "-c"]);
+    expect(copy[2]).toContain("cp -f -- '/mnt/c/Users/me/AppData/Local/Reify/transfer/fusion/outbox/j/part.f3d' '/home/me/proj/exports/plate.f3d.tmp'");
+    expect(copy[2]).not.toContain("$1");
     expect(await io.toHostPath("exports")).toBe("\\\\wsl.localhost\\Ubuntu\\home\\me\\proj\\exports");
     expect(calls.at(-1)).toEqual(["wslpath", "-w", "/home/me/proj/exports"]);
     await io.writeTextAtomic(".pi-cad/transfer/dispatcher.json", "{}");
-    expect(calls.at(-1)!.slice(-2)).toEqual(["/home/me/proj/.pi-cad/transfer/dispatcher.json", "{}"]);
+    const write = calls.at(-1)!;
+    expect(write.at(-1)).toBe("{}");
+    expect(write[2]).toContain("mv -f -- '/home/me/proj/.pi-cad/transfer/dispatcher.json.tmp' '/home/me/proj/.pi-cad/transfer/dispatcher.json'");
+    expect(write[2]).not.toContain("$1");
   });
 
   it("returns null for a missing file and an empty list for a missing folder", async () => {
