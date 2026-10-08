@@ -99,17 +99,94 @@ class TransferAssemblyTests(unittest.TestCase):
         error = self.p.error(ASM, "export_assembly")
         self.assertEqual(error["code"], "TRANSFER_UNSUPPORTED_OP")
         self.assertEqual(error["target"], "arm/post")
-        self.assertEqual((error["detail"]["op"], error["detail"]["option"]), ("import_step", "reference"))
+        self.assertEqual((error["detail"]["op"], error["detail"]["option"]), ("import_step", "unknown_step_source"))
 
-    def test_an_unsupported_feature_in_a_part_stops_the_export(self) -> None:
+    def test_a_part_with_dressups_exports_inside_an_assembly(self) -> None:
         self.p.call("parts/link.FCStd", "apply", ops=[
-            {"op": "mirror", "name": "link/twin", "features": ["link/bearing"], "plane": "YZ"},
+            {"op": "fillet", "name": "link/edge_soft", "edges": {"feature": "link/arm", "role": "top_outer"}, "radius": 0.5},
         ])
         self.p.call(ASM, "apply", ops=self.link_ops())
-        # mirror is supported now: the part exports with it
         data = self.p.call(ASM, "export_assembly")["assembly"]
         link = next(p for p in data["parts"] if p["name"] == "link")
-        self.assertEqual([f["type"] for f in link["features"]["bodies"][0]["features"]], ["pad", "hole", "mirror"])
+        self.assertEqual([f["type"] for f in link["features"]["bodies"][0]["features"]], ["pad", "hole", "fillet"])
+
+    # ------------------------------------------------------------ import_step of a STEP that Reify wrote
+    def post_step(self) -> Path:
+        self.p.open("parts/post.FCStd", "post")
+        self.p.call("parts/post.FCStd", "apply", ops=[
+            {"op": "sketch", "name": "post/profile", "plane": "XY", "shapes": [{"rect": {"center": [0, 0], "size": [10, 10]}}]},
+            {"op": "pad", "name": "post/column", "sketch": "post/profile", "length": 20},
+        ])
+        return self.p.root / "build" / "post.step"
+
+    def test_own_step_imports_become_occurrences_of_their_part(self) -> None:
+        step = self.post_step()
+        sidecar = Path(str(step) + ".source.json")
+        source = json.loads(sidecar.read_text())
+        self.assertEqual((source["schema"], source["fcstd"], source["body"], source["rev"], source["kind"]), ("reify.step-source/1", "parts/post.FCStd", "post", 1, "part"))
+        import hashlib
+
+        self.assertEqual(source["stepSha256"], hashlib.sha256(step.read_bytes()).hexdigest())
+        self.assertEqual(source["fcstdSha256"], hashlib.sha256((self.p.root / "parts" / "post.FCStd").read_bytes()).hexdigest())
+        self.p.call(ASM, "apply", ops=[
+            {"op": "import_step", "name": "arm/post_1", "file": "build/post.step", "position": [30, 15, 0]},
+            {"op": "import_step", "name": "arm/post_2", "file": "build/post.step", "position": [-30, 15, 0], "rotation": {"axis": [0, 0, 1], "angle": 90}},
+        ])
+        data = self.p.call(ASM, "export_assembly")["assembly"]
+        self.assertEqual([p["ref"] for p in data["parts"]], ["parts/post.FCStd"])  # one part for both imports
+        self.assertEqual(data["parts"][0]["features"]["bodies"][0]["features"][0]["name"], "post/column")
+        occ = {o["name"]: o for o in data["occurrences"]}
+        self.assertEqual(sorted(occ), ["arm/post_1", "arm/post_2"])
+        self.assertEqual(occ["arm/post_1"]["transform"]["origin"], [30, 15, 0])
+        self.assertEqual(occ["arm/post_2"]["transform"]["origin"], [-30, 15, 0])
+        self.assertAlmostEqual(occ["arm/post_2"]["transform"]["rotation"][0][1], -1.0, places=6)
+        self.assertEqual([v["volume_mm3"] for v in data["reference"]["feature_volumes"]], [2000.0, 2000.0])
+        self.assertEqual(data["parts"][0]["features"]["reference"]["volume_mm3"], 2000.0)
+
+    def test_links_and_own_step_imports_mix(self) -> None:
+        self.post_step()
+        self.p.call(ASM, "apply", ops=self.link_ops() + [{"op": "import_step", "name": "arm/post_1", "file": "build/post.step", "position": [30, 15, 0]}])
+        data = self.p.call(ASM, "export_assembly")["assembly"]
+        self.assertEqual(sorted(p["ref"] for p in data["parts"]), ["parts/base.FCStd", "parts/link.FCStd", "parts/post.FCStd"])
+        self.assertEqual(len(data["occurrences"]), 3)
+
+    def test_a_step_of_a_changed_part_is_stale(self) -> None:
+        step = self.post_step()
+        sidecar = Path(str(step) + ".source.json")
+        old_step, old_sidecar = step.read_bytes(), sidecar.read_text()
+        self.p.call(ASM, "apply", ops=[{"op": "import_step", "name": "arm/post_1", "file": "build/post.step"}])
+        self.p.call("parts/post.FCStd", "apply", ops=[
+            {"op": "sketch", "name": "post/cap_profile", "plane": "XY", "offset": 20, "shapes": [{"rect": {"center": [0, 0], "size": [4, 4]}}]},
+            {"op": "pad", "name": "post/cap", "sketch": "post/cap_profile", "length": 3},
+        ])
+        # the part moved on but this STEP and its sidecar are the old ones (for example restored from a backup)
+        step.write_bytes(old_step)
+        sidecar.write_text(old_sidecar)
+        error = self.p.error(ASM, "export_assembly")
+        self.assertEqual(error["code"], "TRANSFER_UNSUPPORTED_OP")
+        self.assertEqual((error["target"], error["detail"]["op"], error["detail"]["option"]), ("arm/post_1", "import_step", "stale_step"))
+        self.assertIn("rebuild the part", error["hints"][0])
+
+    def test_a_modified_step_or_a_missing_sidecar_is_unknown(self) -> None:
+        step = self.post_step()
+        self.p.call(ASM, "apply", ops=[{"op": "import_step", "name": "arm/post_1", "file": "build/post.step"}])
+        sidecar = Path(str(step) + ".source.json")
+        kept = sidecar.read_text()
+        sidecar.unlink()
+        error = self.p.error(ASM, "export_assembly")
+        self.assertEqual((error["detail"]["option"], error["target"]), ("unknown_step_source", "arm/post_1"))
+        sidecar.write_text(kept.replace('"stepSha256": "', '"stepSha256": "0'))
+        self.assertEqual(self.p.error(ASM, "export_assembly")["detail"]["option"], "unknown_step_source")
+
+    def test_try_does_not_leave_a_sidecar_for_its_step(self) -> None:
+        self.post_step()
+        scratch = self.p.root / "build" / "try.step"
+        self.p.call("parts/post.FCStd", "try", output=str(scratch), ops=[
+            {"op": "sketch", "name": "post/cap_profile", "plane": "XY", "offset": 20, "shapes": [{"rect": {"center": [0, 0], "size": [4, 4]}}]},
+            {"op": "pad", "name": "post/cap", "sketch": "post/cap_profile", "length": 3},
+        ])
+        self.assertTrue(scratch.exists())
+        self.assertFalse(Path(str(scratch) + ".source.json").exists())
 
 
 if __name__ == "__main__":

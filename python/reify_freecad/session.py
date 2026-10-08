@@ -22,6 +22,7 @@ from .core import (
 from .errors import ReifyOpError, failure_code, hints_for
 from .exprs import PARAMS_OBJECT
 from .naming import canonicalize_path
+from .effects import check_feature_effect
 from .ops import handler_for, validate_ops
 from .ops.context import OpContext
 from .assembly import apply_joints, joint_objects, refresh_links, units
@@ -288,9 +289,17 @@ class DocumentSession:
                     ctx = OpContext(self)
                     check_sketch(ctx, obj)
                 code = failure_code(obj.TypeId, status)
+                detail = {"feature": path, "freecadStatus": status}
+                hints = hints_for(code)
+                if code in ("FILLET_FAILED", "CHAMFER_FAILED"):
+                    from .dressup import diagnose
+
+                    extra_detail, extra_hints = diagnose(obj)
+                    detail.update(extra_detail)
+                    hints = extra_hints + [hint for hint in hints if hint not in extra_hints]
                 raise ReifyOpError(
                     code, f"{path} failed to recompute: {status}", target=path,
-                    detail={"feature": path, "freecadStatus": status}, hints=hints_for(code),
+                    detail=detail, hints=hints,
                 )
         ctx = OpContext(self)
         from .ops.sketch import check_sketch
@@ -334,13 +343,14 @@ class DocumentSession:
                 handler_for(op["op"])(ctx, op)
                 self.recompute()
                 warnings.extend(self.check_health(index))
+                check_feature_effect(ctx, op)
                 warnings.extend(ctx.warnings)
                 ctx.warnings.clear()
             index = -1
             self.check_bodies()
         except ReifyOpError as error:
             self._abort()
-            error.rolled_back = True
+            self._mark_rolled_back(error)
             if index >= 0:
                 error.failed_op_index = index
             raise
@@ -348,7 +358,7 @@ class DocumentSession:
             self._abort()
             code = "FEATURE_FAILED"
             wrapped = ReifyOpError(code, f"{type(error).__name__}: {error}", detail={"feature": normalised[index]["op"] if index >= 0 else "?", "freecadStatus": str(error)})
-            wrapped.rolled_back = True
+            self._mark_rolled_back(wrapped)
             wrapped.failed_op_index = index if index >= 0 else None
             raise wrapped from error
 
@@ -367,11 +377,24 @@ class DocumentSession:
             result["rev"] = self.rev
             result["fcstd"] = str(self.fcstd)
             result["fcstdSha256"] = _sha256(self.fcstd)
+            if result.get("step"):
+                export_module.write_source(self, Path(result["step"]))  # now the saved document is the one the STEP shows
         else:
             self._abort()
+            if result.get("step"):
+                export_module.drop_source(Path(result["step"]))
             result["rev"] = self.rev
         result["elapsedMs"] = int((time.monotonic() - started) * 1000)
         return result
+
+    def _mark_rolled_back(self, error: ReifyOpError) -> None:
+        """A failed apply already restored the saved revision: say so, so the Agent does not undo a good one."""
+        error.rolled_back = True
+        error.detail.setdefault("rev", self.rev)
+        notice = f"Rolled back: the document is at revision {self.rev} and nothing was changed. Do NOT call undo (it would remove revision {self.rev})."
+        error.message = f"{error.message} [{notice}]"
+        error.args = (error.message,)
+        error.hints = [*error.hints, f"rolled back: the document is at revision {self.rev}; undo is not needed, fix the ops and apply again"]
 
     def _abort(self) -> None:
         try:
@@ -428,6 +451,10 @@ class DocumentSession:
             return {"step": None, "declarations": None, "empty": True}
         export_module.write_step(self, step)
         declarations = export_module.write_declarations(self, step)
+        try:
+            export_module.write_source(self, step)
+        except OSError:
+            pass
         return {"step": str(step), "declarations": str(declarations)}
 
     # ------------------------------------------------------------ history
@@ -458,9 +485,19 @@ class DocumentSession:
         for old in saved[:-HISTORY_LIMIT]:
             old.unlink(missing_ok=True)
 
-    def undo(self) -> dict[str, Any]:
+    def undo(self, to_empty: bool = False) -> dict[str, Any]:
         if self.rev <= 0:
             raise ReifyOpError("NOTHING_TO_UNDO", "the document is at its first revision", hints=["nothing to undo"])
+        if self.rev == 1 and not to_empty:
+            raise ReifyOpError(
+                "UNDO_WOULD_EMPTY",
+                "undo would remove the only revision and leave the document empty (revision 0); nothing was changed",
+                detail={"rev": self.rev},
+                hints=[
+                    "a failed apply is already rolled back: do not undo it, fix the ops and apply again",
+                    "to really start over, undo with to_empty=True",
+                ],
+            )
         previous = self._history_file(self.rev - 1)
         if not previous.exists():
             raise ReifyOpError("NOTHING_TO_UNDO", f"revision {self.rev - 1} is older than the {HISTORY_LIMIT} kept copies",

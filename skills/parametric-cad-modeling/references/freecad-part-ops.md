@@ -84,7 +84,7 @@ Declare a parameter once with `{"op": "param", "name": "width", "value": 40, "un
 | `polar_pattern` | `name`, `features`, `axis`, `angle`, `count` | | `angle` 360 spreads the instances around the circle |
 | `mirror` | `name`, `features`, `plane` | | |
 | `set` | `target`, `prop`, `value` | | see below |
-| `delete` | `target` | | `HAS_DEPENDENTS` lists what still uses it |
+| `delete` | `target` | | a feature in the middle of a body is removed and the next feature is relinked to the one before it (like `Body.removeObject`); its sketch stays. `HAS_DEPENDENTS` lists (by path) only real users: a sketch attached to it, a pattern's `features`, a fillet or chamfer on its edges, an expression, a joint |
 | `rename` | `target`, `to` | | children and requirements follow |
 | `placement` | `target` (a body or an occurrence) | `position`, `rotation` `{"axis", "angle"}` | values may be `=expressions`: this is how poses are driven |
 | `link` | `name`, `part` (a `.FCStd` path), `body` (the part's body path) | `position`, `rotation` | an occurrence of a part in an assembly; see "Assemblies" |
@@ -123,7 +123,7 @@ An assembly document holds occurrences (`link`), references (`import_step`), and
 - `limits` are checked after every apply. A value outside the limits is a failed intent in `r.intent` (`status: "fail"`, the value and the limits).
 - The pose of a body or an occurrence can still be set with `placement`; a joint takes precedence over it for its child.
 - `doc.sweep(...)` accepts a joint name in place of a parameter: `await arm.sweep("arm/j1", (-90, 90), step=5, check=("clearance", {"a": "arm/link", "b": "arm/post"}), refine=True)`.
-- `check("interference", all=True)` and `check("clearance", a=..., b=...)` take occurrence paths. Bounding boxes are compared first.
+- `check("interference", all=True)` and `check("clearance", a=..., b=...)` take occurrence paths. Bounding boxes (enlarged by `contact_tol`) are compared first.
 - **A new revision of a part reaches the assembly on its next `open`, `apply`, `tree`, `query` or `check`.** The changed occurrences are listed in `features.recomputed`, their faces that changed are orange, and the joints seat the occurrences again. A part's `apply` changes only the part document; the parent's run state does not change until the parent applies.
 - The exported STEP has one named product per body, occurrence and reference, with its pose. `cadctl assembly-tree` lists them by semantic path, and the `focus` and `hide` options of the visual probe take those paths (`focus: ["arm/link"]`).
 - A part keeps its own pose inside its document; in the assembly only the occurrence's pose counts.
@@ -134,11 +134,13 @@ A complete example is in the assets: [freecad-assembly](../assets/freecad-assemb
 
 ```python
 await doc.check("clearance", a="arm/upper", b="arm/base")               # minimum distance and the two closest points
-await doc.check("interference", all=True)                               # volume of overlap for each body pair
+await doc.check("interference", all=True)                               # exact B-Rep overlap per pair: `interferences` (volume) and `contacts` (touching or gap < contact_tol)
 await doc.check("wall_thickness", target="bracket", samples=200)        # minimum wall by inward rays
 await doc.check("mass", target="bracket")                               # mass, centre of mass, inertia
 await doc.sweep("j3_angle", (-90, 90), step=2, check=("clearance", {"a": "arm/upper", "b": "arm/base"}), refine=True, budget_s=300)
 ```
+
+`interference` takes `tolerance` (mm3, default 0.001, and at least 1e-9 of the smaller solid) and `contact_tol` (mm, default 0.2). It uses the B-Rep `common` volume, not meshes. `interferences` lists pairs whose common volume exceeds the tolerance, with `volumeMm3`; `contacts` lists pairs without overlap that touch or are closer than `contact_tol` (tangent cylinders, face-to-face boxes, hairline gaps), with `distanceMm`. `value` is the largest interference volume (contacts do not count), `pairs` still lists every pair. On `BUDGET_EXCEEDED` the partial `interferences` and `contacts` are in `detail`.
 
 These read the in-memory shapes; nothing is exported. A sweep varies one parameter, restores it, and does not change the document. It returns the number of samples, the minimum and where it happens, `firstFailure`, `failureIntervals`, and `worstPose`; the views show the worst pose. A clearance of 0 or an interference above 0 counts as a failure; pass `fail_below` or `fail_above` in the check's arguments to choose another limit. `refine=True` bisects every pass or fail boundary down to `step / 8`.
 
@@ -154,7 +156,8 @@ A check that runs past `budget_s` (default 30, at most 600) is stopped. Raise `b
 | `TARGET_NOT_FOUND` | unknown path or role | `target`, `known` | |
 | `TARGET_AMBIGUOUS` | a selector matched several faces | `candidates` | `add role or between` |
 | `NAME_CONFLICT` | the path exists, or ends in a role name | | `rename or use set` |
-| `HAS_DEPENDENTS` | `delete` of something in use | `dependents` | |
+| `HAS_DEPENDENTS` | `delete` of something in use | `dependents` | `delete the dependents first` |
+| `FEATURE_NO_EFFECT` | a `pad`, `pocket`, `hole`, pattern or `mirror` recomputed but did not change the solid's volume (the apply is rolled back; the first pad of a body is never a no-effect) | `feature`, `volumeBefore`, `volumeAfter`, `expected`, `direction` | `try reversed=true`, `the sketch plane is on the opposite side of the material` |
 | `PROP_NOT_ALLOWED` | `set` of another property | `allowed` | |
 | `EXPRESSION_INVALID` | an unknown name, or a missing unit | `expression`, `reason`, `known` | `write units in expressions` |
 | `SKETCH_CONFLICTING`, `SKETCH_REDUNDANT`, `SKETCH_MALFORMED` | solver diagnostics, degenerate geometry | `constraints` (id and name) | |

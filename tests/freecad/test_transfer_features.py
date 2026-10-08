@@ -311,8 +311,8 @@ class TransferFeatureTests(unittest.TestCase):
 
     def test_linear_pattern_in_a_rotated_body_and_symbolic_length(self) -> None:
         self.h.apply([
-            {"op": "param", "name": "pitch", "value": 15, "unit": "mm"},
-            rect_sketch("part/profile", [100, 20]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 5},
+            {"op": "param", "name": "pitch", "value": 10, "unit": "mm"},
+            rect_sketch("part/profile", [100, 60]), {"op": "pad", "name": "part/base", "sketch": "part/profile", "length": 5},
             circles("part/hole_profile", [[-30, 0]], 4, offset=5),
             {"op": "hole", "name": "part/bore", "sketch": "part/hole_profile", "diameter": 4, "type": "through_all"},
             {"op": "linear_pattern", "name": "part/row", "features": ["part/bore"], "direction": "Y", "length": "=pitch * 2", "count": 3},
@@ -320,8 +320,8 @@ class TransferFeatureTests(unittest.TestCase):
         ])
         row = self.features()["bodies"][0]["features"][-1]
         self.assertEqual(row["direction"], [-1, 0, 0])
-        self.assertEqual(row["length"], {"value": 30.0, "expr": "=pitch*2"})
-        self.assertEqual(row["spacing"], {"value": 15.0})
+        self.assertEqual(row["length"], {"value": 20.0, "expr": "=pitch*2"})
+        self.assertEqual(row["spacing"], {"value": 10.0})
 
     def test_mirror(self) -> None:
         self.h.apply([
@@ -449,6 +449,38 @@ class TransferFeatureTests(unittest.TestCase):
         ])
         self.unsupported("fillet", "ambiguous_edge", "part/edge_round")
 
+    def ring(self, thickness: float = 5) -> None:
+        self.h.apply([
+            {"op": "sketch", "name": "part/disc", "plane": "XY", "shapes": [{"circle": {"center": [0, 0], "diameter": 40}}]},
+            {"op": "pad", "name": "part/base", "sketch": "part/disc", "length": thickness},
+            circles("part/bore_profile", [[0, 0]], 10, offset=thickness),
+            {"op": "hole", "name": "part/bore", "sketch": "part/bore_profile", "diameter": 10, "type": "through_all"},
+        ])
+
+    def test_inner_and_outer_circular_edges_are_not_ambiguous(self) -> None:
+        self.ring()
+        self.h.apply([
+            {"op": "chamfer", "name": "part/outer_cut", "edges": {"between": [{"feature": "part/base", "role": "top"}, {"feature": "part/base", "role": "side.0"}]}, "size": 0.8},
+            {"op": "chamfer", "name": "part/inner_cut", "edges": {"between": [{"feature": "part/base", "role": "top"}, {"feature": "part/bore", "role": "wall"}]}, "size": 0.5},
+        ])
+        outer, inner = self.features()["bodies"][0]["features"][-2:]
+        self.assertEqual([len(outer["edges"]), len(inner["edges"])], [1, 1])
+        self.assertEqual((outer["edges"][0]["radius"], inner["edges"][0]["radius"]), (20.0, 5.0))
+        self.assertEqual((outer["edges"][0]["curve"], inner["edges"][0]["curve"]), ("circle", "circle"))
+
+    def test_identical_edges_report_which_edge_matched(self) -> None:
+        self.ring(thickness=0.005)  # top and bottom circles are 0.005 mm apart: same descriptor within 1e-4 x diagonal
+        self.h.apply([{"op": "chamfer", "name": "part/outer_cut", "edges": {"between": [{"feature": "part/base", "role": "top"}, {"feature": "part/base", "role": "side.0"}]}, "size": 0.001}])
+        error = self.unsupported("chamfer", "ambiguous_edge", "part/outer_cut")
+        match = error["detail"]["matches"][0]
+        self.assertEqual((match["curve"], match["radius"]), ("circle", 20.0))
+        self.assertNotEqual(match["edge"], error["detail"]["edge"])
+        self.assertIn("radius 20", error["message"])
+        self.assertIn("length 125.66", error["message"])
+        self.assertIn(match["edge"], error["message"])
+        self.assertIn("midpoint (", error["message"])
+        self.assertTrue(error["hints"])
+
     def test_dressup_variants_that_stay_unsupported(self) -> None:
         self.h.apply(plate_ops() + [{"op": "chamfer", "name": "part/edge_cut", "edges": {"feature": "part/base", "role": "top_outer"}, "size": 1}])
         self.feature_obj("part/edge_cut").ChamferType = "Two distances"
@@ -470,7 +502,7 @@ class TransferFeatureTests(unittest.TestCase):
         self.h.apply(plate_ops())
         self.h.apply([{"op": "chamfer", "name": "part/slope", "edges": {"between": [{"feature": "part/base", "role": "top"}, {"feature": "part/base", "role": "side.0"}]}, "size": 3}])
         self.h.apply([
-            {"op": "sketch", "name": "part/dimple_profile", "on": {"feature": "part/slope", "role": "bevel"}, "shapes": [{"circle": {"center": [0, 0], "diameter": 4}}]},
+            {"op": "sketch", "name": "part/dimple_profile", "on": {"feature": "part/slope", "role": "bevel"}, "shapes": [{"circle": {"center": [0, -7.0710678], "diameter": 4}}]},
             {"op": "pocket", "name": "part/dimple", "sketch": "part/dimple_profile", "depth": 1},
         ])
         data = self.golden("sketch_on_tilted_face")

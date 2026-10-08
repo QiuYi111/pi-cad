@@ -203,7 +203,7 @@
               "type": "circle",
               "center": [
                 0.0,
-                0.0
+                -7.071068
               ],
               "radius": 2.0
             }
@@ -277,7 +277,7 @@
                 ]
               ],
               "value": {
-                "value": 0.0
+                "value": -7.071068
               }
             }
           ]
@@ -351,7 +351,7 @@
     }
   ],
   "reference": {
-    "volume_mm3": 5820.0,
+    "volume_mm3": 5807.433629,
     "bbox": {
       "min": [
         -20.0,
@@ -375,7 +375,7 @@
       },
       {
         "name": "part/dimple",
-        "volume_mm3": 5820.0
+        "volume_mm3": 5807.433629
       }
     ]
   }

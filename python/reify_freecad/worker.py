@@ -107,7 +107,7 @@ class Worker:
         return session.apply(args["ops"], commit=False, message=None, output=Path(args["output"]))
 
     def cmd_undo(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
-        return self._session(doc).undo()
+        return self._session(doc).undo(to_empty=bool(args.get("to_empty", False)))
 
     def cmd_tree(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
         session = self._session(doc)

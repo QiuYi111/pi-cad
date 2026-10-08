@@ -48,7 +48,7 @@ export type AgentApiRequest = AgentApiConversationV1 & (
   | { schema: 1; op: "part-open"; doc: string; output?: string; body?: string; create?: boolean; validation?: "auto" | "fast" | "full" }
   | { schema: 1; op: "part-apply"; doc: string; ops: JsonValue[]; message?: string; output?: string; validation?: "auto" | "fast" | "full"; budgetS?: number }
   | { schema: 1; op: "part-try"; doc: string; ops: JsonValue[]; output?: string; budgetS?: number }
-  | { schema: 1; op: "part-undo"; doc: string; output?: string; validation?: "auto" | "fast" | "full" }
+  | { schema: 1; op: "part-undo"; doc: string; output?: string; toEmpty?: boolean; validation?: "auto" | "fast" | "full" }
   | { schema: 1; op: "part-tree"; doc: string; output?: string }
   | { schema: 1; op: "part-query"; doc: string; target: string; what?: string[]; output?: string }
   | { schema: 1; op: "part-check"; doc: string; kind: string; args: Record<string, JsonValue>; output?: string; budgetS?: number }

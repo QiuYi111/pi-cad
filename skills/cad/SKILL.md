@@ -115,6 +115,14 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
   `rolled_back`. Fix the named op and send the batch again.
 - Faces and edges are named by role (`bracket/mount_hole/wall`, `top_outer`),
   never `Face12`. The names survive dimension edits and added features.
+- `FEATURE_NO_EFFECT` means a pad added no material, or a pocket or hole removed
+  none (for example the sketch is on the bottom face and the cut goes outward).
+  The op is rolled back. Read `hints` and try `reversed=true`.
+- `delete` of a middle feature relinks the chain. It stops only when something
+  really uses the feature; `detail` lists those users by path.
+- `check("interference", ...)` returns `interferences` (real overlap) and
+  `contacts` (touching or closer than `contact_tol`, 0.2 mm by default) as two
+  lists. Only `interferences` are defects. Decide about each contact on purpose.
 - `try_` shows an edit and discards it. `check` and `sweep` read the in-memory
   model (clearance, interference, wall thickness, mass, pose sweeps) without
   exporting a STEP.

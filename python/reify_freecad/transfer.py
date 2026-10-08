@@ -138,6 +138,15 @@ def _edge_ref(edge: Any, who: str, op: str, strict: bool = True) -> dict[str, An
     return ref
 
 
+def _describe(ref: dict[str, Any]) -> str:
+    parts = [str(ref["curve"])]
+    if "radius" in ref:
+        parts.append(f"radius {ref['radius']:g}")
+    parts.append(f"length {ref['length']:g}")
+    parts.append("midpoint (" + ", ".join(f"{c:g}" for c in ref["midpoint"]) + ")")
+    return ", ".join(parts)
+
+
 def _same_edge(a: dict[str, Any], b: dict[str, Any], tol: float) -> bool:
     if a["curve"] != b["curve"] or abs(a["length"] - b["length"]) > tol:
         return False
@@ -159,7 +168,18 @@ def _edge_refs(feature: Any, op: str) -> list[dict[str, Any]]:
         ref = _edge_ref(shape.getElement(edge_name), name, op)
         matches = [i for i, other in enumerate(everything) if _same_edge(ref, other, tol)]
         if len(matches) != 1:
-            raise _unsupported(name, op, "ambiguous_edge", f"{edge_name} cannot be told apart from {len(matches) - 1} other edge(s) by curve, midpoint and length")
+            own = int(edge_name[4:]) - 1
+            others = [i for i in matches if i != own] or matches
+            found = [{"edge": f"Edge{i + 1}", **{k: v for k, v in everything[i].items() if k in ("curve", "midpoint", "length", "radius")}} for i in others]
+            error = _unsupported(
+                name, op, "ambiguous_edge",
+                f"{edge_name} ({_describe(ref)}) cannot be told apart from " + "; ".join(f"{m['edge']} ({_describe(m)})" for m in found)
+                + f" by curve, midpoint and length within {tol:.3g} mm; select a different edge or change the geometry so they differ",
+            )
+            error.detail["edge"] = edge_name
+            error.detail["matches"] = found
+            error.hints = ["pick other roles or a tighter selector (between two roles) for the edges, or chamfer/fillet them in separate features"]
+            raise error
         refs.append(ref)
     return refs
 
@@ -600,42 +620,85 @@ def export_features(session: Any, output: str | None = None, reference_step: str
 
 
 # ------------------------------------------------------------------ assemblies
+def _own_step_source(session: Any, unit: Any) -> tuple[str, Any, str]:
+    """(part document path, its session, body path) for an ``import_step`` unit that Reify wrote itself.
+
+    The STEP carries a ``<step>.source.json`` sidecar (``reify.step-source/1``, see
+    ``export.write_source``). No sidecar means a bought-in STEP; a sidecar whose part document has
+    changed since means the STEP is stale.
+    """
+    from .assembly import file_sha256
+    from .export import SOURCE_SCHEMA, source_sidecar
+
+    step = session.resolve_project_path(unit.source_path)
+    sidecar = source_sidecar(step)
+    unknown = lambda why: _unsupported(  # noqa: E731
+        unit.path, "import_step", "unknown_step_source",
+        f"{unit.path} imports {unit.source_path}, which is not a STEP written by Reify from a project part ({why}); only Reify parts can be transferred")
+    if not sidecar.exists():
+        raise unknown("no .source.json next to it")
+    try:
+        source = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert source["schema"] == SOURCE_SCHEMA
+        fcstd, fcstd_sha, step_sha, body_path = source["fcstd"], source["fcstdSha256"], source["stepSha256"], source.get("body")
+    except (ValueError, KeyError, AssertionError, OSError):
+        raise unknown("unreadable .source.json") from None
+    if file_sha256(step) != step_sha:
+        raise unknown("the STEP changed after Reify wrote it")
+    if not body_path:
+        raise _unsupported(unit.path, "import_step", "unknown_step_source", f"{unit.source_path} was written from {fcstd} as more than one body; import one part's STEP")
+    absolute = session.resolve_project_path(fcstd)
+    if not absolute.exists():
+        raise unknown(f"its part document {fcstd} no longer exists")
+    if file_sha256(absolute) != fcstd_sha:
+        error = _unsupported(
+            unit.path, "import_step", "stale_step",
+            f"{unit.path} imports {unit.source_path}, written from {fcstd} revision {source.get('rev')}; the part has changed since")
+        error.hints = [f"rebuild the part ({fcstd}) so Reify rewrites its STEP, then import_step again (or link the part)"]
+        raise error
+    owner = session.registry.source(absolute)
+    if not any(get_path(b) == body_path for b in bodies(owner.doc)):
+        raise unknown(f"{fcstd} has no body {body_path}")
+    return fcstd, owner, body_path
+
+
 def canonicalize_assembly(session: Any) -> dict[str, Any]:
     """``reify.assembly/1``: the linked parts with their features, and each occurrence's world transform.
 
-    Joints are already applied (the occurrence Placement is the solved pose). Bought-in STEP
-    references and bodies of the assembly document itself are refused.
+    Joints are already applied (the occurrence Placement is the solved pose). An ``import_step``
+    of a STEP that Reify wrote from a project part is an occurrence of that part; bought-in or
+    stale STEPs and bodies of the assembly document itself are refused.
     """
     from .assembly import OCCURRENCE, REFERENCE, units
-    from .session import _sha256  # noqa: F401
 
     doc = session.doc
     session.sync_links()
     found = [u for u in units(session) if not (u.kind == "body" and not any(is_feature(o) for o in u.obj.Group))]  # the scaffold body is empty
-    for unit in found:
-        if unit.kind == REFERENCE:
-            raise _unsupported(unit.path, "import_step", "reference", f"{unit.path} is a bought-in STEP ({unit.source_path}); only Reify parts can be transferred")
-    for unit in found:
-        if unit.kind != OCCURRENCE:
-            raise _unsupported(unit.path, "assembly", "inline_body", f"{unit.path} is a body of the assembly document; link it as a part")
     if not found:
         raise _unsupported(None, "assembly", "no_occurrence", "the document has no occurrences")
-    wanted = {(u.source_path, get_path(u.body)) for u in found}
-    per_doc: dict[str, int] = {}
-    for ref, _body in wanted:
-        per_doc[ref] = per_doc.get(ref, 0) + 1
+    #: (unit, part document path as written in the project, owner session, body path)
+    resolved = []
+    for unit in found:
+        if unit.kind == REFERENCE:
+            resolved.append((unit, *_own_step_source(session, unit)))
+        elif unit.kind == OCCURRENCE:
+            if unit.body is None or unit.owner is None:
+                raise _unsupported(unit.path, "link", "missing_part", f"the part {unit.source_path} or its body is missing")
+            resolved.append((unit, unit.source_path, unit.owner, get_path(unit.body)))
+        else:
+            raise _unsupported(unit.path, "assembly", "inline_body", f"{unit.path} is a body of the assembly document; link it as a part")
+    per_doc: dict[str, set[str]] = {}
+    for _unit, ref, _owner, body_path in resolved:
+        per_doc.setdefault(ref, set()).add(body_path)
     parts: dict[tuple[str, str], dict[str, Any]] = {}
     occurrences, volumes = [], []
     volume = 0.0
     box = None
-    for unit in found:
-        if unit.body is None or unit.owner is None:
-            raise _unsupported(unit.path, "link", "missing_part", f"the part {unit.source_path} or its body is missing")
-        key = (unit.source_path, get_path(unit.body))
+    for unit, ref_path, owner, body_path in resolved:
+        key = (ref_path, body_path)
         if key not in parts:
-            ref = unit.source_path if per_doc[unit.source_path] == 1 else f"{unit.source_path}#{key[1]}"
-            features = canonicalize(unit.owner, key[1])
-            parts[key] = {"ref": ref, "name": key[1], "features": features}
+            ref = ref_path if len(per_doc[ref_path]) == 1 else f"{ref_path}#{body_path}"
+            parts[key] = {"ref": ref, "name": body_path, "features": canonicalize(owner, body_path)}
         placement = unit.placement
         rows = placement.Rotation.toMatrix()
         occurrences.append({

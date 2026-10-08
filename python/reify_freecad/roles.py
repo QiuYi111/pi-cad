@@ -19,6 +19,7 @@ needed: it is reported only when a role cannot be derived at all.
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from dataclasses import dataclass, field
@@ -316,8 +317,94 @@ def compute_body_roles(body: Any) -> BodyRoles:
                 claimed.add(position)
                 result.faces.setdefault(f"{path}/{role}", []).append(RoleFace(f"Face{position}", face))
     _pattern_roles(result, features, created_by_feature, tol, claimed)
+    _distinct_names(result, {path: feature for path, (feature, _roles) in created_by_feature.items()}, tol)
     _edge_roles(result, {path: feature for path, (feature, _roles) in created_by_feature.items()})
     return result
+
+
+#: Roles that name a group of faces on purpose (one round per filleted edge); they keep one name.
+GROUP_ROLES = frozenset({"round", "bevel"})
+
+#: Separator of the pieces of one role: ``side.0~0``, ``side.0~1``.
+PIECE_SEPARATOR = "~"
+
+
+def role_base(role: str) -> str:
+    """``wall.3@2~1`` -> ``wall``."""
+    return re.split(r"[.@~]", role, maxsplit=1)[0]
+
+
+def _feature_frame(feature: Any) -> tuple[Any, Any, Any, Any]:
+    """(origin, u, v, normal) of the feature's sketch, or the global frame."""
+    profile = getattr(feature, "Profile", None) if feature is not None else None
+    sketch = profile[0] if isinstance(profile, tuple) else profile
+    if sketch is not None and getattr(sketch, "TypeId", "") == "Sketcher::SketchObject":
+        rotation = sketch.Placement.Rotation
+        return (sketch.Placement.Base, rotation.multVec(App.Vector(1, 0, 0)), rotation.multVec(App.Vector(0, 1, 0)), rotation.multVec(App.Vector(0, 0, 1)))
+    return App.Vector(), App.Vector(1, 0, 0), App.Vector(0, 1, 0), App.Vector(0, 0, 1)
+
+
+def _order_key(face: Any, frame: tuple[Any, Any, Any, Any]) -> tuple[float, ...]:
+    """Geometric position of a face in the feature's frame; faces of one role are ordered by it.
+
+    A face of revolution is placed first, by (distance along its axis, angle of its centre about the axis
+    counted from the sketch u axis), so the two halves of a seam-split cylinder and the two bands
+    of a grooved shaft each get a fixed order. Any other face follows, placed by (normal, v, u).
+    """
+    origin, u, v, n = frame
+    point = face.CenterOfMass
+    surface = face.Surface
+    if isinstance(surface, (Part.Cylinder, Part.Cone)):
+        axis = App.Vector(surface.Axis)
+        for reference in (n, u, v):
+            lean = axis.dot(reference)
+            if abs(lean) > 1e-9:
+                if lean < 0:
+                    axis = axis * -1
+                break
+        centre = surface.Center if isinstance(surface, Part.Cylinder) else surface.Apex
+        axial = (point - origin).dot(axis)
+        radial = (point - centre) - axis * (point - centre).dot(axis)
+        reference = u - axis * u.dot(axis)
+        if reference.Length < 1e-9:
+            reference = v - axis * v.dot(axis)
+        reference.normalize()
+        angle = 0.0
+        if radial.Length > 1e-7:
+            angle = math.degrees(math.atan2(radial.dot(axis.cross(reference)), radial.dot(reference))) % 360.0
+            if angle > 360.0 - 1e-3:
+                angle = 0.0
+        return (0.0, axial, angle)
+    offset = point - origin
+    return (1.0, offset.dot(n), offset.dot(v), offset.dot(u))
+
+
+def _distinct_names(result: BodyRoles, features: dict[str, Any], tol: float) -> None:
+    """Give every face its own name: a role that holds several faces becomes ``role~0``, ``role~1``...
+
+    A later feature splits one created face into pieces that all inherit its role (a groove
+    cuts a shaft's side into two bands, and OCC cuts a cylinder at its seam), and a selector
+    must be able to tell them apart. Pieces are numbered by ``_order_key``, so the numbers
+    survive dimension edits that keep the topology. ``side.0`` still selects all of them.
+    """
+    renamed: dict[str, list[RoleFace]] = {}
+    for key, entries in result.faces.items():
+        path, _, role = key.rpartition("/")
+        if len(entries) < 2 or role_base(role) in GROUP_ROLES:
+            renamed[key] = entries
+            continue
+        frame = _feature_frame(features.get(path))
+        keyed = [(_order_key(entry.face, frame), entry) for entry in entries]
+
+        def compare(a: tuple[tuple[float, ...], RoleFace], b: tuple[tuple[float, ...], RoleFace]) -> int:
+            for x, y in zip(a[0], b[0]):
+                if abs(x - y) > tol * 10:
+                    return -1 if x < y else 1
+            return 0
+
+        for position, (_k, entry) in enumerate(sorted(keyed, key=functools.cmp_to_key(compare))):
+            renamed[f"{key}{PIECE_SEPARATOR}{position}"] = [entry]
+    result.faces = renamed
 
 
 def _pattern_roles(result: BodyRoles, features: list[Any], created_by_feature: dict[str, tuple[Any, dict[str, list[Any]]]], tol: float, claimed: set[int]) -> None:
@@ -500,7 +587,7 @@ def _edge_roles(result: BodyRoles, features: dict[str, Any]) -> None:
     tol = _tolerance(shape)
     for key, role_faces in list(result.faces.items()):
         path, _, role = key.rpartition("/")
-        base = role.split("@")[0].split(".")[0]
+        base = role_base(role)
         if base == "top":
             for entry in role_faces:
                 names = [n for n in (_edge_name(shape, e) for e in entry.face.OuterWire.Edges) if n]
@@ -553,11 +640,11 @@ def _matching_keys(roles: BodyRoles, feature_path: str, role: str | None) -> lis
 
 def role_matches(key: str, wanted: str) -> bool:
     """``wall`` is exactly that role (the first instance of a pattern); ``side`` also
-    covers ``side.0``, ``side.1``...; ``wall@*`` covers every instance of a pattern."""
+    covers ``side.0``, ``side.1``... and the pieces ``side.0~0``, ``side.0~1``; ``wall@*`` covers every instance of a pattern."""
     if wanted.endswith("@*"):
         base = wanted[:-2]
-        return key == base or key.startswith(base + "@")
-    return key == wanted or key.startswith(wanted + ".")
+        return key == base or key.startswith(base + "@") or key.startswith(base + PIECE_SEPARATOR)
+    return key == wanted or key.startswith(wanted + ".") or key.startswith(wanted + PIECE_SEPARATOR)
 
 
 def known_role_paths(ctx: Any) -> list[str]:
@@ -642,7 +729,72 @@ def resolve_edges(ctx: Any, selectors: list[dict[str, Any]]) -> tuple[Any, list[
     return body_found, names
 
 
+def _edge_facts(shape: Any, name: str) -> dict[str, Any]:
+    edge = shape.Edges[int(name[4:]) - 1]
+    curve = edge.Curve
+    fact: dict[str, Any] = {"edge": name, "length": round(edge.Length, 4), "center": [round(c, 3) for c in edge.CenterOfMass]}
+    if isinstance(curve, Part.Circle):
+        fact["radius"] = round(float(curve.Radius), 4)
+        fact["_axis"], fact["_centre"] = curve.Axis, curve.Center
+    return fact
+
+
+def _concentric_radii(facts: list[dict[str, Any]]) -> bool:
+    """True when two circular edges share an axis and differ in radius: an inner and an outer edge."""
+    circles = [f for f in facts if "radius" in f]
+    for i, a in enumerate(circles):
+        for b in circles[i + 1:]:
+            if abs(a["radius"] - b["radius"]) < 1e-4 or not _parallel(a["_axis"], b["_axis"]):
+                continue
+            offset = b["_centre"] - a["_centre"]
+            if (offset - a["_axis"] * offset.dot(a["_axis"])).Length <= 1e-4 * max(1.0, a["radius"]):
+                return True
+    return False
+
+
+def _public(fact: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in fact.items() if not key.startswith("_")}
+
+
+def _filter_circular(shape: Any, names: list[str], selector: dict[str, Any]) -> list[str]:
+    """Apply ``which`` and ``radius`` to the circular edges of ``names``; an unfiltered ring is ambiguous."""
+    which, wanted = selector.get("which"), selector.get("radius")
+    facts = [_edge_facts(shape, name) for name in names]
+    if which is None and wanted is None:
+        if _concentric_radii(facts):
+            radii = sorted({f["radius"] for f in facts if "radius" in f})
+            raise ReifyOpError(
+                "TARGET_AMBIGUOUS", f"{selector} matches concentric circular edges of {len(radii)} radii ({', '.join(str(r) for r in radii)} mm)",
+                target=selector.get("feature"),
+                detail={"candidates": [_public(f) for f in facts[:12]], "which": ["outer", "inner", "all"], "radii": radii},
+                hints=[f'add "which": "outer" (radius {radii[-1]}) or "inner" (radius {radii[0]}), or "which": "all" for every edge',
+                       'or filter with "radius": {"min": ..., "max": ...}'],
+            )
+        return names
+    keep = facts
+    if wanted is not None:
+        low, high = wanted.get("min", -math.inf) - 1e-4, wanted.get("max", math.inf) + 1e-4
+        keep = [f for f in keep if "radius" in f and low <= f["radius"] <= high]
+    if which in ("outer", "inner"):
+        circles = [f for f in keep if "radius" in f]
+        if circles:
+            pick = max(f["radius"] for f in circles) if which == "outer" else min(f["radius"] for f in circles)
+            keep = [f for f in keep if "radius" not in f or abs(f["radius"] - pick) < 1e-4]
+    if not keep:
+        raise ReifyOpError(
+            "TARGET_NOT_FOUND", f"no circular edge of {selector} satisfies which/radius", target=selector.get("feature"),
+            detail={"target": selector, "candidates": [_public(f) for f in facts[:12]], "which": ["outer", "inner", "all"]},
+            hints=["list the candidates' radius and choose a which or radius range that matches one of them"],
+        )
+    return [f["edge"] for f in keep]
+
+
 def _edges_for(ctx: Any, selector: dict[str, Any]) -> tuple[Any, list[str]]:
+    body, names = _edges_unfiltered(ctx, selector)
+    return body, _filter_circular(ctx.session.roles(body).shape, names, selector)
+
+
+def _edges_unfiltered(ctx: Any, selector: dict[str, Any]) -> tuple[Any, list[str]]:
     if "between" in selector:
         first, second = selector["between"]
         faces_a = _face_candidates(ctx, first)

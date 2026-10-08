@@ -195,3 +195,21 @@ Executors still reject any feature `type` they do not know. New optional keys ar
 - **Pad up to face**: `extent: { type: "up_to_face", face_ref }`, direction `+n` (FreeCAD pads along the sketch normal until the face; verified). `reversed` with up-to-face is `reversed_up_to_face`, a face offset is `offset`, non-planar end faces are `non_planar_face`; other up-to types and pocket up-to stay unsupported.
 - **Patterns**: `Mode = Spacing` is `spacing_mode` (linear) / `offset_mode` (polar). Direction/axis must be an origin axis of the body, mirror plane an origin plane, else `direction` / `axis` / `plane`.
 - **Assembly export**: worker command `export_assembly` (alias `export-assembly`), args `{ output?, referenceStep? }`, result `{ assembly, partCount, occurrenceCount, part, path?, referenceStep? }`. `reify.assembly/1` also has `source: { doc }` and `reference: { volume_mm3, bbox, feature_volumes: [{ name: <occurrence>, volume_mm3 }] }`. `parts[].ref` is the `LinkPart` path (`path#body` when one document is used for two bodies); `parts[].features` is the full `reify.features/1` object of that body (own `source`, `parameters`, `material`, `reference`). `transform.origin/rotation` is the occurrence Placement with joints solved. A bought-in STEP unit is `TRANSFER_UNSUPPORTED_OP` with `target` = the unit path, `op: "import_step"`, `option: "reference"`; a body with features inside the assembly document is `option: "inline_body"`. `export_features` on an assembly document keeps raising `op: "assembly"`, `option: "occurrence"`.
+
+### Own STEPs in an assembly (`import_step` of a Reify part)
+
+Whenever the worker writes a model STEP (open, apply, export; not `try` outputs), it writes `<step path>.source.json` next to it, and rewrites it after the commit of an `apply` so the hash is that of the saved document:
+
+```json
+{ "schema": "reify.step-source/1", "fcstd": "parts/post.FCStd", "fcstdSha256": "<hex of the saved .FCStd>",
+  "stepSha256": "<hex of the STEP>", "body": "post", "part": "post", "rev": 3, "kind": "part" }
+```
+
+`fcstd` is relative to the project root. `body` is the semantic path of the body when the STEP holds exactly one body, else `null` (and `kind: "model"`).
+
+`export_assembly` resolves an `import_step` unit through that sidecar and treats it as an occurrence of the part (one `parts[]` entry per part/body, however many imports; the occurrence transform is the placement of the import unit). Errors, all `TRANSFER_UNSUPPORTED_OP` with `target` = the import unit and `op: "import_step"`:
+
+- `unknown_step_source`: no sidecar (a bought-in STEP, or one made by another tool), unreadable sidecar, the STEP changed after it was written (hash mismatch), the part document is gone or has no such body, or the STEP holds several bodies.
+- `stale_step`: the sidecar is fine but the part's current `.FCStd` hash differs from `fcstdSha256`. Hint: rebuild the part so Reify rewrites its STEP, then import again (or `link` the part).
+
+`ambiguous_edge` errors now say which other edge matched: `detail: { op, option, reason, edge: "Edge7", matches: [{ edge, curve, midpoint, length, radius? }] }`, the message lists the same, and `hints` suggests a different selector. Inner and outer circles of a ring are not ambiguous (radius and length differ); only edges equal in curve, midpoint and length within `1e-4 x diagonal` are.

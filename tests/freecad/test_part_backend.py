@@ -425,8 +425,29 @@ class PartBackendTests(unittest.TestCase):
         log = Path(self.h.doc + ".ops.jsonl").read_text().strip().splitlines()
         self.assertEqual(len(log), 1)
         self.assertEqual(json.loads(log[0])["fcstdSha256"], first)
-        self.assertEqual(self.h.call("undo")["rev"], 0)
+        # Going back to the empty revision 0 needs an explicit argument.
+        refused = self.h.error("undo")
+        self.assertEqual(refused["code"], "UNDO_WOULD_EMPTY")
+        self.assertEqual(self.h.call("tree")["rev"], 1)
+        self.assertEqual(digest(Path(self.h.doc)), first)
+        self.assertEqual(self.h.call("undo", to_empty=True)["rev"], 0)
         self.assertEqual(self.h.error("undo")["code"], "NOTHING_TO_UNDO")
+
+    def test_rolled_back_failure_says_the_revision_and_that_undo_is_not_needed(self) -> None:
+        self.h.apply(plate())
+        before = digest(Path(self.h.doc))
+        error = self.h.error("apply", ops=[{"op": "fillet", "name": "part/too_round", "edges": {"feature": "part/base", "role": "top_outer"}, "radius": 500}])
+        self.assertEqual(error["code"], "FILLET_FAILED")
+        self.assertTrue(error["rolledBack"])
+        self.assertIn("revision 1", error["message"])
+        self.assertIn("Do NOT call undo", error["message"])
+        self.assertTrue(any("undo is not needed" in hint for hint in error["hints"]))
+        self.assertIn("reduce radius", error["hints"])  # the original hints stay
+        self.assertEqual(error["detail"]["rev"], 1)
+        # The state the message describes is the state on disk; an undo now is refused.
+        self.assertEqual(digest(Path(self.h.doc)), before)
+        self.assertEqual(self.h.error("undo")["code"], "UNDO_WOULD_EMPTY")
+        self.assertEqual(self.h.call("tree")["rev"], 1)
 
     def test_try_changes_nothing(self) -> None:
         self.h.apply(plate())

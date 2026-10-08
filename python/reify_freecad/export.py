@@ -206,3 +206,50 @@ def write_declarations(session: Any, step: Path) -> Path:
     temporary.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
     os.replace(temporary, destination)
     return destination
+
+
+# ---------------------------------------------------------------- provenance of a model STEP
+SOURCE_SCHEMA = "reify.step-source/1"
+
+
+def source_sidecar(step: Path) -> Path:
+    return step.with_name(step.name + ".source.json")
+
+
+def write_source(session: Any, step: Path, *, kind: str | None = None) -> Path | None:
+    """Record which saved part document a STEP was written from: ``<step>.source.json``.
+
+    ``fcstdSha256`` is the hash of the saved ``.FCStd`` the STEP reflects, so a later reader can
+    tell that the part has changed since (``cad.transfer`` resolves an ``import_step`` that Reify
+    wrote back to its part this way). ``body`` is set when the STEP is exactly one body.
+    """
+    import hashlib
+
+    if not step.exists() or not session.fcstd.exists():
+        return None
+    exported = solid_units(session)
+    body = exported[0].path if len(exported) == 1 and exported[0].kind == "body" else None
+    try:
+        relative = Path(session.fcstd).relative_to(session.root).as_posix()
+    except ValueError:
+        relative = Path(session.fcstd).as_posix()
+    document = {
+        "schema": SOURCE_SCHEMA, "fcstd": relative,
+        "fcstdSha256": hashlib.sha256(session.fcstd.read_bytes()).hexdigest(),
+        "stepSha256": hashlib.sha256(step.read_bytes()).hexdigest(),
+        "body": body, "part": body or Path(session.fcstd).stem, "rev": session.rev,
+        "kind": kind or ("part" if body else "model"),
+    }
+    destination = source_sidecar(step)
+    temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(document, indent=1) + "\n", encoding="utf-8")
+    os.replace(temporary, destination)
+    return destination
+
+
+def drop_source(step: Path) -> None:
+    """A STEP of an uncommitted state (``try``) has no saved document to point to."""
+    try:
+        source_sidecar(step).unlink()
+    except FileNotFoundError:
+        pass

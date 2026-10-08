@@ -177,28 +177,79 @@ def clearance(ctx: Any, a: str, b: str) -> dict[str, Any]:
     }
 
 
-def interference(ctx: Any, pairs: list[list[str]] | None, all_pairs: bool, budget: Budget) -> dict[str, Any]:
+DEFAULT_INTERFERENCE_TOL_MM3 = 1e-3
+DEFAULT_CONTACT_TOL_MM = 0.2
+
+
+def _positive(args: dict[str, Any], key: str, default: float) -> float:
+    value = args.get(key, default)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = -1.0
+    if number < 0:
+        raise ReifyOpError("OP_SCHEMA_INVALID", f"'{key}' must be a number >= 0", detail={"path": key, "reason": "bad value"})
+    return number
+
+
+def interference(ctx: Any, pairs: list[list[str]] | None, all_pairs: bool, budget: Budget, args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Exact B-Rep overlap per pair, split into interferences and contacts.
+
+    A pair is an *interference* when the volume of ``common`` exceeds
+    ``max(tolerance, 1e-9 * smaller solid)``. Otherwise, when the minimal distance
+    is below ``contact_tol`` (touching, tangent or a hairline gap) it is a *contact*.
+    """
+    args = args or {}
+    tolerance = _positive(args, "tolerance", DEFAULT_INTERFERENCE_TOL_MM3)
+    contact_tol = _positive(args, "contact_tol", DEFAULT_CONTACT_TOL_MM)
     combos: list[tuple[str, str]]
     if pairs:
         combos = [(p[0], p[1]) for p in pairs]
     else:  # all: every pair of bodies, occurrences and references that has a solid
         names = sorted(unit.path for unit in units(ctx.session) if unit.solid_count())
         combos = [(names[i], names[j]) for i in range(len(names)) for j in range(i + 1, len(names))]
-    results = []
+    results: list[dict[str, Any]] = []
+    interferences: list[dict[str, Any]] = []
+    contacts: list[dict[str, Any]] = []
     worst = 0.0
     for first, second in combos:
         if budget.expired():
-            raise ReifyOpError("BUDGET_EXCEEDED", "interference check ran out of time", detail={"checked": len(results), "total": len(combos)})
+            raise ReifyOpError("BUDGET_EXCEEDED", "interference check ran out of time",
+                               detail={"checked": len(results), "total": len(combos), "interferences": interferences, "contacts": contacts})
         shape_a, shape_b = shape_of(ctx, first), shape_of(ctx, second)
         box_a, box_b = shape_a.BoundBox, shape_b.BoundBox
-        if not box_a.intersect(box_b):
+        near = App.BoundBox(box_a)
+        near.enlarge(contact_tol)  # a contact may have a gap, so the boxes need not overlap
+        if not near.intersect(box_b):
             results.append({"a": first, "b": second, "volumeMm3": 0.0, "skipped": "bounding boxes do not overlap"})
             continue
-        common = shape_a.common(shape_b)
-        volume = _round(common.Volume, 6) if not common.isNull() else 0.0
-        worst = max(worst, volume)
-        results.append({"a": first, "b": second, "volumeMm3": volume})
-    return {"kind": "interference", "pairs": results, "value": worst, "unit": "mm3"}
+        volume = 0.0
+        if box_a.intersect(box_b):
+            try:
+                common = shape_a.common(shape_b)
+                volume = _round(common.Volume, 6) if not common.isNull() else 0.0
+            except Exception:
+                volume = 0.0
+        smaller = min(abs(getattr(shape_a, "Volume", 0.0)), abs(getattr(shape_b, "Volume", 0.0)))
+        entry: dict[str, Any] = {"a": first, "b": second, "volumeMm3": volume}
+        if volume > max(tolerance, 1e-9 * smaller):
+            entry["distanceMm"] = 0.0
+            entry["kind"] = "interference"
+            interferences.append(entry)
+            worst = max(worst, volume)
+        else:
+            entry["volumeMm3"] = 0.0 if volume <= tolerance else volume
+            distance = _round(shape_a.distToShape(shape_b)[0], 6)
+            entry["distanceMm"] = distance
+            if distance < contact_tol:
+                entry["kind"] = "contact"
+                contacts.append(entry)
+        results.append(entry)
+    return {
+        "kind": "interference", "pairs": results, "value": worst, "unit": "mm3",
+        "interferences": interferences, "contacts": contacts,
+        "tolerance": {"volumeMm3": tolerance, "relativeToSmallerSolid": 1e-9, "contactMm": contact_tol},
+    }
 
 
 def wall_thickness(ctx: Any, target: str, samples: int, budget: Budget) -> dict[str, Any]:
@@ -300,7 +351,7 @@ def run_check(ctx: Any, kind: str, args: dict[str, Any], budget: Budget) -> dict
     if kind == "clearance":
         return clearance(ctx, _need(args, "a"), _need(args, "b"))
     if kind == "interference":
-        return interference(ctx, args.get("pairs"), bool(args.get("all", False)), budget)
+        return interference(ctx, args.get("pairs"), bool(args.get("all", False)), budget, args)
     if kind == "wall_thickness":
         return wall_thickness(ctx, _need(args, "target"), int(args.get("samples", 200)), budget)
     if kind == "mass":

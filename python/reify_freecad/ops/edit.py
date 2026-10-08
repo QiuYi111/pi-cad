@@ -83,6 +83,22 @@ def _set_constraint(ctx: Any, sketch: Any, name: str, value: Any, target: str) -
     sketch.setDatum(name, App.Units.Quantity(f"{float(value)} {unit}"))
 
 
+def _is_chain_successor(obj: Any, other: Any) -> bool:
+    """True when ``other`` points at ``obj`` only as the next solid feature of the body chain."""
+    if "BaseFeature" not in other.PropertiesList or other.BaseFeature != obj:
+        return False
+    if is_sketch(obj):
+        return False
+    if "Originals" in other.PropertiesList and obj in other.Originals:
+        return False  # a pattern of obj
+    if "Profile" in other.PropertiesList and other.Profile is not None and other.Profile[0] == obj:
+        return False
+    if "Base" in other.PropertiesList and other.Base and other.Base[0] == obj and other.Base[1]:
+        return False  # a fillet or chamfer that names edges of obj
+    expressions = getattr(other, "ExpressionEngine", None) or []
+    return not any(obj.Name in str(expr) for _path, expr in expressions)
+
+
 def delete(ctx: Any, op: dict[str, Any]) -> None:
     target = op["target"]
     obj = ctx.lookup(target)
@@ -92,6 +108,8 @@ def delete(ctx: Any, op: dict[str, Any]) -> None:
     for other in obj.InList:
         path = get_path(other)
         if path and not is_body(other) and other.TypeId != "App::DocumentObjectGroup":
+            if _is_chain_successor(obj, other):
+                continue  # Body.removeObject relinks the BaseFeature chain
             dependents.append(path)
     if is_body(obj):
         dependents.extend(p for p in (get_path(o) for o in obj.Group) if p)

@@ -118,7 +118,11 @@ class PartDocument:
         validation: str = "auto",
         budget_s: float | None = None,
     ) -> PartResult:
-        """Run ops in one transaction; commit, rebuild, and attach the views, or raise with nothing changed."""
+        """Run ops in one transaction; commit, rebuild, and attach the views, or raise with nothing changed.
+
+        A pad, pocket, hole or pattern that does not change the solid's volume fails with ``FEATURE_NO_EFFECT``
+        (volumes and a ``reversed`` hint in the error); a middle feature can be deleted, its successors are relinked.
+        """
         _check_ops(ops)
         response = await request(
             "part-apply", **self._wire(), ops=ops, validation=validation,
@@ -132,8 +136,13 @@ class PartDocument:
         response = await request("part-try", **self._wire(), ops=ops, **({"budgetS": budget_s} if budget_s else {}))
         return await self._present(response, "trial (not applied)", applied=False)
 
-    async def undo(self, *, validation: str = "auto") -> PartResult:
-        response = await request("part-undo", **self._wire(), validation=validation)
+    async def undo(self, *, to_empty: bool = False, validation: str = "auto") -> PartResult:
+        """Go back one revision. A failed ``apply`` is already rolled back: do not undo it.
+
+        Undoing the only revision would leave an empty document, so it raises
+        ``UNDO_WOULD_EMPTY`` unless ``to_empty=True``.
+        """
+        response = await request("part-undo", **self._wire(), validation=validation, **({"toEmpty": True} if to_empty else {}))
         return await self._present(response, "after undo")
 
     async def tree(self) -> dict[str, Any]:
@@ -145,7 +154,7 @@ class PartDocument:
         return await request("part-query", **self._wire(), target=target, **({"what": what} if what else {}))
 
     async def check(self, kind: str, *, budget_s: float | None = None, **args: Any) -> dict[str, Any]:
-        """``clearance(a, b)``, ``interference(pairs=... | all=True)``, ``wall_thickness(target, samples)``, ``mass(target)``."""
+        """``clearance(a, b)``, ``interference(pairs=... | all=True, tolerance=1e-3, contact_tol=0.2)`` (B-Rep ``common``: ``interferences`` have volume, ``contacts`` touch or are closer than ``contact_tol`` mm; ``value`` is the worst interference volume), ``wall_thickness(target, samples)``, ``mass(target)``."""
         return await request("part-check", **self._wire(), kind=kind, args=args, **({"budgetS": budget_s} if budget_s else {}))
 
     async def sweep(

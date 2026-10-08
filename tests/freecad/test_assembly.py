@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_part_backend import HAVE_FREECAD, ROOT  # noqa: E402
 
 if HAVE_FREECAD:
+    import FreeCAD as App
     import Part
     from reify_freecad.worker import Worker
 
@@ -257,6 +258,92 @@ class AssemblyTests(unittest.TestCase):
         self.assertEqual(labels, {"arm/base", "arm/link", "arm/post"})
         link = next(o for o in payload["occurrences"] if o["label"] == "arm/link")
         self.assertAlmostEqual(link["world"]["position"][2], 6.0, places=3, msg="the placement is in the STEP")
+
+def grooved_shaft() -> list[dict[str, Any]]:
+    """A 10 mm x 40 mm shaft with a groove at mid height: the groove cuts its side into two bands."""
+    return [
+        {"op": "sketch", "name": "shaft/profile", "plane": "XY", "shapes": [{"circle": {"center": [0, 0], "diameter": 10}}]},
+        {"op": "pad", "name": "shaft/cyl", "sketch": "shaft/profile", "length": 40},
+        {"op": "sketch", "name": "shaft/groove_profile", "plane": "XY", "offset": 20,
+         "shapes": [{"circle": {"center": [0, 0], "diameter": 14}}, {"circle": {"center": [0, 0], "diameter": 8}}]},
+        {"op": "pocket", "name": "shaft/groove", "sketch": "shaft/groove_profile", "depth": 3},
+    ]
+
+
+class SplitFaceTests(unittest.TestCase):
+    """A.2: faces that one created face is split into keep distinct, stable names."""
+
+    def setUp(self) -> None:
+        self.p = Project()
+        self.addCleanup(self.p.close)
+        self.p.open("parts/shaft.FCStd", "shaft")
+        self.p.call("parts/shaft.FCStd", "apply", ops=grooved_shaft())
+
+    def face_z(self, doc: str, target: str) -> float:
+        faces = self.p.call(doc, "query", target=target, what=["faces"])["faces"]
+        self.assertEqual(len(faces), 1, f"{target} must name exactly one face")
+        return faces[0]["center"][2]
+
+    def test_every_piece_of_a_split_face_has_its_own_name(self) -> None:
+        roles = {item["path"]: item.get("roles") for item in self.p.call("parts/shaft.FCStd", "tree")["bodies"][0]["objects"]}
+        self.assertEqual(roles["shaft/cyl"], ["bottom", "side.0~0", "side.0~1", "top"])
+        self.assertEqual(roles["shaft/groove"], ["floor", "wall.1~0", "wall.1~1"])
+        low = self.face_z("parts/shaft.FCStd", "shaft/cyl/side.0~0")
+        high = self.face_z("parts/shaft.FCStd", "shaft/cyl/side.0~1")
+        self.assertLess(low, 20.0 - 1e-6)
+        self.assertGreater(high, 20.0 + 1e-6)
+        both = self.p.call("parts/shaft.FCStd", "query", target="shaft/cyl/side.0", what=["faces"])["faces"]
+        self.assertEqual(len(both), 2, "the logical face name still selects every piece")
+
+    def test_the_names_survive_dimension_edits(self) -> None:
+        self.p.call("parts/shaft.FCStd", "apply", ops=[
+            {"op": "set", "target": "shaft/cyl", "prop": "Length", "value": 60},
+            {"op": "set", "target": "shaft/groove", "prop": "Length", "value": 5},
+        ])
+        self.assertLess(self.face_z("parts/shaft.FCStd", "shaft/cyl/side.0~0"), self.face_z("parts/shaft.FCStd", "shaft/cyl/side.0~1"))
+        self.assertGreater(self.face_z("parts/shaft.FCStd", "shaft/cyl/side.0~1"), 20.0)
+
+    def test_the_two_halves_of_a_seam_split_cylinder_are_ordered_by_angle(self) -> None:
+        from reify_freecad.roles import _order_key
+
+        frame = (App.Vector(), App.Vector(1, 0, 0), App.Vector(0, 1, 0), App.Vector(0, 0, 1))
+        halves = [Part.makeCylinder(5, 40, App.Vector(), App.Vector(0, 0, 1), 180), Part.makeCylinder(5, 40, App.Vector(), App.Vector(0, 0, 1), 180)]
+        halves[1].rotate(App.Vector(), App.Vector(0, 0, 1), 180)
+        sides = [next(f for f in half.Faces if isinstance(f.Surface, Part.Cylinder)) for half in halves]
+        keys = [_order_key(face, frame) for face in sides]
+        self.assertAlmostEqual(keys[0][1], keys[1][1], places=6)
+        self.assertAlmostEqual(keys[0][2], 90.0, places=3)
+        self.assertAlmostEqual(keys[1][2], 270.0, places=3)
+
+    def test_the_same_part_can_be_linked_twice(self) -> None:
+        self.p.open("assembly/twin.FCStd", "twin")
+        result = self.p.call("assembly/twin.FCStd", "apply", ops=[
+            {"op": "link", "name": "twin/left", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "twin/right", "part": "parts/shaft.FCStd", "body": "shaft", "position": [30, 0, 0]},
+            {"op": "joint", "name": "twin/lift", "type": "prismatic", "flip": True, "value": 5,
+             "parent": {"feature": "twin/left/cyl", "role": "top"}, "child": {"feature": "twin/right/cyl", "role": "bottom"}},
+        ])
+        self.assertIn("twin/right/cyl/side.0~1", result["highlight"]["paths"])
+        for unit in ("twin/left", "twin/right"):
+            for piece in ("side.0~0", "side.0~1"):
+                self.face_z("assembly/twin.FCStd", f"{unit}/cyl/{piece}")
+        self.assertGreater(self.face_z("assembly/twin.FCStd", "twin/right/cyl/side.0~0"), 45.0, "the right shaft stands 5 mm above the left one")
+        clearance = self.p.call("assembly/twin.FCStd", "check", kind="clearance", args={"a": "twin/left", "b": "twin/right"})
+        self.assertAlmostEqual(clearance["value"], 5.0, places=3)
+        none = self.p.call("assembly/twin.FCStd", "check", kind="interference", args={"all": True})
+        self.assertEqual(none["value"], 0.0)
+        self.assertEqual({e["a"] for e in none["pairs"]} | {e["b"] for e in none["pairs"]}, {"twin/left", "twin/right"})
+
+    def test_a_joint_on_a_split_face_names_the_pieces(self) -> None:
+        self.p.open("assembly/twin.FCStd", "twin")
+        error = self.p.error("assembly/twin.FCStd", "apply", ops=[
+            {"op": "link", "name": "twin/left", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "twin/right", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "joint", "name": "twin/fit", "type": "fixed",
+             "parent": {"feature": "twin/left/cyl", "role": "side.0"}, "child": {"feature": "twin/right/cyl", "role": "top"}},
+        ])
+        self.assertEqual(error["code"], "TARGET_AMBIGUOUS")
+        self.assertEqual(sorted(c["face"] for c in error["detail"]["candidates"]), ["twin/left/cyl/side.0~0", "twin/left/cyl/side.0~1"])
 
 
 if __name__ == "__main__":

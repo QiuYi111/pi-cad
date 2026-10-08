@@ -141,7 +141,8 @@ async function committedStep<T>(cwd: string, paths: PartPaths, validation: Valid
   } catch (error) {
     let restored: WorkerBuildResult | null = null;
     try {
-      restored = (await partRequest(cwd, paths, { op: "undo" })) as WorkerBuildResult;
+      // The revision just committed is the one being taken back, even when it was the first one.
+      restored = (await partRequest(cwd, paths, { op: "undo", args: { to_empty: true } })) as WorkerBuildResult;
     } catch { /* reported below */ }
     let registered = false;
     if (restored) {
@@ -157,16 +158,24 @@ async function committedStep<T>(cwd: string, paths: PartPaths, validation: Valid
       ...(restored !== null && !registered ? { note: `the document is at revision ${restored.rev} but its STEP is not registered; apply again to rebuild it` } : {}),
     };
     const rolledBack = restored !== null && registered;
+    const notice = restored !== null
+      ? ` [Rolled back: the document is at revision ${restored.rev}; this failed revision was undone automatically. Do NOT call undo again.]`
+      : "";
+    const hints = [
+      ...(error instanceof PartOpError ? error.hints ?? [] : []),
+      ...(restored !== null ? [`rolled back: the document is at revision ${restored.rev}; undo is not needed`] : []),
+    ];
+    const message = `${error instanceof Error ? error.message : String(error)}${notice}`;
     if (error instanceof PartOpError) {
-      throw new PartOpError(error.message, {
+      throw new PartOpError(message, {
         code: error.code,
         ...(error.target !== undefined ? { target: error.target } : {}),
         detail,
-        ...(error.hints !== undefined ? { hints: error.hints } : {}),
+        ...(hints.length ? { hints } : {}),
         rolledBack,
       });
     }
-    throw new PartOpError(error instanceof Error ? error.message : String(error), { code: "FEATURE_FAILED", detail, rolledBack });
+    throw new PartOpError(message, { code: "FEATURE_FAILED", detail, ...(hints.length ? { hints } : {}), rolledBack });
   }
 }
 
@@ -197,7 +206,7 @@ async function applyOps(cwd: string, request: Extract<PartRequest, { op: "part-a
 
 async function undo(cwd: string, request: Extract<PartRequest, { op: "part-undo" }>) {
   const paths = resolvePartPaths(cwd, request.doc, request.output);
-  const result = (await partRequest(cwd, paths, { op: "undo" })) as WorkerBuildResult;
+  const result = (await partRequest(cwd, paths, { op: "undo", args: { to_empty: request.toEmpty === true } })) as WorkerBuildResult;
   return observeWorkerResult(cwd, paths, result, request.validation ?? "auto");
 }
 
@@ -290,7 +299,44 @@ async function sweep(cwd: string, request: Extract<PartRequest, { op: "part-swee
   return { sweep: jsonValue(summary as never), images: observed.images, ...(observationId ? { observationId } : {}) };
 }
 
+/**
+ * Part operations that change a document and register it as the run's candidate
+ * (`part-open`, `part-apply`, `part-undo`) run one at a time per project. The FreeCAD
+ * worker is a single process that already runs its commands in order, but an operation
+ * is more than one worker command: apply commits, then the STEP is bound, inspected,
+ * rendered and registered as the run's one authoritative candidate, and a failure
+ * after the commit sends an undo. Interleaving those steps across documents (an agent
+ * running `asyncio.gather(doc.apply(...))` over several parts) let one document's
+ * observation, rollback or run-state write overlap another document's commit.
+ * Reads, trials and sweeps only queue behind the worker.
+ */
+const projectLocks = new Map<string, Promise<unknown>>();
+
+async function exclusive<T>(cwd: string, action: () => Promise<T>): Promise<T> {
+  const key = resolve(cwd);
+  const previous = projectLocks.get(key) ?? Promise.resolve();
+  const turn = previous.then(action, action);
+  const tail = turn.then(() => undefined, () => undefined);
+  projectLocks.set(key, tail);
+  try {
+    return await turn;
+  } finally {
+    if (projectLocks.get(key) === tail) projectLocks.delete(key);
+  }
+}
+
 export async function handlePartOperation(cwd: string, request: PartRequest): Promise<JsonValue> {
+  switch (request.op) {
+    case "part-open":
+    case "part-apply":
+    case "part-undo":
+      return exclusive(cwd, () => handleExclusive(cwd, request));
+    default:
+      return handleExclusive(cwd, request);
+  }
+}
+
+async function handleExclusive(cwd: string, request: PartRequest): Promise<JsonValue> {
   switch (request.op) {
     case "part-open": return jsonValue(await openDocument(cwd, request) as never);
     case "part-apply": return jsonValue(await applyOps(cwd, request) as never);

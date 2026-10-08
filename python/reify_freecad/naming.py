@@ -106,12 +106,30 @@ def checked_path(path: object, *, op_index: int | None = None, field: str = "nam
         ) from error
 
 
+#: Concrete replacement for each reserved name, suggested when a feature path ends with it.
+_SAFE_SUFFIX = {
+    "top": "top_plate", "bottom": "bottom_plate", "side": "side_block", "floor": "floor_pan", "wall": "wall_rib",
+    "rim": "rim_ring", "round": "round_edge", "bevel": "bevel_cut", "top_outer": "top_outer_rim",
+    "counterbore_floor": "counterbore_seat", "counterbore_wall": "counterbore_bore", "countersink": "countersink_cut",
+}
+
+
+def suggest_rename(path: str) -> str:
+    """``body/floor`` -> ``body/floor_pan``: the same path with a safe last segment."""
+    head, _, last = path.rpartition("/")
+    base = last.split(".")[0]
+    safe = _SAFE_SUFFIX.get(last) or _SAFE_SUFFIX.get(base) or f"{base}_part"
+    return f"{head}/{safe}" if head else safe
+
+
 def check_not_role_name(path: str) -> None:
     last = path.split("/")[-1]
     if last in ROLE_NAMES or last.split(".")[0] in {"side", "wall"}:
+        suggestion = suggest_rename(path)
         raise ReifyOpError(
             "NAME_CONFLICT",
-            f"'{last}' is a reserved face role name and cannot end a feature path",
+            f"'{last}' is a reserved face role name and cannot end a feature path; use '{suggestion}'",
             target=path,
-            hints=["rename the feature"],
+            detail={"reserved": last, "suggested": suggestion, "reservedNames": sorted(ROLE_NAMES)},
+            hints=[f"rename it to '{suggestion}'", "a name that ends in the role plus a noun is safe (floor_pan, top_plate, wall_rib); the bare role words are not"],
         )

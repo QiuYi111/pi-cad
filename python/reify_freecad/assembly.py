@@ -325,6 +325,7 @@ def find_role_face(session: Any, selector: dict[str, Any]) -> tuple[Unit, Any]:
     """The one face a ``{feature, role}`` selector names, with the unit that owns it."""
     wanted = f"{selector['feature']}/{selector['role']}" if selector.get("role") else selector["feature"]
     hits: list[tuple[Unit, Any]] = []
+    names: list[str] = []
     from .roles import role_matches
 
     for unit in units(session):
@@ -334,6 +335,7 @@ def find_role_face(session: Any, selector: dict[str, Any]) -> tuple[Unit, Any]:
         for key, entries in roles.faces.items():
             if role_matches(key, wanted):
                 hits.extend((unit, entry.face) for entry in entries)
+                names.extend([key] * len(entries))
     if not hits:
         known = [key for unit in units(session) for key in (unit.roles(session).faces if unit.roles(session) else [])]
         from .core import similar_paths
@@ -341,8 +343,8 @@ def find_role_face(session: Any, selector: dict[str, Any]) -> tuple[Unit, Any]:
         raise ReifyOpError("TARGET_NOT_FOUND", f"no face for {selector}", target=wanted, detail={"target": selector, "known": similar_paths(wanted, known)})
     if len(hits) > 1:
         raise ReifyOpError("TARGET_AMBIGUOUS", f"{selector} matches {len(hits)} faces; a joint frame needs one", target=wanted,
-                           detail={"candidates": [{"unit": u.path, "center": [round(c, 3) for c in f.CenterOfMass]} for u, f in hits[:10]]},
-                           hints=["name one instance, for example wall@2"])
+                           detail={"candidates": [{"unit": u.path, "face": name, "center": [round(c, 3) for c in f.CenterOfMass]} for (u, f), name in zip(hits[:10], names)]},
+                           hints=["name one piece or instance, for example " + (names[0] if "~" in names[0] or "@" in names[0] else "wall@2")])
     return hits[0]
 
 

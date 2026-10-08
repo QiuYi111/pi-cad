@@ -205,6 +205,7 @@ class PartWorker {
         if (reopen) await this.send(child, { op: "open", doc: request.doc, args: { ...reopen, create: false, export: false }, budgetS }, budgetS, request.signal);
       }
       const result = await this.send(child, request, budgetS, request.signal);
+      assertSameDocument(request, result);
       if (request.op === "open") this.openInChild.add(request.doc);
       if (request.op === "close") { this.openInChild.delete(request.doc); this.openArgs.delete(request.doc); }
       return result;
@@ -227,7 +228,7 @@ class PartWorker {
         const detail = { budgetS, stderrTail: this.stderrText() };
         this.pending = null;
         finish(() => rejectRequest(new PartOpError(`${request.op} exceeded its budget of ${budgetS}s and was stopped`, {
-          code: "BUDGET_EXCEEDED", detail, hints: ["increase budget_s", "split the check"],
+          code: "BUDGET_EXCEEDED", detail, hints: ["increase budget_s", "split the check", "the worker was restarted; the document is at its last committed revision, so undo is not needed"],
         })));
         this.stop("FreeCAD worker stopped after a budget overrun");
       }, (budgetS + killGraceSeconds()) * 1000);
@@ -356,6 +357,19 @@ class PartWorker {
       (stream as unknown as Record<string, (() => void) | undefined>)[method]?.();
     }
   }
+}
+
+/** A result that names a document (`fcstd`) must name the one the request asked for; never hand back another document's answer. */
+function assertSameDocument(request: PartRequest, result: unknown): void {
+  const named = (result as { fcstd?: unknown } | null)?.fcstd;
+  if (typeof named !== "string" || resolve(named) === resolve(request.doc)) return;
+  throw new PartOpError(`the FreeCAD worker answered ${request.op} for ${named} instead of ${request.doc}`, {
+    code: "DOCUMENT_MISMATCH",
+    target: request.doc,
+    detail: { requested: request.doc, answered: named },
+    hints: ["retry the request", "document requests are processed one at a time per project"],
+    rolledBack: false,
+  });
 }
 
 const workers = new Map<string, PartWorker>();

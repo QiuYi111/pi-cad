@@ -97,11 +97,34 @@ def c_selector(value: Any, index: int | None, where: str) -> dict[str, Any]:
     return selector
 
 
+EDGE_WHICH = ("outer", "inner", "all")
+
+
+def c_edge_selector(value: Any, index: int | None, where: str) -> dict[str, Any]:
+    """An edge selector: a selector plus ``which`` (outer / inner / all) and ``radius`` ({min, max}) for circular edges."""
+    if not isinstance(value, dict):
+        raise fail(index, where, "expected a selector object")
+    extra = {key: value[key] for key in ("which", "radius") if key in value}
+    selector = c_selector({key: item for key, item in value.items() if key not in extra}, index, where)
+    if "which" in extra:
+        selector["which"] = c_enum(*EDGE_WHICH)(extra["which"], index, f"{where}.which")
+    if "radius" in extra:
+        radius = extra["radius"]
+        if is_number(radius):
+            radius = {"min": radius, "max": radius}
+        if not isinstance(radius, dict) or not radius or set(radius) - {"min", "max"} or not all(is_number(v) for v in radius.values()):
+            raise fail(index, f"{where}.radius", "expected a number or {min, max} in mm")
+        if "min" in radius and "max" in radius and radius["min"] > radius["max"]:
+            raise fail(index, f"{where}.radius", "min is above max")
+        selector["radius"] = {key: float(item) for key, item in radius.items()}
+    return selector
+
+
 def c_selectors(value: Any, index: int | None, where: str) -> list[dict[str, Any]]:
     items = value if isinstance(value, list) else [value]
     if not items:
         raise fail(index, where, "expected at least one selector")
-    return [c_selector(item, index, f"{where}[{i}]") for i, item in enumerate(items)]
+    return [c_edge_selector(item, index, f"{where}[{i}]") for i, item in enumerate(items)]
 
 
 def c_pathlist(value: Any, index: int | None, where: str) -> list[str]:
