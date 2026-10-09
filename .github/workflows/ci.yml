@@ -85,6 +85,17 @@ jobs:
       - name: Install FreeCAD (npm run setup:freecad)
         run: bash scripts/bootstrap-freecad.sh
 
+      # reify-asi (Analysis Situs feature recognition) for the DFM geometry
+      # check. Without it the DFM tests run the built-in fallback only.
+      - name: Cache the reify-asi runtime
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pi-cad/runtimes/asi
+          key: asi-${{ runner.os }}-${{ hashFiles('native/reify-asi/**', 'scripts/bootstrap-asi.sh') }}
+
+      - name: Install reify-asi
+        run: bash scripts/bootstrap-asi.sh
+
       # The e2e test needs the uv environment for identity binding and renders;
       # install without the heavy simulation extra.
       - name: Install Node and Python (core only)
@@ -108,6 +119,7 @@ jobs:
           node --import jiti/register tests/build-changes.test.ts
           python3 -m unittest discover -s tests/fusion_addin
           node --import jiti/register tests/transfer-ops.test.ts
+          node --import jiti/register tests/part-dfm.test.ts
           node --import jiti/register tests/transfer-features-e2e.test.ts
 
       - name: End to end through the Agent API

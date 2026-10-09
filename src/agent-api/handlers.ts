@@ -47,6 +47,7 @@ export const AGENT_API_MUTATION_OPERATIONS = {
   "part-query": "probe.run",
   "part-check": "probe.run",
   "part-sweep": "probe.run",
+  "part-dfm": "probe.run",
   "simulation-run": "simulation.run",
   "review-submit": "review.submit",
 } as const satisfies Partial<Record<AgentApiRequest["op"], Operation>>;
@@ -317,7 +318,7 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
       return jsonValue(await buildAndObserve(cwd, request));
     }
     case "part-open": case "part-apply": case "part-undo": case "part-try":
-    case "part-tree": case "part-query": case "part-check": case "part-sweep":
+    case "part-tree": case "part-query": case "part-check": case "part-sweep": case "part-dfm":
       return handlePartOperation(cwd, request);
     case "transfer-status": case "transfer-features": case "transfer-export":
       return handleTransferOperation(cwd, request);

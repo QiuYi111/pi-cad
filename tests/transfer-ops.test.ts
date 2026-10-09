@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 
 import { compareEquivalence, firstDifferingFeature } from "../src/agent-api/transfer-check.ts";
+import { recordDfmSummary } from "../src/agent-api/part-ops.ts";
 import { handleTransferOperation, transferHooks, TRANSFER_DIR } from "../src/agent-api/transfer-ops.ts";
 import { dispatchSidecarRequest } from "../src/authority/sidecar.ts";
 import type { FaceFingerprint, GeometryPayload } from "../src/shared/protocol.ts";
@@ -156,6 +157,28 @@ test("a good export is checked and returns the native file", async () => {
   assert.equal(result.check, "passed");
   assert.equal(result.file, "exports/plate.f3d");
   assert.equal(result.features, 7);
+  assert.equal(result.dfm, null, "a document without a DFM profile has no DFM state");
+});
+
+test("an export states the document's latest DFM state and is not blocked by errors", async () => {
+  await dispatcher({ fusion: "ready", solidworks: "not_installed" });
+  await recordDfmSummary(cwd, "parts/plate.FCStd", {
+    rulepack: "quanzhou.cnc_mill", material: "al6061", layer: "lint+geometry",
+    counts: { error: 2, warn: 1, info: 0, pass: 3 }, geometry: { state: "stale", last_rev: 1 },
+    issues: [{ rule: "hole.min_diameter", severity: "error" }],
+  });
+  answer = async (request) => {
+    await mkdir(join(cwd, "exports"), { recursive: true });
+    await writeFile(join(cwd, request.native), "f3d");
+    await writeFile(join(cwd, request.checkStep), "step");
+    return { ok: true, files: { native: request.native, check_step: request.checkStep }, features_built: 7, feature_volumes: [{ name: "plate/base", volume_mm3: 6000 }] };
+  };
+  const result = await handleTransferOperation(cwd, exportRequest) as any;
+  assert.equal(result.check, "passed");
+  assert.deepEqual(result.dfm, {
+    rulepack: "quanzhou.cnc_mill", material: "al6061", layer: "lint+geometry",
+    counts: { error: 2, warn: 1, info: 0, pass: 3 }, geometry: { state: "stale", last_rev: 1 },
+  });
 });
 
 test("a caller can choose the job id", async () => {

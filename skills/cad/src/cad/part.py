@@ -31,6 +31,36 @@ def _path(value: str | Path) -> tuple[Path, Path]:
 
 
 
+def _number(value: Any) -> str:
+    return f"{value:g}" if isinstance(value, (int, float)) and not isinstance(value, bool) else str(value)
+
+
+def _dfm_target(target: Any) -> str:
+    if isinstance(target, dict):
+        body = target.get("body") or "?"
+        return f"{body}#face{target['face']}" if target.get("face") is not None else str(body)
+    return str(target) if target else "?"
+
+
+def _dfm_issue_line(issue: dict[str, Any]) -> str:
+    measured, limit = issue.get("measured"), issue.get("limit")
+    unit = issue.get("unit") or "mm"
+    if measured is not None and limit is not None:
+        figures = f" ({_number(measured)}/{_number(limit)} {unit})"
+    elif measured is not None:
+        figures = f" ({_number(measured)} {unit})"
+    else:
+        figures = ""
+    source = f" — {issue['source']}" if issue.get("source") else ""
+    return f"- [{issue.get('severity')}] {issue.get('rule')} {_dfm_target(issue.get('target'))}: {issue.get('message', '')}{figures}{source}"
+
+
+def _flagged(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Error and warning issues, errors first, in the order the worker gave them."""
+    flagged = [issue for issue in issues if issue.get("severity") in ("error", "warn")]
+    return sorted(flagged, key=lambda issue: issue.get("severity") != "error")
+
+
 @dataclass(frozen=True, repr=False)
 class PartResult:
     """What one ``open``, ``apply``, ``undo`` or ``try_`` did."""
@@ -58,6 +88,11 @@ class PartResult:
     def warnings(self) -> list[dict[str, Any]]:
         return self.part.get("warnings") or []
 
+    @property
+    def dfm(self) -> dict[str, Any] | None:
+        """The DFM summary of this revision: ``counts``, the first error and warning ``issues``, and ``geometry`` state. None without a profile."""
+        return self.part.get("dfm") or None
+
     def __repr__(self) -> str:
         pieces = [f"rev={self.rev}"]
         if not self.applied:
@@ -76,7 +111,49 @@ class PartResult:
         failed = [item for item in self.intent if item.get("status") != "pass"]
         if failed:
             pieces.append(f"intent failing={len(failed)}")
-        return f"PartResult({', '.join(pieces)})"
+        lines = [f"PartResult({', '.join(pieces)})"]
+        if self.dfm:
+            counts = self.dfm.get("counts") or {}
+            state = (self.dfm.get("geometry") or {}).get("state", "none")
+            layer = self.dfm.get("layer", "lint")
+            lines.append(
+                f"DFM ({self.dfm.get('rulepack')}, {layer}): {counts.get('error', 0)} error, {counts.get('warn', 0)} warn"
+                f" — geometry {state}; run doc.dfm() for the geometry check"
+            )
+            lines.extend(_dfm_issue_line(issue) for issue in _flagged(self.dfm.get("issues") or [])[:3])
+        return "\n".join(lines)
+
+
+@dataclass(frozen=True, repr=False)
+class DfmReport:
+    """What ``doc.dfm()`` found: the lint and geometry layers merged, with the report file and the attached views."""
+
+    rulepack: str
+    material: str
+    rev: int
+    analyzer: str | None
+    #: Every issue, ``info`` included; each has ``rule``, ``severity``, ``layer``, ``target``, ``message``, ``source``.
+    issues: list[dict[str, Any]]
+    counts: dict[str, int]
+    #: Per rule: ``status`` is ``checked`` or ``skipped`` (with ``reason``). A skipped rule is not a pass.
+    coverage: list[dict[str, Any]]
+    report_path: str | None = None
+    #: True when the views show highlighted error or warning faces.
+    highlighted: bool = False
+    #: Names of the attached views, in order.
+    views: tuple[str, ...] = ()
+
+    def __repr__(self) -> str:
+        counts = self.counts
+        lines = [
+            f"DFM ({self.rulepack}, {self.analyzer or 'lint'}): {counts.get('error', 0)} error, "
+            f"{counts.get('warn', 0)} warn, {counts.get('info', 0)} info"
+        ]
+        lines.extend(_dfm_issue_line(issue) for issue in _flagged(self.issues)[:8])
+        skipped = sum(1 for item in self.coverage if item.get("status") == "skipped")
+        if skipped:
+            lines.append(f"skipped: {skipped} rules (see coverage)")
+        return "\n".join(lines)
 
 
 class PartDocument:
@@ -152,6 +229,37 @@ class PartDocument:
     async def query(self, target: str, what: list[str] | None = None) -> dict[str, Any]:
         """Read parameters and geometry facts of a body, feature, or role path (no STEP export)."""
         return await request("part-query", **self._wire(), target=target, **({"what": what} if what else {}))
+
+    async def dfm(self, *, layers: tuple[str, ...] = ("lint", "geometry"), budget_s: float | None = None) -> DfmReport:
+        """Run the DFM check against the last applied revision: ``lint`` (feature rules) and ``geometry`` (analysis of the shape).
+
+        Needs a ``dfm_profile`` op in the document. Writes ``build/dfm/rev-<n>.json`` and attaches the views, with
+        error and warning faces highlighted and labelled by rule id. ``geometry`` is slower and its rules are
+        ``skipped`` (never passed) when the analyzer is unavailable; ``coverage`` says which.
+        """
+        wanted = tuple(layers)
+        if not wanted or any(layer not in ("lint", "geometry") for layer in wanted):
+            raise CadApiError("layers must be a non-empty subset of ('lint', 'geometry')", error_type="PartError", code="OP_SCHEMA_INVALID")
+        response = await request(
+            "part-dfm", **self._wire(), layers=list(wanted), **({"budgetS": budget_s} if budget_s else {}),
+        )
+        report = response.get("report") or {}
+        images = response.get("images") or []
+        highlighted = bool(response.get("highlighted"))
+        counts = report.get("counts") or {}
+        await _attach_images(
+            images, None, highlighted=highlighted,
+            subject=(
+                f"Part {self.path.as_posix()} DFM rev {report.get('rev')} ({report.get('rulepack')}): "
+                f"{counts.get('error', 0)} error, {counts.get('warn', 0)} warn; report {report.get('report_path')}"
+            ),
+        )
+        return DfmReport(
+            rulepack=report.get("rulepack", ""), material=report.get("material", ""), rev=int(report.get("rev", 0)),
+            analyzer=report.get("analyzer"), issues=list(report.get("issues") or []), counts=dict(counts),
+            coverage=list(report.get("coverage") or []), report_path=report.get("report_path"),
+            highlighted=highlighted, views=tuple(str(image.get("name") or "") for image in images),
+        )
 
     async def check(self, kind: str, *, budget_s: float | None = None, **args: Any) -> dict[str, Any]:
         """``clearance(a, b)``, ``interference(pairs=... | all=True, tolerance=1e-3, contact_tol=0.2)`` (B-Rep ``common``: ``interferences`` have volume, ``contacts`` touch or are closer than ``contact_tol`` mm; ``value`` is the worst interference volume), ``wall_thickness(target, samples)``, ``mass(target)``."""

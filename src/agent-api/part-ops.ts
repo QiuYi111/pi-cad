@@ -7,8 +7,8 @@
  * seven mandatory views and registers the evidence. `part-try`, `part-sweep`
  * and the read-only commands never touch run state.
  */
-import { createHash } from "node:crypto";
-import { mkdir, readFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { jsonValue, type JsonValue } from "../harness/canonical.ts";
@@ -24,7 +24,7 @@ import {
   visualPayload,
 } from "../shared/capability.ts";
 import { PartOpError, runPartCommand } from "../shared/freecad-worker.ts";
-import type { GeometryPayload } from "../shared/protocol.ts";
+import type { FaceFingerprint, GeometryPayload } from "../shared/protocol.ts";
 import { sha256File } from "../shared/store.ts";
 import { observeCandidate, projectRelativePath } from "./observe.ts";
 import type { AgentApiRequest } from "./protocol.ts";
@@ -34,6 +34,9 @@ type Validation = "auto" | "fast" | "full";
 
 const HISTORY_DIR = ".pi-cad/cache/part-history";
 const TRY_DIR = ".pi-cad/cache/part-try";
+const DFM_DIR = ".pi-cad/cache/part-dfm";
+/** A DFM issue face is the fingerprint whose centroid lies this close to the issue target centre (mm). */
+const DFM_FACE_MATCH_MM = 0.05;
 
 export interface PartPaths {
   docRel: string;
@@ -64,7 +67,7 @@ export function resolvePartPaths(cwd: string, doc: string, output?: string): Par
 }
 
 /** Test seam: the identity binder can be replaced to make one binding fail. */
-export const partOpsHooks = { bindIdentity };
+export const partOpsHooks = { bindIdentity, inspectGeometry, inspectVisual };
 
 /** Every worker request carries the arguments that open its document, so a restarted sidecar can reopen it. */
 export function partRequest(cwd: string, paths: PartPaths, request: Omit<Parameters<typeof runPartCommand>[1], "doc" | "ensureOpen">, body?: string) {
@@ -98,6 +101,7 @@ async function activeRun(cwd: string) {
 
 /** Bind identity and observe a freshly written STEP; returns the fields shared by open, apply and undo. */
 async function observeWorkerResult(cwd: string, paths: PartPaths, result: WorkerBuildResult, validation: Validation) {
+  if ("dfm" in result) await recordDfmSummary(cwd, paths.docRel, result.dfm);
   if (!result.step || !result.declarations) {
     return { part: jsonValue(result as never), images: [], changes: null, highlighted: false, artifact: null };
   }
@@ -177,6 +181,35 @@ async function committedStep<T>(cwd: string, paths: PartPaths, validation: Valid
     }
     throw new PartOpError(message, { code: "FEATURE_FAILED", detail, ...(hints.length ? { hints } : {}), rolledBack });
   }
+}
+
+/** The DFM summary the worker reports with every build result: enough for export to state the geometry state and error count. */
+function compactDfm(summary: unknown): Record<string, unknown> | null {
+  if (!summary || typeof summary !== "object") return null;
+  const { rulepack, material, layer, counts, geometry } = summary as Record<string, unknown>;
+  return { rulepack, material, layer, counts, geometry };
+}
+
+function dfmSummaryPath(cwd: string, docRel: string): string {
+  const key = createHash("sha256").update(docRel).digest("hex").slice(0, 16);
+  return resolve(cwd, DFM_DIR, `${key}.json`);
+}
+
+export async function recordDfmSummary(cwd: string, docRel: string, summary: unknown): Promise<void> {
+  const path = dfmSummaryPath(cwd, docRel);
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${randomBytes(4).toString("hex")}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(compactDfm(summary))}\n`, "utf8");
+  await rename(temporary, path);
+}
+
+/**
+ * The latest DFM state of a document: the summary from its last build, or from its last
+ * geometry run (`part-dfm`). Null when the document has no DFM profile, or was never built.
+ */
+export async function readDfmSummary(cwd: string, docRel: string): Promise<JsonValue | null> {
+  try { return JSON.parse(await readFile(dfmSummaryPath(cwd, docRel), "utf8")) as JsonValue; }
+  catch { return null; }
 }
 
 function budget(request: { budgetS?: number }): { budgetS?: number } {
@@ -277,6 +310,122 @@ async function tryOps(cwd: string, request: Extract<PartRequest, { op: "part-try
   return { part: jsonValue(result as never), images: observed.images, changes: observed.changes, highlighted: observed.highlighted, ...(observationId ? { observationId } : {}) };
 }
 
+/** What the worker's `dfm` command returns (see python/reify_freecad/worker.py cmd_dfm). */
+interface WorkerDfmReport {
+  rulepack: string;
+  material: string;
+  rev: number;
+  analyzer: string | null;
+  counts: Record<string, number>;
+  issues: Array<{ severity?: string; target?: unknown; [key: string]: unknown }>;
+  coverage: Array<Record<string, unknown>>;
+  highlight: unknown;
+  annotations: Array<{ text: string; at: [number, number, number] }>;
+  report_path: string;
+}
+
+/** Distance from a point to the surface of a fingerprinted face, or null when the fingerprint has no surface model. */
+function surfaceResidual(face: FaceFingerprint, point: number[]): number | null {
+  const offset = [point[0]! - face.c[0], point[1]! - face.c[1], point[2]! - face.c[2]];
+  if (face.type === "PLANE" && face.n) {
+    const length = Math.hypot(face.n[0]!, face.n[1]!, face.n[2]!) || 1;
+    return Math.abs((offset[0]! * face.n[0]! + offset[1]! * face.n[1]! + offset[2]! * face.n[2]!) / length);
+  }
+  if ((face.type === "CYLINDER" || face.type === "CONE") && face.ax && face.ap && face.r !== undefined) {
+    const axis = face.ax;
+    const axisLength = Math.hypot(axis[0]!, axis[1]!, axis[2]!) || 1;
+    const unit = axis.map((value) => value / axisLength);
+    const toPoint = [point[0]! - face.ap[0]!, point[1]! - face.ap[1]!, point[2]! - face.ap[2]!];
+    const along = toPoint[0]! * unit[0]! + toPoint[1]! * unit[1]! + toPoint[2]! * unit[2]!;
+    const perpendicular = [0, 1, 2].map((k) => toPoint[k]! - along * unit[k]!);
+    return Math.abs(Math.hypot(perpendicular[0]!, perpendicular[1]!, perpendicular[2]!) - face.r);
+  }
+  return null;
+}
+
+/**
+ * The DFM geometry check. Issues that name a face are highlighted on the current STEP, the
+ * same way a build highlights its changed faces, and every view is attached: the image is
+ * always part of the result.
+ */
+async function dfmOperation(cwd: string, request: Extract<PartRequest, { op: "part-dfm" }>) {
+  const paths = resolvePartPaths(cwd, request.doc, request.output);
+  const layers = request.layers;
+  const report = (await partRequest(cwd, paths, {
+    op: "dfm", args: layers ? { layers } : {}, ...budget(request),
+  })) as WorkerDfmReport;
+  const reportAbs = resolve(cwd, projectRelativePath(cwd, report.report_path));
+  const runDir = dirname(reportAbs);
+  const geometryRel = projectRelativePath(cwd, join(runDir, `rev-${report.rev}.geometry.json`));
+  const viewsRel = projectRelativePath(cwd, join(runDir, `rev-${report.rev}-views`));
+
+  const geometry = await partOpsHooks.inspectGeometry(cwd, paths.outputRel, geometryRel);
+  if (!geometry.ok) {
+    throw new PartOpError(String((geometry.payload as { error?: string } | undefined)?.error ?? "geometry inspection for the DFM report failed"), { code: "FEATURE_FAILED", detail: { freecadStatus: "inspection failed" } });
+  }
+  const faces: FaceFingerprint[] = (geometry.payload as GeometryPayload | undefined)?.faceFingerprints ?? [];
+  const annotations = report.annotations ?? [];
+  const flagged = new Set<number>();
+  for (const issue of report.issues) {
+    if (issue.severity !== "error" && issue.severity !== "warn") continue;
+    const centre = (issue.target as { centre?: unknown } | null)?.centre;
+    if (Array.isArray(centre) && centre.length === 3) {
+      // A target with a centre names a face: take the face whose centroid is nearest.
+      let best = -1;
+      let bestDistance = Infinity;
+      faces.forEach((face, index) => {
+        const distance = Math.hypot(face.c[0] - Number(centre[0]), face.c[1] - Number(centre[1]), face.c[2] - Number(centre[2]));
+        if (distance < bestDistance) { best = index; bestDistance = distance; }
+      });
+      if (best >= 0 && bestDistance <= DFM_FACE_MATCH_MM) flagged.add(best);
+      continue;
+    }
+    // A feature-path target has no centre: the worker's label for that rule sits on a face of the feature.
+    // Every face that the label point lies on (within DFM_FACE_MATCH_MM) is highlighted.
+    for (const note of annotations) {
+      if (note.text !== issue.rule) continue;
+      faces.forEach((face, index) => {
+        const residual = surfaceResidual(face, note.at);
+        if (residual !== null && residual <= DFM_FACE_MATCH_MM) flagged.add(index);
+      });
+    }
+  }
+  const highlight = [...flagged].sort((a, b) => a - b).map((index) => faces[index]!);
+
+  const visual = await partOpsHooks.inspectVisual(cwd, paths.outputRel, viewsRel, {
+    ...(highlight.length ? { highlight } : {}),
+    ...(annotations.length ? { annotations } : {}),
+  });
+  if (!visual.ok) {
+    throw new PartOpError(String((visual.payload as { error?: string } | undefined)?.error ?? "rendering of the DFM report failed"), { code: "FEATURE_FAILED", detail: { freecadStatus: "rendering failed" } });
+  }
+  const views = visualPayload(visual).views ?? [];
+  const images = await Promise.all(views.map(async (view) => ({
+    name: view.name,
+    data: (await readFile(view.path)).toString("base64"),
+    mimeType: "image/png",
+  })));
+
+  const ranGeometry = !layers || layers.includes("geometry");
+  if (ranGeometry) {
+    await recordDfmSummary(cwd, paths.docRel, {
+      rulepack: report.rulepack, material: report.material, layer: "lint+geometry", counts: report.counts,
+      geometry: { state: "fresh", last_rev: report.rev },
+    });
+  }
+  const observationId = await recordObservation(cwd, `part DFM check: ${paths.docRel}`, [
+    { key: "document", value: paths.docRel },
+    { key: "counts", value: JSON.stringify(report.counts) },
+    { key: "reportPath", value: projectRelativePath(cwd, reportAbs) },
+  ], views);
+  return {
+    report: { ...report, report_path: projectRelativePath(cwd, reportAbs) } as never,
+    images,
+    highlighted: highlight.length > 0,
+    ...(observationId ? { observationId } : {}),
+  };
+}
+
 async function sweep(cwd: string, request: Extract<PartRequest, { op: "part-sweep" }>) {
   const paths = resolvePartPaths(cwd, request.doc, request.output);
   const key = createHash("sha256").update(JSON.stringify([paths.docRel, request.param, request.range, request.step, request.check])).digest("hex").slice(0, 16);
@@ -343,6 +492,7 @@ async function handleExclusive(cwd: string, request: PartRequest): Promise<JsonV
     case "part-undo": return jsonValue(await undo(cwd, request) as never);
     case "part-try": return jsonValue(await tryOps(cwd, request) as never);
     case "part-sweep": return jsonValue(await sweep(cwd, request) as never);
+    case "part-dfm": return jsonValue(await dfmOperation(cwd, request) as never);
     case "part-tree": {
       const paths = resolvePartPaths(cwd, request.doc, request.output);
       return jsonValue(await partRequest(cwd, paths, { op: "tree" }) as never);

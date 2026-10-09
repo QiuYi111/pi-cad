@@ -19,6 +19,7 @@ await doc.tree() -> dict                                     # parameters, sketc
 await doc.query(target, what=None) -> dict                   # what: params, bbox, volume, area, centroid, faces
 await doc.check(kind, *, budget_s=None, **args) -> dict      # clearance, interference, wall_thickness, mass
 await doc.sweep(param, range, *, step, check, refine=False, budget_s=None) -> dict
+await doc.dfm(*, layers=("lint", "geometry"), budget_s=None) -> DfmReport   # the DFM geometry check; see "Geometry check"
 ```
 
 - `path` is a project path ending in `.FCStd`. `output` defaults to `build/<stem>.step`. `body` is the semantic path of the first body (default: the file name).
@@ -140,6 +141,19 @@ With a `dfm_profile` set, every `apply` and `try` result has a `dfm` field: `{"r
 Holes and pockets repeated by a `linear_pattern`, `polar_pattern` or `mirror` are linted once, on the original's path: the copies share its declared parameters, so an issue names the feature to edit, and the lint fact carries `pattern` (the pattern's path) and `instances` (the number of copies).
 
 The lint also reads the threaded hole's length (`thread_depth`), its tap drill and its drill point. A blind hole with a cone bottom is info (`hole.bottom_shape`). A `dimension` requirement whose tolerance is tighter than GB/T 1804-m for its nominal size is info (`tol.general`), because the platform machines to m grade.
+
+## Geometry check (`doc.dfm()`)
+
+```python
+report = await doc.dfm()                      # layers=("lint", "geometry") by default
+report = await doc.dfm(layers=("lint",))      # feature rules only; quick
+```
+
+- It needs a `dfm_profile` op in the document and checks the last applied revision, `report.rev`. It writes `build/dfm/rev-<n>.json` (`report.report_path`) and attaches the views, with error and warning faces highlighted and labelled by rule id.
+- `report.issues` has every issue, info included. `report.counts` has `error`, `warn`, `info` and `pass`. `report.coverage` has one entry per rule with `status` `checked` or `skipped` (and a `reason`). A skipped rule is not a pass.
+- `report.analyzer` is `analysis_situs`, or `builtin` when the analyzer is missing (the rules that need it are then skipped). It is `None` for a lint-only run.
+- `print(report)` shows the counts, then up to eight error and warning lines, then the number of skipped rules.
+- `PartResult.dfm` (after each `apply`) carries the lint summary. Its `geometry.state` is `none` until `doc.dfm()` has run, `fresh` for the revision it ran on, and `stale` after a later change. Export results carry the same state and error count in `dfm`. v1 never blocks an export on it.
 
 ## Assemblies
 

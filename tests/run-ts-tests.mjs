@@ -80,6 +80,7 @@ await jiti.import("./build-changes.test.ts", { default: true });
 await jiti.import("./freecad-worker.test.ts", { default: true });
 await jiti.import("./part-ops-authorization.test.ts", { default: true });
 await jiti.import("./part-e2e.test.ts", { default: true });
+await jiti.import("./part-dfm.test.ts", { default: true });
 await jiti.import("./simulation-v2-protocol.test.ts", { default: true });
 await jiti.import("./simulation-v2-store.test.ts", { default: true });
 await jiti.import("./simulation-v2-runtime.test.ts", { default: true });
