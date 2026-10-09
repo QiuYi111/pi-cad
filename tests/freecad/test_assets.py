@@ -32,6 +32,13 @@ class AssetTests(unittest.TestCase):
         wall = harness.call("query", target="bracket/mount_hole/wall", what=["faces"])["faces"][0]
         self.assertAlmostEqual(wall["radius"], 4.0, places=3)
 
+    def test_dfm_asset(self) -> None:
+        harness = Harness("bracket", "bracket")
+        self.addCleanup(harness.close)
+        result = harness.apply(ops("freecad-part", "dfm.ops.json"))
+        self.assertEqual(result["dfm"]["rulepack"], "quanzhou.cnc_mill")
+        self.assertEqual((result["dfm"]["counts"]["error"], result["dfm"]["counts"]["warn"]), (0, 0), result["dfm"]["issues"])
+
     def test_assembly_asset(self) -> None:
         project = Project()
         self.addCleanup(project.close)

@@ -141,3 +141,6 @@ Known baseline failure before DFM work: `test_assembly.AssemblyTests.test_the_ex
 - Lint coverage status for executed rules is `"checked"`.
 - `loop_metrics` takes `{"geometry": [item dicts], "orient": [...]}`.
 - With `thread` set, FreeCAD stores the tap drill in `Diameter` (spike E0-c).
+- WP5a: hole op fields `thread_depth` and `drill_point` (`flat`/`angled`, blind holes only). Hole facts add
+  `thread_depth_type`, `pattern`, `instances` (pattern copies share the original's path). Rulepack search
+  path env `PI_CAD_DFM_RULEPACK_PATH`. `tables.gb1804_m` for tol.general.

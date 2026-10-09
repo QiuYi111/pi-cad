@@ -35,6 +35,8 @@ PLAN_RULE_IDS = [
 
 MILL = "quanzhou.cnc_mill"
 TURN = "quanzhou.cnc_turn"
+ROOT = Path(__file__).resolve().parents[2]
+REFERENCE = ROOT / "skills" / "design-for-manufacturing" / "references" / "quanzhou-cnc-mill.md"
 
 
 def _pack_data() -> dict:
@@ -203,6 +205,10 @@ class RenderReferenceTests(unittest.TestCase):
 
     def test_render_is_deterministic(self) -> None:
         self.assertEqual(render_reference.render(MILL), render_reference.render(MILL))
+
+    def test_committed_reference_is_the_generated_one(self) -> None:
+        # Regenerate with: python -m reify_freecad.dfm.render_reference quanzhou.cnc_mill > <that file>
+        self.assertEqual(REFERENCE.read_text(encoding="utf-8"), render_reference.render(MILL))
 
 
 if __name__ == "__main__":

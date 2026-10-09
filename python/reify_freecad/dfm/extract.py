@@ -3,6 +3,12 @@
 Reuses ``transfer`` (sketch frames, sketch geometry, placed shapes, bounding boxes) by import.
 Hole properties are read here, not through ``transfer._hole``, because that function refuses
 features (modeled threads, for example) that lint must report on.
+
+Pattern instances: a linear, polar or mirror pattern repeats its originals with the same declared
+parameters. The lint facts keep one entry per original (same semantic path, so an issue targets the
+feature the agent edits, and ``lint.evaluate_full`` reports each rule once per target). The entry
+gets ``pattern`` (the pattern's path) and ``instances`` (the number of copies, the original included).
+Instance positions are not computed; no lint rule needs them.
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from .profile import get_profile
 from .sketch_metrics import loop_metrics
 
 _DRESSUP = {"PartDesign::Fillet": "fillet", "PartDesign::Chamfer": "chamfer"}
+_PATTERNS = ("PartDesign::LinearPattern", "PartDesign::PolarPattern", "PartDesign::Mirrored")
 
 
 def extract_facts(ctx: Any) -> dict[str, Any]:
@@ -79,7 +86,19 @@ def extract_facts(ctx: Any) -> dict[str, Any]:
             except Exception as error:  # noqa: BLE001 - one unreadable feature must not stop the lint
                 facts["unreadable"].append({"path": path, "reason": f"{type(error).__name__}: {error}"})
         facts["sharp_edges"].append({"body": unit.path, "count": _sharp_edges(session, unit)})
+    for pattern_path, pattern in facts.pop("_patterns", []):
+        _annotate_pattern(facts, pattern_path, pattern)
     return facts
+
+
+def _annotate_pattern(facts: dict[str, Any], pattern_path: str, pattern: Any) -> None:
+    """Mark the holes and pockets a pattern repeats (first pattern wins when several repeat one feature)."""
+    count = 2 if pattern.TypeId == "PartDesign::Mirrored" else int(pattern.Occurrences)
+    originals = {get_path(original) for original in pattern.Originals}
+    for entry in facts["holes"] + facts["pockets"]:
+        if entry["path"] in originals and entry["pattern"] is None:
+            entry["pattern"] = pattern_path
+            entry["instances"] = count
 
 
 def _requirements(session: Any) -> list[dict[str, Any]]:
@@ -133,6 +152,8 @@ def _feature(obj: Any, path: str, body: str, box: Any, sketches: dict[str, Any],
         facts["pads"].append(_pad(obj, path, body, box, sketches))
     elif tid in _DRESSUP:
         facts["fillets" if _DRESSUP[tid] == "fillet" else "chamfers"].append(_dressup(obj, path, body, box))
+    elif tid in _PATTERNS:
+        facts.setdefault("_patterns", []).append((path, obj))
 
 
 def _hole(obj: Any, path: str, body: str, box: Any, sketches: dict[str, Any]) -> dict[str, Any]:
@@ -144,9 +165,12 @@ def _hole(obj: Any, path: str, body: str, box: Any, sketches: dict[str, Any]) ->
     depth = None if through else float(obj.Depth.Value)
     threaded = bool(obj.Threaded)
     thread_size = str(obj.ThreadSize).partition("x")[0] if threaded else None
-    if threaded and str(obj.ThreadDepthType) == "Hole Depth":
+    thread_depth_type = str(obj.ThreadDepthType) if threaded else None
+    if threaded and thread_depth_type == "Hole Depth":
+        # the thread runs the whole hole; FreeCAD's stored value is arbitrary for a through hole
         thread_depth = depth if depth is not None else _extent(axis, box)
     elif threaded:
+        # "Dimension" (the value the op set, clamped to the hole depth) or "Tapped (DIN76)" (computed by FreeCAD)
         thread_depth = float(obj.ThreadDepth.Value)
     else:
         thread_depth = None
@@ -157,12 +181,13 @@ def _hole(obj: Any, path: str, body: str, box: Any, sketches: dict[str, Any]) ->
         "length": _extent(axis, box) if through else depth,
         "depth_type": "through" if through else "blind",
         "threaded": threaded, "model_thread": bool(obj.ModelThread), "thread_size": thread_size,
-        "thread_depth": thread_depth,
+        "thread_depth": thread_depth, "thread_depth_type": thread_depth_type,
         "cut_type": str(obj.HoleCutType),
         "cut_diameter": float(obj.HoleCutDiameter.Value), "cut_depth": float(obj.HoleCutDepth.Value),
         "countersink_angle": float(obj.HoleCutCountersinkAngle.Value),
         "drill_point": str(obj.DrillPoint).lower(),
         "positions": world, "axis": [round(c, 9) for c in axis],
+        "pattern": None, "instances": 1,
     }
 
 
@@ -172,7 +197,8 @@ def _pocket(obj: Any, path: str, body: str, box: Any, sketches: dict[str, Any]) 
     axis = list(n) if obj.Reversed else [-c for c in n]
     through = str(obj.Type) == "ThroughAll"
     depth = _extent(axis, box) if through else float(obj.Length.Value)
-    return {"path": path, "body": body, "depth": depth, "through": through, "loops": _loops(entry["geometry"])}
+    return {"path": path, "body": body, "depth": depth, "through": through, "loops": _loops(entry["geometry"]),
+            "pattern": None, "instances": 1}
 
 
 def _pad(obj: Any, path: str, body: str, box: Any, sketches: dict[str, Any]) -> dict[str, Any]:

@@ -37,6 +37,10 @@ def _is_standard(thickness: float, standard: list[float]) -> bool:
     return any(abs(thickness - value) <= _THICKNESS_EPS for value in standard)
 
 
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def _nominal_mm(size: str | None) -> float | None:
     match = re.match(r"^M(\d+(?:\.\d+)?)$", size or "")
     return float(match.group(1)) if match else None
@@ -130,13 +134,43 @@ def stock_surface_treatment(facts, rule, pack):
     return [_issue(rule, pack, facts["part"], message=f"{material}: a surface treatment is recommended")]
 
 
+_GB_RANGE = re.compile(r"^(>)?(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$")
+
+
+def _gb1804_tolerance(table: dict[str, Any], nominal: float) -> float | None:
+    """Class m tolerance (±mm) for a nominal size, from keys "a-b" (a <= n <= b) or ">a-b" (a < n <= b)."""
+    for key, tolerance in table.items():
+        match = _GB_RANGE.match(str(key))
+        if match is None:
+            continue
+        low, high = float(match.group(2)), float(match.group(3))
+        above_low = nominal > low + _EPS if match.group(1) else nominal >= low - _EPS
+        if above_low and nominal <= high + _EPS:
+            return float(tolerance)
+    return None
+
+
 def tol_general(facts, rule, pack):
-    dimensions = [r for r in facts["requirements"] if r["kind"] == "dimension" and r["tolerance"] > 0]
-    if not dimensions:
+    table = pack.tables.get("gb1804_m")
+    if table is None:
+        _skip(facts, f"{rule.params['standard']} table is not in the rulepack")
         return []
-    if "gb1804_m" not in pack.tables:
-        _skip(facts, f"{rule.params['standard']} m-grade table is not in the rulepack")
-    return []
+    issues = []
+    for req in facts["requirements"]:
+        if req["kind"] != "dimension" or not req["tolerance"] > 0 or not _is_number(req["limit"]):
+            continue
+        nominal = abs(float(req["limit"]))
+        standard = _gb1804_tolerance(table, nominal)
+        if standard is None:
+            _skip(facts, f"{rule.params['standard']} has no row for a {nominal:g} mm dimension")
+            continue
+        if req["tolerance"] < standard - _EPS:
+            issues.append(_issue(
+                rule, pack, req["path"], measured=req["tolerance"], limit=standard,
+                message=f"{req['path']}: tolerance ±{req['tolerance']:g} mm is tighter than {rule.params['standard']} "
+                        f"±{standard:g} mm for a {nominal:g} mm dimension; agree a fine-hole compensation or confirm with the vendor",
+            ))
+    return issues
 
 
 def tol_precision_hole(facts, rule, pack):

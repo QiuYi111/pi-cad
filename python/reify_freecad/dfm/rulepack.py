@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,8 @@ from ..errors import ReifyOpError
 
 SCHEMA_ID = "reify.dfm.rulepack/1"
 PACK_DIR = Path(__file__).resolve().parent / "rulepacks"
+#: Folders searched before PACK_DIR, separated by os.pathsep. A pack in one of them with the same id wins.
+SEARCH_ENV = "PI_CAD_DFM_RULEPACK_PATH"
 
 _LAYERS = frozenset({"lint", "geometry"})
 _SEVERITIES = frozenset({"error", "warn", "info"})
@@ -47,15 +50,35 @@ class Rulepack:
     rules: list[Rule] = field(default_factory=list)
 
 
+_seen_search: tuple[str, Path] | None = None  # (environment value, built-in folder) the cache was filled for
+
+
+def search_path() -> tuple[Path, ...]:
+    """Folders searched for ``<id>.yaml``: those in ``PI_CAD_DFM_RULEPACK_PATH``, then the built-in folder.
+
+    When the environment value or the built-in folder changes, the cached packs are dropped.
+    """
+    global _seen_search
+    raw = os.environ.get(SEARCH_ENV, "")
+    key = (raw, PACK_DIR)
+    if key != _seen_search:
+        _load.cache_clear()
+        _seen_search = key
+    folders = [Path(part) for part in raw.split(os.pathsep) if part.strip()]
+    return (*folders, PACK_DIR)
+
+
 def available_rulepacks() -> list[str]:
-    """Ids of the rulepacks shipped next to this module (file stem is the id)."""
-    if not PACK_DIR.is_dir():
-        return []
-    return sorted(path.name[: -len(".yaml")] for path in PACK_DIR.glob("*.yaml"))
+    """Ids of the rulepacks found in the search path (file stem is the id), sorted."""
+    ids: set[str] = set()
+    for folder in search_path():
+        if folder.is_dir():
+            ids.update(path.name[: -len(".yaml")] for path in folder.glob("*.yaml"))
+    return sorted(ids)
 
 
 def load_rulepack(rulepack_id: str) -> Rulepack:
-    """Load and validate a shipped rulepack. Cached per process."""
+    """Load and validate a rulepack from the search path (the first folder that has it). Cached per process."""
     if not isinstance(rulepack_id, str) or rulepack_id not in available_rulepacks():
         raise ReifyOpError(
             "DFM_RULEPACK_UNKNOWN",
@@ -63,15 +86,20 @@ def load_rulepack(rulepack_id: str) -> Rulepack:
             target=str(rulepack_id),
             hints=available_rulepacks(),
         )
-    return _load(rulepack_id)
+    for folder in search_path():
+        path = folder / f"{rulepack_id}.yaml"
+        if path.is_file():
+            return _load(str(path), rulepack_id)
+    raise ReifyOpError("DFM_RULEPACK_UNKNOWN", f"unknown rulepack {rulepack_id!r}", target=str(rulepack_id), hints=available_rulepacks())
 
 
 @functools.lru_cache(maxsize=None)
-def _load(rulepack_id: str) -> Rulepack:
-    path = PACK_DIR / f"{rulepack_id}.yaml"
+def _load(path_text: str, rulepack_id: str) -> Rulepack:
+    path = Path(path_text)
     try:
+        # libyaml's loader: about 10x faster than the pure one, which would eat the lint budget on first use
         with path.open(encoding="utf-8") as handle:
-            data = yaml.safe_load(handle)
+            data = yaml.load(handle, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
     except (OSError, yaml.YAMLError) as error:
         raise _invalid(path, f"cannot parse YAML: {error}") from error
     return validate_rulepack(data, path=path, expected_id=rulepack_id)

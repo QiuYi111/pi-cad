@@ -67,8 +67,13 @@ def hole(ctx: Any, op: dict[str, Any]) -> None:
     obj.DepthType = "ThroughAll" if through else "Dimension"
     if not through:
         ctx.set_value(obj, "Depth", op["depth"])
+        if "drill_point" in op:
+            obj.DrillPoint = {"flat": "Flat", "angled": "Angled"}[op["drill_point"]]
     if "thread" in op:
         _thread(obj, op)
+    if "thread_depth" in op:
+        obj.ThreadDepthType = "Dimension"
+        ctx.set_value(obj, "ThreadDepth", op["thread_depth"])
     if "counterbore" in op:
         spec = _dict(op["counterbore"], ("diameter", "depth"), "counterbore")
         obj.HoleCutType = "Counterbore"
