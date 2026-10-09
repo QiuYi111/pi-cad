@@ -133,7 +133,7 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
     ],
     parameters: MECHANICAL_ACTION_PARAMETERS.cad_probe,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      return executeCadProbe(ctx.cwd, params, signal);
+      return executeCadProbe(ctx.cwd, params, mechanicalRegistries, signal);
     },
   });
 

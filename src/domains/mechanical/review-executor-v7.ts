@@ -10,6 +10,7 @@ import {
 
 import type { FreshReviewExecutorV1, ReviewVerdictV1 } from "../../harness/review.ts";
 import { CadProbeParametersSchema, executeCadProbe, type CadProbeParams } from "../../modules/probe/tool.ts";
+import { mechanicalRegistries } from "./registries.ts";
 
 function modelLabel(model: unknown): string {
   if (!model || typeof model !== "object") return "unavailable";
@@ -63,7 +64,7 @@ export function mechanicalReviewExecutorV7(ctx: ExtensionContext): FreshReviewEx
           const args = params.args ?? {};
           if (["artifact", "before", "after", "output"].some((key) => key in args)) return { content: [{ type: "text" as const, text: "Reviewer may not override subject paths." }], isError: true };
           probes += 1;
-          return executeCadProbe(ctx.cwd, { ...params, subject: "current" });
+          return executeCadProbe(ctx.cwd, { ...params, subject: "current" }, mechanicalRegistries);
         },
       });
       const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: true, maxRetries: 1 } });
