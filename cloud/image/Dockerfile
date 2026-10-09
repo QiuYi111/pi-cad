@@ -43,9 +43,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # 1. System packages.
 #    bzip2 is needed by scripts/bootstrap-freecad.sh (micromamba archive).
 #    xz-utils is needed to unpack the Node tarball.
+#    libgl1 and libx11-6: the OCP kernel in python/.venv (build123d) links libGL.so.1 and libX11.so.6.
+#    Ubuntu 24.04's libglu1-mesa depends on libopengl0 only and does not pull them in.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      bubblewrap libglu1-mesa ripgrep git ca-certificates curl tini bzip2 xz-utils \
+      bubblewrap libglu1-mesa libgl1 libx11-6 ripgrep git ca-certificates curl tini bzip2 xz-utils \
  && rm -rf /var/lib/apt/lists/*
 
 # 2. Non-root user. Ubuntu 24.04 ships a user with uid 1000; remove it first.
