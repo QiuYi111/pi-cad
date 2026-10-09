@@ -28,6 +28,14 @@ def get_profile(session: Any) -> dict[str, Any] | None:
     return {"rulepack": obj.Rulepack, "material": obj.Material or None, "overrides": overrides}
 
 
+def density_of(session: Any) -> float:
+    """The DFM profile's material density when the document sets one, else the Params density."""
+    profile = get_profile(session)
+    if profile and profile["material"]:
+        return float(load_rulepack(profile["rulepack"]).materials[profile["material"]]["density_g_cm3"])
+    return session.density()
+
+
 def dfm_profile(ctx: Any, op: dict[str, Any]) -> None:
     doc = ctx.doc
     existing = doc.getObject(PROFILE_NAME)

@@ -78,13 +78,14 @@ class Worker:
 
     # ------------------------------------------------------------ commands
     def cmd_open(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
+        from .dfm import services as dfm_services
         from .session import DocumentSession
 
         existing = self.sessions.get(doc)
         if existing is not None:
             existing.close()
         self.registry.adopt(Path(doc))  # one session owns a document, even when an assembly linked it first
-        session = DocumentSession(Path(doc), Path(args["output"]), Path(args["historyDir"]), args.get("body"))
+        session = DocumentSession(Path(doc), Path(args["output"]), Path(args["historyDir"]), args.get("body"), dfm=dfm_services)
         session.registry = self.registry
         session.root = Path(args["root"]) if args.get("root") else Path(doc).parent
         created = session.open(bool(args.get("create", False)))

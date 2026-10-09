@@ -27,6 +27,7 @@ import Part
 
 from .core import JOINTS_NAME, KIND_PROPERTY, bodies, body_features, get_path
 from .errors import ReifyOpError
+from .exprs import evaluate_constant, is_expression, rewrite_expression
 from .roles import BodyRoles
 
 OCCURRENCE = "occurrence"
@@ -233,6 +234,26 @@ def open_source(ctx: Any, part: str, body_path: str) -> tuple[Any, Any]:
     return source, body
 
 
+def set_pose(ctx: Any, obj: Any, op: dict[str, Any]) -> None:
+    position = op.get("position")
+    rotation = op.get("rotation")
+    base = obj.Placement.Base
+    current_rotation = obj.Placement.Rotation
+    if position is not None:
+        base = App.Vector(*[evaluate_constant(v) or 0.0 for v in position])
+    if rotation is not None:
+        axis = App.Vector(*[evaluate_constant(v) or 0.0 for v in rotation["axis"]])
+        angle = evaluate_constant(rotation["angle"]) or 0.0
+        current_rotation = App.Rotation(axis, angle)
+    obj.Placement = App.Placement(base, current_rotation)
+    if position is not None:
+        for axis_name, value in zip("xyz", position):
+            if is_expression(value):
+                obj.setExpression(f"Placement.Base.{axis_name}", rewrite_expression(value, ctx.known_params))
+    if rotation is not None and is_expression(rotation["angle"]):
+        obj.setExpression("Placement.Rotation.Angle", rewrite_expression(rotation["angle"], ctx.known_params))
+
+
 def link(ctx: Any, op: dict[str, Any]) -> None:
     source, body = open_source(ctx, op["part"], op["body"])
     container = make_container(ctx, op["name"], OCCURRENCE, occurrence_shape(source, body))
@@ -240,8 +261,6 @@ def link(ctx: Any, op: dict[str, Any]) -> None:
     _add_prop(container, "App::PropertyString", "LinkBody", op["body"])
     _add_prop(container, "App::PropertyString", "SourceSha256", file_sha256(source.fcstd))
     if "position" in op or "rotation" in op:
-        from .ops.placement import set_pose
-
         set_pose(ctx, container, op)
 
 
@@ -265,8 +284,6 @@ def import_step(ctx: Any, op: dict[str, Any]) -> None:
     _add_prop(container, "App::PropertyString", "FileSha256", file_sha256(absolute))
     _add_prop(container, "App::PropertyString", "Role", "bought_in")
     if "position" in op or "rotation" in op:
-        from .ops.placement import set_pose
-
         set_pose(ctx, container, op)
 
 
