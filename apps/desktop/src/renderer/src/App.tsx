@@ -84,6 +84,9 @@ export function App() {
     setSettings(await window.piCad.settings.get());
     setPage("workbench");
   };
+  const retryWorkspaceStart = async () => {
+    cloud.setStatus(await window.piCad.cloud.workspaceStart());
+  };
   const reconnectCloud = async () => {
     await prime.stop();
     cloud.setStatus(await window.piCad.cloud.workspaceStart());
@@ -101,7 +104,7 @@ export function App() {
         : <button className="titlebar-project" aria-expanded={projectMenu} onClick={() => setProjectMenu((open) => !open)} title={settings.projectPath || "Choose a project"}>{settings.projectPath ? settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) : "Choose project"}</button>}
       {!cloudMode && projectMenu && <aside className="global-project-menu"><small>ACTIVE PROJECT</small><strong>{settings.projectPath || "No project selected"}</strong><button onClick={() => void chooseProject()}><FolderOpen size={14} />Open project</button><label><span>New project</span><input autoFocus value={projectName} onChange={(event) => setProjectName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void createProject(); }} placeholder="Project name" /></label><button disabled={!projectName.trim()} onClick={() => void createProject()}><Plus size={14} />Create in folder…</button>{projectError && <p role="alert">{projectError}</p>}</aside>}
     </header>
-    {cloudMode && <CloudNotices view={cloud.view} onDismiss={cloud.dismiss} onReconnect={reconnectCloud} />}
+    {cloudMode && <CloudNotices view={cloud.view} onDismiss={cloud.dismiss} onReconnect={reconnectCloud} onRetryStart={retryWorkspaceStart} />}
     {cloudError && <div className="cloud-banner" role="alert">{cloudError}</div>}
     <main className="page-host">
       {activePage === "workbench" && <Workbench settings={settings} prime={prime} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}

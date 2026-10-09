@@ -21,7 +21,14 @@ export function reduceCloudEvent(view: CloudView, event: CloudEvent): CloudView 
       const running = event.state === "running";
       return {
         ...view,
-        status: { ...view.status, workspace: { state: event.state, ...(event.position !== undefined ? { position: event.position } : {}) } },
+        status: {
+          ...view.status,
+          workspace: {
+            state: event.state,
+            ...(event.position !== undefined ? { position: event.position } : {}),
+            ...(event.error ? { error: event.error } : {}),
+          },
+        },
         idleWarning: running ? view.idleWarning : false,
         reclaimed: running ? false : view.reclaimed,
       };
@@ -64,7 +71,7 @@ export function workspaceLabel(view: CloudView): string {
     case "running":
       return "运行中";
     case "failed":
-      return "启动失败";
+      return workspace.error ? `工作区启动失败：${workspace.error}` : "工作区启动失败";
     default:
       return "已暂停";
   }

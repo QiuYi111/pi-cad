@@ -59,7 +59,8 @@ export interface AppSettings {
 }
 
 export interface CloudUser { id: string; email: string; displayName: string | null }
-export interface CloudProject { id: string; name: string; updatedAt?: string }
+/** Project as platform-api returns it (GET /v1/projects, POST, PATCH). */
+export interface CloudProject { id: string; name: string; role: "maintainer" | "editor" | "viewer"; createdAt: string }
 export type CloudWorkspaceState = "stopped" | "queued" | "starting" | "running" | "stopping" | "failed";
 export interface CloudWorkspaceInfo {
   state: CloudWorkspaceState;
@@ -67,6 +68,7 @@ export interface CloudWorkspaceInfo {
   position?: number;
   /** Set after the server warns that the workspace will be paused for being idle. */
   idleWarningAt?: string;
+  /** The server's lastError, present while `state` is "failed". */
   error?: string;
 }
 export interface CloudStatus {
