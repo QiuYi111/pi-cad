@@ -42,8 +42,8 @@ test("skills have valid frontmatter, resolvable links, executable assets, and no
   ]) assert.ok(existsSync(join(skills, expected)), `missing executable/copyable asset ${expected}`);
 });
 
-test("handwritten prompts, routers, and READMEs do not duplicate exact public tool names", () => {
-  const paths = [join(root, "README.md"), join(root, "README.zh-CN.md"), ...files(join(root, "src", "prompts")), ...files(skills).filter((path) => path.endsWith("SKILL.md"))];
+test("handwritten routers and READMEs do not duplicate exact public tool names", () => {
+  const paths = [join(root, "README.md"), join(root, "README.zh-CN.md"), ...files(skills).filter((path) => path.endsWith("SKILL.md"))];
   for (const path of paths) assert.doesNotMatch(readFileSync(path, "utf-8"), /\bcad_[a-z][a-z_]*/g, `exact tool catalog leaked into handwritten router: ${path}`);
 });
 

@@ -1,57 +1,23 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import type { CadRunState } from "../../shared/protocol.ts";
-import { routeKey } from "../../shared/protocol.ts";
-import { CadProjectStore } from "../../shared/store.ts";
-
-const routeName = (state: { route?: CadRunState["route"] }) =>
-  state.route ? routeKey(state.route) : "intake";
+import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
+import { resolveActiveRun } from "../../harness/run-scope.ts";
 
 export default function cadUiExtension(pi: ExtensionAPI) {
-  pi.events.on("pi-cad:state-changed", (state: CadRunState) => {
-    const lockReason = state.routeRequiresReassessment
-      ? state.lastRequirementsRevision?.routeAssessmentReason
-      : undefined;
-    const text = [
-      lockReason ? `Pi-CAD · lock=${lockReason}` : `Pi-CAD · ${routeName(state)}`,
-      lockReason ? `route=${routeName(state)}` : "",
-      `phase=${state.phase}`,
-      `status=${state.status}`,
-      state.routeRequiresReassessment ? "routeReassessment=required" : "",
-      state.candidateLabel ? `candidate=${state.candidateLabel}` : "",
-      state.currentArtifactHash ? `artifact=${state.currentArtifactHash.slice(0, 12)}` : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-    // Read-only status projection. This extension owns no workflow state.
-    pi.setSessionName(text.slice(0, 80));
-  });
-
   pi.registerCommand("cad-status", {
-    description: "Show the canonical Pi-CAD workflow state",
+    description: "Show the active Pi-CAD workflow run (phase and run id)",
     handler: async (_args, ctx) => {
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await store.load();
-      if (!state) {
+      const loaded = await resolveActiveRun(ctx.cwd, mechanicalRegistries);
+      if (!loaded) {
         if (ctx.hasUI) ctx.ui.notify("No Pi-CAD workflow is active", "info");
         return;
       }
-      const runs = await store.listRuns();
+      const { state, workflow } = loaded;
       const lines = [
-        `Pi-CAD · ${routeName(state)}`,
+        `Pi-CAD · workflow=${workflow.id}@${workflow.version}`,
         `run=${state.runId}`,
-        `phase=${state.phase} status=${state.status} policy=${state.mutationPolicy}`,
-        state.routeRequiresReassessment ? "routeRequiresReassessment=true" : "",
-        state.routeRequiresReassessment && state.lastRequirementsRevision?.routeAssessmentReason
-          ? `routeReassessmentReason=${state.lastRequirementsRevision.routeAssessmentReason}`
-          : "",
-        state.baselineArtifactHash ? `baseline=${state.baselineArtifactHash.slice(0, 12)}` : "",
-        state.currentArtifactHash ? `artifact=${state.currentArtifactHash.slice(0, 12)}` : "",
-        `evidence=${state.evidence.map((e) => e.kind).join(",") || "none"}`,
-        `runs=${runs
-          .map((r) => `${r.runId}:${r.route ? routeKey(r.route) : "intake"}/${r.status}`)
-          .join(", ")}`,
-      ].filter(Boolean);
+        `phase=${state.phase} status=${state.status}`,
+      ];
       if (ctx.mode === "tui") {
         ctx.ui.setWidget("pi-cad-status", lines);
       } else {

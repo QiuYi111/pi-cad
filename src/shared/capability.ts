@@ -431,18 +431,6 @@ export async function exportArtifact(
   return runCadctl(args, { cwd, timeoutMs });
 }
 
-export async function drawingCommand(
-  cwd: string,
-  stage: "validate" | "generate",
-  spec: string,
-  outputDir?: string,
-  timeoutMs?: number,
-): Promise<CadEventEnvelope> {
-  const args = ["drawing", stage, "--spec", resolve(cwd, spec)];
-  if (outputDir) args.push("--output-dir", resolve(cwd, outputDir));
-  return runCadctl(args, { cwd, timeoutMs });
-}
-
 export interface InspectSurfacesOptions {
   output?: string;
   labels?: boolean;
@@ -464,19 +452,6 @@ export async function inspectSurfaces(
     if (options.views?.length) args.push("--views", options.views.join(","));
   }
   return runCadctl(args, { cwd, timeoutMs });
-}
-
-export async function presentationCommand(
-  cwd: string,
-  stage: "validate" | "preview" | "generate" | "run",
-  spec: string,
-  outputDir: string,
-  timeoutMs?: number,
-): Promise<CadEventEnvelope> {
-  return runCadctl(
-    ["present", stage, "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs },
-  );
 }
 
 export async function imageContent(

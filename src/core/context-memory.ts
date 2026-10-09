@@ -41,7 +41,7 @@ import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-a
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { nowIso } from "../shared/store.ts";
+import { nowIso } from "../shared/hash.ts";
 import type { LoadedHarnessRunV7 } from "../harness/run-store.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
