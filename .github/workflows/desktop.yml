@@ -47,6 +47,13 @@ jobs:
         working-directory: apps/desktop
       - run: npm run build
         working-directory: apps/desktop
+      # The one Playwright scenario that runs in every desktop PR: it drives the
+      # built app under a virtual display. Other specs run only where they are listed.
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+        if: runner.os == 'Linux'
+      - run: xvfb-run -a npx playwright test tests/e2e/conversation-workflow.spec.ts
+        if: runner.os == 'Linux'
+        working-directory: apps/desktop
 
   linux-package-smoke:
     name: Linux native package smoke

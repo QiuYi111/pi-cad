@@ -1,6 +1,7 @@
 import { expect, test, _electron as electron } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -53,6 +54,7 @@ interface Fixture {
   workflowHome: string;
   canonical: string;
   userData: string;
+  settingsPath: string;
 }
 
 /**
@@ -68,7 +70,9 @@ async function createFixture(): Promise<Fixture> {
   await mkdir(appRoot, { recursive: true });
   await cp(join(process.cwd(), "out"), join(appRoot, "out"), { recursive: true });
   await mkdir(join(appRoot, "node_modules"), { recursive: true });
-  await cp(join(process.cwd(), "node_modules/yaml"), join(appRoot, "node_modules/yaml"), { recursive: true });
+  // The built main process imports these packages at load time; electron-vite
+  // leaves them external, so the app root needs its own copies.
+  for (const dependency of ["yaml", "ws"]) await cp(join(process.cwd(), "node_modules", dependency), join(appRoot, "node_modules", dependency), { recursive: true });
   await writeFile(join(appRoot, "package.json"), JSON.stringify({ name: "reify-conversation-lifecycle", version: "0.0.0", type: "module", main: "out/main/index.js" }));
   const project = join(root, "project");
   const workflowHome = join(root, "workflow-home");
@@ -78,6 +82,10 @@ async function createFixture(): Promise<Fixture> {
   await mkdir(join(workflowHome, ".pi-cad", "workflows"), { recursive: true });
   await mkdir(canonical, { recursive: true });
   await mkdir(userData, { recursive: true });
+  // A model whose catalog tops out below the saved level: the Effort control
+  // must show the folded level, and the fold must be written back.
+  const settingsPath = join(userData, "settings.json");
+  await writeFile(settingsPath, JSON.stringify({ provider: "zai", model: "glm-5.3", thinking: "xhigh", onboardingComplete: true }));
   await writeFile(join(workflowHome, ".pi-cad", "workflows", "desktop-conversation.yaml"), WORKFLOW_PACKAGE);
   // Prime names a session after its transcript, and the Desktop lists
   // conversations by transcript, so these files are the two conversations.
@@ -88,7 +96,7 @@ async function createFixture(): Promise<Fixture> {
       "",
     ].join("\n"));
   }
-  return { root, appRoot, project, workflowHome, canonical, userData };
+  return { root, appRoot, project, workflowHome, canonical, userData, settingsPath };
 }
 
 /** Call the same Agent API the Desktop main process uses. */
@@ -108,12 +116,25 @@ function agentApi(fixture: Fixture, request: Record<string, unknown>): any {
   return response.result;
 }
 
+/** The Electron binary the desktop package depends on, on every platform. */
+function electronBinary(): string {
+  return createRequire(join(process.cwd(), "package.json"))("electron") as string;
+}
+
 async function launch(fixture: Fixture) {
-  const executablePath = join(process.cwd(), "node_modules/electron/dist", process.platform === "win32" ? "electron.exe" : "electron");
-  await chmod(executablePath, 0o755).catch(() => undefined);
   const application = await electron.launch({
-    executablePath,
-    args: [`--user-data-dir=${fixture.userData}`, fixture.appRoot, "--pi-cad-e2e", "--pi-cad-e2e-workflow-authority"],
+    executablePath: electronBinary(),
+    // Chromium's sandbox needs user namespaces, which CI containers and
+    // root-run hosts often lack; the app under test is the local build, so the
+    // sandbox is off on Linux only.
+    args: [
+      ...(process.platform === "linux" ? ["--no-sandbox"] : []),
+      `--user-data-dir=${fixture.userData}`,
+      fixture.appRoot,
+      "--pi-cad-e2e",
+      "--pi-cad-e2e-workflow-authority",
+      "--pi-cad-e2e-open-step=/workspace/demo/imported.step",
+    ],
     env: {
       ...process.env,
       PI_CAD_DESKTOP_E2E: "1",
@@ -162,6 +183,10 @@ async function openConversation(page: import("@playwright/test").Page, title: st
   }
 }
 
+// Every step waits on real processes (authority reads, a restart), so the
+// cold path needs more than the default per-test limit.
+test.setTimeout(300_000);
+
 test("each Desktop conversation keeps its own workflow across new, switch and restart", async () => {
   const fixture = await createFixture();
   let application: Awaited<ReturnType<typeof launch>>["application"] | undefined;
@@ -181,6 +206,12 @@ test("each Desktop conversation keeps its own workflow across new, switch and re
     application = launched.application;
     let page = launched.page;
     const rail = page.getByTestId("workflow-rail");
+
+    // The saved `xhigh` is not in the catalog of the selected model, so the
+    // Effort control shows the level below it and the fold is written back.
+    await expect(page.getByLabel("Effort")).toHaveValue("high", { timeout: 30_000 });
+    await expect(page.getByLabel("Effort").locator("option")).toHaveCount(5);
+    await expect.poll(async () => JSON.parse(await readFile(fixture.settingsPath, "utf8")).thinking, { timeout: 30_000 }).toBe("high");
 
     // No conversation is selected yet, so there is no workflow to show.
     await expect(rail).toContainText("No active workflow");
@@ -210,10 +241,20 @@ test("each Desktop conversation keeps its own workflow across new, switch and re
     await expect.poll(async () => (await catalog(page)).currentRun, { timeout: 60_000 }).toBeNull();
     await page.getByPlaceholder("Ask anything about the design").fill("Provider retry please");
     await page.getByPlaceholder("Ask anything about the design").press("Enter");
+    // The runtime publishes the retry itself; the status bar shows it while the turn runs.
+    await page.waitForFunction(() => /^Retrying 1\/3$/.test(document.querySelector(".status-bar b")?.textContent ?? ""), null, { timeout: 30_000, polling: 25 });
     await expect(page.getByText("Recovered after one retry.")).toBeAttached({ timeout: 30_000 });
     await expect(rail).toContainText("No active workflow", { timeout: 60_000 });
     expect((await workflow(page))?.runId).toBeUndefined();
     expect((await catalog(page)).currentRun).toBeNull();
+
+    // A long turn reports the tool phase, and Stop ends it as Stopped.
+    await page.getByPlaceholder("Ask anything about the design").fill("Long calculation");
+    await page.getByPlaceholder("Ask anything about the design").press("Enter");
+    await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Running tool", null, { timeout: 30_000, polling: 25 });
+    await page.getByRole("button", { name: "Stop" }).click();
+    await page.waitForFunction(() => document.querySelector(".status-bar b")?.textContent === "Stopped", null, { timeout: 30_000, polling: 25 });
+    await expect(page.locator(".stream-state").last()).toContainText("Stopped");
 
     // Conversation B restores its own non-terminal run.
     await openConversation(page, "Conversation B");
@@ -248,6 +289,11 @@ test("each Desktop conversation keeps its own workflow across new, switch and re
     await expect.poll(async () => (await catalog(page)).currentRun?.id, { timeout: 60_000 }).toBe(runB.runId);
     await expect(restartedRail.locator(".rail-step.active")).toHaveText(/Inspect/, { timeout: 60_000 });
     expect((await workflow(page))?.status).toBe("active");
+
+    // The viewer shows the model the Desktop imports, next to the workflow.
+    await page.locator(".chat-header .open-step").click();
+    await expect(page.locator(".workbench-page")).toHaveClass(/mode-canvas/, { timeout: 30_000 });
+    await expect(page.locator(".viewer-file-identity")).toContainText("imported.step", { timeout: 30_000 });
   } finally {
     await application?.close().catch(() => undefined);
     await rm(fixture.root, { recursive: true, force: true });
