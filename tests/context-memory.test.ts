@@ -8,7 +8,8 @@ import { test } from "node:test";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { CadProjectStore, CadRunStore, hashRecord } from "../src/shared/store.ts";
+import { CadProjectStore, CadRunStore } from "../src/shared/store.ts";
+import { hashRecord } from "../src/shared/hash.ts";
 import { commitPlan, commitRequirements, route as routeQuick } from "../src/core/state-machine.ts";
 import { maybeAutoContinue } from "../src/core/continuation.ts";
 import type { CadRequirements, CadRunState } from "../src/shared/protocol.ts";

@@ -25,7 +25,7 @@ import { writeStatusProjection } from "./storage.ts";
 import { ReviewRuntime, type ReviewerExecutor } from "./review-runtime.ts";
 import { findExperience, getExperience, readExperience, searchExperience } from "../experience/store.ts";
 import type { ExperienceSearchOptions } from "../experience/types.ts";
-import { sha256File } from "../shared/store.ts";
+import { sha256File } from "../shared/hash.ts";
 import { commitEvidenceRef } from "../harness/reducer.ts";
 
 export type SidecarRole = "author" | "reviewer";

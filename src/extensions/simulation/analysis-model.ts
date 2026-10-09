@@ -29,7 +29,8 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
-import { CadProjectStore, sha256File } from "../../shared/store.ts";
+import { CadProjectStore } from "../../shared/store.ts";
+import { sha256File } from "../../shared/hash.ts";
 
 export const DeriveAnalysisModelSchema = Type.Object(
   {

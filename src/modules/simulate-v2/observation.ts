@@ -3,7 +3,7 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { detectImageMimeType, readImageContents } from "../../shared/capability.ts";
-import { sha256File } from "../../shared/store.ts";
+import { sha256File } from "../../shared/hash.ts";
 import type { ExportDeclaration, SimulationRecipeManifest } from "./protocol.ts";
 
 export interface MaterializedExportBase { type: string }

@@ -6,7 +6,8 @@ import { join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 
 import type { CadRunState, EvidenceRef } from "../../shared/protocol.ts";
-import { CadProjectStore, makeEvidenceId, nowIso, sha256File } from "../../shared/store.ts";
+import { CadProjectStore } from "../../shared/store.ts";
+import { makeEvidenceId, nowIso, sha256File } from "../../shared/hash.ts";
 import { renderSimulationObservation } from "../../modules/simulate-v2/observation.ts";
 import { recordObservation } from "../../core/observation-index.ts";
 import { renderSimulationFailure, recordSimulationFailure, simulationFailure, type SimulationFailure } from "../../modules/simulate-v2/failure.ts";

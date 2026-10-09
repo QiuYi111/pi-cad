@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { CadProjectStore, hashRecord } from "../src/shared/store.ts";
+import { CadProjectStore } from "../src/shared/store.ts";
+import { hashRecord } from "../src/shared/hash.ts";
 
 function v3Project() {
   return {

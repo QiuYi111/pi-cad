@@ -9,7 +9,7 @@ import type { GeometryPayload } from "../shared/protocol.ts";
 import { FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
 import { resolveActiveRun } from "../harness/run-scope.ts";
 import { harnessStorageRoot } from "../authority/storage.ts";
-import { sha256File } from "../shared/store.ts";
+import { sha256File } from "../shared/hash.ts";
 import {
   normalizeModelParameterDefinitions,
   type ModelParameterManifestV1,

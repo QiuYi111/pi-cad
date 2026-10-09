@@ -25,7 +25,7 @@ import {
 } from "../shared/capability.ts";
 import { PartOpError, runPartCommand } from "../shared/freecad-worker.ts";
 import type { FaceFingerprint, GeometryPayload } from "../shared/protocol.ts";
-import { sha256File } from "../shared/store.ts";
+import { sha256File } from "../shared/hash.ts";
 import { observeCandidate, projectRelativePath } from "./observe.ts";
 import type { AgentApiRequest } from "./protocol.ts";
 

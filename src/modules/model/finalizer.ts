@@ -38,12 +38,8 @@ import {
   visualPayload,
 } from "../../shared/capability.ts";
 import type { CadEventEnvelope, CadRunState } from "../../shared/protocol.ts";
-import {
-  CadProjectStore,
-  cloneState,
-  nowIso,
-  sha256File,
-} from "../../shared/store.ts";
+import { CadProjectStore, cloneState } from "../../shared/store.ts";
+import { nowIso, sha256File } from "../../shared/hash.ts";
 import {
   acceptCandidate,
   addEvidence,

@@ -12,7 +12,8 @@ import type {
   MeasurePayload,
   VisualPayload,
 } from "./protocol.ts";
-import { CadProjectStore, sha256File } from "./store.ts";
+import { CadProjectStore } from "./store.ts";
+import { sha256File } from "./hash.ts";
 import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
 import { assertLinuxRuntime } from "./platform.ts";
 import { runProcess } from "./process-runner.ts";
