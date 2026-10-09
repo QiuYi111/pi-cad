@@ -1,12 +1,12 @@
 schema: 1
 id: mechanical.default
-description: Plan the engineering task, execute it freely, and finish when the real work is complete.
-tags: [cad, mechanical, default]
-version: 3.0.0
+description: Reason from physics and whole-system form, recurse only when complexity warrants, then integrate and verify the real design.
+tags: [cad, mechanical, default, recursive-design]
+version: 4.0.0
 workflow:
   schema: 1
   id: mechanical.default
-  version: 3.0.0
+  version: 4.0.0
   parametersSchema: {type: object, additionalProperties: false}
   initialPhase: plan
   versionControl:
@@ -16,20 +16,93 @@ workflow:
       plan: {onExit: [commit]}
   phases:
     plan:
-      purpose: Understand the real engineering task and make a useful initial plan.
+      purpose: Understand the engineering problem, establish the physics and whole-system shape, and choose a sound decomposition before detailed CAD.
       guidance: >-
-        Plan the engineering task itself, not the workflow. Capture current
-        requirements and acceptance criteria separately from the current execution
-        strategy. Resolve only questions that materially affect the work.
+        Plan the engineering task itself, not the workflow. Before detailed geometry,
+        understand what the device is physically doing and establish a coherent whole.
+        The amount of analysis should match the problem, but important dimensions and
+        interfaces must have reasons.
 
-        Grilling and visual concepts are optional tools. When a concept image is
-        useful, inspect the actual image and translate its silhouette, topology,
-        proportions, interfaces, curvature, and part relationships into a geometry
-        plan. The image is form and layout intent, not dimensional authority.
+        Start from the governing physics. Identify loads, constraints, motion, power
+        flow, fluid paths, heat paths, electromagnetic effects, contact, friction,
+        tolerances, manufacturing limits, or other first-order mechanisms that can
+        determine the design. Use the persistent IPython kernel as an engineering
+        notebook: calculate quantities, compare options, search references when useful,
+        and keep compact Python variables for requirements, assumptions, estimates,
+        architecture, interfaces, and unresolved questions. Prefer calculations and
+        evidence over arbitrary dimensions.
 
-        Commit the initial plan as `plan`. This plan is a living engineering
-        understanding, not a frozen contract. Later user instructions override it.
-        Advance only when the initial plan is sufficient to begin real work.
+        Establish a rough whole-system form before delegating detailed work. Define the
+        main envelope, datums and axes, spatial arrangement, moving volumes, force or
+        energy paths, assembly direction, and the approximate location of major
+        functions. A concept image or simple spatial sketch is optional. The goal is
+        not a decorative concept; it is enough global shape to keep later parts
+        mutually compatible.
+
+        Then choose the architecture. Decide which functions belong together, what the
+        main subsystems or parts are, what space each receives, and which interfaces
+        are already constrained. Do not delegate ambiguity. A child should receive a
+        bounded engineering problem only after the parent understands the surrounding
+        system well enough to state its goal, relevant physics, envelope, datums,
+        interfaces, neighboring parts, fixed constraints, freedoms, and expected
+        outputs.
+
+        Recursion is a complexity decision, not a goal. If one agent can understand and
+        design the whole object coherently, keep the work local. If the whole assembly
+        is coherent but contains several separable parts, design the assembly first and
+        then delegate bounded part work. If a subsystem is itself a substantial
+        engineering problem, delegate that subsystem and allow its child agent to apply
+        the same method recursively.
+
+        Commit the initial plan as plan. Keep current requirements and acceptance
+        criteria separate from revisable execution strategy. Later user instructions,
+        measurements, calculations, or returned child results may make the Plan stale;
+        update it in COOK rather than treating the first plan as immutable.
+
+        Happy-path examples are normative examples of reasoning, not fixed templates:
+
+        Example A — simple load-bearing wall bracket, no delegation.
+        The request is a wall-mounted bracket holding a 20 mm tube whose center is
+        50 mm from the wall under a 100 N radial load, made by FDM. The parent extracts
+        the load, offset, tube size, manufacturing process, mounting assumptions and
+        safety needs. It sketches one coherent form: wall plate, cantilever, clamp and
+        fastener pattern. It calculates the root bending moment, fastener force couple,
+        rough section requirement, edge distances and print-orientation implications.
+        It selects dimensions from those results, then proceeds to one parametric model.
+        It does not create separate wall-plate, arm and clamp agents merely to obtain
+        parallelism. The object is small enough that splitting would lose coherence.
+
+        Example B — foldable phone stand, one assembly level then part delegation.
+        The parent first treats the stand as one mechanism. It captures the phone size
+        range, mass, portrait/landscape use, FDM process and no-metal-fastener
+        constraint. Before assigning parts it defines the rough deployed and folded
+        shapes, phone support plane, base footprint, main hinge axis, arm envelope,
+        motion range and stowed volume. It checks center-of-mass stability, tipping
+        margin, hinge torque or detent needs, printed clearances and sweep interference.
+        Only after those system decisions are coherent does it define bounded parts
+        such as base, arm, cradle and pin. Each child receives the same frozen hinge
+        axis and its own envelope, interfaces, loads, clearances and neighboring
+        geometry. Children may optimize their own local geometry but must report an
+        impossible interface instead of silently moving a system datum. The parent
+        later reassembles every returned part and owns the motion and stability proof.
+
+        Example C — complete six-axis robot arm, recursive subsystem design.
+        The parent begins with payload, reach, speed, mounting and force-control goals.
+        It builds a kinematic skeleton before any joint is detailed: joint-axis layout,
+        approximate link lengths, workspace, joint ranges, singular poses and
+        self-collision concerns. It propagates mass and load from the tool toward the
+        base to estimate torque, speed and stiffness requirements for J1 through J6.
+        It allocates global envelopes and interfaces, then decomposes the arm at useful
+        engineering boundaries: base/J1, shoulder/J2, elbow/J3, wrist J4-J6, upper-arm
+        link, forearm link and cable routing. A shoulder child may itself compare motor
+        and reducer concepts, size bearings, and recursively delegate reducer, housing
+        or output-stage parts if that local problem remains too complex. Leaf agents
+        return real geometry and measured properties. When J3 or the wrist comes back
+        heavier or larger than estimated, the root agent recomputes upstream torque,
+        inertia, workspace and collision margins and revises affected subsystems. The
+        returned detailed design is evidence that updates the system model, not a reason
+        to freeze outdated assumptions.
+
       actions: [cad_commit, codex_generate_image, transition]
       grants: [file_read, image_generate, transition]
       writeScopes: [project:deliverable]
@@ -42,21 +115,99 @@ workflow:
       transitions:
         plan_ready: {target: cook, requiresPhaseObligations: true}
     cook:
-      purpose: Execute the engineering task autonomously until it is genuinely complete.
+      purpose: Execute the engineering design, recursively delegate only bounded work, integrate the real geometry, and close the physics-and-geometry loop.
       guidance: >-
-        Execute the user's engineering task, not the workflow. Choose the order of
-        design, prototyping, assembly, analysis, probing, simulation, revision,
-        presentation, and review yourself.
+        Execute the engineering task autonomously, not the workflow. Continue from the Plan,
+        but treat design as an iterative closed loop rather than a one-way sequence.
+        Use the persistent IPython kernel as the shared working notebook for the parent:
+        keep the current requirements, calculations, whole-system layout, subsystem
+        budgets, interfaces, estimates, child handles and returned measurements in
+        ordinary Python variables when useful. Do not invent a second orchestration
+        framework or duplicate canonical state.
 
-        Treat the latest commit named `plan` as the current Plan. When later user
-        information, evidence, or a material strategy change makes it stale, update
-        it immediately with another `plan` commit. Do this in COOK without returning
-        to PLAN. Preserve prior versions through the normal commit chain. Separate
-        current requirements and acceptance criteria from revisable execution strategy.
+        Before detailed local optimization, produce enough whole-system geometry to
+        test the intended shape and spatial relationships. For an assembly this can be
+        a simple but truthful blockout or skeleton with the real datums, axes,
+        envelopes and motions. Placeholder detail is acceptable for exploration;
+        fake final solids, fake transforms and scaling tricks are not.
 
-        Concept sketches may be rough and CAD may be incomplete, but CAD cannot be
-        fake. Do not use placeholder solids, fake transforms, or scaling tricks merely
-        to show progress. Build real functional geometry.
+        Keep the parent agent responsible for architecture and integration. The parent
+        decides what to delegate and prepares each delegation from its current IPython
+        state. Pass only the context the child needs, but make that context sufficient:
+        objective, relevant calculations, envelope, coordinate frame, fixed datums,
+        mating interfaces, loads, motion, clearances, neighbors, manufacturing
+        assumptions, freedoms, and expected artifacts or measurements.
+
+        Use Prime's native rlm(...) calls directly from IPython for independent bounded
+        engineering work. Spawn independent children without waiting for each one
+        serially when the tasks can proceed in parallel. Retained children may be
+        messaged again for targeted rework. A child may recursively call rlm(...) when
+        its own assignment is still a complex system. Do not impose a fixed recursion
+        depth or artificial subsystem/part taxonomy.
+
+        A useful delegation shape is conceptually:
+        child = await rlm(
+            "Design this bounded part or subsystem. Overall system: ... Your envelope:"
+            " ... Fixed interfaces: ... Loads and motion: ... Neighbors: ..."
+            " Manufacturing: ... Return actual design artifacts, measured properties,"
+            " uncertainties, and any interface that must be renegotiated.",
+            name="bounded-engineering-task"
+        )
+        The exact prompt should be generated from the current design variables rather
+        than copied blindly from this example.
+
+        Do not accept child output as system truth merely because the child reports
+        success. Integrate returned source and geometry at the parent level. Rebuild or
+        import the actual candidate, inspect the assembly, measure interfaces, run
+        interference and motion checks, and recompute the governing engineering model
+        with measured mass, dimensions, inertia, flow area, pressure loss, stiffness,
+        thermal load or other relevant returned properties.
+
+        Rework at the narrowest responsible level. If a cradle collides with an arm
+        while the frozen hinge axis is still sound, send the collision evidence back to
+        the cradle child instead of redesigning the whole product. If several children
+        reveal that a parent-level interface or architecture is wrong, update the Plan,
+        change the parent decision explicitly, and then propagate the new contract.
+        Downstream agents must not silently redefine upstream interfaces.
+
+        The three happy paths from PLAN continue in COOK:
+
+        Example A — wall bracket.
+        The same parent performs the detailed build. It creates the parametric bracket,
+        observes the real model, probes wall thickness, hole diameter, tube clearance,
+        edge distance and bounding box, and runs structural analysis when the acceptance
+        risk warrants it. A specialist reviewer is optional; no design child is needed.
+        If a fillet or section is weak, the parent changes the source, rebuilds the same
+        candidate and repeats the relevant checks.
+
+        Example B — foldable phone stand.
+        The parent first builds or preserves the system blockout and frozen hinge
+        geometry. It then launches base, arm and cradle work in parallel with bounded
+        contracts derived from the parent variables. Returned parts are assembled at
+        their prescribed transforms. The parent sweeps the mechanism through the full
+        required angle range, checks folded and deployed states, minimum clearances,
+        phone envelope and center-of-mass stability. A 2.4 mm cradle/arm collision at
+        62 degrees is routed back to the cradle child with the collision pose and fixed
+        hinge constraints. The parent accepts the revision only after the complete
+        assembly passes again.
+
+        Example C — six-axis robot arm.
+        The root delegates coherent subsystems after the kinematic skeleton and
+        joint-level requirements exist. A J2 child can recursively split motor,
+        reducer, bearings, output flange and housing when useful; a wrist child can keep
+        J4-J6 together because their axes and packaging are strongly coupled. The root
+        does not micromanage gear tooth geometry, but it does own the arm-level
+        invariants. When real child artifacts return, it extracts actual masses,
+        centers of mass, envelopes and interface locations, updates the kinematic and
+        load model, and reruns worst-case horizontal reach, workspace, collision,
+        stiffness and torque checks. If a heavier elbow raises shoulder torque beyond
+        margin, the root reopens J2 or the architecture rather than declaring completion
+        because every local STEP file exists.
+
+        Treat the latest commit named plan as the current Plan. When later user
+        information, evidence, a child result, or a material strategy change makes it
+        stale, update it immediately with another plan commit in COOK. Preserve prior
+        versions through the normal commit chain.
 
         Use build as visual observation and probe only for facts you need. A successful
         build is not proof of correctness. Spawn temporary specialist reviewers only
@@ -64,11 +215,14 @@ workflow:
         latest Plan commit, and permission to inspect views and run probes. Treat their
         findings, uncertainties, and suggested checks as advice; verify them and make
         the final decision yourself. Distinguish candidate defects, a stale Plan, and
-        missing evidence. Do not use the authoritative reviewer in this default workflow.
+        missing evidence. Do not use the authoritative reviewer in this default
+        workflow.
 
         Continue while any material requirement, interface, motion, manufacturing
-        issue, visual mismatch, or acceptance criterion remains unresolved. Transition
-        only when the requested engineering result is genuinely complete.
+        issue, physical model, visual mismatch, or acceptance criterion remains
+        unresolved. Finish only when the integrated real design, not merely each local
+        task, satisfies the engineering objective.
+
       actions: [cad_build_step, cad_commit, cad_simulate, transition]
       grants: [file_read, file_edit_source, model_build, observe, observe_interference, observe_programmable, shell, transition, simulate]
       writeScopes: [project:deliverable, project:source, run:observation]
