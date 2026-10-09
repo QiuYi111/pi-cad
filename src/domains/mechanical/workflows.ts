@@ -1,4 +1,4 @@
-import { PHASE_PURPOSES } from "../../core/agent-contract.ts";
+import { PHASE_PURPOSES } from "./purposes.ts";
 import { contractTools, phaseContract } from "./phase-contract.ts";
 import type { JsonValue } from "../../harness/canonical.ts";
 import type { BuiltinWorkflowResolver } from "../../harness/workflow/loader.ts";

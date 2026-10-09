@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { TOOL_PURPOSES } from "../../core/agent-contract.ts";
+import { TOOL_PURPOSES } from "./purposes.ts";
 import { ACTIVE_PUBLIC_TOOLS, type ActivePublicTool, type PublicToolGroup } from "../../shared/public-tools.ts";
 import { mechanicalRegistries } from "./registries.ts";
 import { canonicalJson } from "../../harness/canonical.ts";
