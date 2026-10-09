@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { RuntimeBridge } from "./runtime-bridge.js";
+import { SHA256_SHELL } from "./sha256.js";
 
 const SHA256 = /^[0-9a-f]{64}$/;
 const STEP_FILE_NAME = /^[^\\/]+\.(step|stp)$/i;
 // `missing` keeps the probe exit code 0 so a missing project copy is not an error.
-const READ_HASH = 'if [ -f "$1" ]; then sha256sum -- "$1"; else printf missing; fi';
+const READ_HASH = `if [ -f "$1" ]; then ${SHA256_SHELL}; else printf missing; fi`;
 
 /** The slice of the runtime bridge a STEP import needs. */
 export type StepImportRuntime = Pick<RuntimeBridge, "exec">;

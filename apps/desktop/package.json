@@ -22,6 +22,7 @@
     "package:win": "npm run stage:runtime && npm run build && node scripts/package-windows.mjs",
     "package:linux": "npm run stage:runtime && npm run build && electron-builder --linux AppImage deb",
     "package:mac": "node scripts/check-mac-release.mjs && npm run stage:runtime && npm run build && electron-builder --mac dmg zip",
+    "package:mac:unsigned": "npm run stage:runtime && npm run build && electron-builder --mac dmg zip -c.mac.identity=null -c.mac.notarize=false",
     "test:linux:packages": "bash tests/linux/Test-ReifyPackages.sh"
   },
   "dependencies": {
