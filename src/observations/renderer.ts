@@ -13,7 +13,7 @@
  * during migration (Phase 1) so no information is lost before prompts
  * are rewritten (Phase 3).
  */
-import { readImageContents } from "../shared/capability.ts";
+import { readImageContents } from "../shared/image-content.ts";
 import type { CadEventEnvelope } from "../shared/protocol.ts";
 import type { ObservationBundle } from "./bundle.ts";
 import { bundleFromEnvelope, type BundleInputs } from "./bundle.ts";

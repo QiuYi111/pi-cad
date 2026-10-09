@@ -20,7 +20,7 @@ import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
 
-import { readImageContents } from "../../shared/capability.ts";
+import { readImageContents } from "../../shared/image-content.ts";
 import { CadProbeParametersSchema, CadRecallObservationParametersSchema, executeCadProbe } from "../../modules/probe/tool.ts";
 import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
 import { resolveActiveRun } from "../../harness/run-scope.ts";

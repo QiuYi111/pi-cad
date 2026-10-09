@@ -8,7 +8,7 @@
  *     small interface, large implementation.
  *
  * A preset owns:
- *   - argument → cadctl invocation (via shared/capability.ts);
+ *   - argument → cadctl invocation (via shared/cadctl/commands.ts);
  *   - evidence output path policy (run-scoped when a run is active);
  *   - the evidence kind its observations may bind to (or none, for
  *     pure-observation presets);
@@ -16,7 +16,7 @@
  *     meaning).
  */
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
-import { hashOrEmpty } from "../../shared/capability.ts";
+import { hashOrEmpty } from "../../shared/hash.ts";
 import type { ObservationFact, ObservationVisual } from "../../observations/bundle.ts";
 import { bundleToRecord } from "../../observations/bundle.ts";
 import { observeContent } from "../../observations/renderer.ts";

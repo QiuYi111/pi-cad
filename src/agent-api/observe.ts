@@ -6,9 +6,11 @@ import { HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { annotationsForChangedFaces, changedFaces, summarizeBuildChanges, type FaceFingerprint, type FeatureChanges } from "../modules/model/build-changes.ts";
 import type { GeometryPayload } from "../shared/protocol.ts";
-import { FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
+import { FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual } from "../shared/cadctl/commands.ts";
+import { runGeometryEvidencePath, runVisualEvidenceDir } from "../shared/evidence-paths.ts";
+import { visualPayload } from "../shared/envelope.ts";
 import { resolveActiveRun } from "../harness/run-scope.ts";
-import { harnessStorageRoot } from "../authority/storage.ts";
+import { harnessStorageRoot } from "../shared/storage-paths.ts";
 import { sha256File } from "../shared/hash.ts";
 import {
   normalizeModelParameterDefinitions,

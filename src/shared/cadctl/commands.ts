@@ -1,134 +1,14 @@
-import { existsSync } from "node:fs";
-import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { copyFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 
-import type {
-  BuildPayload,
-  CadEventEnvelope,
-  GeometryPayload,
-  VisualPayload,
-} from "./protocol.ts";
-import { sha256File } from "./hash.ts";
-import { packageRoot } from "./paths.ts";
-import { assertLinuxRuntime } from "./platform.ts";
-import { runProcess } from "./process-runner.ts";
-import { isWarmCadctlCommand, runWarmCadctl } from "./cadctl-worker.ts";
-import { harnessRunDirectory } from "../authority/storage.ts";
-import { resolveActiveRun } from "../harness/run-scope.ts";
-import type { ModelParameterValue } from "./model-parameters.ts";
-
-export { packageRoot } from "./paths.ts";
+import type { CadEventEnvelope } from "../protocol.ts";
+import type { ModelParameterValue } from "../model-parameters.ts";
+import { runCadctl } from "./transport.ts";
 
 export const DEFAULT_VIEWS = ["iso", "front", "back", "left", "right", "top", "bottom"];
-export const DEFAULT_CADCTL_TIMEOUT_MS = 180_000;
 export const FULL_GEOMETRY_VALIDATION_TIMEOUT_MS = 15 * 60_000;
 export type GeometryValidationMode = "auto" | "fast" | "full";
-
-/** Reproducible uv-managed Python command inside the Linux/WSL runtime. */
-export function pythonInvocation(extra?: "simulation", _cwd?: string): { command: string; prefixArgs: string[] } {
-  assertLinuxRuntime("Pi-CAD Python capability");
-  const uvExtra = extra ? ["--extra", extra] : [];
-  return {
-    command: process.env.PI_CAD_UV ?? "uv",
-    prefixArgs: ["run", "--project", join(packageRoot(), "python"), ...uvExtra, "python"],
-  };
-}
-
-/** The interpreter the runtime installed, or the project venv `uv` builds. */
-export function managedPythonInterpreter(): string | null {
-  const configured = (process.env.PI_CAD_PYTHON ?? "").trim();
-  if (configured && existsSync(configured)) return configured;
-  const venv = join(packageRoot(), "python", ".venv", "bin", "python");
-  return existsSync(venv) ? venv : null;
-}
-
-/**
- * Command line for the warm cadctl kernel.
- *
- * The kernel has to be a direct child of the process that owns it. The only
- * owner-death signal that still reaches a stopped process is
- * `PR_SET_PDEATHSIG`, and a process can only arm that against its own parent,
- * so `uv run` -- which puts an interpreter child in that slot and outlives a
- * SIGKILLed owner -- cannot be the launcher. The managed interpreter is
- * spawned directly; `uv` stays the launcher only while that environment does
- * not exist yet, where building it is the whole point.
- */
-function warmKernelInvocation(extra?: "simulation"): { command: string; args: string[] } {
-  const managed = managedPythonInterpreter();
-  if (managed) return { command: managed, args: ["-m", "cadctl.worker"] };
-  const python = pythonInvocation(extra);
-  return { command: python.command, args: [...python.prefixArgs, "-m", "cadctl.worker"] };
-}
-
-/** Minimal host environment for spawning the uv-managed cadctl process. */
-export function cadctlEnv(cwd?: string): NodeJS.ProcessEnv {
-  assertLinuxRuntime("Pi-CAD cadctl capability");
-  const env = { ...process.env, NO_COLOR: "1", ...(cwd ? { PI_CAD_INVOCATION_CWD: resolve(cwd) } : {}) };
-  // cadctl stdout is a JSON transport. Prime and terminal hosts may set
-  // FORCE_COLOR globally, which lets dependency diagnostics inject ANSI
-  // bytes ahead of the envelope and makes the bridge unparsable.
-  delete env.FORCE_COLOR;
-  return env;
-}
-
-export interface CadctlOptions {
-  cwd: string;
-  timeoutMs?: number;
-  extra?: "simulation";
-  signal?: AbortSignal;
-}
-
-async function runCadctl(
-  args: string[],
-  options: CadctlOptions,
-): Promise<CadEventEnvelope> {
-  const python = pythonInvocation(options.extra, options.cwd);
-  const timeoutMs = options.timeoutMs ?? DEFAULT_CADCTL_TIMEOUT_MS;
-  const maxStdoutBytes = 16 * 1024 * 1024;
-  const maxStderrBytes = 1024 * 1024;
-  const useWorker = process.env.PI_CAD_CADCTL_TRANSPORT !== "process" && isWarmCadctlCommand(args[0]);
-  const kernel = useWorker ? warmKernelInvocation(options.extra) : null;
-  const result = kernel
-    ? await runWarmCadctl(
-        {
-          key: `${kernel.command}\0${kernel.args.join("\0")}`,
-          command: kernel.command,
-          args: kernel.args,
-          cwd: packageRoot(),
-          env: cadctlEnv(),
-        },
-        { args, cwd: options.cwd, timeoutMs, maxStdoutBytes, maxStderrBytes },
-      )
-    : await runProcess({
-        command: python.command,
-        args: [...python.prefixArgs, "-m", "cadctl", ...args],
-        cwd: options.cwd,
-        env: cadctlEnv(options.cwd),
-        timeoutMs,
-        signal: options.signal,
-        maxStdoutBytes,
-        maxStderrBytes,
-      });
-  if (result.exitCode !== 0 || result.terminationReason) {
-    const diagnostic = [result.stderr, result.stdout].filter(Boolean).join("\n").slice(-8192);
-    throw new Error(
-      `cadctl process failed${result.terminationDetail ? `: ${result.terminationDetail}` : ` with exit ${result.exitCode}`}: ${diagnostic}`,
-    );
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(result.stdout.trim());
-  } catch (error) {
-    throw new Error(`cadctl returned non-JSON output: ${String(error)}`);
-  }
-  if (!parsed || typeof parsed !== "object" || !("ok" in parsed)) {
-    throw new Error("cadctl returned an invalid envelope");
-  }
-  return parsed as CadEventEnvelope;
-}
 
 export interface CapabilityBuildInput {
   source: string;
@@ -259,7 +139,6 @@ export async function measure(
   if (options.b) args.push("--b", options.b);
   return runCadctl(args, { cwd, timeoutMs });
 }
-
 
 export interface CompareOptions {
   before: string;
@@ -454,123 +333,8 @@ export async function inspectSurfaces(
   return runCadctl(args, { cwd, timeoutMs });
 }
 
-export async function imageContent(
-  path: string,
-): Promise<{ type: "image"; data: string; mimeType: string }> {
-  const data = await readFile(path);
-  const mimeType = detectImageMimeType(data);
-  if (!mimeType) throw new Error(`unsupported image encoding: ${path}`);
-  return { type: "image", data: data.toString("base64"), mimeType };
-}
-
-export function detectImageMimeType(data: Buffer): "image/png" | "image/jpeg" | "image/gif" | "image/webp" | null {
-  if (data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
-  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return "image/jpeg";
-  if (data.subarray(0, 6).toString("ascii") === "GIF87a" || data.subarray(0, 6).toString("ascii") === "GIF89a") return "image/gif";
-  if (data.subarray(0, 4).toString("ascii") === "RIFF" && data.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
-  return null;
-}
-
-export async function readImageContents(
-  paths: string[],
-): Promise<Array<{ type: "image"; data: string; mimeType: string }>> {
-  return Promise.all(paths.map((path) => imageContent(path)));
-}
-
 export function defaultBuildOutput(cwd: string, source: string): string {
   const absolute = resolve(cwd, source);
   const stem = basename(absolute).replace(/\.py$/i, "");
   return join(cwd, "build", `${stem}.step`);
-}
-
-export function defaultVisualEvidenceDir(cwd: string, artifact: string): string {
-  return join(cwd, ".pi-cad", "evidence", "visual", basename(artifact).replace(/\.[^.]+$/, ""));
-}
-
-export function defaultGeometryEvidencePath(cwd: string, artifact: string): string {
-  return join(
-    cwd,
-    ".pi-cad",
-    "evidence",
-    "geometry",
-    `${basename(artifact).replace(/\.[^.]+$/, "")}.json`,
-  );
-}
-
-export function runEvidenceRoot(cwd: string, runId: string): string {
-  return join(harnessRunDirectory(cwd, runId), "evidence");
-}
-
-export function runVisualEvidenceDir(cwd: string, runId: string, artifact: string): string {
-  return join(runEvidenceRoot(cwd, runId), "visual", basename(artifact).replace(/\.[^.]+$/, ""));
-}
-
-export function runGeometryEvidencePath(cwd: string, runId: string, artifact: string): string {
-  return join(runEvidenceRoot(cwd, runId), "geometry", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
-}
-
-export function runCompareEvidencePath(cwd: string, runId: string, label: string): string {
-  return join(runEvidenceRoot(cwd, runId), "compare", `${label.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`);
-}
-
-export function runInterferenceEvidencePath(cwd: string, runId: string, artifact: string): string {
-  return join(runEvidenceRoot(cwd, runId), "interference", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
-}
-
-export function runAssemblyEvidencePath(cwd: string, runId: string, artifact: string): string {
-  return join(runEvidenceRoot(cwd, runId), "assembly", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
-}
-
-// Evidence placement follows the v7 harness run scope (the active run of this
-// conversation, or the project's current run). Without an active run there is
-// no run directory, so callers fall back to the project-level default.
-export async function currentRunEvidenceRoot(cwd: string): Promise<string | null> {
-  const loaded = await resolveActiveRun(cwd);
-  return loaded ? runEvidenceRoot(cwd, loaded.state.runId) : null;
-}
-
-export async function currentVisualEvidenceDir(cwd: string, artifact: string): Promise<string> {
-  const loaded = await resolveActiveRun(cwd);
-  return loaded ? runVisualEvidenceDir(cwd, loaded.state.runId, artifact) : defaultVisualEvidenceDir(cwd, artifact);
-}
-
-export async function currentGeometryEvidencePath(cwd: string, artifact: string): Promise<string> {
-  const loaded = await resolveActiveRun(cwd);
-  return loaded ? runGeometryEvidencePath(cwd, loaded.state.runId, artifact) : defaultGeometryEvidencePath(cwd, artifact);
-}
-
-export async function hashOrEmpty(path: string): Promise<string> {
-  try {
-    return await sha256File(path);
-  } catch {
-    return "";
-  }
-}
-
-export function envelopeArtifactHash(
-  envelope: CadEventEnvelope,
-  kind = "step",
-): string | undefined {
-  const artifact = envelope.artifacts?.find((entry) => entry.kind === kind);
-  return artifact?.sha256 ?? envelope.outputHashes?.[artifact?.path ?? ""];
-}
-
-export function artifactPathForKind(envelope: CadEventEnvelope, kind: string): string | undefined {
-  return envelope.artifacts?.find((entry) => entry.kind === kind)?.path;
-}
-
-export function payloadOf<T>(envelope: CadEventEnvelope): T {
-  return envelope.payload as T;
-}
-
-export function buildPayload(envelope: CadEventEnvelope): BuildPayload {
-  return payloadOf<BuildPayload>(envelope);
-}
-
-export function visualPayload(envelope: CadEventEnvelope): VisualPayload {
-  return payloadOf<VisualPayload>(envelope);
-}
-
-export function geometryPayload(envelope: CadEventEnvelope): GeometryPayload {
-  return payloadOf<GeometryPayload>(envelope);
 }

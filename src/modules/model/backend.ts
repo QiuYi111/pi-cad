@@ -15,7 +15,7 @@
  *     success.
  */
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
-import { buildStep, exportArtifact } from "../../shared/capability.ts";
+import { buildStep, exportArtifact } from "../../shared/cadctl/commands.ts";
 import type { ModelParameterValue } from "../../shared/model-parameters.ts";
 
 export interface ModelBuildInput {

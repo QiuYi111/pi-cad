@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { DEFAULT_VIEWS, probePython } from "../../shared/capability.ts";
+import { DEFAULT_VIEWS, probePython } from "../../shared/cadctl/commands.ts";
 import { bundleFromEnvelope, type ObservationBundle } from "../../observations/bundle.ts";
 import { ensureProbePresets, probePreset, renderProbeResult } from "./index.ts";
 import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";

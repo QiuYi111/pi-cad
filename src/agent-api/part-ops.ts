@@ -16,13 +16,9 @@ import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { recordObservationV7 } from "../harness/observations.ts";
 import { resolveActiveRun } from "../harness/run-scope.ts";
 import { changedFaces, summarizeBuildChanges, type FeatureChanges } from "../modules/model/build-changes.ts";
-import {
-  bindIdentity,
-  inspectGeometry,
-  inspectVisual,
-  runGeometryEvidencePath,
-  visualPayload,
-} from "../shared/capability.ts";
+import { bindIdentity, inspectGeometry, inspectVisual } from "../shared/cadctl/commands.ts";
+import { runGeometryEvidencePath } from "../shared/evidence-paths.ts";
+import { visualPayload } from "../shared/envelope.ts";
 import { PartOpError, runPartCommand } from "../shared/freecad-worker.ts";
 import type { FaceFingerprint, GeometryPayload } from "../shared/protocol.ts";
 import { sha256File } from "../shared/hash.ts";

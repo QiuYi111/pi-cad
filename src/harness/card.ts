@@ -8,7 +8,7 @@ import type { RegistrySet } from "./registry.ts";
 import { legalWorkflowTransitions, unmetPhaseObligations } from "./reducer.ts";
 import { HarnessProjectStoreV7, type LoadedHarnessRunV7 } from "./run-store.ts";
 import { resolveActiveRun } from "./run-scope.ts";
-import { harnessStorageRoot } from "../authority/storage.ts";
+import { harnessStorageRoot } from "../shared/storage-paths.ts";
 
 export interface PhaseCardImage {
   path: string;

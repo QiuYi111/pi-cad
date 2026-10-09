@@ -3,12 +3,9 @@ import { registerMechanicalActionTool } from "../../domains/mechanical/register-
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
-import {
-  buildPayload,
-  defaultBuildOutput,
-  envelopeArtifactHash,
-  hashOrEmpty,
-} from "../../shared/capability.ts";
+import { buildPayload, envelopeArtifactHash } from "../../shared/envelope.ts";
+import { defaultBuildOutput } from "../../shared/cadctl/commands.ts";
+import { hashOrEmpty } from "../../shared/hash.ts";
 import { renderProbeResult } from "../../modules/probe/index.ts";
 import { modelBackend } from "../../modules/model/index.ts";
 
