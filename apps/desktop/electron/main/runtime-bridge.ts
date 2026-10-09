@@ -43,7 +43,8 @@ export async function withCanonicalProjectEnvironment(
 ): Promise<string[]> {
   // A bridge that owns the project (cloud workspace) names the canonical directory itself.
   const bridgeCanonical = bridge.canonicalProjectDir?.();
-  if (bridgeCanonical) return ["env", `PI_CAD_CANONICAL_PROJECT_DIR=${bridgeCanonical}`, ...argv];
+  // The bridge sets PI_CAD_CANONICAL_PROJECT_DIR on every exec and spawn it runs, so argv is unchanged.
+  if (bridgeCanonical) return argv;
   let canonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
   if (canonical) canonical = await bridge.toRuntimePath(canonical);
   else {

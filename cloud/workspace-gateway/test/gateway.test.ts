@@ -96,6 +96,12 @@ describe("workspace gateway", () => {
     expect(await client.waitFor("exec_result", 1)).toMatchObject({ stdout: "hi\n", code: 0 });
   });
 
+  it("passes exec env to the command", async () => {
+    const client = await connect();
+    client.send({ type: "exec", ch: 5, args: ["sh", "-c", "printf %s \"$REIFY_TEST_VALUE\""], env: { REIFY_TEST_VALUE: "from-exec-env" } });
+    expect(await client.waitFor("exec_result", 5)).toMatchObject({ stdout: "from-exec-env", code: 0 });
+  });
+
   it("reports non-zero exec exit codes in exec_result", async () => {
     const client = await connect();
     client.send({ type: "exec", ch: 2, args: ["sh", "-c", "echo oops >&2; exit 3"] });

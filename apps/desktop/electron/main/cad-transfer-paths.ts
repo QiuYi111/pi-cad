@@ -50,6 +50,8 @@ export interface ProjectIO {
   copyIn(hostFile: string, relative: string): Promise<void>;
   /** Host path (Windows form in WSL setups) of a project path. */
   toHostPath(relative: string): Promise<string>;
+  /** Spool polling interval. Remote projects poll less often to spare the gateway. */
+  readonly spoolPollMs?: number;
 }
 
 export interface HostEnvironment {

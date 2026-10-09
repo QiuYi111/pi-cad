@@ -169,13 +169,14 @@ describe("remote bridge paths and fixed facts", () => {
     remote.close();
   });
 
-  it("uses the canonical directory of the remote bridge for the project environment", async () => {
-    await expect(withCanonicalProjectEnvironment(bridge, "/unused", ["node", "worker.mjs"])).resolves.toEqual([
-      "env",
-      `PI_CAD_CANONICAL_PROJECT_DIR=${root}/state/p1`,
-      "node",
-      "worker.mjs",
-    ]);
+  it("leaves argv alone for the remote bridge, which sets the canonical directory in the environment itself", async () => {
+    await expect(withCanonicalProjectEnvironment(bridge, "/unused", ["node", "worker.mjs"])).resolves.toEqual(["node", "worker.mjs"]);
+    await expect(bridge.exec(["sh", "-c", "printf %s \"$PI_CAD_CANONICAL_PROJECT_DIR\""])).resolves.toEqual({ stdout: `${root}/state/p1`, stderr: "" });
+  });
+
+  it("keeps the canonical directory per project, so a project switch changes it", async () => {
+    projectId = "p2";
+    await expect(bridge.exec(["sh", "-c", "printf %s \"$PI_CAD_CANONICAL_PROJECT_DIR\""])).resolves.toEqual({ stdout: `${root}/state/p2`, stderr: "" });
   });
 
   it("matches a replayed prefix against the tail of what was delivered", () => {
@@ -202,6 +203,11 @@ describe("remote bridge file transfer", () => {
 });
 
 describe("RemoteProjectIO", () => {
+  it("polls the transfer spool at most every two seconds", () => {
+    const io = new RemoteProjectIO(bridge, join(root, "projects", "p1"), { projectId: "p1", cacheRoot: join(base, "cache") });
+    expect(io.spoolPollMs).toBeGreaterThanOrEqual(2_000);
+  });
+
   it("reads, writes, lists and removes project files through the bridge", async () => {
     const io = new RemoteProjectIO(bridge, join(root, "projects", "p1"), { projectId: "p1", cacheRoot: join(base, "cache") });
     await expect(io.readText("notes/a.txt")).resolves.toBeNull();

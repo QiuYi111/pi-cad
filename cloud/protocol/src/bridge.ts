@@ -8,7 +8,7 @@
 // `ch` for stdout and `ch + 1` for stderr.
 
 export type ClientMessage =
-  | { type: "exec"; ch: number; args: string[]; input?: string; timeoutMs?: number }
+  | { type: "exec"; ch: number; args: string[]; input?: string; timeoutMs?: number; env?: Record<string, string> }
   | { type: "spawn"; ch: number; args: string[]; env?: Record<string, string>; cwd?: string }
   | { type: "stdin_end"; ch: number }
   | { type: "kill"; ch: number; signal?: string }

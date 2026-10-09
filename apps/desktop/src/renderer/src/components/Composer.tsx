@@ -18,16 +18,16 @@ const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium"
 type PendingRequest = { id: string; text: string };
 type RunningIntent = "queue" | "replace" | "note";
 
-export function Composer({ settings, status, queueKey, draftRequest, onSettingsChange, onSend, onNote, onAbort, onDraftChange, onImagesAdded }: { settings: AppSettings; status: RuntimeStatus; queueKey: string; draftRequest?: { id: string; text: string }; onSettingsChange: (patch: Partial<AppSettings>) => Promise<void>; onSend: (text: string, images?: Array<{ data: string; mimeType: string }>) => Promise<void>; onNote: (text: string) => void; onAbort: () => Promise<void>; onDraftChange?: (hasDraft: boolean) => void; onImagesAdded?: (images: Array<{ name: string; data: string; mimeType: string }>) => void }) {
+export function Composer({ settings, status, queueKey, draftRequest, onSettingsChange, onSend, onNote, onAbort, onDraftChange, onImagesAdded }: { settings: AppSettings; status: RuntimeStatus; queueKey: string; draftRequest?: { id: string; text: string }; onSettingsChange: (patch: Partial<AppSettings>) => Promise<void>; onSend: (text: string, images?: Array<{ data: string; mimeType: string }>) => Promise<void>; onNote: (text: string) => void; onAbort: () => Promise<void>; onDraftChange?: (hasDraft: boolean) => void; onImagesAdded?: (images: Array<{ name: string; data: string; mimeType: string; remotePath?: string }>) => void }) {
   const [text, setText] = useState("");
-  const [images, setImages] = useState<Array<{ name: string; data: string; mimeType: string }>>([]);
+  const [images, setImages] = useState<Array<{ name: string; data: string; mimeType: string; remotePath?: string }>>([]);
   const [availableModels, setAvailableModels] = useState<ModelChoice[]>([{ provider: settings.provider, id: settings.model, name: settings.model }]);
   const [catalogModels, setCatalogModels] = useState<ModelChoice[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const [stopping, setStopping] = useState(false);
   const [runningIntent, setRunningIntent] = useState<RunningIntent>("queue");
   const [pending, setPending] = useState<PendingRequest[]>([]);
-  const imagesByConversation = useRef<Record<string, Array<{ name: string; data: string; mimeType: string }>>>({});
+  const imagesByConversation = useRef<Record<string, Array<{ name: string; data: string; mimeType: string; remotePath?: string }>>>({});
   const activeImageKey = useRef(queueKey);
   const imagesRef = useRef(images);
   const draining = useRef(false);
@@ -137,7 +137,10 @@ export function Composer({ settings, status, queueKey, draftRequest, onSettingsC
       }
       return;
     }
-    try { await onSend(value, attached); }
+    // In cloud mode the uploaded images are named by their workspace path, so Prime can open them too.
+    const workspacePaths = images.flatMap((image) => (image.remotePath ? [image.remotePath] : []));
+    const outgoing = workspacePaths.length ? `${value}\n\n附件（工作区路径）：\n${workspacePaths.map((path) => `- ${path}`).join("\n")}` : value;
+    try { await onSend(outgoing, attached); }
     catch { /* The conversation renders the runtime error. */ }
   };
   const attach = async () => {

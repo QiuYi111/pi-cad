@@ -195,7 +195,7 @@ export class CadTransferService {
     this.active = true;
     await this.writeHeartbeat();
     // Poll with timers, not fs.watch: fs.watch does not work over \\wsl$.
-    this.pollTimer = setInterval(() => { void this.pollSpool(); }, SPOOL_POLL_MS);
+    this.pollTimer = setInterval(() => { void this.pollSpool(); }, io.spoolPollMs ?? SPOOL_POLL_MS);
     this.beatTimer = setInterval(() => { void this.writeHeartbeat(); }, HEARTBEAT_MS);
   }
 

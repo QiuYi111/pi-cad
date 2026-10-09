@@ -105,7 +105,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
       case "ping":
         return send(conn, { type: "pong" });
       case "exec":
-        return exec(conn, msg.ch, msg.args, msg.input, msg.timeoutMs);
+        return exec(conn, msg.ch, msg.args, msg.input, msg.timeoutMs, msg.env);
       case "spawn":
         return start(conn, msg.ch, msg.args, msg.env, msg.cwd);
       case "stdin_end":
@@ -125,9 +125,9 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
     }
   }
 
-  async function exec(conn: Connection, ch: number, args: string[], input: string | undefined, timeoutMs: number | undefined) {
+  async function exec(conn: Connection, ch: number, args: string[], input: string | undefined, timeoutMs: number | undefined, env: Record<string, string> | undefined) {
     try {
-      const { stdout, stderr } = await execCollect(args, { input, timeout: timeoutMs, cwd: options.workspaceRoot, env: childEnv() });
+      const { stdout, stderr } = await execCollect(args, { input, timeout: timeoutMs, cwd: options.workspaceRoot, env: childEnv(env) });
       send(conn, { type: "exec_result", ch, stdout, stderr, code: 0 });
     } catch (error) {
       if (!(error instanceof ExecExitError)) throw error;
