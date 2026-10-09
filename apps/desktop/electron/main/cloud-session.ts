@@ -95,6 +95,20 @@ export function jwtExpiryMs(token: string): number | undefined {
   }
 }
 
+/** GET /v1/workspace, and the same view returned by POST start/stop and keepalive. */
+export interface WorkspaceView {
+  name: string;
+  state: "stopped" | "starting" | "running" | "stopping" | "failed";
+  desired: "running" | "stopped";
+  lastActivityAt: string | null;
+  idleWarnedAt: string | null;
+  /** Set once the idle warning has been sent: the time the workspace will be paused. */
+  reclaimAt: string | null;
+  lastError: string | null;
+  /** 1-based position in the start queue, null when not queued. There is no "queued" state on the server. */
+  queuePosition: number | null;
+}
+
 interface TokenResponse {
   accessToken: string;
   refreshToken: string;
@@ -186,15 +200,16 @@ export class CloudSession {
   }
 
   async changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    await this.call("POST", "/v1/auth/password", { oldPassword, newPassword });
+    // Read at send time: a retry after a refresh must carry the rotated token, not the one it replaced.
+    await this.call("POST", "/v1/auth/password", () => ({ oldPassword, newPassword, refreshToken: this.session?.refreshToken }));
   }
 
   // ---- Projects -----------------------------------------------------------
 
   async listProjects(): Promise<CloudProject[]> {
-    const body = await this.call<unknown>("GET", "/v1/projects");
-    const items = Array.isArray(body) ? body : (body as { projects?: unknown } | undefined)?.projects;
-    return Array.isArray(items) ? items.map(toProject) : [];
+    const body = await this.call<{ projects?: unknown }>("GET", "/v1/projects");
+    if (!Array.isArray(body?.projects)) throw new CloudApiError(502, "bad_response", "服务器返回的项目列表不完整。");
+    return body.projects.map(toProject);
   }
 
   async createProject(name: string): Promise<CloudProject> {
@@ -222,8 +237,7 @@ export class CloudSession {
   }
 
   async stopWorkspace(): Promise<CloudWorkspaceInfo> {
-    await this.call("POST", "/v1/workspace/stop");
-    this.setWorkspace("stopping");
+    this.setWorkspace(workspaceInfoFromView(await this.call<WorkspaceView>("POST", "/v1/workspace/stop")));
     return { ...this.workspace };
   }
 
@@ -234,9 +248,7 @@ export class CloudSession {
   }
 
   async refreshWorkspace(): Promise<CloudWorkspaceInfo> {
-    const body = await this.call<Record<string, unknown>>("GET", "/v1/workspace");
-    const state = toWorkspaceState(body.state);
-    this.setWorkspace(state, typeof body.position === "number" ? body.position : undefined);
+    this.setWorkspace(workspaceInfoFromView(await this.call<WorkspaceView>("GET", "/v1/workspace")));
     return { ...this.workspace };
   }
 
@@ -263,8 +275,7 @@ export class CloudSession {
     await this.requestStart();
     for (;;) {
       const info = await this.refreshWorkspace();
-      if (info.state === "running") return info;
-      if (info.state === "failed") throw new Error(info.error || "工作区启动失败，请稍后重试。");
+      if (info.state === "running" || info.state === "failed") return info;
       if (this.now() > deadline) throw new Error("工作区启动超时，请稍后重试。");
       // Still stopped means the request has not taken effect yet (queued or rejected): ask again.
       if (info.state === "stopped") await this.requestStart();
@@ -274,11 +285,11 @@ export class CloudSession {
 
   private async requestStart(): Promise<void> {
     try {
-      await this.call("POST", "/v1/workspace/start");
-      this.setWorkspace("starting");
+      this.setWorkspace(workspaceInfoFromView(await this.call<WorkspaceView>("POST", "/v1/workspace/start")));
     } catch (error) {
       if (!isCapacityFull(error)) throw error;
-      this.setWorkspace("queued", error.position);
+      // 409 capacity_full: {code, message, position}. The request is queued at `position`.
+      this.setWorkspace(error.position !== undefined ? { state: "queued", position: error.position } : { state: "queued" });
     }
   }
 
@@ -339,9 +350,13 @@ export class CloudSession {
       return;
     }
     switch (message.type) {
-      case "workspace_state":
-        this.setWorkspace(toWorkspaceState(message.state));
+      case "workspace_state": {
+        // The event has no queue position and no error text. A failure is read back for its lastError.
+        const state = toServerState(message.state);
+        this.setWorkspace({ state });
+        if (state === "failed") void this.refreshWorkspace().catch(noop);
         return;
+      }
       case "idle_warning": {
         const reclaimAt = typeof message.reclaimAt === "string" ? message.reclaimAt : new Date(this.now()).toISOString();
         this.workspace = { ...this.workspace, idleWarningAt: reclaimAt };
@@ -349,7 +364,7 @@ export class CloudSession {
         return;
       }
       case "reclaimed":
-        this.setWorkspace("stopped");
+        this.setWorkspace({ state: "stopped" });
         this.emit({ type: "reclaimed" });
         return;
     }
@@ -361,9 +376,28 @@ export class CloudSession {
     return new Promise((resolve, reject) => {
       socket.once("open", () => resolve(socket));
       socket.once("unexpected-response", (_request, response) => {
-        socket.terminate();
         const status = response.statusCode ?? 0;
-        reject(status === 401 || status === 403 ? new CloudAuthError() : new CloudApiError(status, undefined, `服务器返回 ${status}`));
+        let text = "";
+        let settled = false;
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          socket.terminate();
+          if (status === 401 || status === 403) return reject(new CloudAuthError());
+          const data = parseJson(text);
+          reject(new CloudApiError(
+            status,
+            typeof data?.code === "string" ? data.code : undefined,
+            typeof data?.message === "string" ? data.message : `服务器返回 ${status}`,
+            typeof data?.retryAfterSec === "number" ? data.retryAfterSec : undefined,
+            typeof data?.position === "number" ? data.position : undefined,
+          ));
+        };
+        response.setEncoding("utf8");
+        response.on("data", (chunk: string) => { text += chunk; });
+        response.on("end", finish);
+        response.on("close", finish);
+        response.on("error", finish);
       });
       socket.once("error", (error) => reject(new CloudApiError(0, "network", error.message)));
     });
@@ -446,20 +480,22 @@ export class CloudSession {
 
   // ---- HTTP ---------------------------------------------------------------
 
-  private async call<T = unknown>(method: string, path: string, body?: unknown, authenticated = true): Promise<T> {
+  private async call<T = unknown>(method: string, path: string, body?: unknown | (() => unknown), authenticated = true, retried = false): Promise<T> {
+    const payload = typeof body === "function" ? (body as () => unknown)() : body;
     const headers: Record<string, string> = {};
-    if (body !== undefined) headers["content-type"] = "application/json";
+    if (payload !== undefined) headers["content-type"] = "application/json";
     if (authenticated) headers.authorization = `Bearer ${await this.accessToken()}`;
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.base}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+      response = await this.fetchImpl(`${this.base}${path}`, { method, headers, body: payload === undefined ? undefined : JSON.stringify(payload) });
     } catch (error) {
       throw new CloudApiError(0, "network", `无法连接到服务器：${error instanceof Error ? error.message : String(error)}`);
     }
-    if (response.status === 401 && authenticated && this.session) {
+    if (response.status === 401 && authenticated && this.session && !retried) {
       // The access token may have expired between the freshness check and the call: refresh once and retry.
+      // A second 401 is the server's answer (for example a wrong old password), so it is not retried again.
       await this.refresh();
-      return this.call<T>(method, path, body, authenticated);
+      return this.call<T>(method, path, body, authenticated, true);
     }
     const text = await response.text();
     let data: Record<string, unknown> | undefined;
@@ -483,10 +519,17 @@ export class CloudSession {
     return url.toString();
   }
 
-  private setWorkspace(state: CloudWorkspaceState, position?: number): void {
-    const next: CloudWorkspaceInfo = { state, ...(state === "queued" && position !== undefined ? { position } : {}) };
-    this.workspace = next;
-    this.emit({ type: "workspace_state", state, ...(next.position !== undefined ? { position: next.position } : {}) });
+  /** Replaces the workspace info. Listeners hear about a change of state, queue position or error, not idle-warning updates. */
+  private setWorkspace(next: CloudWorkspaceInfo): void {
+    const previous = this.workspace;
+    this.workspace = { ...next };
+    if (previous.state === next.state && previous.position === next.position && previous.error === next.error) return;
+    this.emit({
+      type: "workspace_state",
+      state: next.state,
+      ...(next.position !== undefined ? { position: next.position } : {}),
+      ...(next.error !== undefined ? { error: next.error } : {}),
+    });
   }
 
   private emit(event: CloudEvent): void {
@@ -494,15 +537,40 @@ export class CloudSession {
   }
 }
 
+const PROJECT_ROLES = ["maintainer", "editor", "viewer"] as const;
+
+/** One entry of {projects} from GET /v1/projects, or the project returned by POST and PATCH. */
 function toProject(value: unknown): CloudProject {
-  const record = ((value as { project?: unknown } | undefined)?.project ?? value) as { id?: unknown; name?: unknown; updatedAt?: unknown } | undefined;
-  if (typeof record?.id !== "string" || typeof record.name !== "string") throw new CloudApiError(502, "bad_response", "服务器返回的项目信息不完整。");
-  return { id: record.id, name: record.name, ...(typeof record.updatedAt === "string" ? { updatedAt: record.updatedAt } : {}) };
+  const record = value as { id?: unknown; name?: unknown; role?: unknown; createdAt?: unknown } | null | undefined;
+  const role = PROJECT_ROLES.find((candidate) => candidate === record?.role);
+  if (typeof record?.id !== "string" || typeof record.name !== "string" || !role || typeof record.createdAt !== "string") {
+    throw new CloudApiError(502, "bad_response", "服务器返回的项目信息不完整。");
+  }
+  return { id: record.id, name: record.name, role, createdAt: record.createdAt };
 }
 
-function toWorkspaceState(value: unknown): CloudWorkspaceState {
+/**
+ * Maps the server's workspace view onto the client state. The server has no "queued" state: a request
+ * waiting for a slot has queuePosition set. A start that was requested but not yet picked up by the
+ * controller (desired running, state stopped or the previous failure) is shown as starting.
+ */
+export function workspaceInfoFromView(view: WorkspaceView): CloudWorkspaceInfo {
+  const idleWarningAt = typeof view.reclaimAt === "string" ? view.reclaimAt : undefined;
+  if (typeof view.queuePosition === "number") {
+    return { state: "queued", position: view.queuePosition, ...(idleWarningAt ? { idleWarningAt } : {}) };
+  }
+  if (view.state === "failed" && view.desired === "running") return { state: "starting" };
+  if (view.state === "failed") {
+    return { state: "failed", ...(view.lastError ? { error: view.lastError } : {}) };
+  }
+  if (view.state === "stopped" && view.desired === "running") return { state: "starting" };
+  if (view.state === "running" && view.desired === "stopped") return { state: "stopping", ...(idleWarningAt ? { idleWarningAt } : {}) };
+  return { state: view.state, ...(idleWarningAt ? { idleWarningAt } : {}) };
+}
+
+/** Event states the server sends. Anything unknown counts as stopped. */
+function toServerState(value: unknown): Exclude<CloudWorkspaceState, "queued"> {
   switch (value) {
-    case "queued":
     case "starting":
     case "running":
     case "stopping":
@@ -510,6 +578,15 @@ function toWorkspaceState(value: unknown): CloudWorkspaceState {
       return value;
     default:
       return "stopped";
+  }
+}
+
+function parseJson(text: string): Record<string, unknown> | undefined {
+  try {
+    const value = text ? (JSON.parse(text) as unknown) : undefined;
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
   }
 }
 

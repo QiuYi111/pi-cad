@@ -19,8 +19,9 @@ const STATUS_TEXT: Record<number, string> = {
   503: 'Service Unavailable',
 };
 
-function rejectUpgrade(socket: Duplex, status: number, code: string) {
-  const body = JSON.stringify({ code });
+// Same {code, message} body as the HTTP errors, so the desktop reads one error shape everywhere.
+function rejectUpgrade(socket: Duplex, status: number, code: string, message: string) {
+  const body = JSON.stringify({ code, message });
   socket.end(
     `HTTP/1.1 ${status} ${STATUS_TEXT[status] ?? 'Error'}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\nConnection: close\r\n\r\n${body}`,
   );
@@ -38,13 +39,13 @@ export function attachWebSockets(
     const run = async () => {
       if (path === BRIDGE_PATH) return handleBridge(req, socket, head);
       if (path === EVENTS_PATH) return handleEvents(req, socket, head);
-      rejectUpgrade(socket, 404, 'not_found');
+      rejectUpgrade(socket, 404, 'not_found', '未找到');
     };
     run().catch((e: unknown) => {
-      if (e instanceof HttpError) rejectUpgrade(socket, e.status, e.code);
+      if (e instanceof HttpError) rejectUpgrade(socket, e.status, e.code, e.message);
       else {
         console.error('[ws] upgrade failed', e);
-        rejectUpgrade(socket, 500, 'internal');
+        rejectUpgrade(socket, 500, 'internal', '服务器内部错误');
       }
     });
   });
