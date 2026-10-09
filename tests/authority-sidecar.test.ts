@@ -351,6 +351,8 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/skills\/parametric-cad-modeling\n\/opt\/pi-cad\/skills\/parametric-cad-modeling/);
   assert.match(joined, /--skill\n\/opt\/pi-cad\/skills\/parametric-cad-modeling\/SKILL\.md/);
+  assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/skills\/assembly-design\n\/opt\/pi-cad\/skills\/assembly-design/);
+  assert.match(joined, /--skill\n\/opt\/pi-cad\/skills\/assembly-design\/SKILL\.md/);
   assert.match(joined, /--skill\n\/opt\/pi-cad\/cad\/SKILL\.md/);
   assert.match(joined, /cad_experience_search,cad_experience_get,cad_experience_find,cad_experience_read/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
@@ -371,6 +373,30 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   const readOnly = buildPrimeBwrapArgs(paths, ["--print", "inspect it"], "read-only").join("\n");
   assert.match(readOnly, /--ro-bind\n\/project\n\/workspace/);
   assert.doesNotMatch(readOnly, /--bind\n\/project\n\/workspace/);
+});
+
+test("Prime bwrap forwards proxy URLs without embedded credentials", () => {
+  const names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy", "NO_PROXY"] as const;
+  const previous = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+  const paths: LaunchPaths = {
+    repository: "/repo/pi-cad", project: "/project", primeRoot: "/repo/prime", nodeRoot: "/runtime/node",
+    primeAgentDir: "/host/agent", primeKernelVenv: "/host/kernel", cadPythonRoot: "/runtime/cad-python",
+    kernelPythonRoot: "/runtime/python", kernelPythonExecutable: "python3.11", kernelSitePackages: "lib/python3.11/site-packages",
+    runtimeDirectory: "/run/private", ephemeralAgentDir: "/run/private/prime-agent", authorSocketDirectory: "/run/private/author",
+  };
+  try {
+    for (const name of names.filter((name) => name !== "NO_PROXY")) process.env[name] = "http://user:s3cret@proxy.example:8080/path";
+    process.env.NO_PROXY = "localhost,127.0.0.1";
+    const joined = buildPrimeBwrapArgs(paths, ["--print", "build it"]).join("\n");
+    assert.match(joined, /--setenv\nHTTPS_PROXY\nhttp:\/\/proxy\.example:8080\/path\n/);
+    assert.doesNotMatch(joined, /s3cret|user:/);
+    assert.match(joined, /--setenv\nNO_PROXY\nlocalhost,127\.0\.0\.1\n/);
+  } finally {
+    for (const name of names) {
+      if (previous[name] === undefined) delete process.env[name];
+      else process.env[name] = previous[name];
+    }
+  }
 });
 
 test("desktop read-only authority denies workflow and artifact mutation", async () => {

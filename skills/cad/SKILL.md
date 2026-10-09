@@ -160,8 +160,8 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
   a normal first-run state. Tell the user the one command, `npm run setup:freecad`
   (about 4.2 GB, no sudo, once), and stop. Do not try to install FreeCAD
   yourself, and do not fall back to build123d on your own.
-- Read `skills/parametric-cad-modeling/references/freecad-part-ops.md` before
-  the first `cad.part` call in a task: the full op table, role names, assemblies,
+- Read the `references/freecad-part-ops.md` file of the `parametric-cad-modeling`
+  skill (next to that skill's SKILL.md) before the first `cad.part` call in a task: the full op table, role names, assemblies,
   error codes, and worked examples. The copyable starting points are the
   `freecad-part` and `freecad-assembly` assets of the `parametric-cad-modeling`
   skill.
