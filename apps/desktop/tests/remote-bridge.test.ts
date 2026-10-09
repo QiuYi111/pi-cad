@@ -187,7 +187,8 @@ describe("remote bridge paths and fixed facts", () => {
 });
 
 describe("remote bridge file transfer", () => {
-  it("uploads a file and downloads it back with matching checksums", async () => {
+  // The test gateway runs on this host and executes POSIX commands; the real gateway runs only in the Linux workspace pod.
+  it.skipIf(process.platform === "win32")("uploads a file and downloads it back with matching checksums", async () => {
     const data = randomBytes(300_000);
     const local = join(base, "upload.bin");
     await writeFile(local, data);
@@ -220,7 +221,8 @@ describe("RemoteProjectIO", () => {
     await expect(io.readText("notes/a.txt")).resolves.toBeNull();
   });
 
-  it("caches host copies and downloads again only when the remote checksum changes", async () => {
+  // The test gateway runs on this host and executes POSIX commands; the real gateway runs only in the Linux workspace pod.
+  it.skipIf(process.platform === "win32")("caches host copies and downloads again only when the remote checksum changes", async () => {
     const io = new RemoteProjectIO(bridge, join(root, "projects", "p1"), { projectId: "p1", cacheRoot: join(base, "cache") });
     const first = join(base, "first.step");
     await writeFile(first, "solid one");

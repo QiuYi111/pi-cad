@@ -55,7 +55,8 @@ describe("upload on choose", () => {
     expect((await readFile(uploaded!.remotePath)).equals(image)).toBe(true);
   });
 
-  it("uploads a STEP file to its imports path and imports it there without a second copy", async () => {
+  // The test gateway runs on this host and executes POSIX commands; the real gateway runs only in the Linux workspace pod.
+  it.skipIf(process.platform === "win32")("uploads a STEP file to its imports path and imports it there without a second copy", async () => {
     const step = Buffer.from("ISO-10303-21;\nEND-ISO-10303-21;\n");
     const local = join(base, "bracket v2.step");
     await writeFile(local, step);
