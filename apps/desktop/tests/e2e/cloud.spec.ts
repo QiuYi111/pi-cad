@@ -18,15 +18,14 @@ const baseUrl = process.env.REIFY_CLOUD_URL ?? "";
 
 test.skip(!email || !password, "REIFY_CLOUD_EMAIL and REIFY_CLOUD_PASSWORD are required");
 
-async function waitForDevTools(port: number, child: ChildProcess): Promise<void> {
+/** Electron picks a free port (--remote-debugging-port=0) and prints it. Reads it from the app output. */
+async function waitForDevTools(output: () => string, child: ChildProcess): Promise<number> {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) throw new Error(`the app exited early with code ${child.exitCode}`);
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (response.ok) return;
-    } catch { /* not listening yet */ }
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    const match = /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(output());
+    if (match) return Number(match[1]);
+    await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error("the app did not open its DevTools port");
 }
@@ -43,11 +42,10 @@ test("cloud mode: sign in, open a project, run the workspace over the bridge", a
   // The tailnet address must not go through a local HTTP proxy.
   for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) delete env[key];
   env.NO_PROXY = "*";
-  const port = 9300 + Math.floor(Math.random() * 500);
   const electronPath = join(process.cwd(), "node_modules/electron/dist", process.platform === "win32" ? "electron.exe" : "electron");
   const child = spawn(
     electronPath,
-    [".", "--no-sandbox", ...(process.platform === "linux" ? ["--password-store=gnome-libsecret"] : []), `--user-data-dir=${userData}`, `--remote-debugging-port=${port}`],
+    [".", "--no-sandbox", ...(process.platform === "linux" ? ["--password-store=gnome-libsecret"] : []), `--user-data-dir=${userData}`, "--remote-debugging-port=0"],
     { cwd: process.cwd(), env, stdio: ["ignore", "pipe", "pipe"] },
   );
   let appOutput = "";
@@ -56,7 +54,7 @@ test("cloud mode: sign in, open a project, run the workspace over the bridge", a
   child.stderr?.on("data", collect);
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | undefined;
   try {
-    await waitForDevTools(port, child);
+    const port = await waitForDevTools(() => appOutput, child);
     browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
     const context = browser.contexts()[0];
     const page = context.pages()[0] ?? (await context.waitForEvent("page"));
