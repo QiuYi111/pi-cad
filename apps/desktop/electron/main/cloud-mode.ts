@@ -1,5 +1,6 @@
 import type { AppSettings } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
+import { RemoteBridge } from "./remote-bridge.js";
 
 /** Blender and ParaView are not provisioned in cloud workspaces during stage 1 (plan §9.5). */
 export const STAGE_1_CLOUD_UNAVAILABLE = "阶段 1 云端模式不可用";
@@ -30,4 +31,12 @@ export function createRuntimeBridge(settings: AppSettings, platform: NodeJS.Plat
     key: runtimeBridgeKey(settings, platform),
     bridge: isCloudMode(settings) ? factories.remote() : factories.local(),
   };
+}
+
+/**
+ * The cloud workspace bridge when the factory chose one, otherwise null. Handlers that move files
+ * to or from the workspace use this instead of re-reading the mode from settings.
+ */
+export function workspaceBridgeOf(bridge: RuntimeBridge): RemoteBridge | null {
+  return bridge instanceof RemoteBridge ? bridge : null;
 }
