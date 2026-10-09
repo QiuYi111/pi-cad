@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +13,18 @@ import { canonicalDigest } from "../src/harness/canonical.ts";
 import { legalWorkflowTransitions, transitionRun } from "../src/harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { resolveWorkflowPackage, workflowUserDirectory } from "../src/harness/workflow/packages.ts";
+
+// Workflow packages and adoption policy resolve under PI_CAD_WORKFLOW_HOME (or
+// HOME). Run standalone, isolate them in a temp home seeded like run-ts-tests.mjs
+// so tests never touch the real ~/.pi-cad.
+if (!process.env.PI_CAD_WORKFLOW_HOME) {
+  const home = mkdtempSync(join(tmpdir(), "pi-cad-workflow-packages-home-"));
+  process.env.PI_CAD_WORKFLOW_HOME = home;
+  process.on("exit", () => rmSync(home, { recursive: true, force: true }));
+  const workflows = join(home, ".pi-cad", "workflows");
+  mkdirSync(workflows, { recursive: true });
+  cpSync(new URL("../workflow-packages/mechanical/default.yaml", import.meta.url), join(workflows, "mechanical-default.yaml"));
+}
 
 test("installed Mechanical packages expose only default and naked modes", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-workflow-packages-"));
