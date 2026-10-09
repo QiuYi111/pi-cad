@@ -81,17 +81,18 @@ describe('bridge proxy to a real gateway (plan 5.3, 7.2)', () => {
   };
 
   async function open(token?: string, path = '/v1/workspace/bridge'): Promise<Client> {
-    const ws = await new Promise<WebSocket>((resolve, reject) => {
-      const s = new WebSocket(`${base}${path}`, token ? { headers: { authorization: `Bearer ${token}` } } : {});
-      s.once('open', () => resolve(s));
+    const s = new WebSocket(`${base}${path}`, token ? { headers: { authorization: `Bearer ${token}` } } : {});
+    // The client listens from the moment the socket exists. The server may send its first message in the same read as 'open'.
+    const c = new Client(s);
+    clients.push(c);
+    await new Promise<void>((resolve, reject) => {
+      s.once('open', () => resolve());
       s.once('unexpected-response', (_req, res) => {
         s.terminate();
         reject(new Error(`HTTP ${res.statusCode}`));
       });
       s.once('error', reject);
     });
-    const c = new Client(ws);
-    clients.push(c);
     return c;
   }
 
