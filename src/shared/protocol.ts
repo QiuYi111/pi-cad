@@ -9,7 +9,6 @@ import type { Route } from "./route.ts";
 import {
   ACTIVE_CAPABILITY_TOOLS,
   ACTIVE_CONTROL_TOOLS,
-  ACTIVE_PROBE_TOOLS,
   ACTIVE_SIMULATION_TOOLS,
 } from "./public-tools.ts";
 
@@ -17,7 +16,6 @@ export type { Route } from "./route.ts";
 export {
   isRoute,
   routeKey,
-  routeLabel,
   obligationsOf,
   recordObligations,
   MATURITIES,
@@ -43,13 +41,6 @@ export const CAPABILITY_TOOLS = ACTIVE_CAPABILITY_TOOLS;
  * candidate or baseline.
  */
 export const SIMULATION_TOOLS = ACTIVE_SIMULATION_TOOLS;
-
-/**
- * Canonical read-only observation tool. Individual presets decide whether an
- * Observation is eligible to bind evidence; programmable probes remain
- * observation-only.
- */
-export const PROBE_TOOLS = ACTIVE_PROBE_TOOLS;
 
 /** Tools whose evidence obligations are case-scoped (opaque simulation cases). */
 export const SIMULATION_CASE_TOOLS = SIMULATION_TOOLS;

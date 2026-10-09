@@ -148,7 +148,6 @@ class WarmCadctlWorker {
       env: { ...this.launch.env, ...kernelOwnerBinding() },
     });
     this.child = child;
-    workerStats.starts += 1;
     child.stdout.on("data", (chunk: Buffer) => this.onStdout(chunk));
     child.stderr.on("data", (chunk: Buffer) => {
       this.stderrTail = Buffer.concat([this.stderrTail, chunk]).subarray(-8192);
@@ -189,7 +188,6 @@ class WarmCadctlWorker {
       }
       clearTimeout(pending.timer);
       this.pending = null;
-      workerStats.requests += 1;
       pending.resolve({ exitCode: frame.exitCode, stdout: frame.stdout, stderr: frame.stderr });
     }
   }
@@ -212,8 +210,6 @@ class WarmCadctlWorker {
 }
 
 const workers = new Map<string, WarmCadctlWorker>();
-const workerStats = { starts: 0, requests: 0 };
-
 process.once("exit", () => {
   for (const worker of [...workers.values()]) worker.stop("parent process exited");
 });
@@ -230,10 +226,6 @@ export async function runWarmCadctl(
     workers.set(launch.key, worker);
   }
   return worker.run(request);
-}
-
-export function warmCadctlWorkerStats(): { starts: number; requests: number } {
-  return { ...workerStats };
 }
 
 export function shutdownWarmCadctlWorkers(): void {
