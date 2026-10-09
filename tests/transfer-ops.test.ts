@@ -9,6 +9,7 @@ import { recordDfmSummary } from "../src/agent-api/part-ops.ts";
 import { handleTransferOperation, transferHooks, TRANSFER_DIR } from "../src/agent-api/transfer-ops.ts";
 import { dispatchSidecarRequest } from "../src/authority/sidecar.ts";
 import type { FaceFingerprint, GeometryPayload } from "../src/shared/protocol.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 const plane = (c: [number, number, number], a: number, n: number[]): FaceFingerprint => ({ type: "PLANE", c, a, n });
 const geometry = (overrides: Partial<GeometryPayload> = {}): GeometryPayload => ({
@@ -316,11 +317,11 @@ test("the desktop app stopping during a job fails with TRANSFER_UNAVAILABLE", as
 });
 
 test("a read-only desktop denies transfer-export but allows the dry run and the status", async () => {
-  const denied = await dispatchSidecarRequest("author", cwd, exportRequest as never, undefined, undefined, { authorReadOnly: true });
+  const denied = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, exportRequest as never, undefined, undefined, { authorReadOnly: true });
   assert.equal(denied.ok, false);
   assert.match(denied.error!.message, /desktop read-only mode denies operation: transfer-export/);
-  const status = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "transfer-status" } as never, undefined, undefined, { authorReadOnly: true });
+  const status = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "transfer-status" } as never, undefined, undefined, { authorReadOnly: true });
   assert.equal(status.ok, true);
-  const reviewer = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "transfer-status" } as never);
+  const reviewer = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", cwd, { schema: 1, op: "transfer-status" } as never);
   assert.equal(reviewer.ok, false);
 });

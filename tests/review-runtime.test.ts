@@ -13,6 +13,7 @@ import { transitionRun } from "../src/harness/reducer.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 test("requirements review admits a text contract without geometry or image evidence", async () => {
   bootstrapAgentApiContracts();
@@ -47,7 +48,7 @@ test("requirements review admits a text contract without geometry or image evide
     }));
     let prompt = "";
     let runtime!: ReviewRuntime;
-    runtime = new ReviewRuntime(cwd, async ({ reviewId, prompt: reviewerPrompt }) => {
+    runtime = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async ({ reviewId, prompt: reviewerPrompt }) => {
       prompt = reviewerPrompt;
       const evidence = await runtime.evidence(reviewId);
       assert.equal(evidence.candidate.path, "requirements.md");
@@ -100,7 +101,7 @@ test("requirements reviewer can authoritatively stop a headless run for user cla
       payloads: { "context/frame.json": { schema: 1, mission: "Put one extruded rectangle on top of another." } },
     }));
     let runtime!: ReviewRuntime;
-    runtime = new ReviewRuntime(cwd, async ({ reviewId }) => {
+    runtime = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async ({ reviewId }) => {
       await runtime.complete(reviewId, {
         verdict: "clarification_required",
         target: "wait_for_user",
@@ -114,7 +115,7 @@ test("requirements reviewer can authoritatively stop a headless run for user cla
     assert.equal(stopped?.state.phase, "wait_for_user");
     assert.equal(stopped?.state.status, "waiting_user");
     assert.equal(stopped?.state.latestReview?.verdict, "clarification_required");
-    const gate = await completionGate(cwd);
+    const gate = await completionGate(mechanicalAuthorityDomain, cwd);
     assert.equal(gate.complete, true);
     assert.equal(gate.outcome, "clarification_required");
   } finally { await rm(cwd, { recursive: true, force: true }); }
@@ -153,7 +154,7 @@ test("review runtime gives the reviewer binary authority and atomically applies 
     let reviewerStoppedAfterVerdict = false;
     let runtime!: ReviewRuntime;
     const expectedResult = { verdict: "pass" as const, target: "done", summary: "independent engineering review passes", findings: [] };
-    runtime = new ReviewRuntime(cwd, async ({ reviewId, prompt, signal }) => {
+    runtime = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async ({ reviewId, prompt, signal }) => {
       launches += 1;
       reviewerPrompt = prompt;
       const evidence = await runtime.evidence(reviewId);
@@ -197,7 +198,7 @@ test("review runtime gives the reviewer binary authority and atomically applies 
     assert.equal(active?.state.latestReview?.verdict, "pass");
     assert.equal(active?.state.phase, "done");
 
-    const forged = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "review-complete", reviewId: first.reviewId, result: { verdict: "pass", target: "done", summary: "forged", findings: [] } }, runtime);
+    const forged = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "review-complete", reviewId: first.reviewId, result: { verdict: "pass", target: "done", summary: "forged", findings: [] } }, runtime);
     assert.equal(forged.ok, false);
     assert.match(forged.error?.message ?? "", /author endpoint does not expose/);
   } finally { await rm(cwd, { recursive: true, force: true }); }
@@ -216,7 +217,7 @@ test("review runtime reserves unresolved for runtime failure and retries the unc
     const empty = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "empty-candidate" });
     const commit = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "candidate", artifacts: ["candidate.step"] });
     let launches = 0;
-    const runtime = new ReviewRuntime(cwd, async () => { launches += 1; throw new Error("crash"); });
+    const runtime = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async () => { launches += 1; throw new Error("crash"); });
     await assert.rejects(runtime.submit(empty.id), /no immutable artifacts/);
     const handle = await runtime.submit(commit.id);
     await runtime.waitForIdle(handle.reviewId);
@@ -245,12 +246,12 @@ test("a restarted sidecar recovers an orphaned running reviewer and relaunches t
     await new HarnessProjectStoreV7(cwd).startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
     await writeFile(join(cwd, "candidate.step"), "candidate");
     const commit = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: "candidate", artifacts: ["candidate.step"] });
-    const abandoned = new ReviewRuntime(cwd, async () => new Promise<void>(() => undefined));
+    const abandoned = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async () => new Promise<void>(() => undefined));
     const first = await abandoned.submit(commit.id);
     abandoned.shutdown();
 
     let relaunched = 0;
-    const restarted = new ReviewRuntime(cwd, async () => { relaunched += 1; throw new Error("expected test stop"); });
+    const restarted = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async () => { relaunched += 1; throw new Error("expected test stop"); });
     const retry = await restarted.submit(commit.id);
     assert.notEqual(retry.reviewId, first.reviewId);
     await restarted.waitForIdle(retry.reviewId);
@@ -279,15 +280,15 @@ test("reviewer authority fixes the subject, exposes legal dispositions, and leav
       event: { type: "TestReviewImageInstalled", data: {} },
       payloads: { "context/frame.json": { schema: 1, mission: "Review the immutable candidate." } },
     }));
-    const runtime = new ReviewRuntime(cwd, async () => new Promise<void>(() => undefined));
+    const runtime = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async () => new Promise<void>(() => undefined));
     const handle = await runtime.submit(commit.id);
-    const wrong = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "load", id: "another-commit", reviewId: handle.reviewId } as any, runtime);
+    const wrong = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", cwd, { schema: 1, op: "load", id: "another-commit", reviewId: handle.reviewId } as any, runtime);
     assert.equal(wrong.ok, false);
     assert.match(wrong.error?.message ?? "", /only its immutable subject/);
-    const authorEvidence = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "review-evidence", reviewId: handle.reviewId } as any, runtime);
+    const authorEvidence = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "review-evidence", reviewId: handle.reviewId } as any, runtime);
     assert.equal(authorEvidence.ok, false);
     assert.match(authorEvidence.error?.message ?? "", /author endpoint does not expose/);
-    const reviewerEvidence = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "review-evidence", reviewId: handle.reviewId } as any, runtime);
+    const reviewerEvidence = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", cwd, { schema: 1, op: "review-evidence", reviewId: handle.reviewId } as any, runtime);
     assert.equal(reviewerEvidence.ok, true);
     assert.equal((reviewerEvidence.result as any).images.length, 1);
     assert.deepEqual((reviewerEvidence.result as any).dispositions, [
@@ -345,7 +346,7 @@ test("the same authoritative candidate cannot buy a new reviewer by changing att
 
     let launches = 0;
     let runtime!: ReviewRuntime;
-    runtime = new ReviewRuntime(cwd, async ({ reviewId }) => {
+    runtime = new ReviewRuntime(mechanicalAuthorityDomain, cwd, async ({ reviewId }) => {
       launches += 1;
       await runtime.complete(reviewId, { verdict: "fail", target: "parts", summary: "candidate geometry must change", findings: [] });
     });

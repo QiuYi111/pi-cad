@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { dirname, extname, resolve } from "node:path";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
-import type { WorkflowGitAction, WorkflowSnapshotV1 } from "../harness/workflow/types.ts";
+import type { WorkflowGitAction, WorkflowSnapshotV1 } from "./workflow/types.ts";
 import { runProcess } from "../shared/process-runner.ts";
 
 const DEFAULT_SOURCE_EXTENSIONS = [".py", ".scad", ".fcstd", ".js", ".mjs", ".ts", ".json", ".yaml", ".yml", ".toml", ".md", ".txt"];

@@ -19,9 +19,10 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
+import { MECHANICAL_ACTION_PARAMETERS } from "../../domains/mechanical/action-schemas.ts";
 
 import { readImageContents } from "../../shared/image-content.ts";
-import { CadProbeParametersSchema, CadRecallObservationParametersSchema, executeCadProbe } from "../../modules/probe/tool.ts";
+import { executeCadProbe } from "../../modules/probe/tool.ts";
 import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
 import { resolveActiveRun } from "../../harness/run-scope.ts";
 import { HarnessRunStoreV7 } from "../../harness/run-store.ts";
@@ -130,7 +131,7 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
       "Observations bind evidence only through the control plane (commit/review); probing never mutates the canonical design.",
       "Python runs against a disposable STEP copy with scratch files; assigning a JSON-serializable `result` is required. Change the official candidate through model.build, not by writing to scratch.",
     ],
-    parameters: CadProbeParametersSchema,
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_probe,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       return executeCadProbe(ctx.cwd, params, signal);
     },
@@ -151,7 +152,7 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
       "Filters and ordering are cursor-bound. Changing either invalidates the old cursor.",
       "Recall is read-only memory: it creates no new evidence and never replaces a fresh probe when geometry changed.",
     ],
-    parameters: CadRecallObservationParametersSchema,
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_recall_observation,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const loaded = await resolveActiveRun(ctx.cwd, mechanicalRegistries);
       if (!loaded) {

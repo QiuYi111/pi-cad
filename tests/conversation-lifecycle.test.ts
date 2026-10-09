@@ -9,6 +9,7 @@ import { completionGate, completionGateForConversation, dispatchSidecarRequest }
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
 import { bindingFromTranscriptEntries, WORKFLOW_BINDING_CUSTOM_TYPE, type ConversationBindingV1 } from "../src/integrations/prime/workflow-binding.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 const SESSION_A = "prime-session-a";
 const SESSION_B = "prime-session-b";
@@ -108,7 +109,7 @@ function kernelScope(sessionId: string): RunRequest {
 }
 
 async function send(cwd: string, request: RunRequest) {
-  const response = await dispatchSidecarRequest("author", cwd, { schema: 1, ...request });
+  const response = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, ...request });
   assert.equal(response.ok, true, response.error?.message);
   return response.result;
 }
@@ -152,8 +153,8 @@ test("each Prime conversation owns its own workflow run", async () => {
       // The extension persists the run its conversation just started.
       a.persist(runA.runId);
       assert.equal((await current(cwd, a.scope()))?.runId, runA.runId);
-      assert.equal((await completionGate(cwd)).complete, false, "project-level gate must not inherit a conversation run");
-      const gateA = await completionGateForConversation(cwd, SESSION_A);
+      assert.equal((await completionGate(mechanicalAuthorityDomain, cwd)).complete, false, "project-level gate must not inherit a conversation run");
+      const gateA = await completionGateForConversation(mechanicalAuthorityDomain, cwd, SESSION_A);
       assert.equal(gateA.complete, false);
       assert.equal(gateA.runId, runA.runId, "one-shot launcher can check its root conversation explicitly");
 
@@ -229,7 +230,7 @@ test("a conversation binding survives resume and a promoted run stays invisible 
       assert.equal(freshGate.runId, undefined);
       assert.equal(await card(cwd, fresh.scope()), null);
       // The project pointer keeps its old meaning for callers that name no conversation.
-      assert.equal((await completionGate(cwd)).complete, true);
+      assert.equal((await completionGate(mechanicalAuthorityDomain, cwd)).complete, true);
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
@@ -242,7 +243,7 @@ test("a project-scoped run cannot start behind an active conversation run", asyn
     const a = primeConversation(SESSION_A);
     try {
       const runA = await start(cwd, a.scope());
-      const projectScoped = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: WORKFLOW_ID });
+      const projectScoped = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "workflow-start", id: WORKFLOW_ID });
       assert.equal(projectScoped.ok, false);
       assert.match(projectScoped.error?.message ?? "", /project-scoped run/);
       a.persist(runA.runId);

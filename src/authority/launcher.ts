@@ -7,6 +7,7 @@ import { assertUnixRuntime } from "../shared/platform.ts";
 import { HarnessProjectStoreV7 } from "../harness/run-store.ts";
 import { archivePrimeExperience } from "../experience/prime-archive.ts";
 import { completionGate, completionGateForConversation, startAuthoritySidecar } from "./sidecar.ts";
+import type { AuthorityDomain } from "./domain.ts";
 import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
 import { childExit, capturedChildExit } from "./child-process.ts";
 import { configureBlenderMcp, startManagedBlenderMcp } from "../integrations/blender-mcp.ts";
@@ -45,7 +46,7 @@ export function withHeadlessEventContinuation(args: string[]): string[] {
   ];
 }
 
-export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
+export async function main(domain: AuthorityDomain, primeArgs = process.argv.slice(2)): Promise<number> {
   assertUnixRuntime("Pi-CAD authority sidecar");
   if (primeArgs.some((value) => value === "--cwd" || value.startsWith("--cwd="))) {
     throw new Error("prime-cad owns --cwd so the sandbox cannot escape its project root");
@@ -95,7 +96,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   let launchPaths!: LaunchPaths;
   let currentAuthorModel: ReviewerModelSelection | undefined;
   const sidecar = await startAuthoritySidecar({
-    cwd: project, runtimeDirectory,
+    domain, cwd: project, runtimeDirectory,
     authorReadOnly: process.env.PI_CAD_DESKTOP_PERMISSION === "read-only",
     onAuthorModelSelection: (selection) => { currentAuthorModel = selection; },
     reviewerExecutor: async ({ reviewId, prompt, signal }) => {
@@ -168,8 +169,8 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
     // pointer intentionally stays empty for those runs, so gate against the
     // first run this launch bound (the root session starts before RLM children).
     const gate = launchedConversation
-      ? await completionGateForConversation(project, launchedConversation)
-      : await completionGate(project);
+      ? await completionGateForConversation(domain, project, launchedConversation)
+      : await completionGate(domain, project);
     await archivePrimeExperience(project, gate, currentAuthorModel);
     if (result.signal) return 128;
     if (!isOneShot(primeArgs)) return result.code;

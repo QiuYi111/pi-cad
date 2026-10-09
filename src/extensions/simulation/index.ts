@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
-import { Type } from "typebox";
+import { MECHANICAL_ACTION_PARAMETERS } from "../../domains/mechanical/action-schemas.ts";
 
 import cadSimulationV2Extension from "./v2.ts";
 import { executeMechanicalRecipeV7 } from "../../domains/mechanical/recipe-actions-v7.ts";
@@ -19,7 +19,7 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       "Use simplified/defeatured/sectioned only for an intentionally authored analysis model.",
       "Declare the derivation record and derived artifact as simulation Recipe inputs.",
     ],
-    parameters: Type.Object({ recipe: Type.String({ minLength: 1 }), action: Type.Optional(Type.String({ minLength: 1 })), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))) }, { additionalProperties: false }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_derive_analysis_model,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "analysis-model", recipe: params.recipe, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
@@ -39,7 +39,7 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
       "Optimization output is not CAD; reconstruct it as build123d geometry and commit a candidate.",
       "Accepted CAD must be simulated again before engineering acceptance.",
     ],
-    parameters: Type.Object({ recipe: Type.String({ minLength: 1 }), action: Type.Optional(Type.String({ minLength: 1 })), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))) }, { additionalProperties: false }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_optimize,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "optimization", recipe: params.recipe, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });

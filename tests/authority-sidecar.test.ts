@@ -15,6 +15,7 @@ import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { commitWorkspace } from "../src/harness/commit.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 test("sidecar allows the complete model build and observation pipeline to finish", () => {
   assert.ok(SIDECAR_REQUEST_TIMEOUT_MS > DEFAULT_CADCTL_TIMEOUT_MS * 2 + FULL_GEOMETRY_VALIDATION_TIMEOUT_MS);
@@ -100,12 +101,12 @@ test("authority sidecar owns canonical state and rewrites a non-authoritative wo
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-runtime-"));
   const previous = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
   process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd, runtimeDirectory: runtime });
   try {
     assert.notEqual(sidecar.authorSocket, sidecar.reviewerSocket);
     assert.equal((await stat(sidecar.authorSocket)).mode & 0o777, 0o600);
     assert.equal((await stat(sidecar.reviewerSocket)).mode & 0o777, 0o600);
-    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
+    const started = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
     assert.equal(started.ok, true);
     assert.ok((await readdir(canonical)).includes("v7-project"));
     assert.deepEqual(await readdir(join(cwd, ".pi-cad")), ["status.json"]);
@@ -123,21 +124,21 @@ test("authority sidecar owns canonical state and rewrites a non-authoritative wo
 
     await chmod(statusPath, 0o644);
     await writeFile(statusPath, '{"authoritative":true,"run":{"phase":"release"}}\n');
-    const current = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-current" });
+    const current = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "workflow-current" });
     assert.equal(current.ok, true);
     assert.equal((current.result as any).phase, "plan");
     assert.equal(JSON.parse(await readFile(statusPath, "utf-8")).authoritative, false);
 
-    const gate = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "completion-gate" });
+    const gate = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "completion-gate" });
     assert.equal(gate.ok, true);
     assert.equal((gate.result as any).complete, false);
-    const reviewerGate = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "completion-gate" });
+    const reviewerGate = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", cwd, { schema: 1, op: "completion-gate" });
     assert.equal(reviewerGate.ok, false);
 
-    const denied = await dispatchSidecarRequest("reviewer", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
+    const denied = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
     assert.equal(denied.ok, false);
     assert.match(denied.error?.message ?? "", /reviewer endpoint does not expose/);
-    const malformed = await dispatchSidecarRequest("author", cwd, { schema: 2, op: "workflow-current" });
+    const malformed = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 2, op: "workflow-current" });
     assert.equal(malformed.ok, false);
   } finally {
     await sidecar.close();
@@ -157,9 +158,9 @@ test("workspace projection symlinks cannot redirect sidecar writes", async () =>
   const previous = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
   process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
   await symlink(outside, join(cwd, ".pi-cad"));
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd, runtimeDirectory: runtime });
   try {
-    const response = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
+    const response = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" });
     assert.equal(response.ok, true);
     assert.deepEqual(await readdir(outside), []);
     assert.ok((await readdir(canonical)).includes("v7-project"));
@@ -195,7 +196,7 @@ test("completion gate requires terminal state, release commit, and a PASS bound 
     }, mechanicalRegistries);
     const project = new HarnessProjectStoreV7(cwd);
     const initial = await project.startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
-    assert.equal((await completionGate(cwd)).complete, false);
+    assert.equal((await completionGate(mechanicalAuthorityDomain, cwd)).complete, false);
     const releaseHash = "a".repeat(64);
     await new HarnessRunStoreV7(cwd, initial.state.runId).mutate(mechanicalRegistries, ({ state, registryContract }) => ({
       state: {
@@ -211,12 +212,12 @@ test("completion gate requires terminal state, release commit, and a PASS bound 
       },
       event: { type: "TestCompleted" },
     }));
-    assert.equal((await completionGate(cwd)).complete, true);
+    assert.equal((await completionGate(mechanicalAuthorityDomain, cwd)).complete, true);
     await new HarnessRunStoreV7(cwd, initial.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
       state: { ...state, latestReview: { ...state.latestReview!, subjectHash: "b".repeat(64) } },
       event: { type: "TestReviewStaled" },
     }));
-    const stale = await completionGate(cwd);
+    const stale = await completionGate(mechanicalAuthorityDomain, cwd);
     assert.equal(stale.complete, false);
     assert.match(stale.reason, /another release/);
   } finally {
@@ -237,7 +238,7 @@ test("completion gate accepts a terminal workflow that declares no release recor
     await new HarnessRunStoreV7(cwd, started.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
       state: { ...state, status: "done" }, event: { type: "TestCompleted" },
     }));
-    const gate = await completionGate(cwd);
+    const gate = await completionGate(mechanicalAuthorityDomain, cwd);
     assert.equal(gate.complete, true);
     assert.equal(gate.outcome, "complete");
     assert.match(gate.reason, /no release record/);
@@ -298,7 +299,7 @@ test("completion gate permits a workflow with only pre-build review when release
       state: { ...state, status: "done" },
       event: { type: "TestCompleted" },
     }));
-    const mismatched = await completionGate(cwd);
+    const mismatched = await completionGate(mechanicalAuthorityDomain, cwd);
     assert.equal(mismatched.complete, false);
     assert.match(mismatched.reason, /current authoritative candidate and source/);
 
@@ -314,7 +315,7 @@ test("completion gate permits a workflow with only pre-build review when release
       },
       event: { type: "TestCandidateHashesAligned" },
     }));
-    const accepted = await completionGate(cwd);
+    const accepted = await completionGate(mechanicalAuthorityDomain, cwd);
     assert.equal(accepted.complete, true);
     assert.match(accepted.reason, /without a final review/);
   } finally {
@@ -405,10 +406,10 @@ test("Prime bwrap forwards proxy URLs without embedded credentials", () => {
 test("desktop read-only authority denies workflow and artifact mutation", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-read-only-"));
   try {
-    const started = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" }, undefined, undefined, { authorReadOnly: true });
+    const started = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "workflow-start", id: "mechanical.default" }, undefined, undefined, { authorReadOnly: true });
     assert.equal(started.ok, false);
     if (!started.ok) assert.match(started.error.message, /read-only mode denies/);
-    const authorization = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "authorize", operation: "model.build" }, undefined, undefined, { authorReadOnly: true });
+    const authorization = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "authorize", operation: "model.build" }, undefined, undefined, { authorReadOnly: true });
     assert.equal(authorization.ok, true);
     if (authorization.ok) assert.deepEqual(authorization.result, { allowed: false, reason: "Desktop is in read-only mode.", legalNextActions: ["Switch permission to Workspace."] });
   } finally {

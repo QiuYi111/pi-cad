@@ -1,20 +1,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
+import { MECHANICAL_ACTION_PARAMETERS } from "../../domains/mechanical/action-schemas.ts";
 import { resolve } from "node:path";
-import { Type } from "typebox";
 
 import { buildPayload, envelopeArtifactHash } from "../../shared/envelope.ts";
 import { defaultBuildOutput } from "../../shared/cadctl/commands.ts";
 import { hashOrEmpty } from "../../shared/hash.ts";
 import { renderProbeResult } from "../../modules/probe/index.ts";
 import { modelBackend } from "../../modules/model/index.ts";
-
-const sourceParam = Type.String({
-  description: "Path to the build123d Python source to execute, relative to the project root",
-});
-const outputParam = Type.String({
-  description: "Output STEP path. Defaults to build/<source-stem>.step",
-});
 
 export default function cadGeometryExtension(pi: ExtensionAPI) {
   registerMechanicalActionTool(pi, {
@@ -27,11 +20,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       "Prefer cad_commit_candidate in source phases; the harness builds and binds candidate evidence automatically.",
       "The source must expose a build123d Shape as result, or call cadctl gen_step(result, output).",
     ],
-    parameters: Type.Object({
-      source: sourceParam,
-      output: Type.Optional(outputParam),
-      force: Type.Optional(Type.Boolean({ description: "Regenerate even if outputs exist" })),
-    }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_build_step,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const output = params.output ?? defaultBuildOutput(ctx.cwd, params.source);
       const sourceHash = await hashOrEmpty(resolve(ctx.cwd, params.source));
@@ -70,12 +59,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       "STEP remains the primary artifact; other formats are sidecars.",
       "Do not use export to patch design intent into a mesh.",
     ],
-    parameters: Type.Object({
-      source: Type.String(),
-      sourceSha256: Type.Optional(Type.String({ description: "SHA-256 from the selected ArtifactRef; export refuses if the file has changed." })),
-      output: Type.String(),
-      format: Type.Enum({ step: "step", stl: "stl", glb: "glb", brep: "brep" }),
-    }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_export,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const envelope = await modelBackend().export(ctx.cwd, params);
       if (!envelope.ok) {

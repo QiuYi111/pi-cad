@@ -1,6 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerKernelActionTool, registerMechanicalActionTool } from "../domains/mechanical/register-action.ts";
-import { Type } from "typebox";
 
 import { type CadRequirements, type Route, isRoute, routeKey } from "../shared/protocol.ts";
 import { finalReviewerEnabled } from "./policies.ts";
@@ -25,13 +24,9 @@ import {
   okTool,
   errTool,
   validateInputDeclarations,
-  RouteParamsSchema,
-  EvidenceObligationsSchema,
-  AcceptanceAssertionSchema,
   buildRoute,
-  AssemblyDesignRecordSchema,
-  InterfaceContractsRecordSchema,
 } from "../domains/mechanical/tool-schemas.ts";
+import { MECHANICAL_ACTION_PARAMETERS } from "../domains/mechanical/action-schemas.ts";
 
 export function registerControlTools(pi: ExtensionAPI): void {
   registerKernelActionTool(pi, {
@@ -64,7 +59,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "structure=assembly whenever the deliverable is more than one part; maturity is the reality floor (prototype is still REAL/BUILDABLE/FUNCTIONAL).",
       "Maturity adds closure obligations you must satisfy before the run can finish (manufacturing owes drawing evidence, release owes presentation evidence). Route to the maturity the request actually implies — over-routing blocks closure.",
     ],
-    parameters: RouteParamsSchema,
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_route,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const nextRoute: Route = buildRoute(params);
       if (typeof nextRoute === "string") return errTool(nextRoute);
@@ -92,24 +87,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Never claim the user approved a downgrade — only the /cad-approve-reroute token counts, and it works for the approved route only.",
       "There is no target phase: the harness decides where the run resumes.",
     ],
-    parameters: Type.Object(
-      {
-        objective: Type.Enum({ analyze: "analyze", convert: "convert", design: "design" }),
-        lineage: Type.Optional(Type.Enum({ greenfield: "greenfield", legacy: "legacy", hybrid: "hybrid" })),
-        structure: Type.Optional(Type.Enum({ part: "part", assembly: "assembly" })),
-        maturity: Type.Optional(
-          Type.Enum({
-            prototype: "prototype",
-            engineering: "engineering",
-            manufacturing: "manufacturing",
-            release: "release",
-          }),
-        ),
-        reason: Type.String({ description: "What changed about the task's shape and why the new route fits" }),
-        authorityToken: Type.Optional(Type.String({ description: "One-time harness-issued downgrade authority" })),
-      },
-      { additionalProperties: false },
-    ),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_reroute,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const nextRoute = buildRoute(params);
       if (typeof nextRoute === "string") return errTool(nextRoute);
@@ -139,24 +117,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Use cad_revise_requirements when later authoritative information changes this committed task definition.",
       "Physical CAD tasks default to REAL/BUILDABLE/FUNCTIONAL; only commit a mockup brief after the user explicitly downgraded maturity.",
     ],
-    parameters: Type.Object({
-      goal: Type.String(),
-      deliverables: Type.Array(Type.String(), { minItems: 1 }),
-      must: Type.Array(Type.String(), { default: [] }),
-      assertions: Type.Array(AcceptanceAssertionSchema, { default: [] }),
-      preferences: Type.Array(Type.String(), { default: [] }),
-      assumptions: Type.Array(Type.String(), { default: [] }),
-      openUnknowns: Type.Array(Type.String(), { default: [] }),
-      deferredClarifications: Type.Optional(Type.Array(Type.Object({
-        question: Type.String(),
-        reason: Type.String(),
-        alternatives: Type.Array(Type.String(), { minItems: 2 }),
-        fallback: Type.String(),
-        impact: Type.String(),
-      }))),
-      inputs: Type.Optional(Type.Array(Type.String())),
-      evidenceObligations: Type.Optional(EvidenceObligationsSchema),
-    }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_commit_requirements,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const inputFailure = validateInputDeclarations(params as unknown as CadRequirements, ctx.cwd);
       if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
@@ -180,29 +141,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Set routeAssessment=changed when cad_reroute must follow; the harness locks all downstream engineering until reroute succeeds.",
       "A missing declared baseline blocks execution after the new requirements become canonical; it never restores the obsolete version.",
     ],
-    parameters: Type.Object({
-      goal: Type.String(),
-      deliverables: Type.Array(Type.String(), { minItems: 1 }),
-      must: Type.Array(Type.String(), { default: [] }),
-      assertions: Type.Array(AcceptanceAssertionSchema, { default: [] }),
-      preferences: Type.Array(Type.String(), { default: [] }),
-      assumptions: Type.Array(Type.String(), { default: [] }),
-      openUnknowns: Type.Array(Type.String(), { default: [] }),
-      deferredClarifications: Type.Optional(Type.Array(Type.Object({
-        question: Type.String(),
-        reason: Type.String(),
-        alternatives: Type.Array(Type.String(), { minItems: 2 }),
-        fallback: Type.String(),
-        impact: Type.String(),
-      }))),
-      inputs: Type.Optional(Type.Array(Type.String())),
-      evidenceObligations: Type.Optional(EvidenceObligationsSchema),
-      reason: Type.String({ minLength: 1 }),
-      routeAssessment: Type.Object({
-        outcome: Type.Enum({ unchanged: "unchanged", changed: "changed" }),
-        reason: Type.String({ minLength: 1 }),
-      }, { additionalProperties: false }),
-    }, { additionalProperties: false }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_revise_requirements,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const { reason, routeAssessment, ...record } = params;
       const inputFailure = validateInputDeclarations(record as unknown as CadRequirements, ctx.cwd);
@@ -225,30 +164,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Use in part_design/plan/transform_plan to enter the source phase.",
       "Use in release audit/gap_closure/package to record workstream statuses.",
     ],
-    parameters: Type.Object({
-      summary: Type.String(),
-      protected: Type.Array(Type.String(), { default: [] }),
-      plannedChanges: Type.Array(Type.String(), { default: [] }),
-      interfaces: Type.Array(Type.Any(), { default: [] }),
-      datums: Type.Array(Type.String(), { default: [] }),
-      reviewPlan: Type.Array(Type.String(), { default: [] }),
-      architecture: Type.Optional(Type.Array(Type.String())),
-      selectionRationale: Type.Optional(Type.String()),
-      evidenceObligations: Type.Optional(EvidenceObligationsSchema),
-      workstreams: Type.Optional(
-        Type.Array(
-          Type.Object({
-            name: Type.String(),
-            status: Type.Enum({
-              open: "open",
-              complete: "complete",
-              not_applicable: "not_applicable",
-              blocked_external: "blocked_external",
-            }),
-          }),
-        ),
-      ),
-    }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_commit_plan,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "plan", value: params });
@@ -270,44 +186,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "not_applicable only when coordinates carry through verbatim AND direction is never referenced (pure format conversion); still record your best reading of the file's axes.",
       "user_declined only when you actually asked and the user declined; say so in howConfirmed. Never guess from how the part sits in the file or from axis names alone.",
     ],
-    parameters: Type.Object(
-      {
-        disposition: Type.Enum({
-          confirmed: "confirmed",
-          already_provided: "already_provided",
-          not_applicable: "not_applicable",
-          user_declined: "user_declined",
-          assumed_headless: "assumed_headless",
-        }, {
-          description:
-            "confirmed: you asked and the user answered. already_provided: the user stated the mapping unprompted earlier. not_applicable: coordinates carry through and direction is irrelevant. user_declined: the user explicitly declined. assumed_headless: no user turn exists, so a best-effort mapping is recorded as clarification debt.",
-        }),
-        axes: Type.Array(
-          Type.Object(
-            {
-              axis: Type.Enum({ x: "x", y: "y", z: "z" }),
-              mapsTo: Type.String({
-                minLength: 1,
-                description: "Functional meaning of this artifact axis, in the user's words",
-              }),
-            },
-            { additionalProperties: false },
-          ),
-          {
-            minItems: 3,
-            description:
-              "All three artifact axes must be mapped — including not_applicable/declined records (a best-effort reading of the file's own axes, honestly attributed)",
-          },
-        ),
-        howConfirmed: Type.String({
-          minLength: 1,
-          description:
-            "What the user pointed at or said when confirming; for other dispositions, why that disposition applies (e.g. which earlier message stated the mapping)",
-        }),
-        notes: Type.Optional(Type.String()),
-      },
-      { additionalProperties: false },
-    ),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_commit_frame_context,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "frame_context", value: params });
@@ -326,7 +205,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Answer all four architecture questions before committing: modules, datums, assembly sequence, envelopes.",
       "The record is the design's skeleton — later interface contracts and parts are checked against it.",
     ],
-    parameters: AssemblyDesignRecordSchema,
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_commit_assembly_design,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "assembly_design", value: params });
@@ -345,7 +224,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "One contract per interface pair, with locating scheme and constrained DOF stated explicitly.",
       "Interfaces must name the assembly datum each side locates against.",
     ],
-    parameters: InterfaceContractsRecordSchema,
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_commit_interface_contracts,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "interface_contracts", value: params });
@@ -365,12 +244,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "In convert routes with STEP/STP source, provide format and optional output.",
       "In release gap_closure, commit the revised engineering source; the harness compares against the project head automatically.",
     ],
-    parameters: Type.Object({
-      sources: Type.Array(Type.String(), { minItems: 1 }),
-      label: Type.String({ minLength: 1 }),
-      format: Type.Optional(Type.String()),
-      output: Type.Optional(Type.String()),
-    }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_commit_candidate,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const result = await commitMechanicalCandidateV7({ cwd: ctx.cwd, sources: params.sources, label: params.label, ...(params.format ? { format: params.format } : {}), ...(params.output ? { output: params.output } : {}) });
@@ -393,10 +267,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Do not provide self-authored checks or justification. The reviewer receives canonical Mission, preregistered Assertions, current visuals/digest/evidence, and cad_probe only.",
       "FAIL or UNRESOLVED leaves the phase unchanged; revise the candidate or explicitly revise a suspect requirements contract before submitting again.",
     ],
-    parameters: Type.Object(
-      { summary: Type.Optional(Type.String({ description: "Optional terse submission label; not acceptance evidence" })) },
-      { additionalProperties: false },
-    ),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_submit_for_review,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!finalReviewerEnabled()) return errTool("cad_submit_for_review is disabled by PI_CAD_FINAL_REVIEWER=0");
       try {
@@ -423,10 +294,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "baseline_understood requires bound baseline visual and geometry evidence.",
       "release accepted requires all workstream statuses to be complete/not_applicable/blocked_external.",
     ],
-    parameters: Type.Object({
-      event: Type.String(),
-      note: Type.String(),
-    }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_transition,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: params.event, note: params.note });
@@ -447,7 +315,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "In interactive mode, pause for a material specification ambiguity when competing answers change topology, interfaces, placement, or final extents. Do not pause for ordinary implementation judgment. In headless mode, record deferredClarifications in the requirements commit and continue with its explicit fallback.",
       "Before pausing over missing evidence, check whether you can produce it yourself (e.g. drawing evidence via cadctl drawing through bash) or reroute to the maturity the request actually implies.",
     ],
-    parameters: Type.Object({ reason: Type.String() }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_wait_for_user,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await waitMechanicalRunV7({ cwd: ctx.cwd, reason: params.reason });
@@ -467,14 +335,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Set affectsContract=true only before the first requirements commit. After commit, repair against the frozen contract or declare a user-authority blocker.",
       "After recording a non-contract fallback, continue the current workflow immediately.",
     ],
-    parameters: Type.Object({
-      question: Type.String({ minLength: 1 }),
-      reason: Type.String({ minLength: 1 }),
-      alternatives: Type.Array(Type.String({ minLength: 1 }), { minItems: 2 }),
-      fallback: Type.String({ minLength: 1 }),
-      impact: Type.String({ minLength: 1 }),
-      affectsContract: Type.Boolean(),
-    }, { additionalProperties: false }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_defer_clarification,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await deferMechanicalClarificationV7({ cwd: ctx.cwd, ...params });
@@ -494,11 +355,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Use external_input for indispensable external facts such as unavailable loads, materials, boundary conditions, or credentials.",
       "Do not use this for an engineering interpretation you can resolve with a documented fallback.",
     ],
-    parameters: Type.Object({
-      type: Type.Enum({ user_authority: "user_authority", external_input: "external_input" }),
-      reason: Type.String({ minLength: 1 }),
-      needed: Type.String({ minLength: 1 }),
-    }, { additionalProperties: false }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_declare_blocker,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await blockMechanicalRunV7({ cwd: ctx.cwd, status: params.type === "user_authority" ? "blocked_user" : "blocked_external", type: params.type, reason: params.reason, needed: params.needed });
@@ -514,7 +371,7 @@ export function registerControlTools(pi: ExtensionAPI): void {
       "Request workflow closure. Harness verifies READY, files, evidence, and release workstreams. It does not judge design quality.",
     promptSnippet: "Close the workflow after Ready",
     promptGuidelines: ["Only call after cad_submit_for_review has produced READY (analyze routes keep their existing findings-delivered closure)."],
-    parameters: Type.Object({}),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_finish,
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
       try {
         const loaded = await finishMechanicalRunV7({ cwd: ctx.cwd });

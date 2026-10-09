@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
-import { executeWorkflowGitActions, prepareWorkflowGit } from "../src/authority/workflow-git.ts";
+import { executeWorkflowGitActions, prepareWorkflowGit } from "../src/harness/workflow-git.ts";
 import type { WorkflowSnapshotV1 } from "../src/harness/workflow/types.ts";
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
 

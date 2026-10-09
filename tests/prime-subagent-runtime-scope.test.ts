@@ -12,6 +12,7 @@ import { WORKFLOW_BINDING_CUSTOM_TYPE } from "../src/integrations/prime/workflow
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 const PARENT_SESSION = "prime-parent-session";
 const CHILD_SESSION = "prime-child-session";
@@ -107,7 +108,7 @@ test("a parent, child and grandchild each resolve their own workflow run", async
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-subagent-scope-sidecar-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
   const previousSessionId = process.env.PI_CAD_SESSION_ID;
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd, runtimeDirectory: runtime });
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   delete process.env.PI_CAD_SESSION_ID;
 
@@ -172,7 +173,7 @@ test("a parent, child and grandchild each resolve their own workflow run", async
     // A caller that names only its session — the cad Python kernel — still
     // resolves that conversation's run through the registry, not the project
     // pointer.
-    const current = await dispatchSidecarRequest("author", cwd, { schema: 1, op: "workflow-current", sessionId: CHILD_SESSION });
+    const current = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, { schema: 1, op: "workflow-current", sessionId: CHILD_SESSION });
     assert.equal(current.ok, true, current.error?.message);
     assert.equal((current as any).result.runId, runs.get(CHILD_SESSION));
   } finally {

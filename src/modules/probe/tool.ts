@@ -10,7 +10,7 @@ import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
 import { resolveActiveRun } from "../../harness/run-scope.ts";
 import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
 import { recordObservationV7 } from "../../harness/observations.ts";
-import type { AgentArtifactSubject } from "../../agent-api/protocol.ts";
+import type { AgentArtifactSubject } from "../../authority/protocol.ts";
 
 export const CAD_PROBE_PRESET_NAMES = {
   visual: "visual",

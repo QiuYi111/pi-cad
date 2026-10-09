@@ -24,6 +24,7 @@ import {
 import type { ExperienceIndexEntry } from "../src/experience/types.ts";
 import { renderExperienceView } from "../src/experience/view.ts";
 import { dispatchSidecarRequest } from "../src/authority/sidecar.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -118,12 +119,12 @@ test("experience index supports evaluation, retrieval, bounded reads, and atomic
       (await searchExperience({ benchmark: "CADTestBench", benchmark_exact_pass: true })).map((item) => item.seq),
       [1],
     );
-    const authorResult = await dispatchSidecarRequest("author", root, {
+    const authorResult = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", root, {
       schema: 1, op: "experience-get", identifier: { seq: 1 },
     });
     assert.equal(authorResult.ok, true);
     assert.doesNotMatch(JSON.stringify(authorResult), /archive_path|session_path|project_path/);
-    const reviewerResult = await dispatchSidecarRequest("reviewer", root, {
+    const reviewerResult = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", root, {
       schema: 1, op: "experience-get", identifier: { seq: 1 },
     });
     assert.equal(reviewerResult.ok, false);
