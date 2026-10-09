@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  workflow_call:
   push:
     branches: [master]
   pull_request:
@@ -113,7 +114,6 @@ jobs:
 
       - name: Pure-Python and bridge tests
         run: |
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/skills/cad/src" uv run --project python python -m unittest tests.test_reify_freecad_pure tests.test_bind_identity tests.test_render_highlight tests.test_face_fingerprints tests.test_cad_package tests.test_cad_transfer tests.test_transfer_geometry_pure
           node --import jiti/register tests/freecad-worker.test.ts
           node --import jiti/register tests/part-ops-authorization.test.ts
           node --import jiti/register tests/build-changes.test.ts
