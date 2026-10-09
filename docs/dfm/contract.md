@@ -128,3 +128,16 @@ PYTHONPATH=python:$E/lib PI_CAD_FREECAD_PYTHON=$E/bin/python $E/bin/python -m un
 ```
 
 Known baseline failure before DFM work: `test_assembly.AssemblyTests.test_the_exported_assembly_names_every_occurrence`.
+
+## Accepted deviations (after WP0–WP3)
+
+- `holes[].bottom` may be `"none"` (through hole). `blends[].kind` may be `"unknown"`.
+- `dihedral[].angle_deg` is the angle between face normals; convexity comes from the AAG.
+- Only requested checks appear in the JSON; absent key = not run.
+- Thickness is an OCCT ray cast and is slow (about 6 s for 206 faces at 400 samples).
+  WP4 uses `--thickness-samples 64` by default and passes the remaining budget as timeout.
+- `rapidjson` is not used. `reify-asi` exit codes: 0 ok, 2 usage, 3 input, 4 analyzer, 5 output.
+- `make_issue` takes `rulepack=` to build `source`. `summarize` does not dedupe; callers do.
+- Lint coverage status for executed rules is `"checked"`.
+- `loop_metrics` takes `{"geometry": [item dicts], "orient": [...]}`.
+- With `thread` set, FreeCAD stores the tap drill in `Diameter` (spike E0-c).
