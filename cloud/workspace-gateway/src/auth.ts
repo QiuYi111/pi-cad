@@ -1,7 +1,5 @@
 import { importSPKI, jwtVerify } from "jose";
 
-export const GATEWAY_TOKEN_HEADER = "x-reify-gateway-token";
-
 export type TokenVerifier = (token: string) => Promise<boolean>;
 
 // Gateway tokens live 60 s (plan 7.2). Anything older than this, or without exp and iat, is rejected.

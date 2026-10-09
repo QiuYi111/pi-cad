@@ -8,13 +8,14 @@ import {
   encodeFrame,
   execCollect,
   ExecExitError,
+  GATEWAY_TOKEN_HEADER,
   resolveWorkspacePath,
   WorkspacePathError,
   type ClientMessage,
   type GatewayMessage,
 } from "@reify/cloud-protocol";
 import { ActivityMonitor } from "./activity.js";
-import { GATEWAY_TOKEN_HEADER, type TokenVerifier } from "./auth.js";
+import type { TokenVerifier } from "./auth.js";
 import { errorMessage, ProtocolError } from "./errors.js";
 import { streamFile, Upload } from "./files.js";
 import { RingBuffer } from "./ring.js";

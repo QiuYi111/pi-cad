@@ -9,6 +9,7 @@ import { dirname, posix } from "node:path";
 import type { WebSocket } from "ws";
 import type { AppSettings, DependencyCheck, RuntimeStatus, SimulationComponentStatus } from "../../src/shared/contracts.js";
 import { engineeringKnowledgeProbe, managedPythonProbe, runtimeChecksReady, type RuntimeBridge, type RuntimePaths } from "./runtime-bridge.js";
+import { CHANNEL_HEADER_BYTES, decodeFrame, encodeFrame, type GatewayMessage } from "../../../../cloud/protocol/src/index.js";
 
 /**
  * Bridge to the workspace gateway in a cloud workspace (plan §9.3). The wire
@@ -37,7 +38,6 @@ const RECONNECT_MAX_MS = 30_000;
 const OUTPUT_TAIL_BYTES = 1024 * 1024;
 const UPLOAD_HIGH_WATER_BYTES = 4 * 1024 * 1024;
 const CHUNK_BYTES = 64 * 1024;
-const CHANNEL_HEADER_BYTES = 4;
 const WS_OPEN = 1;
 const SERVER_MANAGED = "由服务器管理";
 const NOT_AVAILABLE_IN_STAGE_1 = "阶段 1 不可用";
@@ -59,16 +59,6 @@ export interface RemoteBridgeOptions {
   workspaceRoot?: string;
 }
 
-type ServerMessage =
-  | { type: "pong" }
-  | { type: "spawned"; ch: number; spawnId: string; pid: number | undefined }
-  | { type: "exit"; ch: number; code: number | null; signal: string | null }
-  | { type: "exec_result"; ch: number; stdout: string; stderr: string; code: number | null }
-  | { type: "file_end"; ch: number; size: number; sha256: string }
-  | { type: "file_put_done"; ch: number; path: string; size: number; sha256: string }
-  | { type: "error"; ch?: number; code: string; message: string }
-  | { type: "activity"; active: boolean; reason: string };
-
 /** An exec, download or upload waiting for its answer on one channel. */
 interface Operation {
   kind: "exec" | "get" | "put";
@@ -76,7 +66,7 @@ interface Operation {
   /** True once the request left on the current socket. Unsent requests survive a reconnect. */
   sent: boolean;
   timer?: ReturnType<typeof setTimeout>;
-  message(msg: ServerMessage): void;
+  message(msg: GatewayMessage): void;
   serverError(message: string): void;
   fail(error: Error): void;
   data?(chunk: Buffer): void;
@@ -578,12 +568,14 @@ export class RemoteBridge implements RuntimeBridge {
     const bytes = toBuffer(data);
     if (isBinary) {
       if (bytes.length < CHANNEL_HEADER_BYTES) return;
-      this.onBytes(bytes.readUInt32BE(0), bytes.subarray(CHANNEL_HEADER_BYTES));
+      // decodeFrame subarrays the Buffer it is given, so the payload stays a Buffer at runtime.
+      const frame = decodeFrame(bytes);
+      this.onBytes(frame.ch, frame.data as Buffer);
       return;
     }
-    let msg: ServerMessage;
+    let msg: GatewayMessage;
     try {
-      msg = JSON.parse(bytes.toString("utf8")) as ServerMessage;
+      msg = JSON.parse(bytes.toString("utf8")) as GatewayMessage;
     } catch {
       return;
     }
@@ -601,7 +593,7 @@ export class RemoteBridge implements RuntimeBridge {
     }
   }
 
-  private onControl(msg: ServerMessage): void {
+  private onControl(msg: GatewayMessage): void {
     switch (msg.type) {
       case "pong":
         this.onPong();
@@ -781,14 +773,6 @@ export function overlapLength(replay: Buffer, seen: Buffer): number {
     if (seen[start] === replay[0] && seen.subarray(start).equals(replay.subarray(0, length))) return length;
   }
   return 0;
-}
-
-/** Binary frame encoding, the same layout as cloud/protocol encodeFrame. */
-export function encodeFrame(ch: number, data: Uint8Array): Uint8Array {
-  const frame = new Uint8Array(CHANNEL_HEADER_BYTES + data.length);
-  new DataView(frame.buffer).setUint32(0, ch, false);
-  frame.set(data, CHANNEL_HEADER_BYTES);
-  return frame;
 }
 
 function toBuffer(data: unknown): Buffer {
