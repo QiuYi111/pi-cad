@@ -6,6 +6,7 @@
  * (probing never touches state).
  */
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,6 +14,10 @@ import { test } from "node:test";
 import { Value } from "typebox/value";
 
 import { CadProbeParametersSchema } from "../src/modules/probe/tool.ts";
+import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
+import { buildRegistryContract } from "../src/harness/registry-contract.ts";
+import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
+import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
 
 test("cad_probe schema is preset-discriminated and fail-closed", () => {
   assert.equal(Value.Check(CadProbeParametersSchema, { preset: "geometry", subject: "current" }), true);
@@ -49,31 +54,29 @@ try {
   const probe = tools.get("cad_probe");
   if (!probe) throw new Error("cad_probe not registered");
 
-  // Project + run state so subject resolution works.
-  mkdirSync(join(cwd, ".pi-cad", "runs", "r1"), { recursive: true });
-  writeFileSync(
-    join(cwd, ".pi-cad", "project.json"),
-    JSON.stringify({
-      schemaVersion: 6, projectId: "p", head: {}, currentRunId: "r1",
-      createdAt: "x", updatedAt: "x",
-    }),
-  );
+  // A v7 harness run with the design bound as its authoritative artifact, so
+  // subject resolution reads the run state (no v6 project pointer).
+  const workflow = compileWorkflowDefinition({ schema: 1, id: "test/cad-probe", version: "1.0.0", parametersSchema: {}, initialPhase: "review", phases: {
+    review: { purpose: "Observe", actions: ["cad_probe"], grants: ["observe"], writeScopes: ["run:observation"], recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action", "mechanical.observations"], hooks: [], transitions: { done: { target: "end" } } },
+    end: { purpose: "Done", actions: ["read"], grants: ["file_read"], writeScopes: [], recordObligations: [], evidenceObligations: [], contextProviders: ["kernel.current-action"], hooks: [], transitions: {}, terminal: true },
+  } }, mechanicalRegistries);
+  const loaded = await new HarnessProjectStoreV7(cwd).startRun({ workflow, registryContract: buildRegistryContract(mechanicalRegistries) });
+  const runId = loaded.state.runId;
   const fixture = readFileSync(new URL("./fixtures/interference_contact.step", import.meta.url));
   mkdirSync(join(cwd, "build"), { recursive: true });
   writeFileSync(join(cwd, "build", "part.step"), fixture);
-  writeFileSync(
-    join(cwd, ".pi-cad", "runs", "r1", "state.json"),
-    JSON.stringify({
-      schemaVersion: 6, runId: "r1", projectId: "p", createdAt: "x", updatedAt: "x",
-      route: { objective: "design", lineage: "greenfield", structure: "part", maturity: "prototype" },
-      phase: "review", status: "active", mutationPolicy: "read_only",
-      evidence: [], staleEvidence: [],
-      currentArtifactPath: "build/part.step",
-    }),
-  );
-
-  const statePath = join(cwd, ".pi-cad", "runs", "r1", "state.json");
-  const stateBefore = readFileSync(statePath, "utf8");
+  const runStore = new HarnessRunStoreV7(cwd, runId);
+  await runStore.mutate(mechanicalRegistries, ({ state }) => ({
+    state: { ...state, artifacts: { authoritative: { id: "authoritative", path: "build/part.step", sha256: createHash("sha256").update(fixture).digest("hex"), role: "authoritative" } }, updatedAt: new Date().toISOString() },
+    event: { type: "ArtifactBound", data: { path: "build/part.step" } },
+    payloads: {},
+  }));
+  // Probing records observations, so compare the decision-relevant state only.
+  const runStateSnapshot = async () => {
+    const state = await runStore.transactions.readJson<any>("state.json");
+    return JSON.stringify({ phase: state.phase, artifacts: state.artifacts, evidence: state.evidence, staleEvidence: state.staleEvidence });
+  };
+  const stateBefore = await runStateSnapshot();
 
   await test("cad_probe: preset geometry resolves subject=current from run state", async () => {
     const result = await probe.execute("t1", { preset: "geometry", subject: "current" }, undefined, undefined, { cwd });
@@ -121,7 +124,7 @@ try {
     assert.ok(result.details.envelope.ok, JSON.stringify(result.details.envelope.payload));
     assert.equal(result.details.kind, undefined, "python mode must not bind evidence kind");
     assert.ok(result.details.subjectArtifactHash);
-    assert.equal(readFileSync(statePath, "utf8"), stateBefore, "state must be unchanged");
+    assert.equal(await runStateSnapshot(), stateBefore, "state must be unchanged");
   });
 
   await test("cad_probe: reusable project script receives decoded JSON parameters", async () => {

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 
 import type {
   BuildPayload,
@@ -10,14 +10,13 @@ import type {
   GeometryPayload,
   VisualPayload,
 } from "./protocol.ts";
-import { CadProjectStore } from "./store.ts";
 import { sha256File } from "./hash.ts";
 import { packageRoot } from "./paths.ts";
-import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
 import { assertLinuxRuntime } from "./platform.ts";
 import { runProcess } from "./process-runner.ts";
 import { isWarmCadctlCommand, runWarmCadctl } from "./cadctl-worker.ts";
-import { harnessRunDirectory, harnessStorageRoot } from "../authority/storage.ts";
+import { harnessRunDirectory } from "../authority/storage.ts";
+import { resolveActiveRun } from "../harness/run-scope.ts";
 import type { ModelParameterValue } from "./model-parameters.ts";
 
 export { packageRoot } from "./paths.ts";
@@ -480,74 +479,6 @@ export async function presentationCommand(
   );
 }
 
-/**
- * Create a harness-owned analysis-model derivation record. fused/bonded
- * are executed by the backend (boolean union); authored operations hash
- * both ends at record time.
- */
-export async function deriveAnalysisModel(
-  cwd: string,
-  spec: string,
-  outputDir: string,
-  timeoutMs?: number,
-): Promise<CadEventEnvelope> {
-  return runCadctl(
-    ["derive-analysis-model", "--spec", resolve(cwd, spec), "--output-dir", resolve(cwd, outputDir)],
-    { cwd, timeoutMs },
-  );
-}
-
-export async function optimizationCommand(
-  cwd: string,
-  spec: string,
-  outputDir: string,
-  runtime = "torch-fem-0.9-cu126",
-  timeoutMs = 3_600_000,
-): Promise<CadEventEnvelope> {
-  const workspace = resolve(outputDir);
-  const specPath = resolve(spec);
-  if (dirname(specPath) !== workspace) throw new Error("managed optimization spec must be inside its run workspace");
-  await managedSimulationRunner.resolveRuntime(cwd, "torch-fem", runtime);
-  const stdoutPath = join(workspace, "managed-stdout.log");
-  const stderrPath = join(workspace, "managed-stderr.log");
-  const result = await managedSimulationRunner.execute({
-    cwd,
-    workspace,
-    recipeDirectory: workspace,
-    command: "uv run --offline --frozen --project \"$PI_CAD_PYTHON_PROJECT\" python -m cadctl optimize --spec spec.json --output-dir .",
-    environment: {},
-    stdoutPath,
-    stderrPath,
-    timeoutMs,
-    backend: "torch-fem",
-    runtime,
-  });
-  const stdout = await readFile(stdoutPath, "utf-8").catch(() => result.stdout);
-  let parsed: CadEventEnvelope;
-  try {
-    parsed = JSON.parse(stdout.trim()) as CadEventEnvelope;
-  } catch {
-    return {
-      tool: "cad_optimize",
-      toolVersion: "0.9.0",
-      ok: false,
-      payload: { error: `managed optimization failed with exit ${result.exitCode}`, diagnostics: result.diagnostics },
-      inputHashes: { spec: await sha256File(specPath) },
-      outputHashes: {},
-      artifacts: [],
-      durationMs: result.durationMs,
-      warnings: [],
-    };
-  }
-  const remap = (value: unknown): unknown => {
-    if (typeof value === "string") return value === "/workspace" || value.startsWith("/workspace/") ? join(workspace, value.slice("/workspace".length)) : value;
-    if (Array.isArray(value)) return value.map(remap);
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, remap(item)]));
-    return value;
-  };
-  return remap(parsed) as CadEventEnvelope;
-}
-
 export async function imageContent(
   path: string,
 ): Promise<{ type: "image"; data: string; mimeType: string }> {
@@ -615,19 +546,22 @@ export function runAssemblyEvidencePath(cwd: string, runId: string, artifact: st
   return join(runEvidenceRoot(cwd, runId), "assembly", `${basename(artifact).replace(/\.[^.]+$/, "")}.json`);
 }
 
+// Evidence placement follows the v7 harness run scope (the active run of this
+// conversation, or the project's current run). Without an active run there is
+// no run directory, so callers fall back to the project-level default.
 export async function currentRunEvidenceRoot(cwd: string): Promise<string | null> {
-  const runId = await new CadProjectStore(cwd).currentRunId();
-  return runId ? runEvidenceRoot(cwd, runId) : null;
+  const loaded = await resolveActiveRun(cwd);
+  return loaded ? runEvidenceRoot(cwd, loaded.state.runId) : null;
 }
 
 export async function currentVisualEvidenceDir(cwd: string, artifact: string): Promise<string> {
-  const runId = await new CadProjectStore(cwd).currentRunId();
-  return runId ? runVisualEvidenceDir(cwd, runId, artifact) : defaultVisualEvidenceDir(cwd, artifact);
+  const loaded = await resolveActiveRun(cwd);
+  return loaded ? runVisualEvidenceDir(cwd, loaded.state.runId, artifact) : defaultVisualEvidenceDir(cwd, artifact);
 }
 
 export async function currentGeometryEvidencePath(cwd: string, artifact: string): Promise<string> {
-  const runId = await new CadProjectStore(cwd).currentRunId();
-  return runId ? runGeometryEvidencePath(cwd, runId, artifact) : defaultGeometryEvidencePath(cwd, artifact);
+  const loaded = await resolveActiveRun(cwd);
+  return loaded ? runGeometryEvidencePath(cwd, loaded.state.runId, artifact) : defaultGeometryEvidencePath(cwd, artifact);
 }
 
 export async function hashOrEmpty(path: string): Promise<string> {
