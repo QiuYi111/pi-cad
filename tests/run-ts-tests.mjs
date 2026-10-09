@@ -79,6 +79,7 @@ await jiti.import("./model-backend.test.ts", { default: true });
 await jiti.import("./model-parameters.test.ts", { default: true });
 await jiti.import("./build-changes.test.ts", { default: true });
 await jiti.import("./freecad-worker.test.ts", { default: true });
+await jiti.import("./cadctl-worker.test.ts", { default: true });
 await jiti.import("./part-ops-authorization.test.ts", { default: true });
 await jiti.import("./part-e2e.test.ts", { default: true });
 await jiti.import("./part-dfm.test.ts", { default: true });
