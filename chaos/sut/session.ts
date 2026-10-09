@@ -1,6 +1,6 @@
 import { post, waitFor } from "./http.ts";
 import { ControlPlaneClient } from "./client.ts";
-import { spawnEntry, freePort, type SpawnedEntry } from "./proc.ts";
+import { spawnEntry, freePort, type SpawnedEntry } from "../support/process.ts";
 import {
   startToxiproxyServer,
   toxiproxyAvailable,

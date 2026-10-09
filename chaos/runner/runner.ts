@@ -1,7 +1,8 @@
 import fc from "fast-check";
 import { Session } from "../sut/session.ts";
 import type { BugName } from "../sut/server.ts";
-import { get, resetHttpLog, sleep, httpLog } from "../sut/http.ts";
+import { get, resetHttpLog, httpLog } from "../sut/http.ts";
+import { sleep } from "../support/process.ts";
 import { actionDefinitions } from "../actions/index.ts";
 import { allFaultDefinitions, processFaultDefinitions } from "../faults/index.ts";
 import { checkInvariants, invariantDefinitions } from "../invariants/index.ts";

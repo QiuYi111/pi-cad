@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { del, get, httpJson, post, waitFor } from "./http.ts";
-import { TOOLS_DIR, freePort, waitForLine } from "./proc.ts";
+import { TOOLS_DIR, freePort, waitForLine } from "../support/process.ts";
 
 export interface ToxiproxyClient {
   readonly apiUrl: string;

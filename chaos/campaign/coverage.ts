@@ -1,4 +1,4 @@
-import { FAULT_BOUNDARIES } from "../reify/faults.ts";
+import { FAULT_BOUNDARIES } from "../reify/faults/index.ts";
 import type { CampaignCoverage, CampaignRound, FaultBoundary } from "./types.ts";
 
 const AUTHORITY_ACTIONS = [

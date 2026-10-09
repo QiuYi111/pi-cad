@@ -1,6 +1,6 @@
 import http from "node:http";
 import type { ChildProcess } from "node:child_process";
-import { spawnEntry, type SpawnedEntry } from "./proc.ts";
+import { spawnEntry, type SpawnedEntry } from "../support/process.ts";
 
 export type RunState =
   | "PENDING"
