@@ -2,10 +2,10 @@ name: desktop
 
 on:
   pull_request:
-    paths: ["apps/desktop/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
+    paths: ["apps/desktop/**", "cloud/protocol/**", "cloud/workspace-gateway/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
   push:
     branches: [master]
-    paths: ["apps/desktop/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
+    paths: ["apps/desktop/**", "cloud/protocol/**", "cloud/workspace-gateway/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 jobs:
@@ -23,9 +23,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: |-
+            apps/desktop/package-lock.json
+            cloud/protocol/package-lock.json
+            cloud/workspace-gateway/package-lock.json
       - run: npm ci
         working-directory: apps/desktop
+      - run: npm ci
+        working-directory: cloud/protocol
+      - run: npm ci
+        working-directory: cloud/workspace-gateway
       - run: npm test
         working-directory: apps/desktop
       - run: npm run build
