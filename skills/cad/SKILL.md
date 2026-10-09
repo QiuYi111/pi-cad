@@ -237,6 +237,15 @@ needs for joints. The parent owns the assembly document: it uses `link` with
 those paths, `joint` between roles, and `check`/`sweep` on occurrence paths. A
 subagent never edits the assembly or another part's document.
 
+For delegated CAD work, have the child validate a plausible initial mistake
+before it repairs the model: probe the wrong result, apply the corrected ops (or
+change the source and rebuild), and probe the corrected `ArtifactRef`. Resolve identity through semantic paths
+from the artifact's hash-bound manifest when checking reordered assemblies;
+solid indices are evidence for one artifact only. Treat missing or stale
+identity manifests and deleted named features as explicit failures. Once a
+workflow is Done, make observations only against an explicit `ArtifactRef`; do
+not restart the workflow to inspect completed geometry.
+
 - Read `await cad.workflow.current()` before acting. If it is `None`, always call
   `await cad.workflow.list()` and route the request to exactly one workflow from
   that live list. Workflows are user-maintained project data as well as built-in
