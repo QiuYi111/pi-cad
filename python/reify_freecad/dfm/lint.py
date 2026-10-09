@@ -85,7 +85,20 @@ def evaluate_full(ctx: Any) -> dict[str, Any] | None:
     return {"issues": issues, "coverage": coverage, "passes": passes, "truncated": truncated, "profile": profile}
 
 
-def evaluate(ctx: Any) -> dict[str, Any] | None:
+def geometry_state(session: Any, next_rev: int | None = None) -> dict[str, Any]:
+    """"fresh" when the last geometry run is for this revision and file, "stale" when older, "none" when never run.
+
+    ``next_rev`` is the revision the summary describes (a committing apply describes the revision it creates).
+    """
+    run = getattr(session, "geometry_run", None)
+    if not run:
+        return {"state": "none", "last_rev": None}
+    current = session.rev if next_rev is None else next_rev
+    fresh = run["rev"] == current and run["sha"] == getattr(session, "loaded_sha", None)
+    return {"state": "fresh" if fresh else "stale", "last_rev": run["rev"]}
+
+
+def evaluate(ctx: Any, next_rev: int | None = None) -> dict[str, Any] | None:
     full = evaluate_full(ctx)
     if full is None:
         return None
@@ -94,5 +107,5 @@ def evaluate(ctx: Any) -> dict[str, Any] | None:
     return {
         "rulepack": profile["rulepack"], "material": profile["material"], "layer": "lint",
         "counts": shown["counts"], "issues": shown["issues"], "truncated": full["truncated"],
-        "geometry": {"state": "none", "last_rev": None},
+        "geometry": geometry_state(ctx.session, next_rev),
     }

@@ -141,6 +141,47 @@ class Worker:
         session = self._session(doc)
         return queries.run_check(self._ctx(session), args["kind"], args.get("args") or {}, queries.Budget(budget_s))
 
+    def cmd_dfm(self, doc: str, args: dict[str, Any], budget_s: float) -> dict[str, Any]:
+        """The DFM report: lint and geometry layers merged; writes ``<output dir>/dfm/rev-<rev>.json``."""
+        from . import queries
+        from .dfm import geometry, lint as lint_module
+        from .dfm.issues import summarize
+        from .dfm.profile import get_profile
+
+        session = self._session(doc)
+        profile = get_profile(session)
+        if profile is None:
+            raise ReifyOpError("OP_SCHEMA_INVALID", "set a dfm_profile first", detail={"path": "dfm_profile", "reason": "missing"},
+                               hints=["apply a dfm_profile op (rulepack and material) before running dfm"])
+        layers = list(args.get("layers") or ["lint", "geometry"])
+        unknown = [layer for layer in layers if layer not in ("lint", "geometry")]
+        if unknown:
+            raise ReifyOpError("OP_SCHEMA_INVALID", f"unknown dfm layer(s) {unknown}", detail={"path": "layers", "reason": "unknown", "allowed": ["lint", "geometry"]})
+        ctx = self._ctx(session)
+        budget = queries.Budget(budget_s)
+        lint_full = lint_module.evaluate_full(ctx) if "lint" in layers else None
+        geometry_full = geometry.evaluate_geometry(ctx, budget) if "geometry" in layers else None
+        merged = geometry.merge(lint_full, geometry_full)
+        counts = summarize(merged["issues"], merged["passes"])["counts"]
+        highlight, annotations = geometry.marks(session, merged["issues"])
+        if geometry_full is not None:
+            session.record_geometry_run(highlight, annotations)
+        rev = session.rev
+        report = {
+            "rulepack": profile["rulepack"], "material": profile["material"], "rev": rev,
+            "analyzer": geometry_full["analyzer"] if geometry_full else None,
+            "asi": geometry_full["asi"] if geometry_full else None,
+            "counts": counts, "issues": merged["issues"], "coverage": merged["coverage"],
+            "highlight": highlight, "annotations": annotations,
+        }
+        report_path = Path(session.output).parent / "dfm" / f"rev-{rev}.json"
+        try:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text(json.dumps(report, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        except OSError as error:
+            raise ReifyOpError("INTERNAL_ERROR", f"cannot write the DFM report: {error}", detail={"path": str(report_path)}) from error
+        return {**report, "report_path": str(report_path)}
+
     def cmd_sweep(self, doc: str, args: dict[str, Any], budget_s: float) -> dict[str, Any]:
         from . import queries, sweep as sweep_module
 
@@ -203,7 +244,7 @@ class Worker:
             method = getattr(self, f"cmd_{str(op).replace('-', '_')}", None)
             if method is None:
                 raise ReifyOpError("BAD_REQUEST", f"unknown command {op!r}")
-            if op in {"check", "sweep"}:
+            if op in {"check", "sweep", "dfm"}:
                 result = method(doc, args, budget_s)
             else:
                 result = method(doc, args)

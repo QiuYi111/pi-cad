@@ -222,10 +222,40 @@ class DfmBehaviourTests(FixtureTestMixin, unittest.TestCase):
         self.assertLessEqual(statistics.median(samples), 50.0, f"lint took {samples} ms")
 
     def test_changing_the_rulepack_threshold_changes_the_result(self) -> None:
-        # Acceptance scenario 10 (hole.min_diameter 1.5 in a copy of the pack, phi1.2 then errors)
-        # needs a rulepack search path override, for example a directory argument or an
-        # environment variable. rulepack.py has none yet, so this stays skipped.
-        self.skipTest("rulepack.py has no search path override yet (acceptance scenario 10)")
+        # Acceptance scenario 10: a copy of the pack with hole.min_diameter at 1.5 mm makes a 1.2 mm hole fail.
+        import os
+        import tempfile
+
+        import yaml
+
+        from reify_freecad.dfm import rulepack
+
+        profile = {"op": "dfm_profile", "rulepack": "quanzhou.cnc_mill", "material": "al6061"}
+        ops = [
+            profile,
+            *plate("part", 40, 30, 5),
+            {"op": "sketch", "name": "part/pin_sketch", "on": {"feature": "part/base", "role": "top"},
+             "shapes": [{"circle": {"center": [0, 0], "diameter": 1.2}}]},
+            {"op": "hole", "name": "part/pin_hole", "sketch": "part/pin_sketch", "diameter": 1.2, "type": "through_all"},
+        ]
+        harness = Harness(name="threshold")
+        self.addCleanup(harness.close)
+        before = harness.apply(ops)["dfm"]
+        self.assertEqual(find(before["issues"], "hole.min_diameter"), [], "1.2 mm passes the shipped pack (min 1.2)")
+
+        folder = tempfile.mkdtemp(prefix="reify-dfm-pack-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        data = yaml.safe_load((rulepack.PACK_DIR / "quanzhou.cnc_mill.yaml").read_text(encoding="utf-8"))
+        for rule in data["rules"]:
+            if rule["id"] == "hole.min_diameter":
+                rule["params"]["min_mm"] = 1.5
+        Path(folder, "quanzhou.cnc_mill.yaml").write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        os.environ[rulepack.SEARCH_ENV] = folder
+        self.addCleanup(os.environ.pop, rulepack.SEARCH_ENV, None)
+
+        after = harness.apply([{"op": "param", "name": "unused", "value": 1}])["dfm"]
+        found = find(after["issues"], "hole.min_diameter", "error")
+        self.assertEqual([(i["target"], i["measured"], i["limit"]) for i in found], [("part/pin_hole", 1.2, 1.5)])
 
 
 if __name__ == "__main__":

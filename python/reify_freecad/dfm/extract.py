@@ -17,7 +17,6 @@ import json
 from typing import Any
 
 import FreeCAD as App
-import Part
 
 from .. import transfer as tr
 from .. import transfer_geometry as tg
