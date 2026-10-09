@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { RuntimeIdentity, SimulationCommandResult, SimulationCommandRunner } from "./store.ts";
 import { assertLinuxRuntime } from "../../shared/platform.ts";
 import { runProcess } from "../../shared/process-runner.ts";
-import { harnessStorageRoot } from "../../authority/storage.ts";
+import { harnessStorageRoot } from "../../shared/storage-paths.ts";
 
 interface RuntimeRegistrationBase {
   backend: string;

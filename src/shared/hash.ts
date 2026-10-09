@@ -44,3 +44,12 @@ export function makeEvidenceId(
   else if (specHash) identity = `${identity}-${specHash.slice(0, 12)}`;
   return `${kind}-${identity}-${randomUUID().slice(0, 8)}`;
 }
+
+export async function hashOrEmpty(path: string): Promise<string> {
+  try {
+    return await sha256File(path);
+  } catch {
+    return "";
+  }
+}
+

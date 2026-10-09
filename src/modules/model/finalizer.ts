@@ -10,12 +10,8 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-import {
-  artifactPathForKind,
-  buildPayload,
-  defaultBuildOutput,
-  envelopeArtifactHash,
-} from "../../shared/capability.ts";
+import { artifactPathForKind, buildPayload, envelopeArtifactHash } from "../../shared/envelope.ts";
+import { defaultBuildOutput } from "../../shared/cadctl/commands.ts";
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
 import { sha256File } from "../../shared/hash.ts";
 import { modelBackend, type ModelBackend } from "./backend.ts";

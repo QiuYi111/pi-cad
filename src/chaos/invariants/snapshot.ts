@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import type { JsonValue } from "../../harness/canonical.ts";
 import { canonicalDigest } from "../../harness/canonical.ts";
 import type { WorkspaceCommitManifestV1 } from "../../harness/commit.ts";
-import { defaultCanonicalProjectDirectory, harnessStorageRoot } from "../../authority/storage.ts";
+import { defaultCanonicalProjectDirectory, harnessStorageRoot } from "../../shared/storage-paths.ts";
 import type { HarnessProjectStateV7 } from "../../harness/run-store.ts";
 import type { HarnessRunStateV7, EvidenceRefV7, RecordRefV7 } from "../../harness/state.ts";
 import type { StatusProjectionV1 } from "../../authority/storage.ts";

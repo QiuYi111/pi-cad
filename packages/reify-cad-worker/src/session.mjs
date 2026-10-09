@@ -417,7 +417,7 @@ function artifactKind(path, role) {
 
 /**
  * Canonical project directory the authority uses for `cwd`. Mirrors
- * defaultCanonicalProjectDirectory in src/authority/storage.ts: the realpath of
+ * defaultCanonicalProjectDirectory in src/shared/storage-paths.ts: the realpath of
  * cwd is hashed, and XDG_DATA_HOME (resolved when set) or ~/.local/share is the base.
  */
 export async function canonicalProjectDir(cwd) {

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import probe from "../src/extensions/probe/index.ts";
-import { harnessRunDirectory } from "../src/authority/storage.ts";
+import { harnessRunDirectory } from "../src/shared/storage-paths.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";

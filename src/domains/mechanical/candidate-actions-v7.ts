@@ -8,19 +8,9 @@ import { resolveActiveRun } from "../../harness/run-scope.ts";
 import type { EvidenceRefV7, HarnessRunStateV7 } from "../../harness/state.ts";
 import type { WorkflowObligationDefinition, WorkflowSnapshotV1 } from "../../harness/workflow/types.ts";
 import { buildProposal, convertProposal, type CandidateProposal } from "../../modules/model/finalizer.ts";
-import {
-  assemblyTree,
-  compareGeometry,
-  inspectGeometry,
-  inspectInterference,
-  inspectVisual,
-  readImageContents,
-  runAssemblyEvidencePath,
-  runCompareEvidencePath,
-  runGeometryEvidencePath,
-  runInterferenceEvidencePath,
-  runVisualEvidenceDir,
-} from "../../shared/capability.ts";
+import { assemblyTree, compareGeometry, inspectGeometry, inspectInterference, inspectVisual } from "../../shared/cadctl/commands.ts";
+import { readImageContents } from "../../shared/image-content.ts";
+import { runAssemblyEvidencePath, runCompareEvidencePath, runGeometryEvidencePath, runInterferenceEvidencePath, runVisualEvidenceDir } from "../../shared/evidence-paths.ts";
 import type { CadEventEnvelope } from "../../shared/protocol.ts";
 import { mechanicalRegistries } from "./registries.ts";
 

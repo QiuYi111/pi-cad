@@ -265,7 +265,7 @@ await test("Windows mapped-drive conversion fails clearly and UNC paths use Wind
   assert.equal(runtimePaths("/tmp/cad-result.step", "windows", "Ubuntu").windowsPath, "\\\\wsl.localhost\\Ubuntu\\tmp\\cad-result.step");
 });
 await test("canonical project dir matches the authority's storage for the same cwd", async () => {
-  const { defaultCanonicalProjectDirectory } = await createJiti(import.meta.url).import(fileURLToPath(new URL("../src/authority/storage.ts", import.meta.url)));
+  const { defaultCanonicalProjectDirectory } = await createJiti(import.meta.url).import(fileURLToPath(new URL("../src/shared/storage-paths.ts", import.meta.url)));
   const cwd = await mkdtemp(join(tmpdir(), "cad-worker-canonical-"));
   const originalXdg = process.env.XDG_DATA_HOME;
   try {

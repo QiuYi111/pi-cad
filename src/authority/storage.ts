@@ -1,43 +1,12 @@
-import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, realpath, rename, writeFile } from "node:fs/promises";
-import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { join, resolve } from "node:path";
 
 import type { HarnessProjectStateV7 } from "../harness/run-store.ts";
 import type { WorkflowSnapshotV1 } from "../harness/workflow/types.ts";
 import type { WorkflowCurrentView } from "../harness/card.ts";
 import type { HarnessRunStateV7 } from "../harness/state.ts";
 import { workflowRunStateView } from "../harness/workflow/phase-view.ts";
-
-const CANONICAL_DIRECTORY_ENV = "PI_CAD_CANONICAL_PROJECT_DIR";
-
-export function canonicalProjectKey(cwd: string): string {
-  return createHash("sha256").update(realpathSync(resolve(cwd))).digest("hex");
-}
-
-export function defaultCanonicalProjectDirectory(cwd: string): string {
-  const dataHome = process.env.XDG_DATA_HOME
-    ? resolve(process.env.XDG_DATA_HOME)
-    : join(homedir(), ".local", "share");
-  return join(dataHome, "pi-cad", canonicalProjectKey(cwd));
-}
-
-/** Direct library tests retain prototype storage unless a sidecar supplies its private root. */
-export function harnessStorageRoot(cwd: string): string {
-  const configured = process.env[CANONICAL_DIRECTORY_ENV];
-  if (!configured) return join(resolve(cwd), ".pi-cad");
-  if (!isAbsolute(configured)) throw new Error(`${CANONICAL_DIRECTORY_ENV} must be absolute`);
-  return resolve(configured);
-}
-
-export function harnessRunDirectory(cwd: string, runId: string): string {
-  return join(harnessStorageRoot(cwd), "runs", runId);
-}
-
-export function harnessProjectDirectory(cwd: string): string {
-  return join(harnessStorageRoot(cwd), "v7-project");
-}
 
 export interface StatusProjectionV1 {
   schema: 1;

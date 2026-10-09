@@ -3,7 +3,7 @@ import { registerMechanicalActionTool } from "../../domains/mechanical/register-
 import { resolve } from "node:path";
 import { Type } from "typebox";
 
-import { imageContent } from "../../shared/capability.ts";
+import { imageContent } from "../../shared/image-content.ts";
 import { executeMechanicalRecipeV7 } from "../../domains/mechanical/recipe-actions-v7.ts";
 
 export default function cadPresentationExtension(pi: ExtensionAPI) {
