@@ -1,0 +1,26 @@
+{
+  "description": "Rectangular pocket 20 x 15, depth 10, sharp corners: the platform adds R2 (depth / 5). Target: corner.inner_auto_radius (info).",
+  "lint": {
+    "must": [
+      {
+        "rule": "corner.inner_auto_radius",
+        "severity": "info",
+        "layer": "lint",
+        "measured": 0
+      }
+    ],
+    "must_not": [
+      "cavity.depth_tool_ratio",
+      "cavity.min_width",
+      "floor.fillet_radius"
+    ]
+  },
+  "geometry": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": []
+  }
+}

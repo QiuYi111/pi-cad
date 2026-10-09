@@ -1,0 +1,21 @@
+{
+  "description": "Two through pockets leave a 0.6 mm wall. Target: wall.min_thickness (geometry only).",
+  "lint": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "wall.min_thickness",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": []
+  }
+}

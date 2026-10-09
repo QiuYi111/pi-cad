@@ -1,0 +1,40 @@
+{
+  "description": "phi2 blind hole, depth 18: depth/diameter 9 > 8. Target: hole.depth_ratio.",
+  "lint": {
+    "must": [
+      {
+        "rule": "hole.depth_ratio",
+        "severity": "error",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter",
+      "hole.thread_tap_drill"
+    ]
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "hole.depth_ratio",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter"
+    ]
+  },
+  "geometry_builtin": {
+    "must": [
+      {
+        "rule": "hole.depth_ratio",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter"
+    ]
+  }
+}

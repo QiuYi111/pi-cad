@@ -1,0 +1,12 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "import_step",
+    "name": "imported",
+    "file": "imports/part.step"
+  }
+]
