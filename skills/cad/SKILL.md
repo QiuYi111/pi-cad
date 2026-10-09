@@ -35,7 +35,7 @@ cad.commit(
 cad.plan.current() -> Commit | None
 cad.plan.update(*, variables: dict | None = None, artifacts: list | None = None) -> Commit
 cad.part.open(path: str | Path, *, output: str | Path | None = None, create: bool = False, body: str | None = None, validation: str = "auto") -> PartDocument
-PartDocument.apply(ops: list[dict], *, message: str | None = None, validation: str = "auto", budget_s: float | None = None) -> PartResult
+PartDocument.apply(ops: list[dict], *, message: str | None = None, validation: str = "auto", budget_s: float | None = None, observe: bool = True) -> PartResult
 PartDocument.try_(ops: list[dict], *, budget_s: float | None = None) -> PartResult
 PartDocument.undo(*, to_empty: bool = False, validation: str = "auto") -> PartResult
 PartDocument.tree() -> dict
@@ -138,11 +138,13 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
   only for bought-in or outside STEP files. A STEP that Reify built from a project
   part has no semantic face names in the assembly, and `cad.transfer` can use it
   only if it is current (the part document did not change since the STEP).
-- Every `apply` on an assembly rebuilds and renders the whole assembly (about
-  0.6 s per part already in it, more for complex parts). Link parts in batches of
-  20 to 40 per `apply`, not one per call: 80 single-link calls cost far more than
-  four batches. If a batch fails nothing is kept (it rolls back), so fix the
-  named op and send the batch again. Do not drop to one link per call to find
+- Every observed `apply` on an assembly exports, inspects and renders the whole
+  assembly. Link parts in batches of 20 to 40 per `apply`, not one per call, and
+  pass `observe=False` for every batch but the last: it commits the revision and
+  returns at once (no views, no change summary, no STEP), and the last apply
+  observes everything. The evidence the build step needs comes from that last
+  apply, so never end on an `observe=False` apply. If a batch fails nothing is
+  kept (it rolls back), so fix the named op and send the batch again. Do not drop to one link per call to find
   the bad one: the error names the occurrence.
 - One part, one document. One assembly, one document. A part is
   `parts/<name>.FCStd` with one owner; the assembly is

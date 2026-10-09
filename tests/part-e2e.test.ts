@@ -264,3 +264,34 @@ test("FreeCAD assembly: parts in their own documents, linked, jointed, swept", {
     await rm(canonical, { recursive: true, force: true });
   }
 });
+
+test("FreeCAD part: observe=false commits a revision without exporting or rendering, the next apply observes", { skip: !installed && "FreeCAD runtime is not installed" }, async () => {
+  const canonical = await mkdtemp(join(tmpdir(), "pi-cad-part-observe-canonical-"));
+  const cwd = await mkdtemp(join(tmpdir(), "pi-cad-part-observe-"));
+  const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = canonical;
+  try {
+    await new HarnessProjectStoreV7(cwd).startRun({ workflow: buildWorkflow(), registryContract: buildRegistryContract(mechanicalRegistries) });
+    await handleAgentApi(cwd, { schema: 1, op: "part-open", doc, create: true, body: "bracket" });
+
+    const quiet = await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc, ops: base as never, message: "bracket", observe: false }) as any;
+    assert.equal(quiet.part.rev, 1, "the revision is committed");
+    assert.deepEqual(quiet.images, []);
+    assert.equal(quiet.artifact, null);
+    assert.equal(quiet.changes, null);
+    assert.equal(existsSync(join(cwd, "build", "bracket.step")), false, "no STEP was exported");
+
+    const seen = await handleAgentApi(cwd, { schema: 1, op: "part-apply", doc, ops: [{ op: "param", name: "hole_d", value: 8 }] as never }) as any;
+    assert.equal(seen.part.rev, 2);
+    assert.equal(seen.images.length, 7, "the apply that observes shows the model");
+    assert.equal(seen.artifact.path, "build/bracket.step");
+    assert.equal(existsSync(join(cwd, "build", "bracket.step")), true);
+  } finally {
+    await shutdownPartWorkers();
+    if (previousCanonical === undefined) delete process.env.PI_CAD_CANONICAL_PROJECT_DIR;
+    else process.env.PI_CAD_CANONICAL_PROJECT_DIR = previousCanonical;
+    await rm(cwd, { recursive: true, force: true });
+    await rm(canonical, { recursive: true, force: true });
+  }
+});
+

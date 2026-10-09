@@ -244,6 +244,53 @@ def export_created_cache(doc: Any) -> dict[str, Any]:
     return {"schema": CREATED_CACHE_SCHEMA, "features": entries}
 
 
+BODY_ROLES_SCHEMA = 1
+
+
+def export_body_roles(roles: BodyRoles) -> dict[str, Any]:
+    """The finished roles of one body as face and edge names, with a fingerprint of every face they use.
+
+    Finding the roles is the slow part of using a part for the first time: seconds per part, minutes for an
+    assembly of thirty. They only depend on the saved file, so they are saved next to it and read back for the
+    same revision (see ``import_body_roles``).
+    """
+    faces = list(roles.shape.Faces)
+    used = sorted({int(entry.face_name[4:]) for entries in roles.faces.values() for entry in entries})
+    return {
+        "schema": BODY_ROLES_SCHEMA, "faces": len(faces), "edges": len(roles.shape.Edges),
+        "prints": {str(number): _face_print(faces[number - 1]) for number in used},
+        "roleFaces": {key: [entry.face_name for entry in entries] for key, entries in roles.faces.items()},
+        "roleEdges": {key: list(names) for key, names in roles.edges.items()},
+        "warnings": roles.warnings,
+    }
+
+
+def import_body_roles(body: Any, entry: Any) -> BodyRoles | None:
+    """The roles ``export_body_roles`` saved, or None when the body's shape is not the one they were found on."""
+    try:
+        if not isinstance(entry, dict) or entry.get("schema") != BODY_ROLES_SCHEMA:
+            return None
+        shape = body.Shape.copy()
+        placement = body.Placement
+        shape.Placement = App.Placement()
+        if shape.isNull():
+            return None
+        faces = list(shape.Faces)
+        if len(faces) != entry["faces"] or len(shape.Edges) != entry["edges"]:
+            return None
+        for number, saved in entry["prints"].items():
+            if int(number) > len(faces) or _face_print(faces[int(number) - 1]) != saved:
+                return None
+        result = BodyRoles(body=body, shape=shape, placement=placement)
+        for key, names in entry["roleFaces"].items():
+            result.faces[key] = [RoleFace(name, faces[int(name[4:]) - 1]) for name in names]
+        result.edges = {key: list(names) for key, names in entry["roleEdges"].items()}
+        result.warnings = list(entry.get("warnings") or [])
+        return result
+    except Exception:
+        return None
+
+
 def import_created_cache(doc: Any, data: dict[str, Any]) -> int:
     """Seed the cache from ``export_created_cache`` of the same saved file; returns the entries accepted."""
     if not isinstance(data, dict) or data.get("schema") != CREATED_CACHE_SCHEMA:

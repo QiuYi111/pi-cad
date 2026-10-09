@@ -433,6 +433,75 @@ class AssemblyScaleTests(unittest.TestCase):
         self.assertGreater(len({e["path"] for e in after["entities"] if e["path"].startswith("many/p0/boss")}), 0, "the refreshed occurrence shows the new feature")
         self.assertEqual({e["path"] for e in before["entities"] if e["path"].startswith("many/p0/boss")}, set())
 
+    def fresh_worker(self) -> Any:
+        """A new worker on the same project, as after a restart; it has opened the part from its saved file."""
+        from reify_freecad.worker import Worker
+
+        worker = Worker()
+        self.addCleanup(worker.registry.close)
+        opened = worker.handle({"id": 0, "op": "open", "doc": self.p.path("parts/base.FCStd"), "budgetS": 60, "args": {
+            "output": self.p.path("build/base.step"), "historyDir": self.p.path(".history/base"), "root": str(self.p.root), "body": "base", "create": False}})
+        self.assertTrue(opened["ok"], opened)
+        return worker
+
+    def test_saved_roles_are_read_back_instead_of_found_again(self) -> None:
+        """A part's roles are found once per revision: a fresh worker (restart, another process) reads them."""
+        import reify_freecad.session as session_module
+        from reify_freecad.worker import Worker
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0), self.link(1)])
+        saved = json.loads(Path(self.p.path("parts/base.FCStd.roles.json")).read_text())
+        self.assertIn("base", saved["bodyRoles"], "the part's roles are saved next to its file")
+        expected = self.p.call("parts/base.FCStd", "query", target="base/plate", what=["faces"])
+
+        searches = {"n": 0}
+        original = session_module.compute_body_roles
+
+        def counting(body: Any) -> Any:
+            searches["n"] += 1
+            return original(body)
+
+        session_module.compute_body_roles = counting
+        self.addCleanup(setattr, session_module, "compute_body_roles", original)
+        fresh = self.fresh_worker()
+        answer = fresh.handle({"id": 1, "op": "query", "doc": self.p.path("parts/base.FCStd"), "args": {"target": "base/plate", "what": ["faces"]}, "budgetS": 60})
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["result"], expected)
+        self.assertEqual(searches["n"], 0, "the roles came from the saved file")
+
+    def test_saved_roles_are_not_used_after_the_part_changed(self) -> None:
+        from reify_freecad.worker import Worker
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0)])
+        self.p.call("parts/base.FCStd", "apply", ops=[
+            {"op": "sketch", "name": "base/boss_profile", "on": {"feature": "base/plate", "role": "top"}, "shapes": [{"circle": {"center": [15, 15], "diameter": 6}}]},
+            {"op": "pad", "name": "base/boss", "sketch": "base/boss_profile", "length": 4},
+        ])
+        fresh = self.fresh_worker()
+        answer = fresh.handle({"id": 1, "op": "query", "doc": self.p.path("parts/base.FCStd"), "args": {"target": "base/boss", "what": ["faces"]}, "budgetS": 60})
+        self.assertTrue(answer["ok"], answer)
+        self.assertTrue(answer["result"], "the new feature has roles: the old file's saved roles were not served")
+
+    def test_an_apply_that_does_not_observe_commits_without_exporting(self) -> None:
+        quiet = self.p.call("assembly/many.FCStd", "apply", ops=[self.link(i) for i in range(3)], observe=False)
+        self.assertEqual(quiet["rev"], 1)
+        self.assertIs(quiet["observed"], False)
+        self.assertNotIn("step", quiet)
+        self.assertNotIn("annotations", quiet)
+        self.assertFalse(Path(self.p.path("build/many.step")).exists(), "no STEP was written")
+        self.assertTrue(Path(self.p.path("assembly/many.FCStd")).exists(), "the revision is saved")
+        seen = self.p.call("assembly/many.FCStd", "apply", ops=[self.link(3)])
+        self.assertEqual(seen["rev"], 2)
+        self.assertIn("step", seen)
+        self.assertTrue(Path(seen["step"]).exists())
+
+    def test_a_failing_unobserved_apply_still_rolls_back(self) -> None:
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0)], observe=False)
+        error = self.p.error("assembly/many.FCStd", "apply", observe=False, ops=[
+            {"op": "link", "name": "many/nowhere", "part": "parts/missing.FCStd", "body": "base"}])
+        self.assertTrue(error.get("rolledBack"))
+        self.assertEqual(self.p.call("assembly/many.FCStd", "tree")["rev"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
