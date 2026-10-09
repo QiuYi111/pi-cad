@@ -10,31 +10,31 @@ if (!existsSync(tsx)) {
   process.exit(1);
 }
 
-const result = spawnSync(tsx, ["--test", resolve(project, "tests/prime-boundary.test.ts")], {
+const result = spawnSync(tsx, ["--test", resolve(project, "tests/prime-integration/e2e/prime-boundary.test.ts")], {
   cwd: project,
   stdio: "inherit",
   env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
 });
 if (result.status !== 0) process.exit(result.status ?? 1);
-const smoke = spawnSync(process.execPath, [resolve(project, "tests/prime-cli-smoke.mjs")], {
+const smoke = spawnSync(process.execPath, [resolve(project, "tests/prime-integration/e2e/prime-cli-smoke.mjs")], {
   cwd: project,
   stdio: "inherit",
   env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
 });
 if (smoke.status !== 0) process.exit(smoke.status ?? 1);
-const subagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-subagent-smoke.mjs")], {
+const subagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-integration/e2e/prime-subagent-smoke.mjs")], {
   cwd: project,
   stdio: "inherit",
   env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
 });
 if (subagentSmoke.status !== 0) process.exit(subagentSmoke.status ?? 1);
-const desktopSubagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-desktop-rpc-subagent-smoke.mjs")], {
+const desktopSubagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-integration/e2e/prime-desktop-rpc-subagent-smoke.mjs")], {
   cwd: project,
   stdio: "inherit",
   env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
 });
 if (desktopSubagentSmoke.status !== 0) process.exit(desktopSubagentSmoke.status ?? 1);
-const daemonSubagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-daemon-subagent-cancel-smoke.mjs")], {
+const daemonSubagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-integration/e2e/prime-daemon-subagent-cancel-smoke.mjs")], {
   cwd: project,
   stdio: "inherit",
   env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },

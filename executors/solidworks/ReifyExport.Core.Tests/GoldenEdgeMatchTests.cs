@@ -7,7 +7,7 @@ using Xunit;
 namespace Reify.Export.Tests
 {
     // Shared golden edge-match fixtures (executors/fixtures/golden/edge_match.json). The same file drives
-    // tests/fusion_addin/test_golden_edge_match.py. expect.solidworks is this matcher's verdict per case.
+    // tests/transfer/fast/fusion_addin/test_golden_edge_match.py. expect.solidworks is this matcher's verdict per case.
     public class GoldenEdgeMatchTests
     {
         static JsonDocument Load()
