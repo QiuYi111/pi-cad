@@ -167,6 +167,33 @@ describe('refresh tokens', () => {
     expect((await post(env, '/v1/auth/refresh', { refreshToken: a.refreshToken })).statusCode).toBe(401);
   });
 
+  it('reusing a logged-out token returns 401 but does not revoke the user other sessions', async () => {
+    await registerUser();
+    const a = (await login('alice@example.com', PASSWORD)).json();
+    const b = (await login('alice@example.com', PASSWORD, { deviceLabel: 'laptop' })).json();
+    await post(env, '/v1/auth/logout', { refreshToken: a.refreshToken });
+    expect((await post(env, '/v1/auth/refresh', { refreshToken: a.refreshToken })).statusCode).toBe(401);
+    expect((await post(env, '/v1/auth/refresh', { refreshToken: b.refreshToken })).statusCode).toBe(200);
+    expect((await env.db.query("select count(*)::int n from events where kind = 'refresh_reuse'")).rows[0].n).toBe(0);
+    // a was revoked by logout. b was rotated by its successful refresh.
+    const reasons = (await env.db.query('select revoked_reason from refresh_tokens where revoked_at is not null order by created_at')).rows;
+    expect(reasons.map((r) => r.revoked_reason)).toEqual(['logout', 'rotated']);
+  });
+
+  it('reusing a token revoked by a password reset or a disable returns 401 without revoking everything', async () => {
+    await registerUser();
+    const a = (await login('alice@example.com', PASSWORD)).json();
+    const b = (await login('alice@example.com', PASSWORD, { deviceLabel: 'laptop' })).json();
+    const { disableUser, enableUser } = await import('../src/admin.js');
+    await disableUser(env.db, env.clock.now(), 'alice@example.com');
+    await enableUser(env.db, env.clock.now(), 'alice@example.com');
+    expect((await post(env, '/v1/auth/refresh', { refreshToken: a.refreshToken })).statusCode).toBe(401);
+    expect((await post(env, '/v1/auth/refresh', { refreshToken: b.refreshToken })).statusCode).toBe(401);
+    expect((await env.db.query("select count(*)::int n from events where kind = 'refresh_reuse'")).rows[0].n).toBe(0);
+    const reasons = (await env.db.query('select revoked_reason from refresh_tokens order by created_at')).rows;
+    expect(reasons.map((r) => r.revoked_reason)).toEqual(['disabled', 'disabled']);
+  });
+
   it('logout revokes the refresh token; the access token still works until it expires', async () => {
     await registerUser();
     const a = (await login('alice@example.com', PASSWORD)).json();

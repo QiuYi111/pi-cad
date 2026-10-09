@@ -3,8 +3,12 @@ import { isIP } from 'node:net';
 import { changePassword, login, logout, refresh, register, resetPassword } from './auth.js';
 import { INVITE_MESSAGES, getInvite } from './invites.js';
 import { HttpError } from './errors.js';
-import { verifyAccess, type Deps } from './deps.js';
+import { userIdFromAuth, type Deps } from './deps.js';
 import { invitePage, resetPage } from './pages.js';
+import { registerProjectRoutes } from './projects.js';
+import { registerWorkspaceRoutes } from './workspace/routes.js';
+import { attachWebSockets } from './workspace/bridge.js';
+import type { WorkspaceDeps } from './workspace/ports.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -32,7 +36,8 @@ const HTML_HEADERS = {
   'cache-control': 'no-store',
 };
 
-export function buildApp(d: Deps & { logger?: boolean }): FastifyInstance {
+// Workspace parts are optional: without them the workspace bridge answers 503 and projects skip filesystem work.
+export function buildApp(d: Deps & { logger?: boolean; workspace?: WorkspaceDeps }): FastifyInstance {
   const app = Fastify({ logger: d.logger ?? false, bodyLimit: 64 * 1024 });
   app.decorateRequest('userId', null);
 
@@ -50,12 +55,7 @@ export function buildApp(d: Deps & { logger?: boolean }): FastifyInstance {
 
   // preHandler for protected routes: verifies the access token and that the user is still active.
   const requireUser = async (req: FastifyRequest, _reply: FastifyReply) => {
-    const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? '');
-    if (!m) throw new HttpError(401, 'unauthorized', '请先登录');
-    const uid = await verifyAccess(d, m[1]);
-    const r = await d.db.query<{ status: string }>('select status from users where id = $1', [uid]);
-    if (r.rows[0]?.status !== 'active') throw new HttpError(401, 'unauthorized', '账户已停用');
-    req.userId = uid;
+    req.userId = await userIdFromAuth(d, req.headers.authorization);
   };
   app.decorate('requireUser', requireUser);
 
@@ -104,6 +104,19 @@ export function buildApp(d: Deps & { logger?: boolean }): FastifyInstance {
     const u = r.rows[0];
     return { id: u.id, email: u.email, displayName: u.display_name };
   });
+
+  registerProjectRoutes(app, d, requireUser, d.workspace);
+  registerWorkspaceRoutes(app, d, requireUser);
+
+  if (d.workspace) {
+    const sockets = attachWebSockets(app.server, { ...d, workspace: d.workspace });
+    app.addHook('onClose', async () => {
+      for (const wss of sockets) {
+        for (const client of wss.clients) client.terminate();
+        await new Promise<void>((resolve) => wss.close(() => resolve()));
+      }
+    });
+  }
 
   app.get<{ Params: { token: string } }>('/invite/:token', async (_req, reply) =>
     reply.headers(HTML_HEADERS).type('text/html; charset=utf-8').send(invitePage(d.config.downloadUrl)),

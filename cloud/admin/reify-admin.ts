@@ -12,7 +12,10 @@ const USAGE = `usage:
   user list
   user disable <email>
   user enable <email>
-  user reset-password <email>`;
+  user reset-password <email>
+  workspace list
+  workspace stop <email>
+  status`;
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -62,6 +65,21 @@ async function run(db: ReturnType<typeof createPool>): Promise<void> {
     if (!base) throw new Error('PUBLIC_BASE_URL is required');
     const r = await admin.createPasswordReset(db, now, base, arg);
     console.log(`一次性重置链接（24 小时内有效）：\n${r.url}\n过期时间：${r.expiresAt.toISOString()}`);
+  } else if (key === 'workspace list') {
+    console.table(await admin.listWorkspaces(db));
+  } else if (key === 'workspace stop') {
+    if (!arg) throw new Error(USAGE);
+    await admin.stopWorkspaceByEmail(db, now, arg);
+    console.log('已请求停止（控制器会先发送 shutdown，最多等 30 秒，然后缩容）');
+  } else if (group === 'status' && !cmd) {
+    const s = await admin.statusReport(db, now);
+    console.log(`排队中：${s.queued}`);
+    console.log('按状态统计：');
+    console.table(s.countsByState);
+    console.log('活跃工作区（期望运行或正在启动 / 运行）：');
+    console.table(s.active);
+    console.log(`最近 24 小时错误事件：${s.errorEventsLast24h}`);
+    console.log('CPU 和内存未显示：本工具不连接 K8s 指标 API（metrics-server）。');
   } else {
     throw new Error(USAGE);
   }

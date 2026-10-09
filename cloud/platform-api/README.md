@@ -32,14 +32,34 @@ Environment (plan §5.5):
 | `TRUST_PROXY` | `1`/`true` to take the client IP from the first `X-Forwarded-For` entry |
 | `PORT` | default `8080` |
 
-`MAX_ACTIVE_WORKSPACES`, `WORKSPACE_IMAGE`, `WORKSPACE_NAMESPACE`, `HTTPS_PROXY_FOR_WORKSPACES` belong to later tasks and are not read yet.
+Workspace settings (plan 5.5, 8.2). Defaults are in `src/config.ts`:
+
+| Variable | Notes |
+|---|---|
+| `GATEWAY_PRIVATE_KEY` / `_FILE` | ES256 PEM for the 60 s gateway tokens. Required. A second key, not `JWT_PRIVATE_KEY` |
+| `INTERNAL_PORT` | default `8081`. Serves `/internal/*` only |
+| `MAX_ACTIVE_WORKSPACES` | default `6` |
+| `WORKSPACE_IMAGE` | image for the workspace pod |
+| `WORKSPACE_NAMESPACE` | default `reify-ws` |
+| `WORKSPACE_TEMPLATE_PATH` | default `cloud/deploy/k3s/workspace-template.yaml`, relative to this package |
+| `WORKSPACE_SECCOMP_TYPE`, `WORKSPACE_HOST_USERS` | filled into the template (plan 0.5) |
+| `HTTPS_PROXY_FOR_WORKSPACES` | `http://<windows host>:7890`, no credentials |
+| `PLATFORM_INTERNAL_URL` | in-cluster base of the internal port, for the activity URL |
+| `GATEWAY_URL_PATTERN` | default `ws://{name}.reify-ws.svc:7000/` |
+
+The controller runs in the same process every 10 s (`controllerIntervalMs` in config).
+Kubernetes access uses the in-cluster service account (or `KUBECONFIG`), limited by `platform-api-rbac.yaml`.
 
 ```sh
-DATABASE_URL=... JWT_PRIVATE_KEY_FILE=./jwt.pem PUBLIC_BASE_URL=https://example.ts.net npm start
+DATABASE_URL=... JWT_PRIVATE_KEY_FILE=./jwt.pem GATEWAY_PRIVATE_KEY_FILE=./gw.pem PUBLIC_BASE_URL=https://example.ts.net npm start
 ```
 
-Routes: `GET /v1/healthz`, `GET /v1/invites/:token`, `POST /v1/auth/{register,login,refresh,logout,password,reset}`,
-`GET /v1/me`, and HTML pages `GET /invite/:token`, `GET /reset/:token`.
+Routes (public port): `GET /v1/healthz`, `GET /v1/invites/:token`, `POST /v1/auth/{register,login,refresh,logout,password,reset}`,
+`GET /v1/me`, `GET|POST /v1/projects`, `PATCH|DELETE /v1/projects/:id`,
+`GET /v1/workspace`, `POST /v1/workspace/{start,stop,keepalive}`, WebSocket `GET /v1/workspace/bridge` and `GET /v1/events`
+(both take the access token in `Authorization: Bearer`), and HTML pages `GET /invite/:token`, `GET /reset/:token`.
+
+Internal port (not routed by Caddy): `POST /internal/workspaces/:id/activity`, authenticated with the workspace's own token.
 
 ## Admin CLI
 
@@ -55,7 +75,12 @@ npx tsx ../admin/reify-admin.ts user list
 npx tsx ../admin/reify-admin.ts user disable <email>
 npx tsx ../admin/reify-admin.ts user enable <email>
 npx tsx ../admin/reify-admin.ts user reset-password <email>
+npx tsx ../admin/reify-admin.ts workspace list
+npx tsx ../admin/reify-admin.ts workspace stop <email>
+npx tsx ../admin/reify-admin.ts status
 ```
+
+`status` does not show CPU or memory. It does not connect to the metrics API.
 
 The invite token and reset token are printed once. Only their sha256 is stored.
 
@@ -82,3 +107,8 @@ Each test file and each test gets its own database on that server, dropped after
 - `src/invites.ts`, `src/admin.ts` - invite validity; operator functions shared with the CLI
 - `src/migrate.ts` - migration runner
 - `src/pages.ts` - invite and reset pages (plain HTML and inline JS)
+- `src/projects.ts` - projects, membership, soft delete, filesystem changes through the gateway
+- `src/internal.ts` - the internal app (activity reports), served on `INTERNAL_PORT` only
+- `src/workspace/` - `service.ts` (start with capacity and queue, stop, keepalive), `controller.ts` (the 5 rules of plan 5.4),
+  `template.ts` (renders the workspace template), `k8s.ts` (Kubernetes client, limited to reify-ws), `gateway.ts`
+  (gateway tokens, exec and shutdown), `bridge.ts` (WebSocket upgrades: bridge and events), `events.ts`, `ports.ts` (interfaces the tests fake)

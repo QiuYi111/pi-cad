@@ -100,8 +100,9 @@ export async function disableUser(db: Db, now: Date, emailIn: string): Promise<v
   await withTx(db, async (c) => {
     const id = await userIdByEmail(c, email);
     await c.query("update users set status = 'disabled' where id = $1", [id]);
-    await c.query('update refresh_tokens set revoked_at = $2 where user_id = $1 and revoked_at is null', [id, now]);
+    await c.query("update refresh_tokens set revoked_at = $2, revoked_reason = 'disabled' where user_id = $1 and revoked_at is null", [id, now]);
     await c.query("update workspaces set desired = 'stopped' where user_id = $1", [id]);
+    await c.query('delete from workspace_queue where workspace_id in (select id from workspaces where user_id = $1)', [id]);
     await recordEvent(c, { kind: 'user_disable', at: now, userId: id, detail: { by: 'admin' } });
   });
 }
@@ -135,4 +136,61 @@ export async function createPasswordReset(
     await recordEvent(c, { kind: 'password_reset_issued', at: now, userId: id, detail: { by: 'admin' } });
     return { url: `${publicBaseUrl}/reset/${token}`, expiresAt };
   });
+}
+
+export interface WorkspaceAdminRow {
+  email: string;
+  name: string;
+  state: string;
+  desired: string;
+  lastActivityAt: Date | null;
+  idleWarnedAt: Date | null;
+  lastError: string | null;
+}
+
+export async function listWorkspaces(db: Db): Promise<WorkspaceAdminRow[]> {
+  const r = await db.query(
+    `select u.email, w.k8s_name, w.state, w.desired, w.last_activity_at, w.idle_warned_at, w.last_error
+       from workspaces w join users u on u.id = w.user_id order by w.last_activity_at desc nulls last, u.email`,
+  );
+  return r.rows.map((x) => ({
+    email: x.email as string,
+    name: x.k8s_name as string,
+    state: x.state as string,
+    desired: x.desired as string,
+    lastActivityAt: x.last_activity_at as Date | null,
+    idleWarnedAt: x.idle_warned_at as Date | null,
+    lastError: x.last_error as string | null,
+  }));
+}
+
+// Forced stop: desired=stopped and removed from the start queue. The controller does the shutdown (plan 10).
+export async function stopWorkspaceByEmail(db: Db, now: Date, emailIn: string): Promise<void> {
+  const email = requireEmail(emailIn);
+  await withTx(db, async (c) => {
+    const id = await userIdByEmail(c, email);
+    await c.query('delete from workspace_queue where workspace_id in (select id from workspaces where user_id = $1)', [id]);
+    await c.query("update workspaces set desired = 'stopped' where user_id = $1", [id]);
+    await recordEvent(c, { kind: 'ws_stop_requested', at: now, userId: id, detail: { by: 'admin' } });
+  });
+}
+
+// Plan 8.6 status without CPU and memory. Those would need the metrics API from the admin machine (not wired here).
+export async function statusReport(db: Db, now: Date) {
+  const since = new Date(now.getTime() - 24 * HOUR);
+  const [active, counts, errors, queued] = await Promise.all([
+    db.query(
+      `select u.email, w.state, w.desired, w.last_activity_at from workspaces w join users u on u.id = w.user_id
+        where w.desired = 'running' or w.state in ('starting','running') order by w.last_activity_at desc nulls last`,
+    ),
+    db.query('select state, count(*)::int n from workspaces group by state order by state'),
+    db.query("select count(*)::int n from events where kind = 'error' and at >= $1", [since]),
+    db.query('select count(*)::int n from workspace_queue'),
+  ]);
+  return {
+    active: active.rows.map((x) => ({ email: x.email as string, state: x.state as string, lastActivityAt: x.last_activity_at as Date | null })),
+    countsByState: Object.fromEntries(counts.rows.map((x) => [x.state as string, x.n as number])),
+    errorEventsLast24h: errors.rows[0].n as number,
+    queued: queued.rows[0].n as number,
+  };
 }
