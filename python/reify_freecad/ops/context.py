@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..assembly import units as assembly_units
 from ..core import bodies, get_path, path_index, set_path, similar_paths
 from ..errors import ReifyOpError
 from ..exprs import PARAMS_OBJECT, is_expression, rewrite_expression
@@ -22,6 +23,10 @@ class OpContext:
     @property
     def known_params(self) -> set[str]:
         return self.session.param_names()
+
+    def units(self) -> list[Any]:
+        """Every body, occurrence and reference of the document (assembly.units)."""
+        return assembly_units(self.session)
 
     def index(self) -> dict[str, Any]:
         return path_index(self.doc)
