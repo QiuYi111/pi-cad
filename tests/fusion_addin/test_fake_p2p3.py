@@ -256,9 +256,6 @@ class GoldenTests(Base):
                     self.assertEqual(set(w), {"feature", "field", "expr", "reason"})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class LiveFusionFindings(Base):
     """Behaviours measured in a real Fusion 2705 (see executors/fusion/README.md)."""
@@ -315,3 +312,6 @@ class LiveFusionFindings(Base):
         exports = [i for i, entry in enumerate(app.log) if entry.startswith("export")]
         self.assertTrue(exports and app.log.index("viewport.fit") < exports[0], app.log)
 
+
+if __name__ == "__main__":
+    unittest.main()

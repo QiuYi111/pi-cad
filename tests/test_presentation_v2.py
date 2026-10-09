@@ -439,9 +439,6 @@ class PresentationRender(unittest.TestCase):
         self.assertEqual(m1["subjectArtifactHash"], m2["subjectArtifactHash"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class PresentationProvenance(unittest.TestCase):
     """FrozenInputs: mid-render input mutation discards the result."""
@@ -652,3 +649,7 @@ class PresentationFreezeBoundary(unittest.TestCase):
             import shutil
 
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

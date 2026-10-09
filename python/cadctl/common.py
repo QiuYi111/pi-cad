@@ -6,7 +6,6 @@ import os
 import re
 
 from . import __version__
-import time
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +16,6 @@ def sha256_file(path: str | Path) -> str:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def canonical_json_bytes(data: Any) -> bytes:
@@ -87,10 +82,6 @@ def resolve_spec_path(spec_path: str | Path, value: str | Path) -> Path:
 def read_json(path: str | Path, *, normalize_paths: bool = False) -> Any:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
     return normalize_host_paths(value) if normalize_paths else value
-
-
-def utcnow_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
 def emit(

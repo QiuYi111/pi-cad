@@ -7,7 +7,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -105,20 +104,21 @@ class SurfaceInspectionTests(unittest.TestCase):
 
 
 class FlowValidationTests(unittest.TestCase):
-    def setUp(self) -> None:
+    @classmethod
+    def setUpClass(cls) -> None:
         # Validation checks existence; the pure-schema tests do not solve.
-        (ROOT / "duct.step").touch(exist_ok=True)
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.duct = Path(cls._tmp.name) / "duct.step"
+        cls.duct.touch()
 
-    def tearDown(self) -> None:
-        try:
-            (ROOT / "duct.step").unlink()
-        except FileNotFoundError:
-            pass
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
 
     def base_spec(self) -> dict:
         return {
             "caseId": "duct",
-            "fluidDomain": "duct.step",
+            "fluidDomain": str(self.duct),
             "geometryUnits": "mm",
             "physics": {"type": "compressible_euler"},
             "fluid": {"model": "ideal_gas", "gamma": 1.4, "gasConstantJPerKgK": 287.05},
@@ -232,7 +232,7 @@ class FlowValidationTests(unittest.TestCase):
 
         spec = {
             "caseId": "duct",
-            "fluidDomain": "duct.step",
+            "fluidDomain": str(self.duct),
             "geometryUnits": "mm",
             "physics": {"type": "incompressible_ns"},
             "fluid": {
@@ -278,19 +278,20 @@ class FlowValidationTests(unittest.TestCase):
 
 
 class ThermalValidationTests(unittest.TestCase):
-    def setUp(self) -> None:
-        (ROOT / "slab.step").touch(exist_ok=True)
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls._tmp = tempfile.TemporaryDirectory()
+        cls.slab = Path(cls._tmp.name) / "slab.step"
+        cls.slab.touch()
 
-    def tearDown(self) -> None:
-        try:
-            (ROOT / "slab.step").unlink()
-        except FileNotFoundError:
-            pass
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls._tmp.cleanup()
 
     def base_spec(self) -> dict:
         return {
             "caseId": "slab",
-            "artifact": "slab.step",
+            "artifact": str(self.slab),
             "geometryUnits": "mm",
             "material": {"conductivityWPerMK": 16.2},
             "boundaries": [
@@ -340,8 +341,14 @@ class ThermalValidationTests(unittest.TestCase):
         self.assertIn("THERMAL_CONDUCTIVITY_CONSTANT= 16.2", text)
 
 
-@unittest.skipUnless(su2_ready(), "SU2 runtime is not available")
 class Su2WalkingSkeletonTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        # Probing the SU2 runtime spawns `cadctl doctor` (minutes); only do it
+        # when this class is actually selected.
+        if not su2_ready():
+            raise unittest.SkipTest("SU2 runtime is not available")
+
     def test_thermal_slab_matches_analytic_conduction(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -569,9 +576,6 @@ class Su2WalkingSkeletonTests(unittest.TestCase):
             self.assertIn("changed during simulation", payload["reason"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 from cadctl.simulation.flow_api import validate_flow_spec  # noqa: E402
 from cadctl.simulation.thermal_api import validate_thermal_spec  # noqa: E402
@@ -765,3 +769,7 @@ class DerivationExecution(unittest.TestCase):
             ok, errors = validate_derive_spec({"source": str(source), "operations": ["fused", "simplified"]})
             self.assertFalse(ok)
             self.assertTrue(any("cannot be combined" in e for e in errors))
+
+
+if __name__ == "__main__":
+    unittest.main()

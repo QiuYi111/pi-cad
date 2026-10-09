@@ -89,7 +89,7 @@ class PathProtocolTests(unittest.TestCase):
         self.assertEqual(join_path(["arm", "a/b"]), "arm/a%2Fb")
 
     def test_non_canonical_spellings_normalize_to_one_path(self) -> None:
-        self.assertEqual(canonicalize_path("arm/forearm"), canonicalize_path("arm/forearm"))
+        self.assertEqual(canonicalize_path("arm/forearm"), "arm/forearm")
         self.assertEqual(canonicalize_path("arm%2fforearm"), canonicalize_path("arm%2Fforearm"))
 
     def test_malformed_paths_are_refused(self) -> None:

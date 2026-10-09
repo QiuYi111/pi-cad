@@ -1,9 +1,9 @@
 """DFM spike E0-c: the cut diameter of a FreeCAD threaded hole, M2 to M12.
 
-Not a test. Run it with the FreeCAD environment's Python:
+Not a test (a measurement script, kept out of tests/). Run it with the FreeCAD environment's Python:
 
     E=~/.local/share/pi-cad/runtimes/freecad/env
-    PYTHONPATH=python:$E/lib $E/bin/python tests/freecad/dfm_spike_e0c.py [--json out.json]
+    PYTHONPATH=python:$E/lib $E/bin/python scripts/spikes/dfm_spike_e0c.py [--json out.json]
 
 For each size it builds a 40 x 30 x 10 mm plate with one blind hole (depth 7.5 mm)
 through the real ``hole`` op with ``thread``, in two ways:

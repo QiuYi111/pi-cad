@@ -15,13 +15,13 @@ Design:
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
+from ..common import sha256_file
 from .base import SimulationBackendError
 
 _VERSION_PATTERN = re.compile(r"SU2 v([0-9][0-9A-Za-z.\-]*)")
@@ -66,14 +66,6 @@ def _probe_version(binary: str) -> str:
     return "unknown"
 
 
-def _hash_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def run_su2(config_path: str | Path, workdir: str | Path, timeout_s: float = 5400.0) -> dict[str, Any]:
     """Run SU2_CFD on one config; returns stdout/stderr/exit information."""
     binary, version = resolve_su2_binary()
@@ -106,13 +98,13 @@ def su2_status() -> dict[str, Any]:
 
 
 def pre_hash_artifacts(paths: list[str | Path]) -> dict[str, str]:
-    return {str(path): _hash_file(path) for path in paths}
+    return {str(path): sha256_file(path) for path in paths}
 
 
 def verify_unchanged(before: dict[str, str]) -> None:
     """Fail closed if any pre-hashed input changed during the solve."""
     for path, digest in before.items():
-        if not Path(path).exists() or _hash_file(path) != digest:
+        if not Path(path).exists() or sha256_file(path) != digest:
             raise SimulationBackendError(
                 f"input artifact changed during simulation; result discarded because the mesh "
                 f"and the bound artifact version no longer match: {path}"
