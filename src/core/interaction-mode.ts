@@ -1,13 +1,6 @@
 import type { CadRunState, InteractionMode } from "../shared/protocol.ts";
 
-export function interactionModeFromEnvironment(
-  env: NodeJS.ProcessEnv = process.env,
-): InteractionMode {
-  const value = env.PI_CAD_HEADLESS?.trim().toLowerCase();
-  return value === "1" || value === "true" || value === "on"
-    ? "headless"
-    : "interactive";
-}
+export { interactionModeFromEnvironment } from "../shared/interaction-mode.ts";
 
 /** Legacy v4 runs predate the field and are conservatively interactive. */
 export function interactionModeOf(state: Pick<CadRunState, "interactionMode">): InteractionMode {
