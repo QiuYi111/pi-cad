@@ -69,9 +69,10 @@ jobs:
 
       # cloud/platform-api/test/cloud-contract.test.ts drives the desktop
       # RemoteBridge and CloudSession, which import "ws" from apps/desktop.
-      # Production deps only; the Electron binary is not needed for these tests.
-      - name: Install desktop runtime deps (cloud-contract test)
-        run: npm ci --prefix apps/desktop --omit=dev --ignore-scripts
+      # Dev deps are needed too: platform-api typecheck reads those files and
+      # needs @types/ws. --ignore-scripts skips the Electron binary download.
+      - name: Install desktop deps (cloud-contract test and typecheck)
+        run: npm ci --prefix apps/desktop --ignore-scripts
 
       - name: Typecheck
         run: |
