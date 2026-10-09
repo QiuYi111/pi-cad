@@ -307,21 +307,29 @@ def _axis_distance(a: bd.Face, b: bd.Face) -> float:
     return math.sqrt(max(r.length**2 - parallel_component**2, 0.0))
 
 
-def measure(
-    artifact: str | Path,
+def measure_shape(
+    shape: bd.Shape,
     metric: str,
     a: str,
     b: str | None = None,
+    *,
+    identity_index: Any = None,
 ) -> dict[str, Any]:
-    artifact = Path(artifact)
-    shape = bd.import_step(artifact)
-
     def face(token: str) -> bd.Face:
-        if token.strip().lower().startswith("surf-"):
-            from .simulation.surface_selector import resolve_surface_shapes
-
-            return resolve_surface_shapes(artifact, [token.strip().lower()])[token.strip().lower()]
+        if not token.strip().startswith("#") and identity_index is not None:
+            _, objects = identity_index.resolve_shapes(token, shape, expect="one")
+            if len(objects) != 1 or not isinstance(objects[0], bd.Face):
+                raise ValueError(f"{token!r} did not resolve to one face")
+            return objects[0]
         return _face_selector(shape, token)
+
+    def solid(token: str) -> bd.Solid:
+        if not token.strip().startswith("#") and identity_index is not None:
+            _, objects = identity_index.resolve_shapes(token, shape, expect="one")
+            if len(objects) != 1 or not isinstance(objects[0], bd.Solid):
+                raise ValueError(f"{token!r} did not resolve to one solid")
+            return objects[0]
+        return _solid_selector(shape, token)
 
     detail: dict[str, Any] = {}
     if metric in {"radius", "diameter"}:
@@ -336,7 +344,7 @@ def measure(
         value = float(face(a).area)
 
     elif metric == "volume":
-        value = float(_solid_selector(shape, a).volume)
+        value = float(solid(a).volume)
 
     elif metric in {"distance", "clearance", "alignment_delta"}:
         if b is None:
@@ -404,3 +412,17 @@ def measure(
         "value": value,
         "detail": detail,
     }
+
+
+def measure(
+    artifact: str | Path,
+    metric: str,
+    a: str,
+    b: str | None = None,
+) -> dict[str, Any]:
+    """Import once, then use the same composable measurement implementation."""
+    artifact = Path(artifact)
+    shape = bd.import_step(artifact)
+    from .identity import IdentityIndex
+
+    return measure_shape(shape, metric, a, b, identity_index=IdentityIndex(artifact))

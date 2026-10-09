@@ -19,16 +19,16 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
   const [quickError, setQuickError] = useState("");
   const viewerRequired = mesh !== null;
   const assembly = useMemo(() => {
-    const groups = new Map<string, { id: string; name: string; solids: number }>();
+    const groups = new Map<string, { id: string; name: string; solids: number; semanticId?: string | null; solidIds: string[] }>();
     for (const part of mesh?.parts || []) {
-      const id = part.partId || part.id || part.name;
+      const id = part.occurrenceId || part.partId || part.solidId || part.id || part.name;
       const current = groups.get(id);
-      groups.set(id, { id, name: part.name, solids: (current?.solids || 0) + 1 });
+      groups.set(id, { id, name: current?.name || part.name, solids: (current?.solids || 0) + 1, semanticId: current?.semanticId ?? part.semanticId, solidIds: [...(current?.solidIds || []), part.solidId || part.id || id] });
     }
     return [...groups.values()];
   }, [mesh]);
   const visibleMesh = useMemo(() => mesh ? { ...mesh, parts: mesh.parts.filter((part) => {
-    const id = part.partId || part.id || part.name;
+    const id = part.occurrenceId || part.partId || part.solidId || part.id || part.name;
     return isolatedPart ? id === isolatedPart : !hiddenParts.has(id);
   }) } : null, [mesh, hiddenParts, isolatedPart]);
 
@@ -86,7 +86,7 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
     const source = mesh?.source || artifactPath;
     if (!source) return;
     setError("");
-    try { await window.piCad.viewer.exportStep(source); }
+    try { await window.piCad.viewer.exportStep(source, mesh?.sha256); }
     catch (reason) { setError(String(reason)); }
   };
 
@@ -119,7 +119,7 @@ export function CadViewer({ artifactPath, expectedSha, revision = 0, meshDocumen
 
   return <section className="cad-viewer" data-testid="cad-viewer">
     <div ref={host} className="viewer-canvas cad-viewer-open-source" />
-    {mesh && assembly.length > 0 && <aside className="assembly-tree" aria-label="Assembly tree"><header><strong>Assembly</strong><button onClick={() => { setHiddenParts(new Set()); setIsolatedPart(""); }}>Show all</button></header>{assembly.map((part) => <div key={part.id} className={selectedPart === part.id ? "selected" : ""}><button className="assembly-part" onClick={() => setSelectedPart(part.id)}><strong>{part.name}</strong><small>{part.id} · {part.solids} solid{part.solids === 1 ? "" : "s"}</small></button><button aria-label={`${hiddenParts.has(part.id) ? "Show" : "Hide"} ${part.name} ${part.id}`} onClick={() => setHiddenParts((current) => { const next = new Set(current); if (next.has(part.id)) next.delete(part.id); else next.add(part.id); return next; })}>{hiddenParts.has(part.id) ? "Show" : "Hide"}</button><button aria-label={`Isolate ${part.name} ${part.id}`} onClick={() => setIsolatedPart((current) => current === part.id ? "" : part.id)}>{isolatedPart === part.id ? "Unisolate" : "Isolate"}</button></div>)}{selectedPart && <footer><span>Selected · {selectedPart} · version {mesh.sha256?.slice(0, 10) || "unknown"}</span><button onClick={() => { const part = assembly.find((item) => item.id === selectedPart)!; onReferencePart?.(`Modify assembly part ${part.name} [partId=${part.id}] from model version ${mesh.sha256 || "unknown"}. Preserve this stable part identity and do not change unrelated parts.`); }}>Ask Agent to modify</button></footer>}</aside>}
+    {mesh && assembly.length > 0 && <aside className="assembly-tree" aria-label="Assembly tree"><header><strong>Assembly</strong><button onClick={() => { setHiddenParts(new Set()); setIsolatedPart(""); }}>Show all</button></header>{assembly.map((part) => <div key={part.id} className={selectedPart === part.id ? "selected" : ""}><button className="assembly-part" onClick={() => setSelectedPart(part.id)}><strong>{part.name}</strong><small>{part.id} · {part.solids} solid{part.solids === 1 ? "" : "s"}</small></button><button aria-label={`${hiddenParts.has(part.id) ? "Show" : "Hide"} ${part.name} ${part.id}`} onClick={() => setHiddenParts((current) => { const next = new Set(current); if (next.has(part.id)) next.delete(part.id); else next.add(part.id); return next; })}>{hiddenParts.has(part.id) ? "Show" : "Hide"}</button><button aria-label={`Isolate ${part.name} ${part.id}`} onClick={() => setIsolatedPart((current) => current === part.id ? "" : part.id)}>{isolatedPart === part.id ? "Unisolate" : "Isolate"}</button></div>)}{selectedPart && <footer><span>Selected · {selectedPart} · version {mesh.sha256?.slice(0, 10) || "unknown"}</span><button onClick={() => { const part = assembly.find((item) => item.id === selectedPart)!; onReferencePart?.(`Selected model object: ${part.name}; occurrenceId=${part.id}; semanticId=${part.semanticId || "unknown"}; solidIds=${part.solidIds.join(",")}; artifact=${mesh.source}; stepSha256=${mesh.sha256 || "unknown"}; identityManifestSha256=${mesh.identityManifestSha256 || "unavailable"}; identitySource=${mesh.identitySource || "anonymous"}; semanticIdentityBound=${mesh.identityBound === true}. Keep this exact artifact revision and object identity.`); }}>Ask Agent to modify</button></footer>}</aside>}
     {mesh && <aside className="quick-inspect" aria-label="Quick inspection">
       <header><strong>Inspect</strong><small>{targetScope === "current" || targetScope === "head" ? "Current model" : `Historical · ${targetScope}`}</small></header>
       <div><span>Measure</span>{(["x", "y", "z"] as const).map((axis) => <button key={`measure-${axis}`} disabled={Boolean(quickBusy)} onClick={() => void inspectDimension(axis)}>{axis.toUpperCase()}</button>)}</div>

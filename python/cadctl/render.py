@@ -189,25 +189,37 @@ def _part_meshes(shape: bd.Shape, tolerance: float) -> list[tuple[np.ndarray, np
     return [(*_tessellate(part, tolerance), part) for part in parts]
 
 
-def _selection_index(artifact: Path, part_count: int) -> tuple[dict[str, int], dict[str, list[str]], list[dict[str, Any]]]:
+def _selection_index(artifact: Path, part_count: int) -> tuple[dict[str, set[int]], dict[str, list[str]], list[dict[str, Any]]]:
     from .assembly import assembly_tree
+    from .mesh import mesh_document
 
     report = assembly_tree(artifact)
+    identity = mesh_document(artifact)
     occurrences = list(report.get("occurrences") or [])
-    lookup: dict[str, int] = {}
+    lookup: dict[str, set[int]] = {}
+    def bind(key: Any, index: int) -> None:
+        if isinstance(key, str) and key:
+            lookup.setdefault(key, set()).add(index)
     for index in range(part_count):
-        lookup[f"#s{index}"] = index
-        lookup[f"solid-{index}"] = index
-        lookup[f"solid-{index + 1}"] = index
+        bind(f"#s{index}", index)
+        bind(f"solid-{index}", index)
+        bind(f"solid-{index + 1}", index)
+        if index < len(identity["parts"]):
+            part = identity["parts"][index]
+            for key in (part.get("partId"), part.get("occurrenceId"), part.get("solidId"), part.get("semanticId")):
+                bind(key, index)
+            for feature in part.get("features", []):
+                if isinstance(feature, dict):
+                    bind(feature.get("id"), index)
+                    bind(feature.get("path"), index)
         if index >= len(occurrences):
             continue
         occurrence = occurrences[index]
         for key in (occurrence.get("ref"), occurrence.get("alias")):
-            if isinstance(key, str) and key:
-                lookup[key] = index
+            bind(key, index)
     for alias, ref in (report.get("aliases") or {}).items():
         if ref in lookup:
-            lookup[str(alias)] = lookup[ref]
+            lookup[str(alias)] = lookup[ref].copy()
     ambiguous = {
         str(label): [str(item) for item in aliases]
         for label, aliases in (report.get("ambiguousLabels") or {}).items()
@@ -217,7 +229,7 @@ def _selection_index(artifact: Path, part_count: int) -> tuple[dict[str, int], d
 
 def _resolve_parts(
     requested: list[str] | None,
-    lookup: dict[str, int],
+    lookup: dict[str, set[int]],
     ambiguous: dict[str, list[str]],
     field: str,
 ) -> set[int]:
@@ -228,7 +240,7 @@ def _resolve_parts(
             raise ValueError(f"{field} label {token!r} is ambiguous; use one of {ambiguous[token]}")
         if token not in lookup:
             raise ValueError(f"unknown {field} occurrence {token!r}; run preset='assembly' again")
-        resolved.add(lookup[token])
+        resolved.update(lookup[token])
     return resolved
 
 

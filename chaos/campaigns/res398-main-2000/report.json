@@ -1,0 +1,341 @@
+{
+  "campaignId": "res398-main-2000",
+  "createdAt": "2026-09-22T18:51:23.772Z",
+  "manifest": {
+    "campaignId": "res398-main-2000",
+    "createdAt": "2026-09-22T13:40:05.016Z",
+    "mode": "nightly",
+    "seed": 398000,
+    "rounds": 2000,
+    "maxCommands": 10,
+    "runtimeRatio": 0.5,
+    "providerFaults": false,
+    "profiles": [
+      "mixed",
+      "process",
+      "file-state",
+      "provider-oauth",
+      "race",
+      "kernel-lifecycle",
+      "runtime-recovery",
+      "session-isolation",
+      "lifecycle-action-race",
+      "desktop-consistency"
+    ],
+    "concurrency": 4,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "e184332ef9b148a8f811ddac98bd1304c2d1a686",
+      "gitBranch": "labrunner/res-398-chaos-06",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 2000,
+    "roundsPassed": 1996,
+    "roundsFailed": 4,
+    "roundsErrored": 0,
+    "distinctSeeds": 2000,
+    "stateObservations": 38862,
+    "actions": {
+      "startRun": 2880,
+      "commitPlan": 2770,
+      "advance": 2632,
+      "multiConversationBuild": 445,
+      "retryBuild": 464,
+      "build": 895,
+      "openConversation": 1031,
+      "burstRefresh": 295,
+      "concurrentBuild": 431,
+      "duplicateCommit": 305,
+      "resumeRun": 321,
+      "desktopRestart": 305,
+      "refresh": 456,
+      "phaseCard": 129,
+      "switchConversation": 287,
+      "listWorkflows": 161,
+      "completionGate": 129,
+      "authorize": 160,
+      "phaseContract": 152,
+      "stopRun": 158,
+      "history": 150
+    },
+    "faultsInjected": {
+      "providerCredentialDropped": 59,
+      "killKernelDuringBuild": 208,
+      "killPrimeRuntime": 83,
+      "killRuntimeDuringBuild": 108,
+      "killAuthorityDuringBuild": 79,
+      "pauseKernelDuringBuild": 109,
+      "missingRunStateFile": 89,
+      "providerCredentialBlanked": 44,
+      "raceUserActionDuringKernelFault": 106,
+      "raceCrossConversationFault": 87,
+      "killKernelChild": 113,
+      "unreadableRunStateFile": 63,
+      "killIdleKernel": 22,
+      "partialStateWrite": 61,
+      "missingDesktopProjection": 36,
+      "providerCredentialExpired": 80,
+      "pauseRuntimeDuringBuild": 47,
+      "raceRepeatSubmitDuringFault": 75,
+      "restartRuntimeDuringBuild": 99,
+      "raceTwoConversationsBuild": 77,
+      "raceLegalOrderSwap": 53,
+      "raceRestartDuringTransition": 33,
+      "pauseAuthorityDuringBuild": 29
+    },
+    "faultsNotApplicable": {
+      "killAuthorityDuringBuild": 123,
+      "cpuPressure": 35,
+      "killRuntimeDuringBuild": 79,
+      "killIdleKernel": 83,
+      "missingRunStateFile": 15,
+      "killKernelDuringBuild": 26,
+      "pauseAuthorityDuringBuild": 50,
+      "raceCrossConversationFault": 28,
+      "restartRuntimeDuringBuild": 60,
+      "partialStateWrite": 18,
+      "raceRestartDuringTransition": 103,
+      "raceUserActionDuringKernelFault": 52,
+      "missingDesktopProjection": 60,
+      "killKernelChild": 14,
+      "pauseKernelDuringBuild": 14,
+      "pauseRuntimeDuringBuild": 29,
+      "raceRepeatSubmitDuringFault": 18,
+      "unreadableRunStateFile": 6,
+      "raceTwoConversationsBuild": 45,
+      "raceLegalOrderSwap": 3
+    },
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {
+      "missingDesktopProjection": 4
+    },
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 574,
+        "injected": 897
+      },
+      "file-state": {
+        "rounds": 215,
+        "injected": 249
+      },
+      "provider-oauth": {
+        "rounds": 160,
+        "injected": 183
+      },
+      "race": {
+        "rounds": 339,
+        "injected": 431
+      }
+    },
+    "components": {
+      "authority": 10938,
+      "kernel": 3060,
+      "provider-oauth": 200,
+      "runtime": 549,
+      "prime": 89,
+      "run-store": 1649,
+      "desktop-projection": 102
+    },
+    "profiles": {
+      "mixed": 224,
+      "process": 333,
+      "file-state": 333,
+      "provider-oauth": 222,
+      "race": 333,
+      "kernel-lifecycle": 111,
+      "runtime-recovery": 111,
+      "session-isolation": 111,
+      "lifecycle-action-race": 111,
+      "desktop-consistency": 111
+    },
+    "runtimeRounds": 1000,
+    "oneShotRounds": 1000
+  },
+  "failures": {
+    "rounds": 4,
+    "unique": 1,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 1,
+    "unverified": 0,
+    "product": 1,
+    "harness": 0
+  },
+  "clusters": [
+    {
+      "id": "cc1cac0ed",
+      "signature": "recovery-convergence | 真 authority 没有把 .pi-cad/status.json 写回来",
+      "invariant": "recovery-convergence",
+      "boundary": "process",
+      "boundaries": [
+        "process",
+        "file-state"
+      ],
+      "nature": "product",
+      "failingSteps": [
+        "fault:pauseAuthorityDuringBuild",
+        "action:multiConversationBuild",
+        "action:concurrentBuild",
+        "action:commitPlan"
+      ],
+      "reason": "真 authority 没有把 .pi-cad/status.json 写回来",
+      "logSignatures": [
+        "真 authority 已把 Desktop 投影写回来"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:raceUserActionDuringKernelFault",
+          "action:concurrentBuild",
+          "action:history",
+          "fault:restartRuntimeDuringBuild",
+          "action:advance",
+          "fault:missingDesktopProjection",
+          "fault:missingDesktopProjection",
+          "action:multiConversationBuild",
+          "fault:pauseAuthorityDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:missingDesktopProjection",
+          "fault:missingDesktopProjection",
+          "action:startRun",
+          "action:listWorkflows",
+          "action:multiConversationBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:missingDesktopProjection",
+          "fault:missingDesktopProjection",
+          "action:switchConversation",
+          "action:stopRun",
+          "action:burstRefresh",
+          "action:concurrentBuild",
+          "action:commitPlan",
+          "action:concurrentBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:commitPlan",
+          "fault:missingRunStateFile",
+          "action:build",
+          "fault:missingDesktopProjection",
+          "action:startRun",
+          "fault:missingDesktopProjection",
+          "action:authorize",
+          "action:retryBuild",
+          "action:build",
+          "action:commitPlan"
+        ]
+      ],
+      "occurrences": 4,
+      "roundIndexes": [
+        468,
+        816,
+        978,
+        1896
+      ],
+      "seeds": [
+        634439893,
+        742519939,
+        1996207347,
+        3361425121
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T14-56-54-648Z-reify-recovery-convergence.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T15-58-36-992Z-reify-recovery-convergence.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T16-19-34-480Z-reify-recovery-convergence.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T18-29-31-470Z-reify-recovery-convergence.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-398/chaos/artifacts/2026-09-22T15-58-36-992Z-reify-recovery-convergence.json",
+      "firstSeenAt": "2026-09-22T14:56:54.648Z",
+      "lastSeenAt": "2026-09-22T18:29:31.470Z",
+      "runtimeModes": [
+        true
+      ],
+      "commits": [
+        "e184332ef9b148a8f811ddac98bd1304c2d1a686"
+      ],
+      "verdict": "false-positive",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 2,
+        "reproductions": 0,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": false,
+        "shrinkOk": false,
+        "originalLength": 0,
+        "shrunkLength": 0,
+        "numShrinks": 0,
+        "minimalSequence": [],
+        "notes": [
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "按 seed+path 没复现：seed=742519939 path=0 没有复现失败"
+        ]
+      }
+    }
+  ],
+  "underExplored": [],
+  "notes": [
+    "本轮报告由 campaign recluster 在已落盘的轮次上重算：原始轮次跑在 e184332ef9b1，recluster / re-triage / report 用的是 1188beb8b241（triage 规则 v3）；聚类口径见 chaos/campaign/signature.ts。"
+  ]
+}

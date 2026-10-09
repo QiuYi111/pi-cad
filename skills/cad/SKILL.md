@@ -48,7 +48,9 @@ cad.probe.run(
     *,
     subject: str | ArtifactRef = "current",
     purpose: str,
-    code: str,
+    code: str | None = None,
+    script: str | Path | None = None,
+    args: dict | None = None,
 ) -> ProbeResult
 cad.review.submit(final_commit: Commit) -> dict
 cad.review.current(handle: dict) -> dict | None
@@ -69,6 +71,33 @@ fail clearly; do not write ad hoc OCP code or add arbitrary thickness.
 `await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")`,
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.
+
+## Delegated CAD work
+
+Prime subagents can use this same `cad` API to build and inspect their own
+candidate. At the start of a delegated task, confirm that `import cad`,
+`await cad.workflow.current()`, and `await cad.workflow.list()` work. If a
+required host connection or API is missing, report which one failed and stop;
+do not guess package names, install CAD libraries, or create a replacement
+service.
+
+The parent assigns each parallel task a unique project-relative folder such as
+`subagents/<task-name>/`. Keep that task's source and generated files there,
+including its STEP output, so two agents never write `module.py` or
+`output.step` at the same path. Build and probe the latest artifact, then return
+its exact `ArtifactRef` and selected evidence to the parent. A child uses its
+own Prime conversation and kernel; it must not use or change the parent's run
+binding or candidate. The parent inspects the returned artifact and explicitly
+chooses whether to use it in the assembly.
+
+For delegated CAD work, have the child validate a plausible initial mistake
+before it repairs the model: probe the wrong result, change the source, rebuild,
+and probe the corrected `ArtifactRef`. Resolve identity through semantic paths
+from the artifact's hash-bound manifest when checking reordered assemblies;
+solid indices are evidence for one artifact only. Treat missing or stale
+identity manifests and deleted named features as explicit failures. Once a
+workflow is Done, make observations only against an explicit `ArtifactRef`; do
+not restart the workflow to inspect completed geometry.
 
 - Read `await cad.workflow.current()` before acting. If it is `None`, always call
   `await cad.workflow.list()` and route the request to exactly one workflow from
@@ -151,6 +180,16 @@ reason to call `inspect.signature()` before using them.
   `result` is an output name, not a pre-bound input—never read it before the
   assignment. Use `@cad.probe(...)` only for a synchronous
   function defined in a real source file, where Python can capture its source.
+  For reusable programs, pass `script="checks/probe.py"`; pass structured
+  JSON values with `args={...}`. Inside either program form, decoded values are
+  available as `params`; the decorator forwards named arguments through this
+  channel. Done workflows allow observations only with an explicit,
+  hash-bound project `ArtifactRef`.
+  The probe preloads a resolver for the shared, hash-bound identity manifest.
+  It returns identity metadata and B-Rep objects from the same imported STEP;
+  `.object` requires one match and `.objects` exposes an explicitly requested
+  collection. The preloaded measurement helper reuses the managed implementation
+  on the loaded shape, including hash-bound semantic names and geometry refs.
   The legacy `"current"` and `"baseline"` subjects remain available for
   state-bound v7 runs; unrestricted imports do not cross the effect fence.
 - For movable designs, treat the concept as a kinematic hypothesis and the
@@ -163,6 +202,14 @@ reason to call `inspect.signature()` before using them.
   unreachable or singular states, endpoint reachability, and pass/fail result.
   Use `analysisLevel="fast"`, `"standard"`, or `"full"` in that result to state
   the strength of the proof; this is an evidence label, not a separate solver.
+  For finite rigid-pose batches, Python probes preload single-pose and batch
+  interference helpers; both use the same exact AABB/common implementation as
+  the interference preset. Batch transforms use solid indexes from the
+  current hash-bound STEP, translation in mm, and Euler rotation in degrees.
+  Batch output reports each pose and failure and states that it sampled only
+  those poses.
+  Preloaded named-group helpers accept semantic path pairs and optional poses,
+  resolving groups without importing the STEP again.
 - Use `await cad.probe.run(subject=artifact_ref, preset="visual",
   args={"views": ["right", "top"]})` when another direction would resolve a
   visual question. Choose only the views needed from `iso`, `front`, `back`,

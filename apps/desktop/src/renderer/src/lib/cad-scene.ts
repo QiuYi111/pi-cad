@@ -41,10 +41,10 @@ export function toThreeCadShapes(document: MeshDocument): Shapes {
   const rootName = document.source.split(/[\\/]/).at(-1) || "Model";
   return {
     version: 3, id: "/Model", name: rootName,
-    parts: document.parts.map((part, index) => {
+    parts: document.parts.map((part) => {
       const derived = geometryData(part);
       return {
-        version: 3, id: `/Model/${index}-${part.name}`, name: part.name,
+        version: 3, id: `/Model/${encodeURIComponent(part.solidId || part.id || part.occurrenceId || part.name)}`, name: part.name,
         type: "shapes" as const, subtype: "solid" as const, state: [1, 1] as const, color: part.color,
         alpha: 1, texture: null, renderback: false, accuracy: null,
         loc: [[0, 0, 0], [0, 0, 0, 1]] as const,

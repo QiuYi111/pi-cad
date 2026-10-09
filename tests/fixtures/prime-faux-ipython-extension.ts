@@ -16,14 +16,14 @@ export default async function registerPrimePlanCFaux(pi: any): Promise<void> {
   if (loadMode) {
     faux.setResponses([
       capture(ai.fauxAssistantMessage(ai.fauxToolCall("ipython", {
-        code: "import cad\nplan_c_history = await cad.history()\nplan_c_loaded = await cad.load(plan_c_history[-1].id)\nprint('CAD_CROSS_SESSION', plan_c_loaded.id, plan_c_loaded.variables['marker'])",
+        code: "import cad\ntry:\n    await cad.history()\nexcept Exception as error:\n    print('CAD_CROSS_SESSION_BLOCKED', str(error))",
       }), { stopReason: "toolUse" })),
       capture(ai.fauxAssistantMessage("PRIME_PLAN_C_LOAD_OK")),
     ]);
   } else {
   faux.setResponses([
     capture(ai.fauxAssistantMessage(ai.fauxToolCall("ipython", {
-      code: "import cad\nplan_c_marker = 41\nprint('CAD_IMPORT', cad.__file__)\nprint('CAD_WORKFLOW', await cad.workflow.current())\nplan_c_commit = await cad.commit('provider-handoff', variables={'marker': plan_c_marker}, artifacts=['mandatory.png'])\nprint('CAD_COMMIT', plan_c_commit.id)",
+      code: "import cad\nplan_c_marker = 41\nprint('CAD_IMPORT', cad.__file__)\nplan_c_workflow = await cad.workflow.start('mechanical.naked', interaction_mode='headless')\nprint('CAD_WORKFLOW', plan_c_workflow['workflowId'], plan_c_workflow['phase'])\nplan_c_commit = await cad.commit('provider-handoff', variables={'marker': plan_c_marker})\nprint('CAD_COMMIT', plan_c_commit.id)",
     }), { stopReason: "toolUse" })),
     capture(ai.fauxAssistantMessage(ai.fauxToolCall("ipython", {
       code: "plan_c_loaded = await cad.load(plan_c_commit.id)\nprint('CAD_LOAD', plan_c_loaded.variables['marker'])\nprint('CAD_PERSIST', plan_c_marker + 1)",

@@ -286,7 +286,11 @@ export interface DistillationStatus {
 export interface MeshPart {
   id?: string;
   partId?: string;
+  occurrenceId?: string;
   solidId?: string;
+  semanticId?: string | null;
+  features?: unknown[];
+  datums?: unknown[];
   name: string;
   positions: number[];
   indices: number[];
@@ -296,6 +300,9 @@ export interface MeshPart {
 export interface MeshDocument {
   source: string;
   sha256?: string;
+  identityManifestSha256?: string | null;
+  identityBound?: boolean;
+  identitySource?: "identity" | "legacy" | "anonymous";
   parts: MeshPart[];
   bounds: { min: [number, number, number]; max: [number, number, number] };
 }
@@ -516,7 +523,7 @@ export interface DesktopApi {
   viewer: {
     loadStep(path: string): Promise<MeshDocument>;
     chooseStep(): Promise<string | null>;
-    exportStep(path: string): Promise<string | null>;
+    exportStep(path: string, expectedSha?: string): Promise<string | null>;
     catalog(): Promise<ViewerCatalog>;
     previewParameters(manifestPath: string, values: Record<string, ModelParameterValue>): Promise<MeshDocument>;
     applyParameters(manifestPath: string, values: Record<string, ModelParameterValue>): Promise<void>;

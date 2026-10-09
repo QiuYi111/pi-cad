@@ -1,0 +1,868 @@
+{
+  "schema": 1,
+  "sut": "reify",
+  "createdAt": "2026-09-22T08:58:45.152Z",
+  "invariant": "recovery-convergence",
+  "detail": "真 authority 没有把 .pi-cad/status.json 写回来",
+  "evidence": {},
+  "seed": 624507661,
+  "replayPath": "1:2:2:3:2:2:2",
+  "maxCommands": 8,
+  "runtimeMode": true,
+  "faultScope": [
+    "killKernelDuringBuild",
+    "pauseKernelDuringBuild",
+    "killAuthorityDuringBuild",
+    "pauseAuthorityDuringBuild",
+    "killIdleKernel",
+    "killKernelChild",
+    "killRuntimeDuringBuild",
+    "pauseRuntimeDuringBuild",
+    "restartRuntimeDuringBuild",
+    "killPrimeRuntime",
+    "cpuPressure",
+    "missingRunStateFile",
+    "unreadableRunStateFile",
+    "partialStateWrite",
+    "missingDesktopProjection",
+    "providerCredentialExpired",
+    "providerCredentialDropped",
+    "providerCredentialBlanked",
+    "raceUserActionDuringKernelFault",
+    "raceTwoConversationsBuild",
+    "raceRestartDuringTransition",
+    "raceLegalOrderSwap",
+    "raceRepeatSubmitDuringFault",
+    "raceCrossConversationFault"
+  ],
+  "originalSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "build",
+      "params": {
+        "source": "slow_part.py",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "raceCrossConversationFault",
+      "params": {
+        "faultedIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "build",
+      "params": {
+        "source": "part.py",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "action",
+      "name": "multiConversationBuild",
+      "params": {}
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "finished",
+        "conversationIndex": 1
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "missingRunStateFile",
+      "params": {}
+    }
+  ],
+  "shrunkSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "missingRunStateFile",
+      "params": {}
+    }
+  ],
+  "replaySequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "fault",
+      "name": "missingRunStateFile",
+      "params": {}
+    }
+  ],
+  "reproducible": true,
+  "actionSequence": [
+    {
+      "kind": "action",
+      "name": "startRun",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "commitPlan",
+      "params": {
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    },
+    {
+      "kind": "action",
+      "name": "advance",
+      "params": {
+        "event": "plan_ready",
+        "conversationIndex": 0
+      }
+    }
+  ],
+  "faultSequence": [
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "missingDesktopProjection",
+      "params": {}
+    },
+    {
+      "kind": "fault",
+      "name": "missingRunStateFile",
+      "params": {}
+    }
+  ],
+  "requests": [
+    {
+      "at": 1790067517427,
+      "op": "workflow-start",
+      "ok": true,
+      "ms": 207,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067517946,
+      "op": "commit",
+      "ok": true,
+      "ms": 176,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067518436,
+      "op": "workflow-advance",
+      "ok": true,
+      "ms": 170,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067519691,
+      "op": "workflow-advance",
+      "ok": false,
+      "ms": 20,
+      "conversation": "conv-a",
+      "error": "illegal workflow transition: cook.plan_ready"
+    },
+    {
+      "at": 1790067520028,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 18,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067520046,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 15,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067520061,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 15,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067521867,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 17,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067521884,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 19,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067521903,
+      "op": "model-build",
+      "ok": true,
+      "ms": 3052,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067524955,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 16,
+      "conversation": "conv-a"
+    },
+    {
+      "at": 1790067524971,
+      "op": "workflow-current",
+      "ok": true,
+      "ms": 15,
+      "conversation": "conv-a"
+    }
+  ],
+  "ids": {
+    "conversations": [
+      "conv-a"
+    ],
+    "runs": [
+      "v7-1790067517485-7d8e674d"
+    ],
+    "kernels": [
+      "1263050"
+    ]
+  },
+  "stateTimeline": [
+    {
+      "at": 1790067517634,
+      "step": 1,
+      "command": "action:startRun(conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790067517485-7d8e674d",
+          "phase": "plan",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    },
+    {
+      "at": 1790067518122,
+      "step": 2,
+      "command": "action:commitPlan(conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790067517485-7d8e674d",
+          "phase": "plan",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    },
+    {
+      "at": 1790067518606,
+      "step": 3,
+      "command": "action:advance(event=plan_ready,conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790067517485-7d8e674d",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    },
+    {
+      "at": 1790067519220,
+      "step": 4,
+      "command": "fault:missingDesktopProjection",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790067517485-7d8e674d",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    },
+    {
+      "at": 1790067519457,
+      "step": 5,
+      "command": "fault:missingDesktopProjection",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790067517485-7d8e674d",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    },
+    {
+      "at": 1790067519711,
+      "step": 6,
+      "command": "action:advance(event=plan_ready,conversationIndex=0)",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": "active"
+        }
+      ],
+      "runs": [
+        {
+          "id": "v7-1790067517485-7d8e674d",
+          "phase": "cook",
+          "status": "active",
+          "artifacts": 0,
+          "hashesOk": true
+        }
+      ],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    },
+    {
+      "at": 1790067520376,
+      "step": 7,
+      "command": "fault:missingRunStateFile",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": null
+        }
+      ],
+      "runs": [],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    },
+    {
+      "at": 1790067520613,
+      "step": 8,
+      "command": "final-settle",
+      "conversations": [
+        {
+          "id": "conv-a",
+          "runId": "v7-1790067517485-7d8e674d",
+          "status": null
+        }
+      ],
+      "runs": [],
+      "kernels": [
+        {
+          "pid": 1263050,
+          "ppid": 1249950,
+          "ownerPid": null,
+          "orphan": false
+        }
+      ],
+      "liveAuthorities": [
+        2809786
+      ]
+    }
+  ],
+  "logs": [
+    "fault missingDesktopProjection 不适用：这一轮还没有 Desktop 投影可删",
+    "advance 被拒",
+    "run v7-1790067517485-7d8e674d 的 state.json 放回去了",
+    "恢复验证通过：missingRunStateFile 之后真 build 成功（60ms，cache=miss）",
+    "真 authority 已把 Desktop 投影写回来"
+  ],
+  "recoveries": [
+    {
+      "at": 1790067524955,
+      "after": "missingRunStateFile",
+      "buildMs": 60
+    }
+  ],
+  "faultOutcomes": [
+    {
+      "name": "missingDesktopProjection",
+      "phase": "inject",
+      "status": "Injected",
+      "at": 1790067519220
+    },
+    {
+      "name": "missingDesktopProjection",
+      "phase": "inject",
+      "status": "NotApplicable",
+      "at": 1790067519457,
+      "reason": "这一轮还没有 Desktop 投影可删"
+    },
+    {
+      "name": "missingRunStateFile",
+      "phase": "inject",
+      "status": "Injected",
+      "at": 1790067520376
+    },
+    {
+      "name": "missingRunStateFile",
+      "phase": "recover",
+      "status": "Recovered",
+      "at": 1790067524955
+    },
+    {
+      "name": "missingDesktopProjection",
+      "phase": "recover",
+      "status": "Recovered",
+      "at": 1790067524971
+    },
+    {
+      "name": "missingDesktopProjection",
+      "phase": "recover",
+      "status": "RecoveryFailed",
+      "at": 1790067524986
+    }
+  ],
+  "project": {
+    "root": "/var/tmp/res390-chaos/reify-chaos-36TP4X",
+    "project": "/var/tmp/res390-chaos/reify-chaos-36TP4X/project",
+    "canonical": "/var/tmp/res390-chaos/reify-chaos-36TP4X/canonical",
+    "workflowHome": "/var/tmp/res390-chaos/reify-chaos-36TP4X/workflow-home"
+  },
+  "components": {
+    "provider": {
+      "agentDir": "/home/jingyi/.prime/agent",
+      "agentDirPresent": true,
+      "primeAgentRepo": "/home/jingyi/.local/share/pi-cad-desktop/runtime/prime-agent",
+      "credentials": [
+        {
+          "id": "zai",
+          "type": "api_key",
+          "hasCredentials": true,
+          "expiresAt": null,
+          "expired": null
+        },
+        {
+          "id": "openai-codex",
+          "type": "oauth",
+          "hasCredentials": true,
+          "expiresAt": 1789733742424,
+          "expired": true
+        }
+      ],
+      "selection": {
+        "provider": "zai",
+        "model": "glm-5.3-flash",
+        "thinking": "medium",
+        "source": "prime settings.json"
+      },
+      "baseUrl": "https://api.z.ai/api/coding/paas/v4",
+      "api": "openai-completions",
+      "registrySource": "prime models.generated.js",
+      "probe": {
+        "url": "https://api.z.ai/api/coding/paas/v4/models",
+        "status": null,
+        "ok": false,
+        "ms": 0,
+        "authenticated": true,
+        "skipped": "provider probe is opt-in (--provider-probe / CHAOS_REIFY_PROVIDER_PROBE=1)"
+      }
+    },
+    "desktop": {
+      "projection": {
+        "path": "/var/tmp/res390-chaos/reify-chaos-36TP4X/project/.pi-cad/status.json",
+        "present": true,
+        "runId": "v7-1790067517485-7d8e674d",
+        "phase": "cook",
+        "status": "active",
+        "workflowHash": "257fd4596c7db6beb50b5986240454d52587f0c4dec133207305631ca97a0538",
+        "updatedAt": "2026-09-22T08:58:44.985Z"
+      },
+      "backend": {
+        "runId": "v7-1790067517485-7d8e674d",
+        "phase": "cook",
+        "status": "active",
+        "workflowHash": "257fd4596c7db6beb50b5986240454d52587f0c4dec133207305631ca97a0538"
+      },
+      "consistent": true,
+      "mismatch": null
+    },
+    "prime": {
+      "available": true,
+      "processes": [
+        {
+          "pid": 1249950,
+          "role": "prime-runtime",
+          "provider": "zai",
+          "model": "glm-5.3-flash",
+          "sessionPath": null
+        },
+        {
+          "pid": 1250065,
+          "role": "prime-agent",
+          "provider": "zai",
+          "model": "glm-5.3-flash",
+          "sessionPath": null
+        },
+        {
+          "pid": 1250066,
+          "role": "prime-agent",
+          "provider": "zai",
+          "model": "glm-5.3-flash",
+          "sessionPath": null
+        }
+      ],
+      "runtime": null,
+      "journal": []
+    },
+    "wsl": {
+      "host": "linux",
+      "boundary": "wsl-linux",
+      "distro": "Ubuntu",
+      "windows": {
+        "reachable": true,
+        "wslExe": "/mnt/c/Windows/System32/wsl.exe",
+        "distros": [
+          "Ubuntu"
+        ],
+        "version": "WSL 版本: 2.7.8.0"
+      },
+      "probes": [
+        {
+          "id": "node",
+          "ready": true,
+          "detail": "/home/jingyi/.local/bin/node"
+        },
+        {
+          "id": "uv",
+          "ready": true,
+          "detail": "/home/jingyi/.local/bin/uv"
+        },
+        {
+          "id": "python",
+          "ready": true,
+          "detail": "/usr/bin/python3"
+        },
+        {
+          "id": "bwrap",
+          "ready": true,
+          "detail": "/usr/bin/bwrap"
+        },
+        {
+          "id": "windows-wsl",
+          "ready": true,
+          "detail": "wsl.exe sees Ubuntu"
+        }
+      ],
+      "command": "export PATH=\"$HOME/.local/bin:$PATH\"; printf \"node=%s\\n\" \"$(command -v node || true)\"; printf \"uv=%s\\n\" \"$(command -v uv || true)\"; printf \"python=%s\\n\" \"$(command -v python3 || true)\"; printf \"bwrap=%s\\n\" \"$(command -v bwrap || true)\"; printf \"prime=%s\\n\" \"$(test -f \"$HOME/prime-agent.sh\" -o -f \"$PRIME_AGENT_REPO/prime-agent.sh\" 2>/dev/null && echo ready || echo unknown)\"",
+      "note": "Inside the WSL Linux side; the Windows side is really observed through wsl.exe."
+    },
+    "identities": {
+      "project": "project",
+      "nodes": [
+        {
+          "id": "project:project",
+          "kind": "project",
+          "label": "project",
+          "state": {
+            "root": "/var/tmp/res390-chaos/reify-chaos-36TP4X/project",
+            "canonical": "/var/tmp/res390-chaos/reify-chaos-36TP4X/canonical"
+          }
+        },
+        {
+          "id": "run:v7-1790067517485-7d8e674d",
+          "kind": "run",
+          "label": "v7-1790067517485-7d8e674d",
+          "state": {
+            "phase": "cook",
+            "status": "active"
+          }
+        },
+        {
+          "id": "conversation:conv-a",
+          "kind": "conversation",
+          "label": "conv-a",
+          "state": {
+            "runId": "v7-1790067517485-7d8e674d",
+            "runStatus": "active"
+          }
+        },
+        {
+          "id": "kernel:2809878",
+          "kind": "kernel",
+          "label": "cadctl.worker#2809878",
+          "state": {
+            "pid": 2809878,
+            "ppid": 2809786,
+            "ownerPid": 2809786,
+            "orphan": false
+          }
+        },
+        {
+          "id": "provider:zai:glm-5.3-flash",
+          "kind": "provider",
+          "label": "https://api.z.ai/api/coding/paas/v4/models",
+          "state": {
+            "provider": "zai",
+            "model": "glm-5.3-flash",
+            "ok": false
+          }
+        }
+      ],
+      "edges": [
+        {
+          "from": "run:v7-1790067517485-7d8e674d",
+          "to": "project:project",
+          "kind": "run->project",
+          "evidence": "canonical v7 run store"
+        },
+        {
+          "from": "conversation:conv-a",
+          "to": "run:v7-1790067517485-7d8e674d",
+          "kind": "conversation->run",
+          "evidence": "v7-project conversation binding"
+        },
+        {
+          "from": "kernel:2809878",
+          "to": "project:project",
+          "kind": "kernel->authority",
+          "evidence": "/proc ppid points at an authority process observed by the session"
+        },
+        {
+          "from": "provider:zai:glm-5.3-flash",
+          "to": "project:project",
+          "kind": "provider->project",
+          "evidence": "provider boundary request made for this project"
+        }
+      ]
+    },
+    "machine": {
+      "kernels": 2,
+      "foreignKernels": 1
+    }
+  }
+}

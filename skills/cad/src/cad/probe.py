@@ -41,25 +41,31 @@ class ProbeProgram:
         if self.function.__code__.co_freevars:
             raise TypeError(f"cad.probe does not capture closures: {', '.join(self.function.__code__.co_freevars)}; pass values explicitly")
         signature = inspect.signature(self.function)
-        preloaded = {"shape", "bd", "np", "math", "statistics"}
+        preloaded = {
+            "shape", "bd", "np", "math", "statistics", "cad_resolve",
+            "identity_index", "cad_measure", "cad_interference", "cad_interference_batch",
+            "cad_interference_named", "cad_interference_batch_named",
+        }
         callable_parameters = [name for name in signature.parameters if name not in preloaded]
         missing = [name for name in callable_parameters if name not in arguments and signature.parameters[name].default is inspect.Parameter.empty]
         extra = [name for name in arguments if name not in callable_parameters]
         if missing or extra:
             raise TypeError(f"probe arguments mismatch; missing={missing}, extra={extra}")
         call_items = []
+        values: dict[str, Any] = {}
         for name in signature.parameters:
             if name in preloaded:
                 call_items.append(f"{name}={name}")
             elif name in arguments:
                 try:
-                    encoded = json.dumps(arguments[name], ensure_ascii=False, allow_nan=False)
+                    json.dumps(arguments[name], ensure_ascii=False, allow_nan=False)
                 except (TypeError, ValueError) as error:
                     raise TypeError(f"probe argument {name!r} must be JSON-serializable") from error
-                call_items.append(f"{name}={encoded}")
+                values[name] = arguments[name]
+                call_items.append(f"{name}=params[{name!r}]")
         code = f"{self.source}\nresult = {self.function.__name__}({', '.join(call_items)})"
         subject = self.subject.__cad_snapshot__() if isinstance(self.subject, ArtifactRef) else self.subject
-        payload = await request("probe", subject=subject, purpose=self.purpose, code=code)
+        payload = await request("probe", subject=subject, purpose=self.purpose, code=code, args=values)
         return ProbeResult(payload["value"], payload.get("artifactHash"), payload.get("scriptHash"), payload.get("observationId"))
 
     async def __call__(self, **arguments: Any) -> Any:
@@ -82,6 +88,7 @@ async def run(
     preset: str = "python",
     purpose: str = "",
     code: str | None = None,
+    script: str | None = None,
     args: dict[str, Any] | None = None,
 ) -> ProbeResult:
     """Run a registered read-only preset or an explicit fenced probe program."""
@@ -93,13 +100,13 @@ async def run(
     if selected == "python":
         if not isinstance(purpose, str) or not purpose.strip():
             raise ValueError("cad.probe.run purpose must be non-empty for preset='python'")
-        if not isinstance(code, str) or not code.strip():
-            raise ValueError("cad.probe.run code must be non-empty for preset='python'")
-        if args is not None:
-            raise ValueError("cad.probe.run args are not used by preset='python'")
+        if bool(code and code.strip()) == bool(script and script.strip()):
+            raise ValueError("cad.probe.run requires exactly one of code or script for preset='python'")
+        if args is not None and not isinstance(args, dict):
+            raise TypeError("cad.probe.run args must be a dict")
     else:
-        if code is not None:
-            raise ValueError("cad.probe.run code is only valid for preset='python'")
+        if code is not None or script is not None:
+            raise ValueError("cad.probe.run code and script are only valid for preset='python'")
         if args is not None and not isinstance(args, dict):
             raise TypeError("cad.probe.run args must be a dict")
     wire_subject = subject.__cad_snapshot__() if isinstance(subject, ArtifactRef) else subject
@@ -108,6 +115,10 @@ async def run(
         kwargs["subject"] = wire_subject
     if code is not None:
         kwargs["code"] = code
+    if script is not None:
+        kwargs["script"] = script
+    if args:
+        kwargs["args"] = args
     payload = await request("probe", **kwargs)
     images = payload.get("images") or []
     if images:

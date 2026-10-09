@@ -74,6 +74,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
     ],
     parameters: Type.Object({
       source: Type.String(),
+      sourceSha256: Type.Optional(Type.String({ description: "SHA-256 from the selected ArtifactRef; export refuses if the file has changed." })),
       output: Type.String(),
       format: Type.Enum({ step: "step", stl: "stl", glb: "glb", brep: "brep" }),
     }),

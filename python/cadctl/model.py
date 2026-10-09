@@ -95,8 +95,13 @@ def run_source(
     if not source.exists():
         raise FileNotFoundError(f"source does not exist: {source}")
 
+    from .identity import Assembly, current as current_identity, reset as reset_identity
+
     output_path = Path(output) if output else None
     reset_writes()
+    # A fresh execution declares a fresh set of identities; anything the
+    # previous run left behind must not leak into this build.
+    reset_identity()
     old_cwd = Path.cwd()
     stdout = io.StringIO()
     stderr = io.StringIO()
@@ -116,6 +121,7 @@ def run_source(
             "__name__": "__pi_cad_user_model__",
             "__file__": str(source),
             "gen_step": gen_step,
+            "Assembly": Assembly,
         }
 
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -125,6 +131,9 @@ def run_source(
                 entrypoint = namespace.get("build")
                 if not callable(entrypoint):
                     raise TypeError("parameterized model must expose build(parameters)")
+                # The module body may already have built once to expose
+                # ``result``; only the parameterized declaration is current.
+                reset_identity()
                 result = entrypoint(dict(parameters))
             else:
                 result = namespace.get("result")
@@ -160,11 +169,13 @@ def run_source(
         if output_path is not None and not output_path.exists():
             raise RuntimeError(f"STEP output was not created: {output_path}")
 
+        declared = current_identity()
         return {
             "exitCode": 0,
             "stdout": stdout.getvalue(),
             "stderr": stderr.getvalue(),
             "sourceFiles": sorted(set(_source_files(source, source_roots, before_modules)) | {str(path) for path in accessed_files if path != output_path and ".pi-cad" not in path.parts}),
+            "identity": declared,
         }
     except Exception as exc:  # pragma: no cover - formatted below
         return {

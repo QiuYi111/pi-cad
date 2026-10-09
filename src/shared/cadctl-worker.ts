@@ -1,3 +1,4 @@
+import { kernelOwnerBinding } from "./kernel-owner.ts";
 import { processConcurrencyGate, spawnInteractiveProcess } from "./process-runner.ts";
 
 type InteractiveProcess = ReturnType<typeof spawnInteractiveProcess>;
@@ -143,7 +144,7 @@ class WarmCadctlWorker {
       command: this.launch.command,
       args: this.launch.args,
       cwd: this.launch.cwd,
-      env: this.launch.env,
+      env: { ...this.launch.env, ...kernelOwnerBinding() },
     });
     this.child = child;
     workerStats.starts += 1;

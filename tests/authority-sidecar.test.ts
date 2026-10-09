@@ -341,7 +341,11 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /--ro-bind\n\/run\/private\/author\n\/run\/pi-cad\/author/);
   assert.doesNotMatch(joined, /reviewer/);
   assert.doesNotMatch(joined, /PI_CAD_CANONICAL_PROJECT_DIR/);
-  assert.doesNotMatch(joined, /\/host\/agent/);
+  // The whole durable agent directory is the shared credential namespace, so
+  // auth.json, its lock directory and Prime's atomic temp files live together.
+  assert.match(joined, /--bind\n\/host\/agent\n\/home\/prime\/\.prime\/agent/);
+  assert.doesNotMatch(joined, /--bind\n\/host\/agent\/auth\.json\n/);
+  assert.match(joined, /--bind\n\/run\/private\/prime-agent\/settings\.json\n\/home\/prime\/\.prime\/agent\/settings\.json/);
   assert.doesNotMatch(joined, /--ro-bind\n\/repo\/pi-cad\n/);
   assert.match(joined, /--tmpfs\n\/tmp/);
   assert.match(joined, /--setenv\nHOME\n\/home\/prime/);
@@ -350,6 +354,13 @@ test("Prime bwrap mounts only the author endpoint and selected read-only Pi-CAD 
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/cad\/src/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/python\n\/opt\/pi-cad\/python/);
   assert.match(joined, /--ro-bind\n\/runtime\/cad-python\n\/runtime\/cad-python/);
+  assert.match(joined, /--ro-bind\n\/runtime\/python\n\/runtime\/python/);
+  assert.match(joined, /PRIME_AGENT_KERNEL_VENV\n\/opt\/prime-kernel-venv/);
+  assert.match(joined, /PRIME_AGENT_KERNEL_PYTHON\n\/opt\/prime-kernel-venv\/bin\/python/);
+  assert.match(joined, /PRIME_KERNEL_PROVENANCE/);
+  assert.match(joined, /sys\.prefix does not match PRIME_AGENT_KERNEL_VENV/);
+  assert.match(joined, /PRIME_KERNEL_PROVENANCE_FAILURE/);
+  assert.doesNotMatch(joined, /--ro-bind\n\/runtime\/python\n\/opt\/python/);
   assert.match(joined, /--ro-bind\n\/repo\/pi-cad\/scripts\n\/opt\/pi-cad\/scripts/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/pi-cad\/python/);
   assert.match(joined, /PYTHONPATH\n[^\n]*\/opt\/prime\/packages\/coding-agent\/dist\/skills\/attach-image\/src/);

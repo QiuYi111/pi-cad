@@ -1,0 +1,190 @@
+{
+  "campaignId": "res410-focused-20260923-1124",
+  "createdAt": "2026-09-23T03:54:30.493Z",
+  "manifest": {
+    "campaignId": "res410-focused-20260923-1124",
+    "createdAt": "2026-09-23T03:32:51.485Z",
+    "mode": "targeted",
+    "seed": 410923,
+    "rounds": 96,
+    "maxCommands": 12,
+    "runtimeRatio": 1,
+    "providerFaults": false,
+    "profiles": [
+      "idle-kernel",
+      "idle-kernel",
+      "idle-kernel",
+      "desktop-consistency",
+      "desktop-consistency",
+      "desktop-consistency",
+      "session-isolation",
+      "session-isolation",
+      "lifecycle-action-race",
+      "lifecycle-action-race",
+      "runtime-recovery",
+      "runtime-recovery"
+    ],
+    "concurrency": 2,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "8aa12102e39d3f1b0f6d65082c0b0a26936c7e77",
+      "gitBranch": "codex/desktop-app",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 96,
+    "roundsPassed": 96,
+    "roundsFailed": 0,
+    "roundsErrored": 0,
+    "distinctSeeds": 96,
+    "stateObservations": 2090,
+    "actions": {
+      "startRun": 143,
+      "commitPlan": 143,
+      "advance": 132,
+      "build": 84,
+      "refresh": 35,
+      "concurrentBuild": 30,
+      "openConversation": 48,
+      "desktopRestart": 29,
+      "retryBuild": 30,
+      "authorize": 10,
+      "completionGate": 10,
+      "resumeRun": 22,
+      "burstRefresh": 20,
+      "multiConversationBuild": 33,
+      "switchConversation": 15,
+      "duplicateCommit": 19,
+      "history": 9,
+      "listWorkflows": 7,
+      "phaseCard": 10,
+      "stopRun": 9,
+      "phaseContract": 9
+    },
+    "faultsInjected": {
+      "killKernelDuringBuild": 17,
+      "killKernelChild": 5,
+      "missingDesktopProjection": 6,
+      "raceTwoConversationsBuild": 3,
+      "killRuntimeDuringBuild": 10,
+      "restartRuntimeDuringBuild": 9,
+      "pauseRuntimeDuringBuild": 2,
+      "raceRepeatSubmitDuringFault": 2,
+      "pauseKernelDuringBuild": 5,
+      "killIdleKernel": 4,
+      "raceRestartDuringTransition": 2,
+      "raceCrossConversationFault": 4,
+      "raceUserActionDuringKernelFault": 1,
+      "killPrimeRuntime": 1
+    },
+    "faultsNotApplicable": {
+      "raceRestartDuringTransition": 6,
+      "killAuthorityDuringBuild": 5,
+      "killKernelDuringBuild": 3,
+      "killRuntimeDuringBuild": 4,
+      "killKernelChild": 1,
+      "raceUserActionDuringKernelFault": 2
+    },
+    "faultsInjectionFailed": {},
+    "faultsRecoveryFailed": {},
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 34,
+        "injected": 53
+      },
+      "file-state": {
+        "rounds": 6,
+        "injected": 6
+      },
+      "provider-oauth": {
+        "rounds": 0,
+        "injected": 0
+      },
+      "race": {
+        "rounds": 12,
+        "injected": 12
+      }
+    },
+    "components": {
+      "authority": 577,
+      "kernel": 221,
+      "run-store": 93,
+      "desktop-projection": 6,
+      "runtime": 29,
+      "prime": 1
+    },
+    "profiles": {
+      "idle-kernel": 24,
+      "desktop-consistency": 24,
+      "session-isolation": 16,
+      "lifecycle-action-race": 16,
+      "runtime-recovery": 16
+    },
+    "runtimeRounds": 96,
+    "oneShotRounds": 0
+  },
+  "failures": {
+    "rounds": 0,
+    "unique": 0,
+    "reproducible": 0,
+    "flaky": 0,
+    "falsePositive": 0,
+    "unverified": 0,
+    "product": 0,
+    "harness": 0
+  },
+  "clusters": [],
+  "underExplored": [
+    "provider-oauth：0 次真注入"
+  ],
+  "notes": []
+}

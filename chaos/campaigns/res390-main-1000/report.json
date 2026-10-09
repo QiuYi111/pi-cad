@@ -1,0 +1,525 @@
+{
+  "campaignId": "res390-main-1000",
+  "createdAt": "2026-09-22T08:58:45.328Z",
+  "manifest": {
+    "campaignId": "res390-main-1000",
+    "createdAt": "2026-09-22T06:23:46.307Z",
+    "mode": "nightly",
+    "seed": 390000,
+    "rounds": 1000,
+    "maxCommands": 8,
+    "runtimeRatio": 0.5,
+    "providerFaults": false,
+    "profiles": [
+      "mixed",
+      "process",
+      "file-state",
+      "provider-oauth",
+      "race",
+      "kernel-lifecycle",
+      "runtime-recovery",
+      "session-isolation",
+      "lifecycle-action-race",
+      "desktop-consistency"
+    ],
+    "concurrency": 3,
+    "triageReplays": 2,
+    "faultPool": [
+      "killKernelDuringBuild",
+      "pauseKernelDuringBuild",
+      "killAuthorityDuringBuild",
+      "pauseAuthorityDuringBuild",
+      "killIdleKernel",
+      "killKernelChild",
+      "killRuntimeDuringBuild",
+      "pauseRuntimeDuringBuild",
+      "restartRuntimeDuringBuild",
+      "killPrimeRuntime",
+      "cpuPressure",
+      "missingRunStateFile",
+      "unreadableRunStateFile",
+      "partialStateWrite",
+      "missingDesktopProjection",
+      "providerCredentialExpired",
+      "providerCredentialDropped",
+      "providerCredentialBlanked",
+      "raceUserActionDuringKernelFault",
+      "raceTwoConversationsBuild",
+      "raceRestartDuringTransition",
+      "raceLegalOrderSwap",
+      "raceRepeatSubmitDuringFault",
+      "raceCrossConversationFault"
+    ],
+    "version": {
+      "package": "0.9.0",
+      "node": "v22.23.2",
+      "gitCommit": "7f234667e1289f5931edbe33e8dfdc4cf3e82d43",
+      "gitBranch": "labrunner/res-390-chaos-05",
+      "gitDirty": false
+    },
+    "environment": {
+      "CHAOS_REIFY_PROVIDER_FAULTS": null,
+      "CHAOS_REIFY_PROVIDER_PROBE": null,
+      "CHAOS_REIFY_PROVIDER": null,
+      "CHAOS_REIFY_MODEL": null,
+      "CHAOS_REIFY_RECOVERY_BUDGET_MS": null,
+      "CHAOS_REIFY_ORPHAN_GRACE_MS": null,
+      "CHAOS_REIFY_PAUSE_MS": null,
+      "CHAOS_REIFY_FINAL_SETTLE_MS": null,
+      "CHAOS_REIFY_CPU_WORKERS": null,
+      "PI_CAD_KERNEL": null
+    }
+  },
+  "coverage": {
+    "rounds": 1000,
+    "roundsPassed": 994,
+    "roundsFailed": 6,
+    "roundsErrored": 0,
+    "distinctSeeds": 1000,
+    "stateObservations": 17374,
+    "actions": {
+      "startRun": 1393,
+      "commitPlan": 1278,
+      "advance": 1231,
+      "concurrentBuild": 202,
+      "refresh": 204,
+      "phaseCard": 43,
+      "resumeRun": 113,
+      "stopRun": 54,
+      "multiConversationBuild": 174,
+      "retryBuild": 157,
+      "build": 369,
+      "switchConversation": 129,
+      "desktopRestart": 123,
+      "burstRefresh": 142,
+      "openConversation": 467,
+      "duplicateCommit": 131,
+      "listWorkflows": 60,
+      "phaseContract": 64,
+      "authorize": 47,
+      "completionGate": 70,
+      "history": 60
+    },
+    "faultsInjected": {
+      "killRuntimeDuringBuild": 51,
+      "killKernelDuringBuild": 91,
+      "providerCredentialExpired": 30,
+      "providerCredentialDropped": 30,
+      "raceLegalOrderSwap": 31,
+      "killAuthorityDuringBuild": 37,
+      "raceCrossConversationFault": 29,
+      "missingRunStateFile": 48,
+      "providerCredentialBlanked": 22,
+      "raceRepeatSubmitDuringFault": 35,
+      "pauseKernelDuringBuild": 28,
+      "killKernelChild": 47,
+      "raceUserActionDuringKernelFault": 46,
+      "restartRuntimeDuringBuild": 50,
+      "pauseAuthorityDuringBuild": 13,
+      "pauseRuntimeDuringBuild": 23,
+      "partialStateWrite": 27,
+      "unreadableRunStateFile": 25,
+      "raceRestartDuringTransition": 17,
+      "raceTwoConversationsBuild": 28,
+      "killPrimeRuntime": 26,
+      "missingDesktopProjection": 13,
+      "killIdleKernel": 3
+    },
+    "faultsNotApplicable": {
+      "raceRestartDuringTransition": 51,
+      "killRuntimeDuringBuild": 20,
+      "missingDesktopProjection": 34,
+      "killIdleKernel": 39,
+      "killAuthorityDuringBuild": 57,
+      "cpuPressure": 12,
+      "raceTwoConversationsBuild": 17,
+      "pauseAuthorityDuringBuild": 23,
+      "restartRuntimeDuringBuild": 15,
+      "missingRunStateFile": 7,
+      "killKernelChild": 8,
+      "pauseKernelDuringBuild": 1,
+      "raceRepeatSubmitDuringFault": 5,
+      "raceCrossConversationFault": 10,
+      "raceLegalOrderSwap": 5,
+      "partialStateWrite": 9,
+      "unreadableRunStateFile": 6,
+      "raceUserActionDuringKernelFault": 15,
+      "pauseRuntimeDuringBuild": 9,
+      "killKernelDuringBuild": 7
+    },
+    "invariantsChecked": [
+      "no-orphan-kernel",
+      "run-ownership",
+      "terminal-state-stable",
+      "artifact-integrity",
+      "recovery-convergence",
+      "fault-outcome-honest"
+    ],
+    "boundaries": {
+      "process": {
+        "rounds": 264,
+        "injected": 369
+      },
+      "file-state": {
+        "rounds": 98,
+        "injected": 113
+      },
+      "provider-oauth": {
+        "rounds": 72,
+        "injected": 82
+      },
+      "race": {
+        "rounds": 148,
+        "injected": 186
+      }
+    },
+    "components": {
+      "authority": 5030,
+      "runtime": 207,
+      "desktop-projection": 48,
+      "kernel": 1211,
+      "run-store": 704,
+      "provider-oauth": 86,
+      "prime": 27
+    },
+    "profiles": {
+      "mixed": 112,
+      "process": 168,
+      "file-state": 168,
+      "provider-oauth": 112,
+      "race": 165,
+      "kernel-lifecycle": 55,
+      "runtime-recovery": 55,
+      "session-isolation": 55,
+      "lifecycle-action-race": 55,
+      "desktop-consistency": 55
+    },
+    "runtimeRounds": 500,
+    "oneShotRounds": 500
+  },
+  "failures": {
+    "rounds": 6,
+    "unique": 4,
+    "reproducible": 1,
+    "flaky": 1,
+    "falsePositive": 2,
+    "unverified": 0,
+    "product": 4,
+    "harness": 0
+  },
+  "clusters": [
+    {
+      "id": "c41b23f2c",
+      "signature": "no-orphan-kernel | N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)",
+      "invariant": "no-orphan-kernel",
+      "boundary": "process",
+      "boundaries": [
+        "process"
+      ],
+      "nature": "product",
+      "failingSteps": [
+        "action:advance",
+        "fault:restartRuntimeDuringBuild"
+      ],
+      "reason": "N 个 kernel 的父控制面已经死了，进程还在：#(owner=#)",
+      "logSignatures": [
+        "advance 被拒",
+        "kernel 恢复运行后请求结束（signal=#）",
+        "重启后原请求结束：Reify runtime closed without a response"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:restartRuntimeDuringBuild",
+          "action:advance",
+          "fault:pauseRuntimeDuringBuild",
+          "fault:pauseRuntimeDuringBuild",
+          "action:refresh",
+          "fault:killKernelDuringBuild",
+          "fault:killRuntimeDuringBuild",
+          "action:advance"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:pauseKernelDuringBuild",
+          "fault:restartRuntimeDuringBuild"
+        ],
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:pauseAuthorityDuringBuild",
+          "action:resumeRun",
+          "action:refresh",
+          "action:refresh",
+          "fault:pauseKernelDuringBuild",
+          "action:retryBuild",
+          "action:desktopRestart",
+          "fault:restartRuntimeDuringBuild"
+        ]
+      ],
+      "occurrences": 3,
+      "roundIndexes": [
+        38,
+        92,
+        868
+      ],
+      "seeds": [
+        2095886532,
+        1959249991,
+        28520918
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-28-36-137Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-38-11-069Z-reify-no-orphan-kernel.json",
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T08-31-08-688Z-reify-no-orphan-kernel.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-38-11-069Z-reify-no-orphan-kernel.json",
+      "firstSeenAt": "2026-09-22T06:28:36.137Z",
+      "lastSeenAt": "2026-09-22T08:31:08.688Z",
+      "runtimeModes": [
+        true
+      ],
+      "commits": [
+        "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+      ],
+      "verdict": "reproducible",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 3,
+        "reproductions": 3,
+        "sequenceReplayOk": true,
+        "seedPathReplayOk": true,
+        "shrinkOk": true,
+        "originalLength": 5,
+        "shrunkLength": 5,
+        "numShrinks": 0,
+        "minimalSequence": [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:pauseKernelDuringBuild",
+          "fault:restartRuntimeDuringBuild"
+        ],
+        "notes": [
+          "最小复现 5 步（原始 5 步，numShrinks=0），commit=7f234667e128"
+        ],
+        "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/campaigns/res390-main-1000/regressions/c41b23f2c-no-orphan-kernel.json"
+      }
+    },
+    {
+      "id": "c61f9d95e",
+      "signature": "recovery-convergence | pauseAuthorityDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+      "invariant": "recovery-convergence",
+      "boundary": "process",
+      "boundaries": [
+        "process"
+      ],
+      "nature": "product",
+      "failingSteps": [
+        "fault:pauseAuthorityDuringBuild"
+      ],
+      "reason": "pauseAuthorityDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+      "logSignatures": [
+        "控制面恢复运行后请求结束（signal=#）"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:advance",
+          "fault:pauseAuthorityDuringBuild"
+        ]
+      ],
+      "occurrences": 1,
+      "roundIndexes": [
+        37
+      ],
+      "seeds": [
+        1088643780
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-29-49-981Z-reify-recovery-convergence.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-29-49-981Z-reify-recovery-convergence.json",
+      "firstSeenAt": "2026-09-22T06:29:49.981Z",
+      "lastSeenAt": "2026-09-22T06:29:49.981Z",
+      "runtimeModes": [
+        false
+      ],
+      "commits": [
+        "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+      ],
+      "verdict": "false-positive",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 2,
+        "reproductions": 0,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": false,
+        "shrinkOk": false,
+        "originalLength": 0,
+        "shrunkLength": 0,
+        "numShrinks": 0,
+        "minimalSequence": [],
+        "notes": [
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "按 seed+path 没复现：seed=1088643780 path=0 没有复现失败"
+        ]
+      }
+    },
+    {
+      "id": "c0c99ebdb",
+      "signature": "recovery-convergence | pauseRuntimeDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+      "invariant": "recovery-convergence",
+      "boundary": "process",
+      "boundaries": [
+        "process"
+      ],
+      "nature": "product",
+      "failingSteps": [
+        "action:build"
+      ],
+      "reason": "pauseRuntimeDuringBuild 之后系统没能恢复：model-build: authority exited with SIGKILL: (node:#) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time. (Use `node --trace-warnings ...` to show where the warning was created)",
+      "logSignatures": [
+        "phaseCard 被拒"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "action:startRun",
+          "action:refresh",
+          "fault:killRuntimeDuringBuild",
+          "fault:pauseRuntimeDuringBuild",
+          "action:phaseCard",
+          "action:build"
+        ]
+      ],
+      "occurrences": 1,
+      "roundIndexes": [
+        104
+      ],
+      "seeds": [
+        2879171463
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-42-57-813Z-reify-recovery-convergence.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-42-57-813Z-reify-recovery-convergence.json",
+      "firstSeenAt": "2026-09-22T06:42:57.813Z",
+      "lastSeenAt": "2026-09-22T06:42:57.813Z",
+      "runtimeModes": [
+        true
+      ],
+      "commits": [
+        "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+      ],
+      "verdict": "false-positive",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 2,
+        "reproductions": 0,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": false,
+        "shrinkOk": false,
+        "originalLength": 0,
+        "shrunkLength": 0,
+        "numShrinks": 0,
+        "minimalSequence": [],
+        "notes": [
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "按 seed+path 没复现：seed=-1415795833 path=0 没有复现失败"
+        ]
+      }
+    },
+    {
+      "id": "ca17c3c29",
+      "signature": "recovery-convergence | restartRuntimeDuringBuild 之后系统没能恢复：Reify runtime socket timed out",
+      "invariant": "recovery-convergence",
+      "boundary": "process",
+      "boundaries": [
+        "process"
+      ],
+      "nature": "product",
+      "failingSteps": [
+        "fault:pauseAuthorityDuringBuild"
+      ],
+      "reason": "restartRuntimeDuringBuild 之后系统没能恢复：Reify runtime socket timed out",
+      "logSignatures": [
+        "重启后原请求还挂着"
+      ],
+      "shapes": [
+        [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:killAuthorityDuringBuild",
+          "fault:killRuntimeDuringBuild",
+          "action:build",
+          "fault:raceTwoConversationsBuild",
+          "fault:pauseKernelDuringBuild",
+          "fault:restartRuntimeDuringBuild",
+          "fault:pauseAuthorityDuringBuild"
+        ]
+      ],
+      "occurrences": 1,
+      "roundIndexes": [
+        36
+      ],
+      "seeds": [
+        624507661
+      ],
+      "artifactPaths": [
+        "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-30-07-116Z-reify-recovery-convergence.json"
+      ],
+      "representative": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/artifacts/2026-09-22T06-30-07-116Z-reify-recovery-convergence.json",
+      "firstSeenAt": "2026-09-22T06:30:07.116Z",
+      "lastSeenAt": "2026-09-22T06:30:07.116Z",
+      "runtimeModes": [
+        true
+      ],
+      "commits": [
+        "7f234667e1289f5931edbe33e8dfdc4cf3e82d43"
+      ],
+      "verdict": "flaky",
+      "triage": {
+        "ruleVersion": 3,
+        "attempts": 3,
+        "reproductions": 1,
+        "sequenceReplayOk": false,
+        "seedPathReplayOk": true,
+        "shrinkOk": true,
+        "originalLength": 11,
+        "shrunkLength": 7,
+        "numShrinks": 6,
+        "minimalSequence": [
+          "action:startRun",
+          "action:commitPlan",
+          "action:advance",
+          "fault:missingDesktopProjection",
+          "fault:missingDesktopProjection",
+          "action:advance",
+          "fault:missingRunStateFile"
+        ],
+        "notes": [
+          "第 1 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "第 2 次按序列 replay 没复现：序列跑完但没有复现失败",
+          "最小复现 7 步（原始 11 步，numShrinks=6），commit=7f234667e128",
+          "这是偶发失败的 shrink 结果，只作最小证据，不代表稳定复现"
+        ],
+        "enrichedArtifact": "/home/jingyi/symphony-workspaces/oh-my/reify/RES-390/chaos/campaigns/res390-main-1000/regressions/ca17c3c29-recovery-convergence.json"
+      }
+    }
+  ],
+  "underExplored": [],
+  "notes": []
+}
