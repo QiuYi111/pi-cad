@@ -90,6 +90,15 @@ own Prime conversation and kernel; it must not use or change the parent's run
 binding or candidate. The parent inspects the returned artifact and explicitly
 chooses whether to use it in the assembly.
 
+For delegated CAD work, have the child validate a plausible initial mistake
+before it repairs the model: probe the wrong result, change the source, rebuild,
+and probe the corrected `ArtifactRef`. Resolve identity through semantic paths
+from the artifact's hash-bound manifest when checking reordered assemblies;
+solid indices are evidence for one artifact only. Treat missing or stale
+identity manifests and deleted named features as explicit failures. Once a
+workflow is Done, make observations only against an explicit `ArtifactRef`; do
+not restart the workflow to inspect completed geometry.
+
 - Read `await cad.workflow.current()` before acting. If it is `None`, always call
   `await cad.workflow.list()` and route the request to exactly one workflow from
   that live list. Workflows are user-maintained project data as well as built-in
