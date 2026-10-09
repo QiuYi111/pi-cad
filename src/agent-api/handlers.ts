@@ -22,7 +22,7 @@ import { workflowCurrentView } from "../harness/card.ts";
 import { workflowRunStateView } from "../harness/workflow/phase-view.ts";
 import { resolveActiveRun, resolveRequestScope, runWithRunScope, type RunScopeRequestV1 } from "../harness/run-scope.ts";
 import { sha256File } from "../shared/hash.ts";
-import { currentGitRevision, executeWorkflowGitActions, phaseGitActions, prepareWorkflowGit, type WorkflowGitResult } from "../authority/workflow-git.ts";
+import { currentGitRevision, executeWorkflowGitActions, phaseGitActions, prepareWorkflowGit, type WorkflowGitResult } from "../harness/workflow-git.ts";
 import {
   normalizeModelParameterDefinitions,
   type ModelParameterManifestV1,

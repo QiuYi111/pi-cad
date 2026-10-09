@@ -8,7 +8,7 @@ import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { transitionRun } from "../harness/reducer.ts";
 import type { WorkflowSnapshotV1 } from "../harness/workflow/types.ts";
 import type { HarnessRunStateV7 } from "../harness/state.ts";
-import { executeWorkflowGitActions, phaseGitActions } from "./workflow-git.ts";
+import { executeWorkflowGitActions, phaseGitActions } from "../harness/workflow-git.ts";
 
 export type AuthoritativeReviewVerdictV1 = "pass" | "fail" | "clarification_required";
 export interface ReviewHandleV1 { reviewId: string; subjectCommit: string; status: "running" | AuthoritativeReviewVerdictV1 | "unresolved"; }
