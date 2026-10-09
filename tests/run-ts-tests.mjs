@@ -48,6 +48,7 @@ await jiti.import("./v7-rules-context.test.ts", { default: true });
 await jiti.import("./review-v7.test.ts", { default: true });
 await jiti.import("./observations-v7.test.ts", { default: true });
 await jiti.import("./harness-boundary.test.ts", { default: true });
+await jiti.import("./architecture-boundary.test.ts", { default: true });
 await jiti.import("./public-tool-catalog.test.ts", { default: true });
 await jiti.import("./drawing-presentation-tool.test.ts", { default: true });
 await jiti.import("./context-memory.test.ts", { default: true });
