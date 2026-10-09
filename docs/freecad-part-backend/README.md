@@ -81,11 +81,11 @@ Other differences that cost time:
 
 | Where | What | Needs FreeCAD |
 |---|---|---|
-| `tests/test_reify_freecad_pure.py` | op schema, shared path vectors with cadctl, expressions, error mapping, no FreeCAD import in pure modules | no |
-| `tests/freecad/` (34 tests) | nine features, recompute scope, rollback, conflicts, role stability, undo, pose sweep, budget, requirements, the examples in the reference document | yes |
-| `tests/freecad-worker.test.ts` | worker bridge with a fake worker: order, timeout kill, restart and reopen, errors, abort | no |
-| `tests/part-ops-authorization.test.ts` | `model.build` versus `probe.run`, read-only author, reviewer | no |
-| `tests/part-e2e.test.ts` | open, build, edit, resolve the named hole, try, failing fillet, budget kill, undo | yes (skipped otherwise) |
-| `tests/build-changes.test.ts`, `tests/test_face_fingerprints.py`, `tests/test_render_highlight.py`, `tests/test_bind_identity.py` | change summary, fingerprints (shared vectors), render highlight and labels (pixel-identical without them), identity binding | no |
+| `tests/freecad-part/fast/test_reify_freecad_pure.py` | op schema, shared path vectors with cadctl, expressions, error mapping, no FreeCAD import in pure modules | no |
+| `tests/freecad-part/e2e/`, `tests/dfm/e2e/`, `tests/transfer/e2e/` (FreeCAD Python) | nine features, recompute scope, rollback, conflicts, role stability, undo, pose sweep, budget, requirements, the examples in the reference document | yes |
+| `tests/freecad-part/fast/freecad-worker.test.ts` | worker bridge with a fake worker: order, timeout kill, restart and reopen, errors, abort | no |
+| `tests/freecad-part/fast/part-ops-authorization.test.ts` | `model.build` versus `probe.run`, read-only author, reviewer | no |
+| `tests/freecad-part/e2e/part-e2e.test.ts` | open, build, edit, resolve the named hole, try, failing fillet, budget kill, undo | yes (skipped otherwise) |
+| `tests/cad-build123d/fast/build-changes.test.ts`, `tests/cad-build123d/fast/test_face_fingerprints.py`, `tests/probe-render/fast/test_render_highlight.py`, `tests/cad-build123d/fast/test_bind_identity.py` | change summary, fingerprints (shared vectors), render highlight and labels (pixel-identical without them), identity binding | no |
 
-Run the FreeCAD tests with `PYTHONPATH=python:<env>/lib <env>/bin/python -m unittest discover -s tests/freecad`.
+Run the FreeCAD tests with `PYTHONPATH=python:<env>/lib node tests/run-py-tests.mjs --layer e2e --systems freecad --python <env>/bin/python` (areas in `tests/areas.yaml`).

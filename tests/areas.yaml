@@ -1,0 +1,215 @@
+# Test areas. A PR runs the areas whose src or tests it touches (scripts/select-areas.mjs).
+# A change to a `shared` path runs every area. Nightly and pushes to master run every area.
+#
+# src:    repo-relative globs. `**` crosses directories; a path that ends in `/` covers the directory.
+# tests:  directories under tests/. `fast` needs no real system; `e2e` needs one of `real`.
+# real:   systems the e2e layer needs. CI declares the systems it installs (runner --systems);
+#         an e2e layer whose systems are not declared is run by the job that has them. When a
+#         declared system is missing, the test fails (REIFY_REQUIRE_<SYSTEM>=1), it does not skip.
+# Systems: freecad, blender, ffmpeg, bwrap, torch, su2, prime-checkout, toxiproxy, postgres.
+#
+# Chaos suites are not an area: tests/chaos*.test.ts run nightly via tests/run-chaos-tests.mjs.
+
+shared:
+  - src/harness/**
+  - src/shared/**
+  - src/agent-api/**
+  - package.json
+  - package-lock.json
+  - scripts/test.sh
+  - scripts/select-areas.mjs
+  - python/uv.lock
+  - python/pyproject.toml
+  - tests/run-ts-tests.mjs
+  - tests/run-py-tests.mjs
+  - tests/areas.yaml
+  - tests/support/**
+  - tests/fixtures/**
+  - .github/workflows/**
+
+outside_areas:
+  - tests/chaos*.test.ts
+  - tests/run-chaos-tests.mjs
+  - tests/run-prime-tests.mjs
+
+areas:
+  core-workflow:
+    src:
+      - src/workflows/**
+      - src/authority/**
+      - src/domains/**
+      - src/core/**
+      - src/observations/**
+      - src/experience/**
+      - src/composition/**
+      - src/extensions/core/**
+      - src/extensions/ui/**
+      - src/extensions/optional/**
+      - src/agent-api/workflow-ops.ts
+      - workflow-packages/**
+      - recipes/**
+    tests:
+      fast: [tests/core-workflow/fast]
+      e2e: [tests/core-workflow/e2e]
+    real: []
+
+  freecad-part:
+    src:
+      - python/reify_freecad/*.py
+      - python/reify_freecad/ops/**
+      - python/reify_freecad/roles.py
+      - src/agent-api/part-ops.ts
+      - src/shared/freecad-worker.ts
+      - src/extensions/geometry/**
+      - skills/parametric-cad-modeling/**
+      - docs/freecad-part-backend/**
+    tests:
+      fast: [tests/freecad-part/fast]
+      e2e: [tests/freecad-part/e2e]
+    real: [freecad]
+
+  transfer:
+    src:
+      - src/agent-api/transfer-ops.ts
+      - src/agent-api/transfer-check.ts
+      - python/reify_freecad/transfer.py
+      - python/reify_freecad/transfer_geometry.py
+      - skills/cad/src/cad/transfer.py
+      - executors/fusion/**
+      - executors/solidworks/**
+      - executors/fixtures/**
+      - docs/cad-transfer/**
+    tests:
+      fast: [tests/transfer/fast, tests/transfer/fast/fusion_addin]
+      e2e: [tests/transfer/e2e]
+    real: [freecad]
+
+  dfm:
+    src:
+      - python/reify_freecad/dfm/**
+      - native/reify-asi/**
+      - scripts/bootstrap-asi.sh
+      - docs/dfm/**
+    tests:
+      fast: [tests/dfm/fast]
+      e2e: [tests/dfm/e2e]
+    real: [freecad]
+
+  cad-build123d:
+    src:
+      - python/cadctl/identity/**
+      - python/cadctl/commands/**
+      - python/cadctl/cli.py
+      - python/cadctl/model.py
+      - python/cadctl/export.py
+      - python/cadctl/fingerprints.py
+      - python/cadctl/interference.py
+      - python/cadctl/worker.py
+      - python/cadctl/build_cache.py
+      - python/cadctl/assembly.py
+      - python/cadctl/geometry.py
+      - python/cadctl/shape_facts.py
+      - skills/cad/src/**
+      - src/modules/model/**
+      - src/shared/cadctl-worker.ts
+      - src/shared/cadctl/**
+    tests:
+      fast: [tests/cad-build123d/fast]
+      e2e: [tests/cad-build123d/e2e]
+    real: [torch]
+
+  probe-render:
+    src:
+      - python/cadctl/probe.py
+      - python/cadctl/render.py
+      - python/cadctl/mesh.py
+      - python/cadctl/sections.py
+      - python/cadctl/section.py
+      - python/cadctl/drawing.py
+      - src/modules/probe/**
+      - src/extensions/probe/**
+    tests:
+      fast: [tests/probe-render/fast]
+    real: []
+
+  # su2 is not installed in CI: test_thermal_fluid and test_inverse_benchmark gate on it
+  # themselves (skip locally, fail when REIFY_REQUIRE_SU2=1), so the layer needs torch only.
+  simulation:
+    src:
+      - python/picad_sim/**
+      - python/cadctl/simulation/**
+      - python/cadctl/analysis_model.py
+      - src/modules/simulate-v2/**
+      - src/extensions/simulation/**
+      - src/agent-api/simulation-ops.ts
+      - benchmarks/simulation-v2/**
+      - recipes/analysis-model/**
+      - recipes/optimization/**
+      - skills/structural-analysis/**
+      - skills/thermal-fluid-analysis/**
+    tests:
+      fast: [tests/simulation/fast]
+      e2e: [tests/simulation/e2e]
+    real: [torch]
+
+  blender-presentation:
+    src:
+      - python/cadctl/presentation.py
+      - python/cadctl/presentation_driver.py
+      - python/cadctl/blender_bridge.py
+      - src/extensions/presentation/**
+      - src/extensions/drawing/**
+      - src/integrations/blender-mcp.ts
+      - third_party/blender-mcp/**
+      - recipes/presentation/**
+      - recipes/drawing/**
+      - skills/blender-product-rendering/**
+      - scripts/*blender*
+    tests:
+      fast: [tests/blender-presentation/fast]
+      e2e: [tests/blender-presentation/e2e]
+    real: [blender, ffmpeg]
+
+  desktop:
+    # Desktop runs in its own workflow (.github/workflows/desktop.yml) with its own paths.
+    src:
+      - apps/desktop/**
+    tests:
+      fast: [tests/desktop/fast]
+    real: []
+
+  cloud:
+    # Cloud runs in its own workflow (.github/workflows/cloud.yml); no tests here yet.
+    src:
+      - cloud/**
+    tests: {}
+    real: [postgres]
+
+  prime-integration:
+    src:
+      - src/integrations/prime/**
+      - packages/reify-cad-worker/**
+      - skills/reify-cad-worker/**
+      - src/authority/sandbox-bwrap.ts
+      - scripts/prime-cad.mjs
+    tests:
+      fast: [tests/prime-integration/fast]
+      e2e: [tests/prime-integration/e2e]
+    real: [bwrap, prime-checkout]
+
+  skills-docs:
+    src:
+      - skills/**
+      - docs/**
+      - README.md
+      - README.zh-CN.md
+    tests:
+      fast: [tests/skills-docs/fast]
+    real: []
+
+  benchmarks:
+    src:
+      - benchmarks/**
+    tests:
+      fast: [tests/benchmarks/fast]
+    real: []

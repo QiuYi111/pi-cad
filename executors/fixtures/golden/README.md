@@ -4,7 +4,7 @@ Shared inputs and expected verdicts for both executors. One file per concern.
 
 | File | Covers | Loaded by |
 | --- | --- | --- |
-| `edge_match.json` (`reify.golden/edge-match/1`) | Edge reference matching: a canonical `edge_ref` resolved against candidate BRep edges, with the matched indices each executor must return | `tests/fusion_addin/test_golden_edge_match.py` (Python), `executors/solidworks/ReifyExport.Core.Tests/GoldenEdgeMatchTests.cs` (xUnit) |
+| `edge_match.json` (`reify.golden/edge-match/1`) | Edge reference matching: a canonical `edge_ref` resolved against candidate BRep edges, with the matched indices each executor must return | `tests/transfer/fast/fusion_addin/test_golden_edge_match.py` (Python), `executors/solidworks/ReifyExport.Core.Tests/GoldenEdgeMatchTests.cs` (xUnit) |
 
 Each case has `diagonal_mm`, `ref`, `candidates` and `expect.fusion` / `expect.solidworks` (candidate indices accepted).
 `divergent: true` marks a case where the two executors disagree. A test checks that the flag equals `fusion != solidworks`.
