@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-import { allPhaseContracts, contractTools } from "../src/control/phase-contract.ts";
+import { allPhaseContracts, contractTools } from "../src/domains/mechanical/phase-contract.ts";
 import {
   ACTIVE_PUBLIC_TOOL_NAMES,
   HISTORICAL_TOOL_NAMES,

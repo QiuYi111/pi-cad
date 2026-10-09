@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { routeKey, type CadRunState } from "../shared/protocol.ts";
-import { nowIso } from "../shared/store.ts";
+import { nowIso } from "../shared/hash.ts";
 import { runProcess, spawnDetachedProcess } from "../shared/process-runner.ts";
 import {
   EXPERIENCE_SCHEMA_VERSION,

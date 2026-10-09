@@ -3,7 +3,8 @@ import { constants } from "node:fs";
 import { chmod, copyFile, cp, link, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
-import { CadProjectStore, nowIso, sha256File } from "../../shared/store.ts";
+import { CadProjectStore } from "../../shared/store.ts";
+import { nowIso, sha256File } from "../../shared/hash.ts";
 import { harnessRunDirectory } from "../../authority/storage.ts";
 import { hashSimulationPath, loadSimulationRecipe, selectSimulationOutputs, type LoadedSimulationRecipe, type SimulationRecipeManifest } from "./protocol.ts";
 import { validateObservationFile, type ValidatedObservation } from "./observation.ts";

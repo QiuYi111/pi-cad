@@ -13,7 +13,8 @@ const { buildStep } = await jiti.import("../src/shared/capability.ts");
 const { createIntakeState } = await jiti.import("../src/core/state-machine.ts");
 const { commitSimulation } = await jiti.import("../src/extensions/simulation/v2.ts");
 const { createSimulationRun } = await jiti.import("../src/modules/simulate-v2/store.ts");
-const { CadProjectStore, sha256File } = await jiti.import("../src/shared/store.ts");
+const { CadProjectStore } = await jiti.import("../src/shared/store.ts");
+const { sha256File } = await jiti.import("../src/shared/hash.ts");
 
 function spec(device, meshSize = 4, youngsModulus = 70000) {
   return {

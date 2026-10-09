@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import { ProjectStateStore } from "../src/shared/store.ts";
-import { applyCadToolOverlay, PI_CAD_OWNED_TOOLS, toolsForPhase, toolsForState } from "../src/core/policies.ts";
+import { applyCadToolOverlay, toolsForPhase, toolsForState } from "../src/core/policies.ts";
+import { PI_CAD_OWNED_TOOLS } from "../src/domains/mechanical/owned-tools.ts";
 import { CAPABILITY_TOOLS, CONTROL_TOOLS, type CadRequirements, type CadRunState } from "../src/shared/protocol.ts";
 import { commitRequirements, createIntakeState, route as routeQuick, transition as transitionQuick } from "../src/core/state-machine.ts";
 

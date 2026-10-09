@@ -14,7 +14,8 @@ const { createIntakeState } = await jiti.import("../src/core/state-machine.ts");
 const { commitSimulation } = await jiti.import("../src/extensions/simulation/v2.ts");
 const { createSimulationRun } = await jiti.import("../src/modules/simulate-v2/store.ts");
 const { managedSimulationRunner } = await jiti.import("../src/modules/simulate-v2/runtime.ts");
-const { CadProjectStore, sha256File } = await jiti.import("../src/shared/store.ts");
+const { CadProjectStore } = await jiti.import("../src/shared/store.ts");
+const { sha256File } = await jiti.import("../src/shared/hash.ts");
 
 async function prepareWorkflow(project, runId, artifact, caseId) {
   const store = new CadProjectStore(project);

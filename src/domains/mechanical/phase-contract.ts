@@ -12,8 +12,8 @@
  *   - requiredRecords: record obligations the phase owes (route-scoped);
  *   - contextProfile: how the context runtime treats this phase.
  */
-import type { CadPhase } from "../shared/protocol.ts";
-import { CAD_PHASES } from "../shared/protocol.ts";
+import type { CadPhase } from "../../shared/protocol.ts";
+import { CAD_PHASES } from "../../shared/protocol.ts";
 
 export type Capability =
   // observation family

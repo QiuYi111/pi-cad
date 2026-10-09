@@ -15,7 +15,8 @@ import { maybeRebuildContext, maybeRebuildContextV7, registerContextCompaction, 
 import { maybeAutoContinue } from "./continuation.ts";
 import { registerControlTools, type ControllerDeps } from "./controller.ts";
 import { EVIDENCE_KINDS, recordToolEvidence } from "./evidence.ts";
-import { applyCadToolOverlay, PI_CAD_OWNED_TOOLS, toolsForState, writePathAllowed } from "./policies.ts";
+import { applyCadToolOverlay, toolsForState, writePathAllowed } from "./policies.ts";
+import { PI_CAD_OWNED_TOOLS } from "../domains/mechanical/owned-tools.ts";
 import { resumeFromUser } from "./state-machine.ts";
 import { isHeadless, isTerminalStatus } from "./interaction-mode.ts";
 import { readRuntimeAvailability, simulationRuntimeProjection } from "../modules/simulate-v2/runtime.ts";

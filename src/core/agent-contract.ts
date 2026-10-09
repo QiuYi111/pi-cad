@@ -1,4 +1,5 @@
-import { allPhaseContracts, contractTools, phaseContract } from "../control/phase-contract.ts";
+import { allPhaseContracts, contractTools, phaseContract } from "../domains/mechanical/phase-contract.ts";
+import { PHASE_PURPOSES, TOOL_PURPOSES } from "../domains/mechanical/purposes.ts";
 import {
   ACTIVE_PUBLIC_TOOLS,
   ACTIVE_PUBLIC_TOOL_NAMES,
@@ -68,65 +69,6 @@ export interface AgentContract {
   events: TransitionEventContract[];
   obligations: ObligationContract[];
 }
-
-export const TOOL_PURPOSES: Record<ActivePublicTool, string> = {
-  cad_start: "Start a generic v7 run from the project-selected immutable workflow.",
-  cad_route: "Select the route that compiles the workflow and obligations.",
-  cad_reroute: "Change route without bypassing obligations; downgrades require authority.",
-  cad_commit_requirements: "Commit the first complete mission and acceptance contract.",
-  cad_revise_requirements: "Replace requirements after authoritative information changes.",
-  cad_commit_frame_context: "Record the interpretation of an imported coordinate frame.",
-  cad_commit_plan: "Commit the implementation or investigation plan owed by this phase.",
-  cad_commit_assembly_design: "Commit modules, datums, ownership, and assembly sequence.",
-  cad_commit_interface_contracts: "Commit locating, DOF, fit, fastening, and access contracts.",
-  cad_commit_candidate: "Build and propose source-authored CAD with automatic observations.",
-  cad_submit_for_review: "Submit the immutable candidate for independent final verification.",
-  cad_transition: "Apply one legal decision event from the compiled workflow.",
-  cad_wait_for_user: "Pause an interactive workflow for a user-owned decision.",
-  cad_defer_clarification: "Record a bounded headless assumption and continue.",
-  cad_declare_blocker: "Stop honestly on missing authority or indispensable external input.",
-  cad_finish: "Close a ready workflow after deterministic checks.",
-  cad_commit_simulation: "Bind one immutable run/observation to a simulation case obligation.",
-  cad_probe: "Inspect an artifact through a strict typed or programmable read-only probe.",
-  cad_recall_observation: "Recover an observation summary, visuals, or paged detail collection.",
-  cad_build_step: "Execute deterministic build123d source without accepting Project Head.",
-  cad_derive_analysis_model: "Create a provenance-bound solver derivation.",
-  cad_simulate: "Run a solver-native Recipe in a managed runtime; creates no Evidence.",
-  cad_sim_observe: "Re-run only the observer over a frozen SimulationRun.",
-  cad_optimize: "Produce a managed torch-fem optimization artifact.",
-  cad_export: "Create geometry sidecars without changing Project Head.",
-  cad_generate_drawing: "Generate a structured drawing from declared intent.",
-  cad_render_scene: "Create presentation assets from an explicit scene specification.",
-};
-
-export const PHASE_PURPOSES: Record<CadPhase, string> = {
-  intake: "Choose the route before engineering work.",
-  requirements: "Commit the authoritative mission and acceptance contract.",
-  baseline: "Understand the existing design and its frame.",
-  source_baseline: "Understand the source before conversion.",
-  plan: "Plan modifications to a legacy part.",
-  transform_plan: "Plan deterministic conversion.",
-  concept: "Select a coherent hybrid-part concept.",
-  system_concept: "Select the assembly architecture.",
-  domain_analysis: "Resolve a bounded domain question before concept selection.",
-  part_design: "Commit the part implementation plan.",
-  assembly_design: "Commit module ownership, datums, and install sequence.",
-  interface_design: "Commit explicit module interface contracts.",
-  build: "Author and propose greenfield or hybrid CAD.",
-  modify: "Author and propose legacy CAD changes.",
-  convert: "Produce and propose the converted artifact.",
-  review: "Interpret current part evidence and decide acceptance or regression.",
-  compare: "Compare converted output to its source.",
-  integration_review: "Verify the complete assembly, interfaces, interference, and simulations.",
-  investigate: "Probe an artifact until the relevant cause is understood.",
-  explain: "Deliver evidence-bound analysis findings.",
-  audit: "Audit release workstreams and identify gaps.",
-  gap_closure: "Author engineering changes that close release gaps.",
-  package: "Create closure deliverables without inventing engineering intent.",
-  final_review: "Verify release evidence and deliverables.",
-  ready: "Perform deterministic closure checks and finish.",
-  done: "Terminal completed workflow.",
-};
 
 type EventDefinition = { meaning: string; useWhen: string; doNotUseWhen: string };
 

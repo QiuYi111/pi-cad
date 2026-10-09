@@ -19,7 +19,7 @@ import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { commitBoundEvidence, createHarnessRunState, prepareRecipeObligation, replaceWorkflowSnapshot, transitionRun } from "../src/harness/reducer.ts";
 import { HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { approveMechanicalRerouteV7, cadRerouteV7, cadRouteV7 } from "../src/domains/mechanical/actions-v7.ts";
-import { phaseContract } from "../src/control/phase-contract.ts";
+import { phaseContract } from "../src/domains/mechanical/phase-contract.ts";
 import { routeKey } from "../src/shared/route.ts";
 import { compiledSpec } from "../src/workflows/index.ts";
 

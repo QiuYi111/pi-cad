@@ -17,7 +17,7 @@ import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
 import { partOpsHooks } from "../src/agent-api/part-ops.ts";
-import { sha256File } from "../src/shared/store.ts";
+import { sha256File } from "../src/shared/hash.ts";
 import { PartOpError, resolveFreecadRuntime, shutdownPartWorkers } from "../src/shared/freecad-worker.ts";
 
 let installed = true;
