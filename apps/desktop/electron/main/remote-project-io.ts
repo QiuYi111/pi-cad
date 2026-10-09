@@ -2,6 +2,7 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { isProjectRelative, type ProjectIO } from "./cad-transfer-paths.js";
 import type { RemoteBridge } from "./remote-bridge.js";
+import { sha256Command } from "./sha256.js";
 
 /** The bridge calls a project folder needs. */
 export type RemoteProjectBridge = Pick<RemoteBridge, "exec" | "pipe" | "download" | "upload">;
@@ -91,7 +92,7 @@ export class RemoteProjectIO implements ProjectIO {
     this.requireRelative(relative);
     const remote = this.abs(relative);
     const local = join(this.options.cacheRoot, this.options.projectId, ...relative.split("/"));
-    const { stdout } = await this.bridge.exec(["sha256sum", "--", remote]);
+    const { stdout } = await this.bridge.exec(sha256Command(remote));
     const sha256 = stdout.trim().split(/\s+/)[0] ?? "";
     if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error(`Could not read the checksum of ${relative}.`);
     const sidecar = `${local}.sha256`;
