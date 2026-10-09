@@ -170,45 +170,10 @@ def _draw_annotations(
         drawn += 1
 
 
-def _render_view(
-    pts: np.ndarray,
-    tri: np.ndarray,
-    normals: np.ndarray,
-    camera: dict[str, tuple[float, float, float]],
-    width: int,
-    height: int,
-    base_colors: np.ndarray | None = None,
-) -> tuple[Image.Image, np.ndarray, dict[str, float | np.ndarray]]:
-    forward = np.asarray(_normalize(camera["forward"]), dtype=np.float64)
-    right = np.asarray(_normalize(camera["right"]), dtype=np.float64)
-    up = np.asarray(_normalize(camera["up"]), dtype=np.float64)
-
-    px = pts @ right
-    py = pts @ up
-    pz = pts @ forward
-
-    margin = max(12, int(min(width, height) * 0.06))
-    min_x, max_x = float(px.min()), float(px.max())
-    min_y, max_y = float(py.min()), float(py.max())
-    span_x = max(max_x - min_x, 1e-9)
-    span_y = max(max_y - min_y, 1e-9)
-    available_w = max(width - 2 * margin, 1)
-    available_h = max(height - 2 * margin, 1)
-    scale = min(available_w / span_x, available_h / span_y)
-    center_x = (min_x + max_x) / 2.0
-    center_y = (min_y + max_y) / 2.0
-    sx = ((px - center_x) * scale) + (width / 2.0)
-    # PIL rows grow downward.  Keep the declared camera up direction mapped
-    # to visual up instead of vertically mirroring every orthographic view.
-    sy = (height / 2.0) - ((py - center_y) * scale)
-
-    light = np.asarray((0.45, 0.35, 0.82), dtype=np.float64)
-    light = light / np.linalg.norm(light)
-    intensity = 0.46 + 0.54 * np.abs(normals @ light)
-    if base_colors is None:
-        base_colors = np.repeat(np.asarray([[207, 212, 220]], dtype=np.float64), tri.shape[0], axis=0)
-    colors = base_colors * intensity[:, None]
-
+def _rasterize_reference(
+    sx: np.ndarray, sy: np.ndarray, pz: np.ndarray, tri: np.ndarray, colors: np.ndarray, width: int, height: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """One triangle at a time. Kept as the definition of what ``_rasterize`` must produce."""
     z_buffer = np.full((height, width), -np.inf, dtype=np.float64)
     color_buffer = np.full((height, width, 3), 255.0, dtype=np.float64)
 
@@ -253,6 +218,136 @@ def _render_view(
         z_slice[candidate] = depth[candidate]
         color_slice = color_buffer[min_py : max_py + 1, min_px : max_px + 1, :]
         color_slice[candidate] = colors[i]
+
+    return z_buffer, color_buffer
+
+
+#: Triangles whose clipped bounding box is at most this many pixels wide and high go through the batched path.
+_BATCH_SIZES = (2, 3, 4, 6, 8, 12, 16, 24, 32)
+_BATCH_ELEMENTS = 1 << 22
+
+
+def _rasterize(
+    sx: np.ndarray, sy: np.ndarray, pz: np.ndarray, tri: np.ndarray, colors: np.ndarray, width: int, height: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Depth buffer and colour buffer of the triangles; the same pixels as ``_rasterize_reference``.
+
+    The reference loop made about 25 small numpy calls per triangle: with the 60 000 triangles of a large
+    assembly, seven views took 25 seconds, and every build renders them. Here triangles of similar size are
+    tested together, and the covered pixels are collected and resolved at once: a pixel takes the greatest depth,
+    and of equal depths the triangle that comes first, exactly what the loop's strict ``>`` gave.
+    """
+    z_buffer = np.full((height, width), -np.inf, dtype=np.float64)
+    color_buffer = np.full((height, width, 3), 255.0, dtype=np.float64)
+    count = tri.shape[0]
+    if count == 0:
+        return z_buffer, color_buffer
+    a, b, c = tri[:, 0], tri[:, 1], tri[:, 2]
+    x0, y0, x1, y1, x2, y2 = sx[a], sy[a], sx[b], sy[b], sx[c], sy[c]
+    min_px = np.maximum(0, np.floor(np.minimum(np.minimum(x0, x1), x2))).astype(np.int64)
+    max_px = np.minimum(width - 1, np.ceil(np.maximum(np.maximum(x0, x1), x2))).astype(np.int64)
+    min_py = np.maximum(0, np.floor(np.minimum(np.minimum(y0, y1), y2))).astype(np.int64)
+    max_py = np.minimum(height - 1, np.ceil(np.maximum(np.maximum(y0, y1), y2))).astype(np.int64)
+    area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0)
+    valid = (min_px <= max_px) & (min_py <= max_py) & (np.abs(area) >= 1e-9)
+    box = np.maximum(max_px - min_px, max_py - min_py) + 1
+    za, zb, zc = pz[a], pz[b], pz[c]
+
+    pixel_chunks: list[np.ndarray] = []
+    depth_chunks: list[np.ndarray] = []
+    index_chunks: list[np.ndarray] = []
+
+    def cover(ids: np.ndarray, size: int) -> None:
+        step = max(1, _BATCH_ELEMENTS // (size * size))
+        offsets = np.arange(size, dtype=np.int64)
+        for begin in range(0, ids.shape[0], step):
+            t = ids[begin : begin + step]
+            gx = (min_px[t][:, None, None] + offsets[None, None, :]).astype(np.float64)
+            gy = (min_py[t][:, None, None] + offsets[None, :, None]).astype(np.float64)
+            in_box = (gx <= max_px[t][:, None, None]) & (gy <= max_py[t][:, None, None])
+            X0, Y0, X1, Y1, X2, Y2 = (v[t][:, None, None] for v in (x0, y0, x1, y1, x2, y2))
+            w0 = (X1 - gx) * (Y2 - Y1) - (Y1 - gy) * (X2 - X1)
+            w1 = (X2 - gx) * (Y0 - Y2) - (Y2 - gy) * (X0 - X2)
+            w2 = (X0 - gx) * (Y1 - Y0) - (Y0 - gy) * (X1 - X0)
+            w_sum = w0 + w1 + w2
+            positive = (area[t] > 0)[:, None, None]
+            lowest = np.minimum(np.minimum(w0, w1), w2) >= -1e-9
+            highest = np.maximum(np.maximum(w0, w1), w2) <= 1e-9
+            inside = in_box & (np.abs(w_sum) > 1e-9) & np.where(positive, lowest, highest)
+            if not inside.any():
+                continue
+            with np.errstate(divide="ignore", invalid="ignore"):
+                depth = (w0 * za[t][:, None, None] + w1 * zb[t][:, None, None] + w2 * zc[t][:, None, None]) / w_sum
+            inside &= np.isfinite(depth)
+            ti, row, col = np.nonzero(inside)
+            pixel_chunks.append((min_py[t][ti] + row) * width + (min_px[t][ti] + col))
+            depth_chunks.append(depth[ti, row, col])
+            index_chunks.append(t[ti])
+
+    previous = 0
+    for size in _BATCH_SIZES:
+        ids = np.nonzero(valid & (box > previous) & (box <= size))[0]
+        previous = size
+        if ids.shape[0]:
+            cover(ids, size)
+    for i in np.nonzero(valid & (box > _BATCH_SIZES[-1]))[0]:
+        cover(np.asarray([i]), int(box[i]))
+
+    if not pixel_chunks:
+        return z_buffer, color_buffer
+    pixel = np.concatenate(pixel_chunks)
+    depth = np.concatenate(depth_chunks)
+    index = np.concatenate(index_chunks)
+    order = np.lexsort((index, -depth, pixel))
+    pixel, depth, index = pixel[order], depth[order], index[order]
+    first = np.ones(pixel.shape[0], dtype=bool)
+    first[1:] = pixel[1:] != pixel[:-1]
+    pixel, depth, index = pixel[first], depth[first], index[first]
+    z_buffer.reshape(-1)[pixel] = depth
+    color_buffer.reshape(-1, 3)[pixel] = colors[index]
+    return z_buffer, color_buffer
+
+
+def _render_view(
+    pts: np.ndarray,
+    tri: np.ndarray,
+    normals: np.ndarray,
+    camera: dict[str, tuple[float, float, float]],
+    width: int,
+    height: int,
+    base_colors: np.ndarray | None = None,
+) -> tuple[Image.Image, np.ndarray, dict[str, float | np.ndarray]]:
+    forward = np.asarray(_normalize(camera["forward"]), dtype=np.float64)
+    right = np.asarray(_normalize(camera["right"]), dtype=np.float64)
+    up = np.asarray(_normalize(camera["up"]), dtype=np.float64)
+
+    px = pts @ right
+    py = pts @ up
+    pz = pts @ forward
+
+    margin = max(12, int(min(width, height) * 0.06))
+    min_x, max_x = float(px.min()), float(px.max())
+    min_y, max_y = float(py.min()), float(py.max())
+    span_x = max(max_x - min_x, 1e-9)
+    span_y = max(max_y - min_y, 1e-9)
+    available_w = max(width - 2 * margin, 1)
+    available_h = max(height - 2 * margin, 1)
+    scale = min(available_w / span_x, available_h / span_y)
+    center_x = (min_x + max_x) / 2.0
+    center_y = (min_y + max_y) / 2.0
+    sx = ((px - center_x) * scale) + (width / 2.0)
+    # PIL rows grow downward.  Keep the declared camera up direction mapped
+    # to visual up instead of vertically mirroring every orthographic view.
+    sy = (height / 2.0) - ((py - center_y) * scale)
+
+    light = np.asarray((0.45, 0.35, 0.82), dtype=np.float64)
+    light = light / np.linalg.norm(light)
+    intensity = 0.46 + 0.54 * np.abs(normals @ light)
+    if base_colors is None:
+        base_colors = np.repeat(np.asarray([[207, 212, 220]], dtype=np.float64), tri.shape[0], axis=0)
+    colors = base_colors * intensity[:, None]
+
+    z_buffer, color_buffer = _rasterize(sx, sy, pz, tri, colors, width, height)
 
     image = Image.fromarray(np.clip(color_buffer, 0, 255).astype(np.uint8), "RGB")
     return image, z_buffer, {
