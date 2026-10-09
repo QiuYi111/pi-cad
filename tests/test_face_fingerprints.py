@@ -44,7 +44,7 @@ class FaceFingerprintTests(unittest.TestCase):
         result = match_faces(before, after, 50.0)
         changed = [before[i]["type"] for i in result["unmatchedBefore"]]
         self.assertIn("CYLINDER", changed)
-        self.assertIn(("CYLINDER"), [after[j]["type"] for j in result["unmatchedAfter"]])
+        self.assertIn("CYLINDER", [after[j]["type"] for j in result["unmatchedAfter"]])
         # Top and bottom faces lose area, so they change too; side faces do not.
         self.assertEqual(len(result["pairs"]), 4)
 

@@ -32,7 +32,6 @@ from test_part_backend import HAVE_FREECAD, Harness, plate  # noqa: E402
 
 if HAVE_FREECAD:
     from reify_freecad import queries  # noqa: E402
-    from reify_freecad.worker import Worker  # noqa: E402
 
 
 def _dfm_skip_reason() -> str | None:
@@ -151,8 +150,6 @@ class FixtureDfmTests(FixtureTestMixin, unittest.TestCase):
                             f"coverage must say {reason}")
 
     def check_geometry(self, harness: Harness, expect: dict[str, Any], clean: bool) -> None:
-        if not hasattr(Worker, "cmd_dfm"):
-            self.skipTest("the worker has no dfm command yet (geometry layer, WP4)")
         report = harness.call("dfm")
         geometry = report.get("geometry", report)
         analyzer = report.get("analyzer", geometry.get("analyzer"))

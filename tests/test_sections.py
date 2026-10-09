@@ -7,6 +7,7 @@ critical-section judgment.
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -14,17 +15,18 @@ import build123d as bd
 
 from cadctl.sections import scan_sections
 
-FIXTURES = Path(__file__).parent / "fixtures"
-
-
 class SectionScan(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        FIXTURES.mkdir(parents=True, exist_ok=True)
+        cls._tmp = tempfile.TemporaryDirectory()
         with bd.BuildPart() as p:
             bd.Box(40, 30, 12)
-        cls.box = FIXTURES / "section_box.step"
+        cls.box = Path(cls._tmp.name) / "section_box.step"
         bd.export_step(p.part, cls.box)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
 
     def test_exact_area_and_moments_for_a_box(self):
         result = scan_sections(self.box, axis="z", count=3)
@@ -82,9 +84,6 @@ class SectionScan(unittest.TestCase):
             self.assertNotIn(word, blob)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SectionAxesExact(unittest.TestCase):
     """Exact analytics for ALL three scan axes (0.8 review P0).
@@ -96,11 +95,15 @@ class SectionAxesExact(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        FIXTURES.mkdir(parents=True, exist_ok=True)
+        cls._tmp = tempfile.TemporaryDirectory()
         with bd.BuildPart() as p:
             bd.Box(40, 30, 12)  # x-extent 40, y-extent 30, z-extent 12
-        cls.box = FIXTURES / "section_axes_box.step"
+        cls.box = Path(cls._tmp.name) / "section_axes_box.step"
         bd.export_step(p.part, cls.box)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._tmp.cleanup()
 
     def _midsection(self, axis: str) -> dict:
         result = scan_sections(self.box, axis=axis, count=1)
@@ -147,3 +150,7 @@ class SectionAxesExact(unittest.TestCase):
         # Centroid y,z of the box section are 0 (box centered) but the
         # section POSITION is at the x bound.
         self.assertAlmostEqual(result["sections"][0]["position"], -20.0, places=6)
+
+
+if __name__ == "__main__":
+    unittest.main()
