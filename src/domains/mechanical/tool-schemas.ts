@@ -3,7 +3,7 @@ import { existsSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { Type } from "typebox";
 
-import type { CadRequirements, Route } from "../../shared/protocol.ts";
+import type { Route } from "../../shared/protocol.ts";
 
 export function okTool(text: string, details: unknown): AgentToolResult<unknown> {
   return { content: [{ type: "text", text }], details };
@@ -13,7 +13,7 @@ export function errTool(text: string, details?: unknown): AgentToolResult<unknow
   return { content: [{ type: "text", text }], details, isError: true };
 }
 
-export function validateInputDeclarations(record: CadRequirements, cwd: string): string | null {
+export function validateInputDeclarations(record: { inputs?: string[] }, cwd: string): string | null {
   for (const [index, input] of (record.inputs ?? []).entries()) {
     if (typeof input !== "string" || !input.trim()) return `requirements.inputs[${index}] must be a non-empty path`;
     if (!/\.(step|stp)$/i.test(input)) {
