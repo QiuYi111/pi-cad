@@ -3,9 +3,6 @@ import { cpSync, mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Legacy behavior tests are explicit v6 compatibility gates. Individual v7
-// tests call the v7 services directly or override this variable.
-process.env.PI_CAD_KERNEL ??= "v6";
 // Python subprocesses import the canonical Plan C skill directly from its
 // source tree. Test execution must never leave bytecode inside a packaged skill.
 process.env.PYTHONDONTWRITEBYTECODE ??= "1";
@@ -15,16 +12,12 @@ mkdirSync(testWorkflowRoot, { recursive: true });
 cpSync(new URL("../workflow-packages/mechanical/default.yaml", import.meta.url), join(testWorkflowRoot, "mechanical-default.yaml"));
 
 const jiti = createJiti(import.meta.url, { moduleCache: false });
-await jiti.import("./state-machine.test.ts", { default: true });
 await jiti.import("./bounded-files.test.ts", { default: true });
-await jiti.import("./prompt-fast-path.test.ts", { default: true });
 await jiti.import("./process-runner.test.ts", { default: true });
 await jiti.import("./linux-runtime-boundary.test.ts", { default: true });
 await jiti.import("./requirements-revision.test.ts", { default: true });
 await jiti.import("./route-compiler.test.ts", { default: true });
-await jiti.import("./schema-migration.test.ts", { default: true });
 await jiti.import("./interference-tool.test.ts", { default: true });
-await jiti.import("./reroute.test.ts", { default: true });
 await jiti.import("./analysis-model.test.ts", { default: true });
 await jiti.import("./extensions-smoke.test.ts", { default: true });
 await jiti.import("./registry-contract.test.ts", { default: true });
@@ -55,16 +48,8 @@ await jiti.import("./v7-rules-context.test.ts", { default: true });
 await jiti.import("./review-v7.test.ts", { default: true });
 await jiti.import("./observations-v7.test.ts", { default: true });
 await jiti.import("./harness-boundary.test.ts", { default: true });
-await jiti.import("./harness-v0.test.ts", { default: true });
-await jiti.import("./restore.test.ts", { default: true });
-await jiti.import("./policy.test.ts", { default: true });
-await jiti.import("./plugin-composition.test.ts", { default: true });
-await jiti.import("./workflows-full.test.ts", { default: true });
-await jiti.import("./harness-convert.test.ts", { default: true });
 await jiti.import("./public-tool-catalog.test.ts", { default: true });
 await jiti.import("./drawing-presentation-tool.test.ts", { default: true });
-await jiti.import("./task-lifecycle.test.ts", { default: true });
-await jiti.import("./commands-lifecycle.test.ts", { default: true });
 await jiti.import("./context-memory.test.ts", { default: true });
 await jiti.import("./experience.test.ts", { default: true });
 await import("./reify-cad-worker.test.mjs");
@@ -72,7 +57,6 @@ await import("./cadtestbench-metrics.test.mjs");
 await import("./cadtestbench-clarity-controls.test.mjs");
 await import("./cadtestbench-unit-normalization.test.mjs");
 await import("./cadtestbench-ambiguity-adjudication.test.mjs");
-await jiti.import("./golden-phase0.test.ts", { default: true });
 await jiti.import("./observations.test.ts", { default: true });
 await jiti.import("./probe-registry.test.ts", { default: true });
 await jiti.import("./cad-probe-tool.test.ts", { default: true });
@@ -87,7 +71,6 @@ await jiti.import("./part-ops-authorization.test.ts", { default: true });
 await jiti.import("./part-e2e.test.ts", { default: true });
 await jiti.import("./part-dfm.test.ts", { default: true });
 await jiti.import("./simulation-v2-protocol.test.ts", { default: true });
-await jiti.import("./simulation-v2-store.test.ts", { default: true });
 await jiti.import("./simulation-v2-runtime.test.ts", { default: true });
 await jiti.import("./simulation-v2-preflight.test.ts", { default: true });
 await jiti.import("./simulation-v2-spec04.test.ts", { default: true });
@@ -96,5 +79,4 @@ await jiti.import("./observation-index.test.ts", { default: true });
 await jiti.import("./agent-contract.test.ts", { default: true });
 await jiti.import("./no-source-agent-smoke.test.ts", { default: true });
 await jiti.import("./skill-system.test.ts", { default: true });
-await jiti.import("./final-review.test.ts", { default: true });
 await jiti.import("./product-evaluation.test.ts", { default: true });

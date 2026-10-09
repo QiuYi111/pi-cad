@@ -5,7 +5,6 @@ import { join } from "node:path";
 
 // Chaos suites are slow (~10 min) and run nightly via `npm run test:chaos`.
 // Environment setup mirrors tests/run-ts-tests.mjs.
-process.env.PI_CAD_KERNEL ??= "v6";
 process.env.PYTHONDONTWRITEBYTECODE ??= "1";
 process.env.PI_CAD_WORKFLOW_HOME = mkdtempSync(join(tmpdir(), "pi-cad-workflow-home-"));
 const testWorkflowRoot = join(process.env.PI_CAD_WORKFLOW_HOME, ".pi-cad", "workflows");

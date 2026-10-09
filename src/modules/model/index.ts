@@ -14,8 +14,6 @@ export {
 export {
   buildProposal,
   convertProposal,
-  finalizeCandidate,
-  finalizeConversion,
   type CandidateProposal,
   type ProposalResult,
 } from "./finalizer.ts";

@@ -17,7 +17,6 @@ import {
   phaseContract,
 } from "../src/domains/mechanical/phase-contract.ts";
 import { CAD_PHASES } from "../src/shared/protocol.ts";
-import { toolsForPhase } from "../src/core/policies.ts";
 
 test("contracts: every phase has a contract with at least one grant", () => {
   const contracts = allPhaseContracts();
@@ -31,21 +30,6 @@ test("contracts: tools compile without duplicates", () => {
   for (const contract of allPhaseContracts()) {
     const tools = contractTools(contract);
     assert.equal(new Set(tools).size, tools.length, `${contract.phase} duplicates`);
-  }
-});
-
-test("contracts: compiled tool sets equal the golden sets for every phase", () => {
-  // The pre-contract audit list contained every COGNITIVE inspection tool
-  // twice (COGNITIVE_TOOLS + CAPABILITY_TOOLS concatenation). Phase 7
-  // deduped it; every compiled SET must equal the golden SET (reroute
-  // attachment included, via toolsForPhase).
-  const golden = JSON.parse(
-    readFileSync(new URL("./fixtures/phase0-golden.json", import.meta.url), "utf8"),
-  ) as { toolsForPhase: Record<string, string[]> };
-  for (const [phase, tools] of Object.entries(golden.toolsForPhase)) {
-    const expected = new Set(toolsForPhase(phase as never));
-    for (const tool of tools) assert.ok(expected.has(tool), `${phase}: ${tool} missing from contract`);
-    for (const tool of expected) assert.ok(tools.includes(tool), `${phase}: ${tool} extra in contract`);
   }
 });
 

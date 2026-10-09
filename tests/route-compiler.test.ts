@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { compileWorkflow } from "../src/workflows/compiler.ts";
-import { rerouteIsAutonomous as rerouteIsAutonomousRef } from "../src/core/state-machine.ts";
 import { compiledSpec } from "../src/workflows/index.ts";
 import {
   isRoute,
@@ -17,53 +16,6 @@ const design = (
   structure: "part" | "assembly",
   maturity: "prototype" | "engineering" | "manufacturing" | "release",
 ): Route => ({ objective: "design", lineage, structure, maturity });
-
-test("compiler: analyze and convert match the 0.7 processes exactly", () => {
-  const analyze = compileWorkflow({ objective: "analyze" });
-  assert.equal(analyze.nextAfterRequirements, "baseline");
-  assert.deepEqual(analyze.sourcePhases, []);
-  assert.equal(analyze.candidateReviewPhase, "review");
-  assert.deepEqual(analyze.transitions, {
-    baseline: { baseline_understood: "investigate" },
-    investigate: { more_probe: "investigate", cause_understood: "explain" },
-    explain: { findings_delivered: "ready" },
-  });
-  assert.equal(analyze.requiresBaselineInput, true);
-  assert.equal(analyze.baselineEvidenceRequired, true);
-  assert.equal(analyze.updatesHeadOnAccept, false);
-
-  const convert = compileWorkflow({ objective: "convert" });
-  assert.equal(convert.nextAfterRequirements, "source_baseline");
-  assert.deepEqual(convert.sourcePhases, ["convert"]);
-  assert.equal(convert.candidateReviewPhase, "compare");
-  assert.deepEqual(convert.planNext, { transform_plan: "convert" });
-  assert.deepEqual(convert.transitions, {
-    source_baseline: { baseline_understood: "transform_plan" },
-    compare: { repair: "convert", accepted: "ready" },
-  });
-  assert.equal(convert.requiresBaselineInput, true);
-});
-
-test("compiler: legacy part matches the 0.7 modify process exactly", () => {
-  const legacyPart = compileWorkflow(design("legacy", "part", "engineering"));
-  assert.equal(legacyPart.nextAfterRequirements, "baseline");
-  assert.deepEqual(legacyPart.sourcePhases, ["modify"]);
-  assert.equal(legacyPart.candidateReviewPhase, "review");
-  assert.deepEqual(legacyPart.planNext, { plan: "modify" });
-  assert.deepEqual(legacyPart.acceptedPhases, ["review"]);
-  assert.deepEqual(legacyPart.acceptedEvidence({} as never), ["visual", "geometry", "compare"]);
-  assert.equal(legacyPart.requiresBaselineInput, true);
-  assert.equal(legacyPart.baselineEvidenceRequired, true);
-  assert.equal(legacyPart.updatesHeadOnAccept, true);
-  // Lineage obligations: dropping legacy would drop these, so the reroute
-  // can never be autonomous; frame context is confirmed in baseline.
-  assert.deepEqual(legacyPart.obligations, [
-    "lineage:baseline",
-    "lineage:continuity",
-    "record:frame_context",
-  ]);
-  assert.deepEqual(legacyPart.phaseRecords, { baseline: ["frame_context"] });
-});
 
 test("compiler: fast path — greenfield part is four phases with no concept exploration", () => {
   const fast = compileWorkflow(design("greenfield", "part", "engineering"));
@@ -212,31 +164,6 @@ test("obligations: maturity chain is cumulative per structure", () => {
   assert.ok(!greenfieldKeys.has("lineage:baseline"));
   assert.ok(!greenfieldKeys.has("record:frame_context"));
 });
-
-test("obligations: reroute monotonicity (part->assembly autonomous, downgrade not)", () => {
-  const partEng = design("greenfield", "part", "engineering");
-  const assemblyProto = design("greenfield", "assembly", "prototype");
-  // The rule: autonomous iff old obligation set ⊆ new one.
-  const subsetOf = (from: Route, to: Route) => {
-    const toKeys = obligationsOf(to);
-    return [...obligationsOf(from)].every((k) => toKeys.has(k));
-  };
-  // Obligation-only view: partEng -> assemblyProto grows obligations...
-  assert.ok(subsetOf(partEng, assemblyProto));
-  // ...but maturity also dropped, so the reroute is NOT autonomous — the
-  // reality floor never drops without user authority.
-  const { rerouteIsAutonomous } = await_import_reroute();
-  assert.ok(rerouteIsAutonomous(partEng, design("greenfield", "assembly", "engineering")));
-  assert.ok(!rerouteIsAutonomous(partEng, assemblyProto));
-  assert.ok(!rerouteIsAutonomous(design("greenfield", "assembly", "engineering"), design("greenfield", "assembly", "prototype")));
-  assert.ok(!rerouteIsAutonomous(assemblyProto, design("greenfield", "part", "prototype"))); // drops everything
-  assert.ok(!rerouteIsAutonomous(design("greenfield", "part", "release"), partEng)); // maturity downgrade
-});
-
-function await_import_reroute() {
-  // Local indirection over the state-machine import below.
-  return { rerouteIsAutonomous: rerouteIsAutonomousRef };
-}
 
 test("routeKey and isRoute structural validation", () => {
   assert.equal(routeKey({ objective: "analyze" }), "analyze");

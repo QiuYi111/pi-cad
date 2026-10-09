@@ -27,9 +27,7 @@ function fakePi() {
 
 test("public cad_route and record tools dispatch new work to v7 without creating v6 state", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-v7-extension-"));
-  const previous = process.env.PI_CAD_KERNEL;
   try {
-    process.env.PI_CAD_KERNEL = "v7";
     const pi = fakePi();
     for (const extension of [core, probe, geometry, drawing, simulation, presentation]) extension(pi);
     const context = { cwd, hasUI: false } as any;
@@ -46,8 +44,6 @@ test("public cad_route and record tools dispatch new work to v7 without creating
     assert.notEqual(loaded?.state.phase, "requirements");
     await assert.rejects(import("node:fs/promises").then(({ readFile }) => readFile(join(cwd, ".pi-cad", "project.json"))), /ENOENT/);
   } finally {
-    if (previous === undefined) delete process.env.PI_CAD_KERNEL;
-    else process.env.PI_CAD_KERNEL = previous;
     await rm(cwd, { recursive: true, force: true });
   }
 });

@@ -19,8 +19,7 @@ try {
   } as any);
 
   const probe = tools.get("cad_probe");
-  const recall = tools.get("cad_recall_observation");
-  if (!probe || !recall) throw new Error("probe tools not registered");
+  if (!probe) throw new Error("probe tools not registered");
 
   await test("cad_probe without a target returns isError=true with the same failure text", async () => {
     const result = await probe.execute("e1", { preset: "geometry" }, undefined, undefined, { cwd });
@@ -40,11 +39,6 @@ try {
     assert.match(result.content[0].text, /mutually exclusive/);
   });
 
-  await test("cad_recall_observation without an active workflow returns isError=true", async () => {
-    const result = await recall.execute("e3", {}, undefined, undefined, { cwd });
-    assert.equal(result.isError, true);
-    assert.equal(result.content[0].text, "cad_recall_observation failed: no active Pi-CAD workflow");
-  });
 } finally {
   rmSync(cwd, { recursive: true, force: true });
 }

@@ -1,24 +1,34 @@
-import { CadProjectStore } from "../shared/store.ts";
-import { resolveActiveRun } from "./run-scope.ts";
+import { readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
-export type KernelEngine = "v6" | "v7";
+export type KernelEngine = "v7";
 
-let warnedV6Fallback = false;
+const TERMINAL_V6_STATUSES = ["done", "aborted", "blocked_external", "budget_exhausted"];
 
 /**
- * Active runs win over defaults. This is the no-migration compatibility
- * rule: an active v6 run keeps its engine even after v7 becomes the default.
+ * The v6 kernel was removed; v7 (Harness Kernel) is the only engine.
+ * A project whose v6 run is still unfinished is refused, not migrated: the
+ * owner must move or delete the old run state to start fresh.
+ * @deprecated Engine selection is gone; callers should use the v7 services directly. The lead deletes this after merge.
  */
-export async function selectKernelEngine(cwd: string, configured = process.env.PI_CAD_KERNEL): Promise<KernelEngine> {
-  if (configured !== undefined && configured !== "v6" && configured !== "v7") throw new Error(`PI_CAD_KERNEL must be v6 or v7, got ${configured}`);
-  if (configured === "v6" && !warnedV6Fallback) {
-    warnedV6Fallback = true;
-    process.emitWarning("PI_CAD_KERNEL=v6 is a deprecated operational fallback; new work defaults to Harness Kernel v7.", { code: "PI_CAD_V6_DEPRECATED" });
+export async function selectKernelEngine(cwd: string): Promise<KernelEngine> {
+  const piCad = join(resolve(cwd), ".pi-cad");
+  const pointer = await readFile(join(piCad, "project.json"), "utf-8")
+    .then((raw) => JSON.parse(raw) as { schemaVersion?: number; currentRunId?: string | null })
+    .catch(() => null);
+  // Every legacy layout (schema 3-6) is refused while its run is unfinished, not silently ignored.
+  if (pointer && typeof pointer.schemaVersion === "number" && pointer.schemaVersion >= 3 && pointer.schemaVersion <= 6 && pointer.currentRunId) {
+    const runId = pointer.currentRunId;
+    const status = await readFile(join(piCad, "runs", runId, "state.json"), "utf-8")
+      .then((raw) => (JSON.parse(raw) as { status?: string }).status)
+      .catch(() => undefined);
+    if (status !== undefined && !TERMINAL_V6_STATUSES.includes(status)) {
+      throw new Error(
+        `Pi-CAD v6 kernel was removed and this project has an unfinished legacy v${pointer.schemaVersion} run (${runId}, status=${status}). ` +
+          `Start fresh by moving or deleting the old run state: mv .pi-cad/project.json .pi-cad/project.json.v6-old ` +
+          `(and optionally .pi-cad/runs/${runId}), then retry.`,
+      );
+    }
   }
-  const v7 = await resolveActiveRun(cwd).catch(() => null);
-  if (v7 && !["done", "aborted", "blocked_external", "budget_exhausted"].includes(v7.state.status)) return "v7";
-  const v6State = await new CadProjectStore(cwd).load().catch(() => null);
-  if (v6State && !["done", "aborted", "blocked_external", "budget_exhausted"].includes(v6State.status)) return "v6";
-  // Explicit fallback applies only when no active run would be orphaned.
-  return configured ?? "v7";
+  return "v7";
 }
