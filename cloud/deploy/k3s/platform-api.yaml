@@ -1,8 +1,11 @@
 # Platform API (plan section 5) in reify-system.
 #   port 8080  public API. Reached only through Caddy (/v1, /invite, /reset).
+#              Service platform-api, which Caddy uses.
 #   port 8081  internal API (/internal/*). Reached only from workspace pods.
-#              Caddy never routes to it, and its Service has no external path.
-# The image name is a placeholder until the platform-api build exists.
+#              Service platform-api-internal, which only the reify-ws egress policy allows.
+#              Caddy has no route to it, and the public Service does not expose it.
+# The image tag is set in kustomization.yaml (images: reify/platform-api).
+# Every variable that src/config.ts reads is listed here or in the Secret (secret.template.yaml).
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -23,14 +26,25 @@ metadata:
 data:
   PORT: "8080"
   INTERNAL_PORT: "8081"
+  # Caddy is the only proxy in front of the API. Its X-Forwarded-For carries the client address (plan 5.1).
+  TRUST_PROXY: "true"
   MAX_ACTIVE_WORKSPACES: "6"
   WORKSPACE_NAMESPACE: "reify-ws"
-  # Placeholder. Replace with the pi-cad image tag from build.sh (for example reify-workspace:<commit>).
+  # Must match the tag of the image that cloud/platform-api/build.sh imported (see cloud/deploy/README.md).
   WORKSPACE_IMAGE: "reify-workspace:REPLACE_WITH_IMAGE_TAG"
-  # Placeholder. Replace with the Windows host address that mihomo listens on, on port 7890.
+  # Same file as the image copies to this path (Dockerfile). Rendered once per start by the controller.
+  WORKSPACE_TEMPLATE_PATH: "/app/cloud/deploy/k3s/workspace-template.yaml"
+  # Set by verify-runtime.sh (plan 0.5). RuntimeDefault and "true" are the defaults that passed the plan.
+  WORKSPACE_SECCOMP_TYPE: "RuntimeDefault"
+  WORKSPACE_HOST_USERS: "true"
+  # Placeholder. The Windows host address that mihomo listens on, port 7890, without credentials.
+  # The same address must appear in reify-ws-policy.yaml (ipBlock).
   HTTPS_PROXY_FOR_WORKSPACES: "http://REPLACE_WITH_WINDOWS_HOST_IP:7890"
-  # Used by workspace gateways for activity reports. Cluster-internal only.
-  PLATFORM_INTERNAL_URL: "http://platform-api.reify-system.svc.cluster.local:8081"
+  # Gateway address pattern. {name} is the workspace k8s name, the Service name in reify-ws.
+  GATEWAY_URL_PATTERN: "ws://{name}.reify-ws.svc:7000/"
+  # Base URL of the internal API. Workspaces report activity here (ACTIVITY_URL is built from it).
+  # Cluster-internal only, and the host is the internal Service, not the public one.
+  PLATFORM_INTERNAL_URL: "http://platform-api-internal.reify-system.svc.cluster.local:8081"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,7 +69,7 @@ spec:
         app.kubernetes.io/part-of: reify
     spec:
       serviceAccountName: platform-api
-      # The controller needs the API token to manage workspaces in reify-ws.
+      # The controller needs the API token to manage workspaces in reify-ws (platform-api-rbac.yaml).
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
@@ -65,8 +79,13 @@ spec:
           type: RuntimeDefault
       containers:
         - name: platform-api
+          # Replaced through kustomization.yaml (images). Built by cloud/platform-api/build.sh.
           image: reify/platform-api:REPLACE_WITH_TAG
           imagePullPolicy: IfNotPresent
+          env:
+            # tsx writes its compile cache to the temp directory. The root filesystem is read-only.
+            - name: TMPDIR
+              value: /tmp
           ports:
             - name: http
               containerPort: 8080
@@ -100,7 +119,14 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
 ---
+# Public Service. Caddy forwards /v1, /invite and /reset here. It exposes no internal port.
 apiVersion: v1
 kind: Service
 metadata:
@@ -117,6 +143,21 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+---
+# Internal Service. Only workspace pods reach it, through workspace-egress-allowlist (reify-ws-policy.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-api-internal
+  namespace: reify-system
+  labels:
+    app.kubernetes.io/name: platform-api
+    app.kubernetes.io/part-of: reify
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: platform-api
+  ports:
     - name: internal
       port: 8081
       targetPort: internal

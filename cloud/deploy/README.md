@@ -36,13 +36,18 @@ sudo bash cloud/deploy/wsl/install-k3s.sh
 
 按 `cloud/deploy/wsl/reify-autostart.md` 创建 Windows 计划任务。
 
-## 4. 构建并导入工作区镜像
+## 4. 构建并导入镜像
+
+两个镜像都用同一个 pi-cad 提交构建。先确认工作区是干净的，再依次运行：
 
 ```bash
 PRIME_AGENT_REF=<prime-agent 的标签或提交> cloud/image/build.sh --import
+cloud/platform-api/build.sh
 ```
 
-记下输出的镜像标签，例如 `reify-workspace:<提交号>`。
+- 第一条构建工作区镜像，输出 `reify-workspace:<提交号>`。
+- 第二条构建平台 API 镜像，输出 `reify/platform-api:<提交号>`，并导入 k3s。
+- 记下两个标签。第 7 步要用。
 
 ## 5. 运行 0.5 验证
 
@@ -53,11 +58,11 @@ bash cloud/deploy/wsl/verify-runtime.sh
 ```
 
 脚本会写出 `cloud/deploy/wsl/VERIFY.md`。
-按结果选择 seccomp 和 hostUsers：
+按结果选择 seccomp 和 hostUsers。第 7 步要把结果填入 `platform-api.yaml`：
 
-- 模式 A 成功：`SECCOMP_TYPE=RuntimeDefault`，`HOST_USERS=true`。
-- 只有模式 B 成功：`SECCOMP_TYPE=Unconfined`，`HOST_USERS=true`。
-- 只有模式 C 成功：`SECCOMP_TYPE=RuntimeDefault`，`HOST_USERS=false`。
+- 模式 A 成功：`WORKSPACE_SECCOMP_TYPE=RuntimeDefault`，`WORKSPACE_HOST_USERS=true`。
+- 只有模式 B 成功：`WORKSPACE_SECCOMP_TYPE=Unconfined`，`WORKSPACE_HOST_USERS=true`。
+- 只有模式 C 成功：`WORKSPACE_SECCOMP_TYPE=RuntimeDefault`，`WORKSPACE_HOST_USERS=false`。
 
 三种模式都失败：停止部署。把结果报告给负责人。
 
@@ -69,61 +74,58 @@ bash cloud/deploy/wsl/verify-runtime.sh
 
 完成后，把 `VERIFY.md` 补充完整，并提交到仓库。
 
-## 6. 密钥（一次性）
+## 6. 生成密钥（一次性）
 
-密钥文件放在仓库外。不要提交。
+密钥文件必须放在仓库外。脚本会拒绝写入仓库。
 
-1. 生成 ES256 密钥对：
-
-   ```bash
-   openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out jwt-private.pem
-   openssl ec -in jwt-private.pem -pubout -out jwt-public.pem
-   ```
-
-2. 生成数据库密码：
+1. 运行脚本。第一个参数是仓库外的输出路径，第二个参数是公开地址（第 8 节的 Funnel 地址）：
 
    ```bash
-   openssl rand -hex 16
+   cloud/deploy/k3s/make-secrets.sh /root/reify-secrets.yaml https://<机器名>.<tailnet>.ts.net > /root/reify-gateway-pubkey.yaml
    ```
 
-3. 复制 `cloud/deploy/k3s/secret.template.yaml` 到仓库外，例如 `/root/reify-secrets.yaml`。
-4. 把占位值替换为真实值。`JWT_PRIVATE_KEY` 填入 `jwt-private.pem` 的内容。
-5. 应用该文件：`sudo k3s kubectl apply -f /root/reify-secrets.yaml`。
-6. 删除 `/root/reify-secrets.yaml`。
-7. 把 `jwt-private.pem` 放到备份盘或密码管理器。然后从工作目录删除。
-8. 创建公钥 ConfigMap（工作区网关使用它）：
+   脚本会生成：
+   - 用户令牌密钥 `JWT_PRIVATE_KEY`（ES256）。
+   - 网关令牌密钥 `GATEWAY_PRIVATE_KEY`（ES256，第二对，不是同一个）。
+   - 随机数据库密码。它同时写入 `POSTGRES_PASSWORD` 和 `DATABASE_URL`。
 
-   ```bash
-   sudo k3s kubectl -n reify-ws create configmap reify-gateway-pubkey \
-     --from-file=gateway-public-key.pem=jwt-public.pem --dry-run=client -o yaml \
-     | sudo k3s kubectl apply -f -
-   ```
-
-   这一步要在 `reify-ws` 命名空间存在后执行，即第 7 步之后。
+   `/root/reify-gateway-pubkey.yaml` 是 ConfigMap `reify-gateway-pubkey`，只含网关的公钥。
+   它不是 JWT 的公钥。
+2. 把 `/root/reify-secrets.yaml` 备份到备份盘或密码管理器。文件里有私钥和数据库密码。
+3. 脚本不会覆盖已有文件。要重新生成，先删除旧文件。改用新密钥意味着所有用户要重新登录，网关公钥也要重新应用。
 
 ## 7. 应用 K8s 清单
 
-1. 替换以下占位值：
-   - `cloud/deploy/k3s/platform-api.yaml` 里的 `WORKSPACE_IMAGE`、`HTTPS_PROXY_FOR_WORKSPACES`、镜像标签。
-   - `cloud/deploy/k3s/reify-ws-policy.yaml` 里的代理 CIDR（`203.0.113.10/32`）。
-
-   这些值会被提交到仓库。若不希望这样，请使用 kustomize overlay。
-2. 应用：
+1. 替换占位值（这些值会提交到仓库；若不希望这样，请用 kustomize overlay）：
+   - `cloud/deploy/k3s/kustomization.yaml` 的 `images` 里 `reify/platform-api` 的 `newTag`：填第 4 节输出的提交号（标签里冒号后面的部分）。
+   - `cloud/deploy/k3s/platform-api.yaml` 的 ConfigMap `platform-api-config`：
+     - `WORKSPACE_IMAGE`：`reify-workspace:<提交号>`。
+     - `HTTPS_PROXY_FOR_WORKSPACES`：`http://<Windows 主机 IP>:7890`（不含凭据）。
+     - `WORKSPACE_SECCOMP_TYPE`、`WORKSPACE_HOST_USERS`：第 5 节的结果。
+   - `cloud/deploy/k3s/reify-ws-policy.yaml` 的代理 CIDR（`203.0.113.10/32`）：改为 `<Windows 主机 IP>/32`，与上一项是同一个地址。不改的话，工作区访问不到模型（默认拒绝）。
+2. 按这个顺序应用。每一步都要成功再进行下一步：
 
    ```bash
+   sudo k3s kubectl apply -f cloud/deploy/k3s/namespaces.yaml
+   sudo k3s kubectl apply -f /root/reify-secrets.yaml
+   sudo k3s kubectl apply -f /root/reify-gateway-pubkey.yaml
    sudo k3s kubectl apply -k cloud/deploy/k3s
    ```
 
-3. 检查：
+   - 第 1 步创建两个命名空间。第 2 步创建密钥。第 3 步在 `reify-ws` 中创建公钥 ConfigMap。第 4 步应用其余清单。
+   - 第 4 步之前，平台 API 会因缺少密钥而不能启动。这是正常的。第 4 步之后它会自动启动。
+3. 删除 `/root/reify-secrets.yaml`。确认备份已存好后再删。
+4. 检查：
 
    ```bash
    sudo k3s kubectl -n reify-system get pods
-   sudo k3s kubectl -n reify-ws get resourcequota,networkpolicy
+   sudo k3s kubectl -n reify-system logs deploy/platform-api | head -30
+   sudo k3s kubectl -n reify-ws get role,rolebinding,resourcequota,networkpolicy
    ```
 
-4. 确认 `postgres-0` 为 Running 和 Ready。
-
-平台 API 镜像还没有。`platform-api` 会一直处于 ImagePullBackOff，直到镜像导入。
+   - `postgres-0` 应为 Running 和 Ready。
+   - 平台 API 的日志应先显示迁移（`applied: ...` 或 `up to date`），再显示服务器启动。
+   - 如果 `platform-api` 显示 ImagePullBackOff，检查第 4 节的导入，以及 `kustomization.yaml` 里的标签。
 
 ## 8. 公开入口（Funnel）
 
@@ -227,6 +229,9 @@ bash cloud/deploy/wsl/verify-runtime.sh
 | `cloud/deploy/k3s/` | K8s 清单（`kubectl apply -k`） |
 | `cloud/deploy/k3s/workspace-template.yaml` | 每个用户的工作区模板（由控制器渲染） |
 | `cloud/deploy/k3s/secret.template.yaml` | 密钥模板（不含真实值） |
+| `cloud/platform-api/Dockerfile` | 平台 API 镜像 |
+| `cloud/platform-api/build.sh` | 构建并导入平台 API 镜像 |
+| `cloud/deploy/k3s/make-secrets.sh` | 生成密钥和公钥 ConfigMap（输出到仓库外） |
 | `cloud/deploy/wsl/` | WSL 配置、k3s 安装、验证、Funnel、自启动 |
 | `cloud/deploy/backup/` | 备份、恢复、cron 示例 |
 
@@ -243,4 +248,4 @@ bash cloud/deploy/wsl/verify-runtime.sh
 9. **镜像不含 simulation 和 Blender。** 镜像用 `PI_CAD_BASE_RUNTIME=1` 构建。阶段 1 不做这两项。
 10. **脚本未在真实集群上运行。** `backup.sh`、`restore.sh`、`install-k3s.sh` 只做了语法检查。请在 compute 上先做干跑。
 11. **机器外备份。** 阶段 1 末尾再做。
-12. **平台 API 镜像和 SQL 迁移。** 不在本次范围内。
+12. **平台 API 镜像。** 由 `cloud/platform-api/build.sh` 构建。容器启动时先运行迁移，再启动服务。

@@ -25,6 +25,8 @@ export interface Config {
   startTimeoutMs: number; // 5 min
   shutdownWaitMs: number; // 30 s
   bridgeTouchMs: number; // 30 s: at most one activity write per workspace per window
+  trashRetentionMs: number; // 30 days: .trash entries older than this are deleted (plan 5.2)
+  trashSweepMs: number; // 24 h: how often a running workspace is swept
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -50,6 +52,8 @@ export const DEFAULT_CONFIG: Config = {
   startTimeoutMs: 5 * 60_000,
   shutdownWaitMs: 30_000,
   bridgeTouchMs: 30_000,
+  trashRetentionMs: 30 * 24 * 60 * 60_000,
+  trashSweepMs: 24 * 60 * 60_000,
 };
 
 function readPem(env: NodeJS.ProcessEnv, name: string): string | undefined {

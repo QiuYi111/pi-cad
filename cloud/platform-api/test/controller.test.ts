@@ -4,8 +4,10 @@ import { createController } from '../src/workspace/controller.js';
 import type { UserEvent } from '../src/workspace/events.js';
 import { bearer, get, makeEnv, PASSWORD, post, signUp, type Env } from './helpers/env.js';
 
-const MIN = 60_000;
 const SEC = 1000;
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 
 type SignedUp = Awaited<ReturnType<typeof signUp>>;
 
@@ -255,5 +257,68 @@ describe('workspace controller (plan 5.4)', () => {
     expect((await rowOf(alice.userId)).state).toBe('starting');
     expect(env.gateway.shutdowns).toEqual([]);
     expect((await post(env, '/v1/workspace/stop', {}, bearer(alice.accessToken))).statusCode).toBe(200);
+  });
+
+  it('a reconcile error is written to last_error, shown to the user, and cleared by the next clean pass', async () => {
+    await startAs(alice);
+    await tick();
+    env.k8s.fail = true;
+    await tick();
+    expect((await rowOf(alice.userId)).last_error).toBe('fake k8s failure');
+    expect((await get(env, '/v1/workspace', bearer(alice.accessToken))).json().lastError).toBe('fake k8s failure');
+    expect(logged.some((l) => l.includes(`reconcile ${alice.k8sName}`))).toBe(true);
+    logged.length = 0; // expected, checked above
+
+    env.k8s.fail = false;
+    await tick();
+    expect((await rowOf(alice.userId)).last_error).toBeNull();
+  });
+
+  it('a start timeout keeps its reason on later ticks, even after an earlier reconcile error', async () => {
+    await startAs(alice);
+    await tick();
+    env.k8s.fail = true;
+    await tick(); // leaves last_error set
+    env.k8s.fail = false;
+    logged.length = 0; // expected, checked above
+
+    env.clock.advance(5 * MIN + SEC);
+    await tick();
+    expect(await rowOf(alice.userId)).toMatchObject({ state: 'failed', desired: 'stopped' });
+    expect((await rowOf(alice.userId)).last_error).toContain('5 minutes');
+    await tick();
+    expect((await rowOf(alice.userId)).last_error).toContain('5 minutes');
+  });
+
+  it('daily: a running workspace purges .trash entries older than 30 days, at most once a day', async () => {
+    // Idle timers are pushed out of reach so the workspace stays running for two days.
+    const e = await makeEnv({ idleWarnMs: 1000 * DAY, idleReclaimMs: 1000 * DAY });
+    try {
+      const u = await signUp(e, 'trash@example.com');
+      e.fs.purged = 2;
+      await startAs(u, e);
+      await tick(e);
+      makeReady(u, e);
+      await tick(e);
+      expect(e.fs.purges).toEqual([{ name: u.k8sName, cutoff: new Date(e.clock.now().getTime() - 30 * DAY) }]);
+
+      await tick(e);
+      expect(e.fs.purges).toHaveLength(1);
+      e.clock.advance(23 * HOUR);
+      await tick(e);
+      expect(e.fs.purges).toHaveLength(1);
+      e.clock.advance(HOUR);
+      await tick(e);
+      expect(e.fs.purges).toHaveLength(2);
+      expect(logged).toEqual([]);
+    } finally {
+      await e.stop();
+    }
+  });
+
+  it('a stopped workspace is not swept', async () => {
+    await tick();
+    expect((await rowOf(alice.userId)).state).toBe('stopped');
+    expect(env.fs.purges).toEqual([]);
   });
 });

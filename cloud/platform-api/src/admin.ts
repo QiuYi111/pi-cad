@@ -178,7 +178,7 @@ export async function stopWorkspaceByEmail(db: Db, now: Date, emailIn: string): 
 // Plan 8.6 status without CPU and memory. Those would need the metrics API from the admin machine (not wired here).
 export async function statusReport(db: Db, now: Date) {
   const since = new Date(now.getTime() - 24 * HOUR);
-  const [active, counts, errors, queued] = await Promise.all([
+  const [active, counts, errors, queued, failing] = await Promise.all([
     db.query(
       `select u.email, w.state, w.desired, w.last_activity_at from workspaces w join users u on u.id = w.user_id
         where w.desired = 'running' or w.state in ('starting','running') order by w.last_activity_at desc nulls last`,
@@ -186,11 +186,17 @@ export async function statusReport(db: Db, now: Date) {
     db.query('select state, count(*)::int n from workspaces group by state order by state'),
     db.query("select count(*)::int n from events where kind = 'error' and at >= $1", [since]),
     db.query('select count(*)::int n from workspace_queue'),
+    db.query(
+      `select u.email, w.state, w.last_error from workspaces w join users u on u.id = w.user_id
+        where w.last_error is not null order by u.email`,
+    ),
   ]);
   return {
     active: active.rows.map((x) => ({ email: x.email as string, state: x.state as string, lastActivityAt: x.last_activity_at as Date | null })),
     countsByState: Object.fromEntries(counts.rows.map((x) => [x.state as string, x.n as number])),
     errorEventsLast24h: errors.rows[0].n as number,
     queued: queued.rows[0].n as number,
+    // Workspaces whose last reconcile failed or timed out. Cleared by the next clean pass.
+    withErrors: failing.rows.map((x) => ({ email: x.email as string, state: x.state as string, lastError: x.last_error as string })),
   };
 }
