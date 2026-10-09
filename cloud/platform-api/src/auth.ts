@@ -165,17 +165,20 @@ export async function refresh(d: Deps, b: { refreshToken?: unknown }) {
   const now = d.clock.now();
   const out = await withTx(d.db, async (c) => {
     const r = (
-      await c.query<{ id: string; user_id: string; token_hash: Buffer; device_label: string | null; expires_at: Date; revoked_at: Date | null }>(
-        'select id, user_id, token_hash, device_label, expires_at, revoked_at from refresh_tokens where token_hash = $1 for update',
+      await c.query<{ id: string; user_id: string; token_hash: Buffer; device_label: string | null; expires_at: Date; revoked_at: Date | null; revoked_reason: string | null }>(
+        'select id, user_id, token_hash, device_label, expires_at, revoked_at, revoked_reason from refresh_tokens where token_hash = $1 for update',
         [h],
       )
     ).rows[0];
     if (!r || !safeEqual(r.token_hash, h)) return { err: 'invalid' as const };
     if (r.revoked_at) {
-      // Reuse of a rotated or revoked token: assume theft, revoke everything for the user. Returns (not throws) so this commits.
-      await c.query('update refresh_tokens set revoked_at = $2 where user_id = $1 and revoked_at is null', [r.user_id, now]);
-      await recordEvent(c, { kind: 'refresh_reuse', at: now, userId: r.user_id, detail: { tokenId: r.id } });
-      return { err: 'reuse' as const };
+      // Only a rotated token presented again means theft: revoke everything for the user. Returns (not throws) so this commits.
+      // Tokens revoked for other reasons (logout, password change, reset, disabled) just get 401.
+      if (r.revoked_reason === 'rotated') {
+        await c.query('update refresh_tokens set revoked_at = $2 where user_id = $1 and revoked_at is null', [r.user_id, now]);
+        await recordEvent(c, { kind: 'refresh_reuse', at: now, userId: r.user_id, detail: { tokenId: r.id } });
+      }
+      return { err: 'invalid' as const };
     }
     if (r.expires_at.getTime() <= now.getTime()) return { err: 'invalid' as const };
     const u = (await c.query<{ id: string; email: string; display_name: string | null; status: string }>(
@@ -183,7 +186,7 @@ export async function refresh(d: Deps, b: { refreshToken?: unknown }) {
     if (!u || u.status !== 'active') return { err: 'invalid' as const };
 
     const next = await insertRefresh(c, d, r.user_id, r.device_label, now);
-    await c.query('update refresh_tokens set revoked_at = $2, replaced_by = $3 where id = $1', [r.id, now, next.id]);
+    await c.query("update refresh_tokens set revoked_at = $2, revoked_reason = 'rotated', replaced_by = $3 where id = $1", [r.id, now, next.id]);
     return { ok: true as const, user: { id: u.id, email: u.email, displayName: u.display_name }, next: next.token };
   });
   if ('err' in out) throw invalidRefresh();
@@ -193,7 +196,7 @@ export async function refresh(d: Deps, b: { refreshToken?: unknown }) {
 
 export async function logout(d: Deps, b: { refreshToken?: unknown }) {
   if (!TOKEN_RE.test(String(b.refreshToken ?? ''))) return; // unknown token: nothing to revoke, no oracle
-  await d.db.query('update refresh_tokens set revoked_at = $2 where token_hash = $1 and revoked_at is null', [
+  await d.db.query("update refresh_tokens set revoked_at = $2, revoked_reason = 'logout' where token_hash = $1 and revoked_at is null", [
     sha256(b.refreshToken as string),
     d.clock.now(),
   ]);
@@ -220,7 +223,7 @@ export async function changePassword(
   await withTx(d.db, async (c) => {
     await c.query('update password_credentials set password_hash = $2, updated_at = $3 where user_id = $1', [userId, h, now]);
     await c.query(
-      'update refresh_tokens set revoked_at = $2 where user_id = $1 and revoked_at is null and ($3::bytea is null or token_hash <> $3)',
+      "update refresh_tokens set revoked_at = $2, revoked_reason = 'password_change' where user_id = $1 and revoked_at is null and ($3::bytea is null or token_hash <> $3)",
       [userId, now, keep],
     );
     await recordEvent(c, { kind: 'password_change', at: now, userId });
@@ -248,7 +251,7 @@ export async function resetPassword(d: Deps, b: { token?: unknown; newPassword?:
        on conflict (user_id) do update set password_hash = excluded.password_hash, updated_at = excluded.updated_at`,
       [r.user_id, pwHash, now],
     );
-    await c.query('update refresh_tokens set revoked_at = $2 where user_id = $1 and revoked_at is null', [r.user_id, now]);
+    await c.query("update refresh_tokens set revoked_at = $2, revoked_reason = 'reset' where user_id = $1 and revoked_at is null", [r.user_id, now]);
     await recordEvent(c, { kind: 'password_reset', at: now, userId: r.user_id });
   });
 }

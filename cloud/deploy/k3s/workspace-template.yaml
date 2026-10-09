@@ -11,6 +11,8 @@
 #   ${HOST_USERS}                   true or false. Chosen by verify-runtime.sh (plan 0.5).
 #   ${HTTPS_PROXY_FOR_WORKSPACES}   http://<windows-host>:7890 (no credentials)
 #   ${PLATFORM_INTERNAL_URL}        http://platform-api.reify-system.svc.cluster.local:8081
+#   ${ACTIVITY_URL}                 ${PLATFORM_INTERNAL_URL}/internal/workspaces/<WORKSPACE_ID>/activity
+#   ${ACTIVITY_TOKEN}               per-workspace random token, plaintext (the database keeps only its sha256)
 #
 # Values must be plain YAML scalars after substitution. Do not add quotes around placeholders.
 # The PVC is ws-<id>-data (local-path, 50Gi). It survives stop and start.
@@ -87,6 +89,10 @@ spec:
               value: ${HTTPS_PROXY_FOR_WORKSPACES}
             - name: REIFY_PLATFORM_INTERNAL_URL
               value: ${PLATFORM_INTERNAL_URL}
+            - name: REIFY_ACTIVITY_URL
+              value: ${ACTIVITY_URL}
+            - name: REIFY_ACTIVITY_TOKEN
+              value: ${ACTIVITY_TOKEN}
             - name: REIFY_GATEWAY_PUBKEY
               valueFrom:
                 configMapKeyRef:
