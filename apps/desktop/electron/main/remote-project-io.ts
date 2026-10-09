@@ -22,6 +22,9 @@ const q = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
  * still matches the sidecar `<file>.sha256`.
  */
 export class RemoteProjectIO implements ProjectIO {
+  /** Spool polling goes through the gateway, so it runs at most every two seconds (plan §9.6). */
+  readonly spoolPollMs = 2_000;
+
   constructor(private readonly bridge: RemoteProjectBridge, readonly root: string, private readonly options: RemoteProjectIOOptions) {}
 
   private abs(relative: string): string {

@@ -183,8 +183,6 @@ export class RemoteBridge implements RuntimeBridge {
     const [command] = args;
     if (!command) throw new Error("Runtime command is empty.");
     const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
-    const wire = this.withProjectEnvironment(args);
-    const wrapped = wire !== args;
     const ch = this.allocateChannel();
     return new Promise((resolve, reject) => {
       const op: Operation = {
@@ -197,10 +195,9 @@ export class RemoteBridge implements RuntimeBridge {
           if (msg.code === 0) resolve({ stdout: msg.stdout, stderr: msg.stderr });
           else reject(execFailure(command, msg.stdout, msg.stderr, msg.code));
         },
-        // The gateway names the command it ran. With the environment wrapper that is `env`.
         serverError: (message) => {
           this.release(op);
-          reject(new Error(wrapped && message.startsWith("env ") ? `${command}${message.slice(3)}` : message));
+          reject(new Error(message));
         },
         fail: (error) => {
           this.release(op);
@@ -212,7 +209,7 @@ export class RemoteBridge implements RuntimeBridge {
       op.timer = timer;
       this.register(op);
       this.transmit({
-        data: JSON.stringify({ type: "exec", ch, args: wire, input: options.input, timeoutMs: timeout }),
+        data: JSON.stringify({ type: "exec", ch, args, input: options.input, timeoutMs: timeout, env: this.projectEnvironment() }),
         skip: () => !this.channels.has(ch),
         onSent: () => { op.sent = true; },
       });
@@ -730,13 +727,6 @@ export class RemoteBridge implements RuntimeBridge {
   private projectEnvironment(): Record<string, string> | undefined {
     const dir = this.canonicalProjectDir();
     return dir ? { PI_CAD_CANONICAL_PROJECT_DIR: dir } : undefined;
-  }
-
-  /** The exec protocol has no env field, so the environment is set with `env` in front of the command. */
-  private withProjectEnvironment(args: string[]): string[] {
-    const env = this.projectEnvironment();
-    if (!env) return args;
-    return ["env", ...Object.entries(env).map(([key, value]) => `${key}=${value}`), ...args];
   }
 }
 

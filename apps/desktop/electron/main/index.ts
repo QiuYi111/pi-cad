@@ -1,14 +1,21 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, screen, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, protocol, safeStorage, screen, shell } from "electron";
 import { electronApp, is, optimizer } from "@electron-toolkit/utils";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AppSettings, CadTransferTarget, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, ThinkingLevel, WorkflowDocument } from "../../src/shared/contracts.js";
-import { IPC } from "../../src/shared/contracts.js";
+import type { AppSettings, CadTransferTarget, CloudEvent, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, ThinkingLevel, WorkflowDocument } from "../../src/shared/contracts.js";
+import { DEFAULT_CLOUD_BASE_URL, IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
+import { CloudSession, describeLoginError } from "./cloud-session.js";
+import { EncryptedCloudSessionStore, type SecretCipher } from "./cloud-token-store.js";
+import { assertCloudAvailable, createRuntimeBridge, isCloudMode, runtimeBridgeKey as bridgeKeyFor } from "./cloud-mode.js";
+import { downloadForReveal, isWorkspacePath, uploadChosenImages, uploadStepForImport } from "./cloud-uploads.js";
+import { RemoteBridge } from "./remote-bridge.js";
+import { RemoteProjectIO } from "./remote-project-io.js";
 import { WslBridge } from "./wsl.js";
 import { NativeBridge } from "./native.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
@@ -63,6 +70,10 @@ let viewerBridge: RuntimeBridge | null = null;
 let blender: BlenderBackend | null = null;
 let blenderBridge: RuntimeBridge | null = null;
 let managedRuntimeBootstrap: Promise<void> = Promise.resolve();
+/** The hosted-service session for one server address. Rebuilt when the address changes. */
+let cloud: { baseUrl: string; ready: Promise<CloudSession> } | null = null;
+/** Cloud project in use. The remote bridge reads it on every call, so it follows settings. */
+let cloudProjectId: string | undefined;
 const trustedReleases = new Map<string, ReleaseResult>();
 const desktopE2E = process.env.PI_CAD_DESKTOP_E2E === "1" || process.argv.includes("--pi-cad-e2e");
 const desktopE2EOpenStep = process.env.PI_CAD_DESKTOP_E2E_OPEN_STEP
@@ -145,6 +156,7 @@ function followLiveSession(status: RuntimeStatus) {
 async function syncManagedRuntime() {
   if (desktopE2E) return;
   const settings = await settingsStore.get();
+  if (isCloudMode(settings)) return;
   const currentBridge = await bridge();
   const status = await currentBridge.check(settings);
   const wslReady = status.checks.find((item) => item.id === "wsl")?.status === "ready";
@@ -204,18 +216,171 @@ function createWindow() {
   else void mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
 }
 
+const cacheRoot = () => join(app.getPath("userData"), "cache");
+
+const electronSecretCipher: SecretCipher = {
+  isAvailable: () => safeStorage.isEncryptionAvailable(),
+  encrypt: (text) => safeStorage.encryptString(text),
+  decrypt: (data) => safeStorage.decryptString(data),
+};
+
+/** The session for the configured server. Restoring a saved sign-in finishes before it is returned. */
+function ensureCloud(settings: AppSettings): Promise<CloudSession> {
+  const baseUrl = settings.cloud?.baseUrl || DEFAULT_CLOUD_BASE_URL;
+  if (cloud?.baseUrl === baseUrl) return cloud.ready;
+  cloud?.ready.then((session) => session.close(), () => undefined);
+  const ready = (async () => {
+    const session = new CloudSession({
+      baseUrl,
+      store: new EncryptedCloudSessionStore(join(app.getPath("userData"), "cloud-session.bin"), electronSecretCipher),
+      deviceLabel: `Reify desktop (${process.platform})`,
+    });
+    session.on((event: CloudEvent) => send(IPC.cloudEvent, event));
+    await session.restore();
+    return session;
+  })();
+  cloud = { baseUrl, ready };
+  return ready;
+}
+
+async function cloudNow(): Promise<CloudSession> {
+  return ensureCloud(await settingsStore.get());
+}
+
+/** The remote bridge, for the steps that move files. Local-only callers never reach it. */
+async function remoteBridge(): Promise<RemoteBridge> {
+  const current = await bridge();
+  if (!(current instanceof RemoteBridge)) throw new Error("云端模式未启用。");
+  return current;
+}
+
 async function bridge(): Promise<RuntimeBridge> {
   const settings = await settingsStore.get();
+  cloudProjectId = settings.cloud?.projectId;
   const bundledRuntime = is.dev ? join(app.getAppPath(), "resources/runtime") : join(process.resourcesPath, "runtime");
-  const key = process.platform === "win32" ? `wsl:${settings.distro}` : `native:${process.platform}`;
+  const key = bridgeKeyFor(settings, process.platform);
   if (!runtimeBridge || runtimeBridgeKey !== key) {
-    runtimeBridge = process.platform === "win32"
-      ? new WslBridge(settings.distro, bundledRuntime)
-      : new NativeBridge(bundledRuntime, process.execPath);
-    runtimeBridgeKey = key;
+    if (runtimeBridge instanceof RemoteBridge) runtimeBridge.close();
+    const created = createRuntimeBridge(settings, process.platform, {
+      local: () => process.platform === "win32"
+        ? new WslBridge(settings.distro, bundledRuntime)
+        : new NativeBridge(bundledRuntime, process.execPath),
+      remote: () => new RemoteBridge({
+        projectId: () => cloudProjectId,
+        connect: async () => (await ensureCloud(await settingsStore.get())).connectBridge(),
+        onState: (state) => send(IPC.cloudEvent, { type: "bridge_state", state }),
+      }),
+    });
+    runtimeBridge = created.bridge;
+    runtimeBridgeKey = created.key;
   }
   return runtimeBridge;
 }
+
+/** Cloud mode runs commands in the workspace, so the workspace must be running before the runtime starts. */
+async function ensureCloudWorkspace(): Promise<void> {
+  const settings = await settingsStore.get();
+  if (!isCloudMode(settings)) return;
+  if (!settings.cloud?.projectId) throw new Error("请先选择云端项目。");
+  await (await ensureCloud(settings)).startWorkspace();
+}
+
+async function stopCloudRuntime(): Promise<void> {
+  void transfer?.stop();
+  await runtime?.stop();
+  runtime = null;
+  conversation = NO_CONVERSATION;
+  publishConversation();
+}
+
+/** Moves a formal release from the workspace into the chosen local folder, file by file. */
+async function downloadRelease(remote: RemoteBridge, release: ReleaseResult, localRoot: string): Promise<ReleaseResult> {
+  const localPath = join(localRoot, basename(release.path));
+  const files = [...release.files, { path: "release-manifest.json", sha256: "", role: "release-manifest" }];
+  for (const file of files) {
+    const downloaded = await remote.download(`${release.path}/${file.path}`, join(localPath, ...file.path.split("/")));
+    if (file.sha256 && downloaded.sha256 !== file.sha256) throw new Error(`${file.path} did not match the approved release.`);
+  }
+  return { ...release, path: localPath, manifestPath: join(localPath, "release-manifest.json") };
+}
+
+/** Changes the cloud part of the settings. The server address is kept unless the patch names one. */
+async function updateCloud(patch: Partial<NonNullable<AppSettings["cloud"]>>): Promise<AppSettings> {
+  const current = (await settingsStore.get()).cloud;
+  return settingsStore.update({ cloud: { baseUrl: current?.baseUrl || DEFAULT_CLOUD_BASE_URL, ...patch } });
+}
+
+function projectName(value: string): string {
+  const name = value.trim();
+  if (!name) throw new Error("请输入项目名称。");
+  if (name.length > 120) throw new Error("项目名称不能超过 120 个字符。");
+  return name;
+}
+
+function registerCloudIpc() {
+  ipcMain.handle(IPC.cloudStatus, async () => (await cloudNow()).status());
+  ipcMain.handle(IPC.cloudLogin, async (_event, email: string, password: string) => {
+    const session = await cloudNow();
+    const previous = (await settingsStore.get()).cloud;
+    let user;
+    try {
+      user = await session.login(email.trim(), password);
+    } catch (error) {
+      throw new Error(describeLoginError(error));
+    }
+    // A different account must not inherit the previous account's project selection.
+    const sameAccount = previous?.userEmail === user.email;
+    if (!sameAccount) await stopCloudRuntime();
+    await updateCloud({ userEmail: user.email, projectId: sameAccount ? previous?.projectId : undefined });
+    return session.status();
+  });
+  ipcMain.handle(IPC.cloudLogout, async () => {
+    await stopCloudRuntime();
+    const session = await cloudNow();
+    await session.logout();
+    await updateCloud({ userEmail: undefined, projectId: undefined });
+    cloudProjectId = undefined;
+    return session.status();
+  });
+  ipcMain.handle(IPC.cloudChangePassword, async (_event, oldPassword: string, newPassword: string) => {
+    try {
+      await (await cloudNow()).changePassword(oldPassword, newPassword);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : String(error));
+    }
+  });
+  ipcMain.handle(IPC.cloudProjectsList, async () => (await cloudNow()).listProjects());
+  ipcMain.handle(IPC.cloudProjectCreate, async (_event, name: string) => (await cloudNow()).createProject(projectName(name)));
+  ipcMain.handle(IPC.cloudProjectRename, async (_event, id: string, name: string) => (await cloudNow()).renameProject(id, projectName(name)));
+  ipcMain.handle(IPC.cloudProjectDelete, async (_event, id: string) => {
+    await (await cloudNow()).deleteProject(id);
+    if ((await settingsStore.get()).cloud?.projectId === id) {
+      await stopCloudRuntime();
+      cloudProjectId = undefined;
+      await updateCloud({ projectId: undefined });
+    }
+  });
+  ipcMain.handle(IPC.cloudSelectProject, async (_event, id: string | null) => {
+    const before = (await settingsStore.get()).cloud?.projectId;
+    if (before !== (id ?? undefined)) await stopCloudRuntime();
+    const next = await updateCloud({ projectId: id ?? undefined });
+    cloudProjectId = next.cloud?.projectId;
+    return next;
+  });
+  ipcMain.handle(IPC.cloudWorkspaceStart, async () => {
+    const session = await cloudNow();
+    await session.startWorkspace();
+    return session.status();
+  });
+  ipcMain.handle(IPC.cloudWorkspaceStop, async () => {
+    const session = await cloudNow();
+    await session.stopWorkspace();
+    return session.status();
+  });
+  ipcMain.handle(IPC.cloudWorkspaceKeepalive, async () => (await cloudNow()).keepalive());
+}
+
+
 
 async function ensureRuntime() {
   if (runtime) return runtime;
@@ -315,6 +480,7 @@ async function transferProject(): Promise<ProjectIO | null> {
   const current = await bridge();
   const { projectPath } = await current.resolveRuntimePaths(await settingsStore.get());
   if (!projectPath) return null;
+  if (current instanceof RemoteBridge) return new RemoteProjectIO(current, projectPath, { projectId: cloudProjectId ?? "", cacheRoot: cacheRoot() });
   return current.kind === "native" ? new NativeProjectIO(projectPath) : new BridgeProjectIO(current, projectPath);
 }
 
@@ -365,6 +531,7 @@ function registerIpc() {
   ipcMain.handle(IPC.settingsUpdate, async (_event, patch: Partial<AppSettings>) => settingsStore.update(patch));
   ipcMain.handle(IPC.settingsChooseProject, async () => {
     const settings = await settingsStore.get();
+    if (isCloudMode(settings)) throw new Error("云端模式请在云端项目列表中选择项目。");
     const result = await dialog.showOpenDialog(mainWindow!, { title: "Choose engineering project", defaultPath: settings.projectPath || undefined, properties: ["openDirectory", "createDirectory"] });
     return result.canceled ? null : result.filePaths[0] || null;
   });
@@ -372,6 +539,7 @@ function registerIpc() {
     const name = rawName.trim();
     if (!name || name === "." || name === ".." || /[<>:"/\\|?*\u0000-\u001f]/.test(name)) throw new Error("Use a valid folder name.");
     const settings = await settingsStore.get();
+    if (isCloudMode(settings)) throw new Error("云端模式请在云端项目列表中新建项目。");
     const result = await dialog.showOpenDialog(mainWindow!, { title: "Choose where to create the project", defaultPath: settings.projectPath || undefined, properties: ["openDirectory", "createDirectory"] });
     if (result.canceled || !result.filePaths[0]) return null;
     const path = join(result.filePaths[0], name);
@@ -411,6 +579,7 @@ function registerIpc() {
     ? { state: "ready", component: "torch-fem-0.9", detail: "CUDA managed runtime qualified", estimatedSize: "about 6 GB" }
     : (await bridge()).installSimulationComponent(await settingsStore.get()));
   ipcMain.handle(IPC.runtimeStart, async () => {
+    await ensureCloudWorkspace();
     const started = await (await ensureRuntime()).start(await settingsStore.get());
     publishConversation();
     void startTransferDispatcher();
@@ -452,7 +621,8 @@ function registerIpc() {
   ipcMain.handle(IPC.runtimeChooseImages, async () => {
     const result = await dialog.showOpenDialog(mainWindow!, { title: "Attach reference images", properties: ["openFile", "multiSelections"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }] });
     if (result.canceled) return [];
-    return Promise.all(result.filePaths.map(async (path) => {
+    const settings = await settingsStore.get();
+    const images = await Promise.all(result.filePaths.map(async (path) => {
       const data = await readFile(path);
       if (data.byteLength > 20 * 1024 * 1024) throw new Error(`Image is larger than 20 MB: ${path}`);
       const decoded = nativeImage.createFromBuffer(data);
@@ -463,6 +633,12 @@ function registerIpc() {
       const mimeType = extension === ".png" ? "image/png" : extension === ".webp" ? "image/webp" : extension === ".gif" ? "image/gif" : "image/jpeg";
       return { name: path.split(/[\\/]/).at(-1) || "image", data: data.toString("base64"), mimeType };
     }));
+    if (!isCloudMode(settings)) return images;
+    // Cloud mode also keeps each image in the project, so Prime can read it by path.
+    const { projectPath } = await (await bridge()).resolveRuntimePaths(settings);
+    if (!projectPath) throw new Error("请先选择云端项目。");
+    const uploaded = await uploadChosenImages(await remoteBridge(), result.filePaths, projectPath);
+    return images.map((image, index) => ({ ...image, remotePath: uploaded[index]!.remotePath }));
   });
   ipcMain.handle(IPC.runtimeUiResponse, async (_event, id: string, response: Record<string, unknown>) => (await ensureRuntime()).respondToUi(id, response));
   const demoCatalog = () => ({ providers: [
@@ -511,6 +687,11 @@ function registerIpc() {
     const runtime = await bridge();
     const { projectPath } = await runtime.resolveRuntimePaths(settings);
     if (!projectPath) throw new Error("Choose a project before importing STEP.");
+    if (isCloudMode(settings)) {
+      const remote = await remoteBridge();
+      const uploaded = await uploadStepForImport(remote, result.filePaths[0], projectPath);
+      return importStepIntoProject(remote, { source: uploaded.remotePath, fileName: uploaded.fileName, projectPath });
+    }
     const source = await runtime.toRuntimePath(result.filePaths[0]);
     const name = result.filePaths[0].split(/[\\/]/).at(-1) || "model.step";
     return importStepIntoProject(runtime, { source, fileName: name, projectPath });
@@ -529,7 +710,19 @@ function registerIpc() {
       filters: [{ name: "STEP model", extensions: ["step", "stp"] }],
     });
     if (result.canceled || !result.filePath) return null;
-    if (!demo) await (await ensureViewer()).exportStep(settings, source, result.filePath, expectedSha);
+    if (demo) return result.filePath;
+    if (isCloudMode(settings)) {
+      // Export inside the workspace, then download the file to the chosen location.
+      const remote = await remoteBridge();
+      const { projectPath } = await remote.resolveRuntimePaths(settings);
+      const staged = `${projectPath}/exports/${randomUUID()}-${result.filePath.split(/[\\/]/).at(-1) || "model.step"}`;
+      await remote.exec(["mkdir", "-p", "--", `${projectPath}/exports`]);
+      await (await ensureViewer()).exportStep(settings, source, staged, expectedSha);
+      await remote.download(staged, result.filePath);
+      await remote.exec(["rm", "-f", "--", staged]).catch(() => undefined);
+      return result.filePath;
+    }
+    await (await ensureViewer()).exportStep(settings, source, result.filePath, expectedSha);
     return result.filePath;
   });
   ipcMain.handle(IPC.viewerCatalog, async () => stubWorkflowProjection ? {
@@ -568,20 +761,48 @@ function registerIpc() {
   ipcMain.handle(IPC.viewerInspectSection, async (_event, path: string, axis: "x" | "y" | "z") => demo
     ? { source: path, sha256: "demo-step", axis, position: axis === "x" ? 20 : axis === "y" ? 12 : 6, totalArea: axis === "z" ? 960 : axis === "y" ? 480 : 288, faceCount: 1, units: "mm" }
     : (await ensureViewer()).inspectSection(await settingsStore.get(), path, axis));
-  ipcMain.handle(IPC.viewerOpenParaView, async (_event, path: string) => demo ? { state: "ready", sourcePath: path, url: "pi-cad://demo-paraview" } : (await ensureParaView()).open(await settingsStore.get(), path));
-  ipcMain.handle(IPC.viewerInspectSimulation, async (_event, path: string) => demo
-    ? { format: "VTK XML UnstructuredGrid (.vtu, ASCII)", source: path, pointCount: 842, cellCount: 1260, bounds: { x: [-20, 20], y: [-12, 12], z: [0, 12] }, fields: [{ name: "von Mises stress", association: "point", components: 1, min: 2.4, max: 82, unit: "MPa" }, { name: "displacement", association: "point", components: 3, min: 0, max: 0.34, unit: "mm" }], modelSource: "build/part.step#demo-step" }
-    : (await ensureParaView()).inspect(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerOpenParaView, async (_event, path: string) => {
+    if (demo) return { state: "ready", sourcePath: path, url: "pi-cad://demo-paraview" };
+    const settings = await settingsStore.get();
+    assertCloudAvailable(settings, "ParaView");
+    return (await ensureParaView()).open(settings, path);
+  });
+  ipcMain.handle(IPC.viewerInspectSimulation, async (_event, path: string) => {
+    if (demo) return { format: "VTK XML UnstructuredGrid (.vtu, ASCII)", source: path, pointCount: 842, cellCount: 1260, bounds: { x: [-20, 20], y: [-12, 12], z: [0, 12] }, fields: [{ name: "von Mises stress", association: "point", components: 1, min: 2.4, max: 82, unit: "MPa" }, { name: "displacement", association: "point", components: 3, min: 0, max: 0.34, unit: "mm" }], modelSource: "build/part.step#demo-step" };
+    const settings = await settingsStore.get();
+    assertCloudAvailable(settings, "ParaView");
+    return (await ensureParaView()).inspect(settings, path);
+  });
   ipcMain.handle(IPC.viewerStopParaView, async () => paraView?.stop());
-  ipcMain.handle(IPC.viewerOpenParaViewDesktop, async (_event, path: string) => (await ensureParaView()).openDesktop(await settingsStore.get(), path));
-  ipcMain.handle(IPC.viewerInspectBlender, async (_event, path: string) => demo
-    ? { source: path, scene: "product.blend", cameras: ["Hero", "Detail"], activeCamera: "Hero", objectCount: 8, frame: 1, frameStart: 1, frameEnd: 120 }
-    : (await ensureBlender()).inspect(await settingsStore.get(), path));
-  ipcMain.handle(IPC.viewerInstallBlender, async () => demo ? undefined : (await ensureBlender()).install(await settingsStore.get()));
-  ipcMain.handle(IPC.viewerRenderBlender, async (_event, path: string, camera?: string) => demo
-    ? { path: ".pi-cad/renders/product.png", camera: camera || "Hero", dataUrl: "" }
-    : (await ensureBlender()).render(await settingsStore.get(), path, camera));
-  ipcMain.handle(IPC.viewerOpenBlenderDesktop, async (_event, path: string) => demo ? undefined : (await ensureBlender()).openDesktop(await settingsStore.get(), path));
+  ipcMain.handle(IPC.viewerOpenParaViewDesktop, async (_event, path: string) => {
+    const settings = await settingsStore.get();
+    assertCloudAvailable(settings, "ParaView");
+    return (await ensureParaView()).openDesktop(settings, path);
+  });
+  ipcMain.handle(IPC.viewerInspectBlender, async (_event, path: string) => {
+    if (demo) return { source: path, scene: "product.blend", cameras: ["Hero", "Detail"], activeCamera: "Hero", objectCount: 8, frame: 1, frameStart: 1, frameEnd: 120 };
+    const settings = await settingsStore.get();
+    assertCloudAvailable(settings, "Blender");
+    return (await ensureBlender()).inspect(settings, path);
+  });
+  ipcMain.handle(IPC.viewerInstallBlender, async () => {
+    if (demo) return undefined;
+    const settings = await settingsStore.get();
+    assertCloudAvailable(settings, "Blender");
+    return (await ensureBlender()).install(settings);
+  });
+  ipcMain.handle(IPC.viewerRenderBlender, async (_event, path: string, camera?: string) => {
+    if (demo) return { path: ".pi-cad/renders/product.png", camera: camera || "Hero", dataUrl: "" };
+    const settings = await settingsStore.get();
+    assertCloudAvailable(settings, "Blender");
+    return (await ensureBlender()).render(settings, path, camera);
+  });
+  ipcMain.handle(IPC.viewerOpenBlenderDesktop, async (_event, path: string) => {
+    if (demo) return undefined;
+    const settings = await settingsStore.get();
+    assertCloudAvailable(settings, "Blender");
+    return (await ensureBlender()).openDesktop(settings, path);
+  });
   ipcMain.handle(IPC.viewerStopBlender, async () => blender?.stop());
   ipcMain.handle(IPC.viewerRebuildCommit, async (_event, commitId: string, manifestPath: string) => (await ensureViewer()).rebuildCommit(await settingsStore.get(), commitId, manifestPath));
   ipcMain.handle(IPC.viewerReadEvidence, async (_event, path: string) => (await ensureViewer()).readEvidence(await settingsStore.get(), path));
@@ -595,6 +816,17 @@ function registerIpc() {
     const chosen = await dialog.showOpenDialog(mainWindow!, { title: "Choose formal release destination", properties: ["openDirectory", "createDirectory"] });
     if (chosen.canceled || !chosen.filePaths[0]) return null;
     const validate = async () => Boolean((await approvalStore.list(await backend.catalog(settings))).find((item) => item.id === approvalId && item.valid));
+    if (isCloudMode(settings)) {
+      // The package is built in the workspace, then each file is downloaded to the chosen folder.
+      const remote = await remoteBridge();
+      const { projectPath } = await remote.resolveRuntimePaths(settings);
+      await remote.exec(["mkdir", "-p", "--", `${projectPath}/releases`]);
+      const remoteRelease = await backend.releaseCommit(settings, commitId, approval, `${projectPath}/releases`, validate);
+      const localRelease = await downloadRelease(remote, remoteRelease, chosen.filePaths[0]);
+      // Publishing reads the workspace copy, so the remote record is kept for it.
+      trustedReleases.set(remoteRelease.releaseId, remoteRelease);
+      return localRelease;
+    }
     const release = await backend.releaseCommit(settings, commitId, approval, chosen.filePaths[0], validate);
     trustedReleases.set(release.releaseId, release);
     return release;
@@ -634,6 +866,10 @@ function registerIpc() {
     const service = await ensureTransfer();
     const status = await service.getStatus();
     const folder = path || status.jobRoot;
+    if (isCloudMode(await settingsStore.get()) && isWorkspacePath(folder)) {
+      shell.showItemInFolder(await downloadForReveal(await remoteBridge(), folder, cacheRoot()));
+      return;
+    }
     if (existsSync(folder)) shell.showItemInFolder(folder);
     else if (target) await shell.openPath(status.jobRoot);
   });
@@ -649,9 +885,13 @@ function registerIpc() {
     return service.testExport(target);
   });
   ipcMain.handle(IPC.shellReveal, async (_event, path: string) => {
-    const target = await (await bridge()).revealPath(path);
+    const settings = await settingsStore.get();
+    const target = isCloudMode(settings) && isWorkspacePath(path)
+      ? await downloadForReveal(await remoteBridge(), path, cacheRoot())
+      : await (await bridge()).revealPath(path);
     if (existsSync(target)) shell.showItemInFolder(target);
   });
+  registerCloudIpc();
 }
 
 app.whenReady().then(() => {
@@ -666,5 +906,5 @@ app.whenReady().then(() => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("before-quit", () => { void transfer?.stop(); void runtime?.stop(); void paraView?.stop(); viewer?.stop(); });
+app.on("before-quit", () => { void transfer?.stop(); void runtime?.stop(); void paraView?.stop(); viewer?.stop(); cloud?.ready.then((session) => session.close(), () => undefined); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

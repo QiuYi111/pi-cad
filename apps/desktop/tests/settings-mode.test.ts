@@ -2,8 +2,9 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { SettingsStore } from "../electron/main/settings-store";
+import { newInstallMode, SettingsStore } from "../electron/main/settings-store";
 import { assertCandidateAdoptionAllowed } from "../electron/main/traces";
+import { DEFAULT_CLOUD_BASE_URL } from "../src/shared/contracts";
 
 vi.mock("electron", () => ({
   app: { getPath: () => "/unused", getAppPath: () => "/unused", isPackaged: true },
@@ -17,9 +18,17 @@ async function storeWith(content?: string) {
 }
 
 describe("settings mode", () => {
-  it("defaults to local when no settings file exists", async () => {
+  it("defaults a new install to cloud mode with the hosted address", async () => {
     const { store } = await storeWith();
-    expect((await store.get()).mode).toBe("local");
+    const settings = await store.get();
+    expect(settings.mode).toBe("cloud");
+    expect(settings.cloud?.baseUrl).toBe(DEFAULT_CLOUD_BASE_URL);
+  });
+
+  it("keeps Desktop E2E runs on the local runtime", () => {
+    expect(newInstallMode(["electron", "--pi-cad-e2e"], {})).toBe("local");
+    expect(newInstallMode(["electron"], { PI_CAD_DESKTOP_E2E: "1" })).toBe("local");
+    expect(newInstallMode(["electron"], {})).toBe("cloud");
   });
 
   it("loads an existing settings file without a mode field as local", async () => {
