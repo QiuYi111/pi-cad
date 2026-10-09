@@ -7,18 +7,10 @@ import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 
-import {
-  buildPrimeBwrapArgs,
-  buildReviewerBwrapArgs,
-  ensurePrimeAgentFiles,
-  mergePrimeCredentials,
-  preparePerRunAgentDir,
-  primeAgentMounts,
-  resolvePrimeRepository,
-  PRIME_AGENT_PER_RUN_DIRECTORIES,
-  PRIME_AGENT_PER_RUN_FILES,
-  type LaunchPaths,
-} from "../src/authority/launcher.ts";
+import { type LaunchPaths, resolvePrimeRepository } from "../src/authority/prime-config.ts";
+import { ensurePrimeAgentFiles, preparePerRunAgentDir, PRIME_AGENT_PER_RUN_DIRECTORIES, PRIME_AGENT_PER_RUN_FILES } from "../src/authority/prime-bootstrap.ts";
+import { mergePrimeCredentials } from "../src/authority/prime-credentials.ts";
+import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, primeAgentMounts } from "../src/authority/sandbox-bwrap.ts";
 
 const paths: LaunchPaths = {
   repository: "/repo/pi-cad",
