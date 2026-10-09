@@ -1,19 +1,18 @@
+"""cadctl command-line entry point: argument parsing and dispatch.
+
+Handlers live in ``cadctl.commands`` (one module per area). Each handler prints
+its own JSON envelope and returns the exit code.
+"""
+
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
-import os
-import shutil
-import subprocess
+import subprocess  # noqa: F401 - tests patch cadctl.cli.subprocess.run for the blender passthrough
 import sys
-import tempfile
-import time
-from pathlib import Path
 from typing import Sequence
 
 from . import __version__
-from .common import emit, emit_error, sha256_file, write_json
+from .commands import build, env, identity, inspection, presentation, probe, render, simulation
 
 
 VIEW_NAMES = ("iso", "front", "back", "left", "right", "top", "bottom", "iso_opposite")
@@ -22,889 +21,6 @@ VIEW_NAMES = ("iso", "front", "back", "left", "right", "top", "bottom", "iso_opp
 def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help=argparse.SUPPRESS)
 
-
-def _cmd_build(args: argparse.Namespace) -> int:
-    from .build_cache import (
-        canonical_parameters_hash,
-        current_manifest,
-        exclusive_build,
-        make_manifest,
-        write_manifest,
-    )
-    from .model import run_source
-
-    started = time.monotonic()
-    source = Path(args.source)
-    output = Path(args.output)
-    try:
-        parameters = json.loads(args.parameters_json) if args.parameters_json else None
-        if parameters is not None and not isinstance(parameters, dict):
-            raise TypeError("--parameters-json must contain an object")
-        input_hashes = {"source": sha256_file(source)}
-        parameters_hash = canonical_parameters_hash({"solidify": True} if args.solidify else parameters)
-        if parameters is not None:
-            input_hashes["parameters"] = parameters_hash
-        with exclusive_build(Path.cwd(), output):
-            cached = None if args.force else current_manifest(
-                Path.cwd(), output, parameters_hash=parameters_hash
-            )
-            if cached is not None:
-                input_hashes["sourceClosure"] = cached["sourceClosureHash"]
-                input_artifacts = [
-                    {"path": item["path"], "role": f"source:{index}", "sha256": sha256_file(item["path"])}
-                    for index, item in enumerate(cached["dependencies"])
-                ]
-                emit(
-                    "cad_build_step",
-                    {
-                        "step": str(output),
-                        "sidecars": [],
-                        "exitCode": 0,
-                        "stdout": "",
-                        "stderr": "",
-                        "cache": "hit",
-                        "sourceFiles": [item["path"] for item in cached["dependencies"]],
-                    },
-                    input_hashes=input_hashes,
-                    input_artifacts=input_artifacts,
-                    artifacts=[{"path": str(output), "kind": "step", "sha256": cached["outputHash"]}],
-                    duration_ms=int((time.monotonic() - started) * 1000),
-                )
-                return 0
-
-            if source.suffix.lower() in {".step", ".stp"}:
-                if parameters is not None:
-                    raise ValueError("STEP import does not accept model parameters")
-                if source.resolve() == output.resolve():
-                    raise ValueError("STEP import output must differ from its source")
-                output.parent.mkdir(parents=True, exist_ok=True)
-                if args.solidify:
-                    from .step_repair import solidify_closed_step
-
-                    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".step", delete=False) as temporary:
-                        temporary_path = Path(temporary.name)
-                    try:
-                        solidify_closed_step(source, temporary_path)
-                        os.replace(temporary_path, output)
-                    finally:
-                        temporary_path.unlink(missing_ok=True)
-                else:
-                    with tempfile.NamedTemporaryFile(dir=output.parent, suffix=".step", delete=False) as temporary:
-                        temporary_path = Path(temporary.name)
-                        try:
-                            with source.open("rb") as original:
-                                shutil.copyfileobj(original, temporary)
-                        except BaseException:
-                            temporary_path.unlink(missing_ok=True)
-                            raise
-                    os.replace(temporary_path, output)
-                result = {"exitCode": 0, "sourceFiles": [str(source.resolve())], "stdout": "", "stderr": ""}
-            else:
-                if args.solidify:
-                    raise ValueError("--solidify requires a .step or .stp source")
-                result = run_source(source, output, parameters=parameters)
-            if result.get("exitCode", 1) != 0:
-                emit_error(
-                    "cad_build_step",
-                    result.get("error", "model execution failed"),
-                    input_hashes=input_hashes,
-                    duration_ms=int((time.monotonic() - started) * 1000),
-                    stderr=result.get("stderr", ""),
-                )
-                return 0
-
-            from .identity import (
-                IdentityError,
-                prune_stale_manifest,
-                write_manifest as write_identity_manifest,
-            )
-
-            artifacts: list[dict[str, str]] = []
-            if result.get("identity") is not None:
-                try:
-                    identity_file, _ = write_identity_manifest(
-                        result["identity"],
-                        output,
-                        source_files=result.get("sourceFiles") or [str(source.resolve())],
-                        parameters=parameters,
-                    )
-                except IdentityError as error:
-                    emit_error(
-                        "cad_build_step",
-                        error.message,
-                        input_hashes=input_hashes,
-                        duration_ms=int((time.monotonic() - started) * 1000),
-                        stderr=result.get("stderr", ""),
-                    )
-                    return 0
-                artifacts.append(
-                    {
-                        "path": str(identity_file),
-                        "kind": "identity",
-                        "sha256": sha256_file(identity_file),
-                    }
-                )
-            else:
-                # No declaration this build: drop a manifest that described an
-                # earlier artifact so it cannot masquerade as this model.
-                prune_stale_manifest(output)
-
-            manifest = make_manifest(
-                source_files=result.get("sourceFiles") or [str(source.resolve())],
-                root=Path.cwd(),
-                output=output,
-                parameters_hash=parameters_hash,
-            )
-            write_manifest(Path.cwd(), output, manifest)
-            input_hashes["sourceClosure"] = manifest["sourceClosureHash"]
-            input_artifacts = [
-                {"path": item["path"], "role": f"source:{index}", "sha256": sha256_file(item["path"])}
-                for index, item in enumerate(manifest["dependencies"])
-            ]
-            emit(
-                "cad_build_step",
-                {
-                    "step": str(output),
-                    "sidecars": [artifact["path"] for artifact in artifacts],
-                    "exitCode": 0,
-                    "stdout": result.get("stdout", ""),
-                    "stderr": result.get("stderr", ""),
-                    "cache": "miss",
-                    "sourceFiles": result.get("sourceFiles", []),
-                },
-                input_hashes=input_hashes,
-                input_artifacts=input_artifacts,
-                artifacts=[
-                    {"path": str(output), "kind": "step", "sha256": manifest["outputHash"]}
-                ]
-                + artifacts,
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-        return 0
-    except Exception as exc:  # pragma: no cover - best-effort envelope
-        emit_error(
-            "cad_build_step",
-            str(exc),
-            input_hashes={"source": sha256_file(source) if source.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_inspect(args: argparse.Namespace) -> int:
-    from .geometry import inspect_geometry
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        payload = inspect_geometry(artifact, validation=args.validation)
-        artifacts = []
-        if args.output:
-            out = Path(args.output)
-            write_json(out, payload)
-            artifacts.append({"path": str(out), "kind": "geometry", "sha256": sha256_file(out)})
-        emit(
-            "cad_inspect_geometry",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_inspect_geometry",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_mesh(args: argparse.Namespace) -> int:
-    from .mesh import mesh_document
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        emit(
-            "cad_mesh_document",
-            mesh_document(artifact),
-            input_hashes={"artifact": sha256_file(artifact)},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_mesh_document",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-def _cmd_render(args: argparse.Namespace) -> int:
-    from .render import render_views
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    views = args.views.split(",") if args.views else None
-    try:
-        payload = render_views(
-            artifact,
-            args.out_dir,
-            views=views,
-            width=args.width,
-            height=args.height,
-            display=args.display,
-            labels=args.labels,
-            focus=json.loads(args.focus_json) if args.focus_json else None,
-            hide=json.loads(args.hide_json) if args.hide_json else None,
-            explode=args.explode,
-            ghost_others=args.ghost_others,
-            highlight=json.loads(args.highlight_json) if args.highlight_json else None,
-            annotations=json.loads(args.annotations_json) if args.annotations_json else None,
-        )
-        artifacts = [
-            {"path": view["path"], "kind": "visual", "sha256": sha256_file(view["path"])}
-            for view in payload["views"]
-        ]
-        emit(
-            "cad_inspect_visual",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_inspect_visual",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_probe(args: argparse.Namespace) -> int:
-    from .probe import ProbeError, run_probe
-    from .identity.manifest import identity_path
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    identity_manifest = identity_path(artifact)
-    identity_hash = sha256_file(identity_manifest) if identity_manifest.is_file() else "absent"
-    try:
-        code = Path(args.code_file).read_text(encoding="utf-8")
-    except OSError as exc:
-        emit_error(
-            "cad_probe_python",
-            f"cannot read probe code: {exc}",
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 1
-    try:
-        parameters = json.loads(args.params_json) if args.params_json else {}
-        if not isinstance(parameters, dict):
-            raise ProbeError("probe params must decode to a JSON object")
-        payload = run_probe(artifact, code, params=parameters)
-        emit(
-            "cad_probe_python",
-            payload,
-            input_hashes={
-                "artifact": sha256_file(artifact),
-                "script": sha256_file(Path(args.code_file)),
-                "parameters": hashlib.sha256(json.dumps(parameters, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
-                "identityManifest": identity_hash,
-            },
-            input_artifacts=[
-                {"path": str(artifact), "role": "subject"},
-                *([{"path": str(identity_manifest), "role": "identity-manifest"}] if identity_manifest.is_file() else []),
-            ],
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except json.JSONDecodeError as exc:
-        emit_error(
-            "cad_probe_python",
-            f"probe params are invalid JSON: {exc}",
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else "", "script": sha256_file(Path(args.code_file)), "identityManifest": identity_hash},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 1
-    except ProbeError as exc:
-        emit_error(
-            "cad_probe_python",
-            str(exc),
-            input_hashes={
-                "artifact": sha256_file(artifact) if artifact.exists() else "",
-                "script": sha256_file(Path(args.code_file)),
-                "parameters": hashlib.sha256(json.dumps(parameters if "parameters" in locals() else {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
-                "identityManifest": identity_hash,
-            },
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 1
-
-
-def _cmd_measure(args: argparse.Namespace) -> int:
-    from .geometry import measure
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        payload = measure(artifact, args.metric, args.a, args.b)
-        emit(
-            "cad_measure",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_measure",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-
-def _cmd_section(args: argparse.Namespace) -> int:
-    from .section import render_section
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        payload = render_section(
-            artifact,
-            args.out_dir,
-            origin=tuple(float(x) for x in args.origin.split(",")),
-            normal=tuple(float(x) for x in args.normal.split(",")),
-            width=args.width,
-            height=args.height,
-            display=args.display,
-            labels=args.labels,
-        )
-        artifacts = [
-            {"path": view["path"], "kind": "section", "sha256": sha256_file(view["path"])}
-            for view in payload["views"]
-        ]
-        emit(
-            "cad_inspect_section",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_inspect_section",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_compare(args: argparse.Namespace) -> int:
-    from .compare import compare_geometry
-
-    started = time.monotonic()
-    before, after = Path(args.before), Path(args.after)
-    try:
-        import json as _json
-
-        transform_before = _json.loads(args.transform_before) if args.transform_before else None
-        transform_after = _json.loads(args.transform_after) if args.transform_after else None
-        payload = compare_geometry(
-            before,
-            after,
-            transform_before=transform_before,
-            transform_after=transform_after,
-            metrics=args.metrics.split(",") if args.metrics else None,
-            diff_output=args.output,
-        )
-        artifacts = []
-        if args.output and Path(args.output).exists():
-            artifacts.append({"path": args.output, "kind": "compare", "sha256": sha256_file(args.output)})
-        emit(
-            "cad_compare_geometry",
-            payload,
-            input_hashes={
-                "before": sha256_file(before),
-                "after": sha256_file(after),
-            },
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_compare_geometry",
-            str(exc),
-            input_hashes={
-                "before": sha256_file(before) if before.exists() else "",
-                "after": sha256_file(after) if after.exists() else "",
-            },
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_assembly_tree(args: argparse.Namespace) -> int:
-    from .assembly import assembly_tree
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        payload = assembly_tree(artifact)
-        artifacts = []
-        if args.output:
-            write_json(args.output, payload)
-            artifacts.append({"path": args.output, "kind": "assembly_tree", "sha256": sha256_file(args.output)})
-        emit(
-            "cad_assembly_tree",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_assembly_tree",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_bind_identity(args: argparse.Namespace) -> int:
-    from .identity import IdentityError
-    from .identity.bind import bind_identity
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    declarations = Path(args.declarations)
-    input_hashes = {
-        "artifact": sha256_file(artifact) if artifact.exists() else "",
-        "declarations": sha256_file(declarations) if declarations.exists() else "",
-    }
-    try:
-        payload = bind_identity(artifact, declarations)
-        manifest = Path(payload["identityManifest"])
-        emit(
-            "cad_bind_identity",
-            payload,
-            input_hashes=input_hashes,
-            artifacts=[{"path": str(manifest), "kind": "identity", "sha256": sha256_file(manifest)}],
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-    except (IdentityError, OSError, ValueError) as exc:
-        failed = exc.details.get("path") if isinstance(exc, IdentityError) else None
-        emit_error(
-            "cad_bind_identity",
-            exc.message if isinstance(exc, IdentityError) else str(exc),
-            input_hashes=input_hashes,
-            duration_ms=int((time.monotonic() - started) * 1000),
-            detail={"code": "IDENTITY_BIND_FAILED", "paths": [failed] if failed else []},
-        )
-    return 0
-
-
-def _cmd_identity(args: argparse.Namespace) -> int:
-    from .identity import IdentityError, IdentityIndex
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    tool = f"cad_identity_{args.stage}"
-    try:
-        index = IdentityIndex(artifact)
-        if args.stage == "verify":
-            payload = index.verify()
-        elif args.stage == "list":
-            payload = {
-                "source": index.source,
-                "artifactHash": index.artifact_hash,
-                "verification": index.verify(),
-                "entities": [
-                    resolution.as_payload()
-                    for resolution in index.entities(kind=args.kind, owner=args.owner)
-                ],
-            }
-        else:
-            expect = args.expect
-            if isinstance(expect, str) and expect.lstrip("-").isdigit():
-                expect = int(expect)
-            payload = index.resolve(
-                args.target,
-                kind=args.kind,
-                owner=args.owner,
-                expect=expect,
-            ).as_payload()
-        artifacts: list[dict[str, str]] = []
-        if args.output:
-            write_json(args.output, payload)
-            artifacts.append({"path": args.output, "kind": "identity", "sha256": sha256_file(args.output)})
-        emit(
-            tool,
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except IdentityError as exc:
-        emit_error(
-            tool,
-            exc.message,
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            tool,
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_inspect_interference(args: argparse.Namespace) -> int:
-    from .interference import inspect_interference
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        payload = inspect_interference(artifact)
-        artifacts = []
-        if args.output:
-            write_json(args.output, payload)
-            artifacts.append({"path": args.output, "kind": "interference", "sha256": sha256_file(args.output)})
-        emit(
-            "cad_inspect_interference",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            input_artifacts=[{"path": str(artifact), "sha256": sha256_file(artifact), "role": "artifact"}],
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_inspect_interference",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_scan_sections(args: argparse.Namespace) -> int:
-    from .sections import scan_sections
-
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        count = args.count if args.count is not None else None
-        step = args.step if args.step is not None else None
-        payload = scan_sections(artifact, axis=args.axis, count=count, step=step)
-        artifacts = []
-        if args.output:
-            write_json(args.output, payload)
-            artifacts.append({"path": args.output, "kind": "sections", "sha256": sha256_file(args.output)})
-        emit(
-            "cad_scan_sections",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            input_artifacts=[{"path": str(artifact.resolve()), "sha256": sha256_file(artifact), "role": "artifact"}],
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_scan_sections",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_derive_analysis_model(args: argparse.Namespace) -> int:
-    from .analysis_model import run_derivation
-
-    started = time.monotonic()
-    try:
-        record = run_derivation(args.spec, args.output_dir)
-        emit(
-            "cad_derive_analysis_model",
-            record,
-            input_hashes={"spec": sha256_file(args.spec), "source": record["sourceHash"]},
-            input_artifacts=[
-                {"path": str(Path(args.spec).resolve()), "sha256": sha256_file(args.spec), "role": "spec"},
-                {"path": record["source"], "sha256": record["sourceHash"], "role": "source"},
-            ],
-            artifacts=[
-                {"path": record["output"], "kind": "analysis_model", "sha256": record["outputHash"]},
-                {"path": record["recordPath"], "kind": "derivation_record", "sha256": sha256_file(record["recordPath"])},
-            ],
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_derive_analysis_model",
-            str(exc),
-            input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_export(args: argparse.Namespace) -> int:
-    from .export import export_artifact
-
-    started = time.monotonic()
-    source = Path(args.source)
-    try:
-        payload = export_artifact(source, args.output, args.format, expected_source_sha256=args.source_sha256)
-        artifacts = [{"path": args.output, "kind": args.format, "sha256": payload["outputSha256"]}]
-        if payload.get("identityManifest") and payload.get("identityManifestSha256"):
-            artifacts.append({"path": payload["identityManifest"], "kind": "assembly_identity_manifest", "sha256": payload["identityManifestSha256"]})
-        emit(
-            "cad_export",
-            payload,
-            input_hashes={"source": payload["sourceSha256"]},
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_export",
-            str(exc),
-            input_hashes={"source": sha256_file(source) if source.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_capability(args: argparse.Namespace) -> int:
-    from .capability import capabilities
-
-    started = time.monotonic()
-    emit(
-        "cadctl_capability",
-        {"capabilities": capabilities()},
-        duration_ms=int((time.monotonic() - started) * 1000),
-    )
-    return 0
-
-
-def _load_spec(spec_path: str) -> dict:
-    from .common import read_json
-    return read_json(spec_path, normalize_paths=True)
-
-
-def _cmd_drawing(args: argparse.Namespace) -> int:
-    from .drawing import generate_drawing, validate_drawing_spec
-
-    started = time.monotonic()
-    try:
-        spec = _load_spec(args.spec)
-        if args.stage == "validate":
-            ok, errors = validate_drawing_spec(spec)
-            payload = {"status": "validated" if ok else "invalid", "errors": errors}
-            emit("cad_generate_drawing", payload, input_hashes={"spec": sha256_file(args.spec)}, duration_ms=int((time.monotonic() - started) * 1000))
-        else:
-            payload = generate_drawing(args.spec, args.output_dir)
-            artifacts = [
-                {"path": p, "kind": "drawing", "sha256": sha256_file(p)}
-                for p in payload["outputs"]
-            ]
-            emit(
-                "cad_generate_drawing",
-                payload,
-                input_hashes={"spec": sha256_file(args.spec)},
-                artifacts=artifacts,
-                warnings=payload.get("warnings", []),
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-        return 0
-    except Exception as exc:
-        emit_error("cad_generate_drawing", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
-        return 0
-
-
-def _cmd_inspect_surfaces(args: argparse.Namespace) -> int:
-    started = time.monotonic()
-    artifact = Path(args.artifact)
-    try:
-        from .simulation.surface_selector import enumerate_surfaces, render_labeled_views
-
-        payload = enumerate_surfaces(artifact)
-        artifacts: list[dict[str, str]] = []
-        if args.output:
-            out = Path(args.output)
-            write_json(out, payload)
-            artifacts.append({"path": str(out), "kind": "surfaces", "sha256": sha256_file(out)})
-        if args.labels:
-            out_dir = Path(args.out_dir) if args.out_dir else (out.parent / "views" if args.output else Path.cwd() / "surface-views")
-            views = render_labeled_views(
-                artifact,
-                out_dir,
-                payload["surfaces"],
-                views=args.views.split(",") if args.views else None,
-            )
-            payload["views"] = views
-            for view in views:
-                artifacts.append({"path": view["path"], "kind": "surfaces_visual", "sha256": sha256_file(view["path"])})
-        emit(
-            "cad_inspect_surfaces",
-            payload,
-            input_hashes={"artifact": sha256_file(artifact)},
-            artifacts=artifacts,
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error(
-            "cad_inspect_surfaces",
-            str(exc),
-            input_hashes={"artifact": sha256_file(artifact) if artifact.exists() else ""},
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-
-
-def _cmd_present(args: argparse.Namespace) -> int:
-    from .presentation import run_presentation
-
-    started = time.monotonic()
-    try:
-        payload = run_presentation(args.spec, args.output_dir, stage=args.stage)
-        if payload.get("status") == "discarded":
-            emit_error(
-                "cad_render_scene",
-                str(payload.get("reason", "presentation discarded")),
-                input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""},
-                duration_ms=int((time.monotonic() - started) * 1000),
-            )
-            return 0
-        artifacts = [
-            {"path": p, "kind": "presentation", "sha256": sha256_file(p)}
-            for p in payload.get("outputs", [])
-            if Path(p).exists()
-        ]
-        # Provenance comes FROM the frozen invocation set (spec, artifact,
-        # and every reference image), never from a post-render re-hash:
-        # accept/finish re-verify these hashes, so a rewritten reference
-        # invalidates the evidence like any other input.
-        frozen_artifacts = payload.get("inputArtifacts") or []
-        if frozen_artifacts:
-            input_hashes = {entry["role"]: entry["sha256"] for entry in frozen_artifacts}
-            input_artifacts = frozen_artifacts
-        else:
-            input_hashes = {"spec": sha256_file(args.spec)}
-            input_artifacts = [
-                {"path": str(Path(args.spec).resolve()), "sha256": sha256_file(args.spec), "role": "spec"}
-            ]
-        emit(
-            "cad_render_scene",
-            payload,
-            input_hashes=input_hashes,
-            input_artifacts=input_artifacts,
-            artifacts=artifacts,
-            warnings=["presentation run is optional and may be unavailable"] if payload.get("status") in {"unavailable", "script-generated"} else [],
-            duration_ms=int((time.monotonic() - started) * 1000),
-        )
-        return 0
-    except Exception as exc:
-        emit_error("cad_render_scene", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
-        return 0
-
-
-def _cmd_doctor(args: argparse.Namespace) -> int:
-    from .doctor import doctor
-
-    started = time.monotonic()
-    payload = doctor()
-    if args.json:
-        print(__import__("json").dumps(payload, indent=2, sort_keys=True))
-        return 0
-    emit("cadctl_doctor", payload, duration_ms=int((time.monotonic() - started) * 1000))
-    return 0
-
-
-def _cmd_blender(args: argparse.Namespace) -> int:
-    """Run agent-authored Blender work through the managed runtime."""
-    from .presentation import blender_binary
-
-    binary, source = blender_binary()
-    if not binary or source in {"missing", "path-fallback", "override-missing"}:
-        print(
-            json.dumps({
-                "ok": False,
-                "tool": "cadctl_blender",
-                "payload": {
-                    "error": "managed Blender runtime is unavailable",
-                    "source": source,
-                },
-            }),
-            file=sys.stderr,
-        )
-        return 2
-    if args.print_path:
-        print(binary)
-        return 0
-    command = list(args.blender_args)
-    if command[:1] == ["--"]:
-        command = command[1:]
-    if not command:
-        print("cadctl blender requires Blender arguments or --print-path", file=sys.stderr)
-        return 2
-    lib_dir = Path(binary).parent / "lib"
-    env = {**os.environ, "OMP_NUM_THREADS": os.environ.get("OMP_NUM_THREADS", "1")}
-    if lib_dir.exists():
-        env["LD_LIBRARY_PATH"] = f"{lib_dir}{os.pathsep}{env.get('LD_LIBRARY_PATH', '')}".rstrip(os.pathsep)
-    return subprocess.run([binary, *command], env=env, check=False).returncode
-
-
-def _cmd_blender_bridge(args: argparse.Namespace) -> int:
-    from .blender_bridge import prepare_blender_bundle
-    print(json.dumps(prepare_blender_bundle(args.artifact, args.output_dir, args.source), indent=2))
-    return 0
-
-
-def _cmd_optimize(args: argparse.Namespace) -> int:
-    from .simulation.topology import run_topology
-
-    started = time.monotonic()
-    try:
-        import json as _json
-
-        spec = _json.loads(Path(args.spec).read_text(encoding="utf-8"))
-        payload = run_topology(spec, args.output_dir)
-        artifacts = []
-        if Path(args.spec).exists():
-            artifacts.append({"path": args.spec, "kind": "optimization_spec", "sha256": sha256_file(args.spec)})
-        if payload.get("artifact") and Path(payload["artifact"]).exists():
-            artifacts.append({"path": payload["artifact"], "kind": "optimization", "sha256": sha256_file(payload["artifact"])})
-        emit("cad_optimize", payload, input_hashes={"spec": sha256_file(args.spec)}, artifacts=artifacts, duration_ms=int((time.monotonic() - started) * 1000))
-        return 0
-    except Exception as exc:
-        emit_error("cad_optimize", str(exc), input_hashes={"spec": sha256_file(args.spec) if Path(args.spec).exists() else ""}, duration_ms=int((time.monotonic() - started) * 1000))
-        return 0
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cadctl", description="Pi-CAD deterministic CAD backend (V0)")
@@ -917,22 +33,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--force", action="store_true")
     p.add_argument("--parameters-json")
     p.add_argument("--solidify", action="store_true", help="sew only closed STEP surfaces into valid solids")
-    p.set_defaults(func=_cmd_build)
+    p.set_defaults(func=build.cmd_build)
 
     p = sub.add_parser("inspect", help="Return STEP geometry facts")
     p.add_argument("--artifact", required=True)
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
     p.add_argument("--validation", choices=("auto", "fast", "full"), default="auto")
-    p.set_defaults(func=_cmd_inspect)
+    p.set_defaults(func=inspection.cmd_inspect)
 
     p = sub.add_parser("mesh", help="Return a compact desktop preview mesh")
     p.add_argument("--artifact", required=True)
-    p.set_defaults(func=_cmd_mesh)
+    p.set_defaults(func=inspection.cmd_mesh)
 
     p = sub.add_parser("bind-identity", help="Bind a declarations.json (e.g. from the FreeCAD backend) to a STEP and write its identity manifest")
     p.add_argument("--artifact", required=True)
     p.add_argument("--declarations", required=True)
-    p.set_defaults(func=_cmd_bind_identity)
+    p.set_defaults(func=identity.cmd_bind_identity)
 
     p = sub.add_parser("render", help="Render orthographic STEP views")
     p.add_argument("--artifact", required=True)
@@ -948,14 +64,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--explode", type=float, default=0.0, help="Exploded-view distance, 0..5")
     p.add_argument("--ghost-others", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--labels", action=argparse.BooleanOptionalAction, default=True, help="Render view names and the world-frame triad (use --no-labels for a clean render)")
-    p.set_defaults(func=_cmd_render)
+    p.set_defaults(func=render.cmd_render)
 
     p = sub.add_parser("measure", help="Return one deterministic measurement")
     p.add_argument("--artifact", required=True)
     p.add_argument("--metric", required=True)
     p.add_argument("--a", required=True)
     p.add_argument("--b", default=None)
-    p.set_defaults(func=_cmd_measure)
+    p.set_defaults(func=inspection.cmd_measure)
 
     p = sub.add_parser(
         "probe",
@@ -964,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--artifact", required=True)
     p.add_argument("--code-file", required=True, help="Path to the probe script (harness-managed temporary file)")
     p.add_argument("--params-json", default="{}", help="Structured JSON parameters passed to the Python scope")
-    p.set_defaults(func=_cmd_probe)
+    p.set_defaults(func=probe.cmd_probe)
 
     p = sub.add_parser("section", help="Render a deterministic section view")
     p.add_argument("--artifact", required=True)
@@ -975,7 +91,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--width", type=int, default=640)
     p.add_argument("--height", type=int, default=480)
     p.add_argument("--labels", action="store_true")
-    p.set_defaults(func=_cmd_section)
+    p.set_defaults(func=render.cmd_section)
 
     p = sub.add_parser("compare", help="Return deterministic before/after geometry diff")
     p.add_argument("--before", required=True)
@@ -984,12 +100,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--transform-before", default=None)
     p.add_argument("--transform-after", default=None)
     p.add_argument("--output", default=None)
-    p.set_defaults(func=_cmd_compare)
+    p.set_defaults(func=inspection.cmd_compare)
 
     p = sub.add_parser("assembly-tree", help="Return occurrence tree and world transforms")
     p.add_argument("--artifact", required=True)
     p.add_argument("--output", default=None)
-    p.set_defaults(func=_cmd_assembly_tree)
+    p.set_defaults(func=inspection.cmd_assembly_tree)
 
     p = sub.add_parser(
         "identity",
@@ -1002,12 +118,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--owner", default=None, help="Restrict to one owner semantic path")
     p.add_argument("--expect", default=None, help="one, many, or an exact count")
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
-    p.set_defaults(func=_cmd_identity)
+    p.set_defaults(func=identity.cmd_identity)
 
     p = sub.add_parser("inspect-interference", help="Return pairwise solid interference facts (penetration/contact/clearance)")
     p.add_argument("--artifact", required=True)
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
-    p.set_defaults(func=_cmd_inspect_interference)
+    p.set_defaults(func=inspection.cmd_inspect_interference)
 
     p = sub.add_parser("scan-sections", help="Scan cross-section facts (area, centroid, moments) along an axis")
     p.add_argument("--artifact", required=True)
@@ -1015,48 +131,48 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--count", type=int, default=None, help="Number of evenly spaced sections")
     p.add_argument("--step", type=float, default=None, help="Spacing between sections")
     p.add_argument("--output", default=None, help="Also write the JSON payload to this path")
-    p.set_defaults(func=_cmd_scan_sections)
+    p.set_defaults(func=inspection.cmd_scan_sections)
 
     p = sub.add_parser("derive-analysis-model", help="Create a harness-owned analysis-model derivation record (fused/bonded executed by the harness)")
     p.add_argument("--spec", required=True)
     p.add_argument("--output-dir", required=True)
-    p.set_defaults(func=_cmd_derive_analysis_model)
+    p.set_defaults(func=simulation.cmd_derive_analysis_model)
 
     p = sub.add_parser("export", help="Export STEP/STL/GLB/BREP deterministically")
     p.add_argument("--source", required=True)
     p.add_argument("--source-sha256", default=None)
     p.add_argument("--output", required=True)
     p.add_argument("--format", required=True)
-    p.set_defaults(func=_cmd_export)
+    p.set_defaults(func=build.cmd_export)
 
     p = sub.add_parser("capability", help="Report installed deterministic backend capabilities")
-    p.set_defaults(func=_cmd_capability)
+    p.set_defaults(func=env.cmd_capability)
 
     p = sub.add_parser("doctor", help="Report the actual Pi-CAD execution environment")
     p.add_argument("--json", action="store_true")
-    p.set_defaults(func=_cmd_doctor)
+    p.set_defaults(func=env.cmd_doctor)
 
     p = sub.add_parser("blender", help="Run the pinned managed Blender binary")
     p.add_argument("--print-path", action="store_true", help="Print the managed Blender path and exit")
     p.add_argument("blender_args", nargs=argparse.REMAINDER)
-    p.set_defaults(func=_cmd_blender)
+    p.set_defaults(func=presentation.cmd_blender)
 
     p = sub.add_parser("blender-bridge", help="Tessellate STEP into a labeled Blender import bundle")
     p.add_argument("--artifact", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--source", default=None)
-    p.set_defaults(func=_cmd_blender_bridge)
+    p.set_defaults(func=presentation.cmd_blender_bridge)
 
     p = sub.add_parser("optimize", help="Run deterministic differentiable topology optimization")
     p.add_argument("--spec", required=True)
     p.add_argument("--output-dir", required=True)
-    p.set_defaults(func=_cmd_optimize)
+    p.set_defaults(func=simulation.cmd_optimize)
 
     p = sub.add_parser("drawing", help="Validate or generate a spec-driven drawing")
     p.add_argument("stage", choices=("validate", "generate"))
     p.add_argument("--spec", required=True)
     p.add_argument("--output-dir", required=False)
-    p.set_defaults(func=_cmd_drawing)
+    p.set_defaults(func=render.cmd_drawing)
 
     p = sub.add_parser("inspect-surfaces", help="Return deterministic boundary-surface facts and surface IDs")
     p.add_argument("--artifact", required=True)
@@ -1064,13 +180,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--labels", action="store_true", help="Render labeled selector views")
     p.add_argument("--out-dir", default=None, help="Directory for labeled views (requires --labels)")
     p.add_argument("--views", default=None, help="Comma-separated subset of iso,front,right,top")
-    p.set_defaults(func=_cmd_inspect_surfaces)
+    p.set_defaults(func=inspection.cmd_inspect_surfaces)
 
     p = sub.add_parser("present", help="Validate, preview, generate, or run a spec-driven presentation")
     p.add_argument("stage", choices=("validate", "preview", "generate", "run"))
     p.add_argument("--spec", required=True)
     p.add_argument("--output-dir", required=True)
-    p.set_defaults(func=_cmd_present)
+    p.set_defaults(func=presentation.cmd_present)
 
     return parser
 
