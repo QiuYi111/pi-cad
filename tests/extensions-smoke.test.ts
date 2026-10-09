@@ -71,42 +71,7 @@ test("all configured extensions load and register the expected tools/events", as
 
   assert.deepEqual(pi.tools.sort(), [...ACTIVE_PUBLIC_TOOL_NAMES].sort());
   assert.deepEqual(pi.commands.sort(), ["cad", "cad-abort", "cad-approve-reroute", "cad-status"]);
-  for (const event of ["before_agent_start", "tool_call", "tool_result", "agent_settled"]) {
+  for (const event of ["before_agent_start", "tool_call", "agent_settled"]) {
     assert.ok((pi.handlers.get(event) ?? []).length > 0, `missing ${event} handler`);
   }
-});
-
-test("baseline prompts mandate frame handling without fabricating headless confirmation", async () => {
-  const { loadPrompt } = await import("../src/core/context.ts");
-  // loadPrompt falls back to generic text when a file is missing, so the
-  // distinctive phrases double as file-presence guards.
-  const baseline = await loadPrompt("baseline");
-  assert.match(baseline, /Establish the coordinate frame/i);
-  assert.match(baseline, /INTERACTIVE mode, confirm the mapping with the user/i);
-  assert.match(baseline, /HEADLESS mode no user turn exists/i);
-  assert.match(baseline, /assumed_headless/);
-  assert.match(baseline, /mandatory/i);
-  assert.match(baseline, /frame-context record/);
-  // The question must be grounded in visible evidence (views or features).
-  assert.match(baseline, /views|features/i);
-  // Silent assumption is never an escape.
-  assert.match(baseline, /never assume silently|silent assumption is never an exception/i);
-
-  const sourceBaseline = await loadPrompt("source_baseline");
-  assert.match(sourceBaseline, /Establish the coordinate frame/i);
-  assert.match(sourceBaseline, /assumed_headless/);
-  assert.match(sourceBaseline, /phase completion/);
-
-  // The requirements prompt defers the frame question to the baseline
-  // phase instead of duplicating it.
-  const requirements = await loadPrompt("requirements");
-  assert.match(requirements, /coordinate orientation/i);
-  assert.match(requirements, /completed deliverable/i);
-  assert.match(requirements, /pre-cut\/pre-boolean profile/i);
-  assert.match(requirements, /without seeing the generating source or feature history/i);
-
-  const finalVerifier = await loadPrompt("final_verifier");
-  assert.match(finalVerifier, /final-state claims/i);
-  assert.match(finalVerifier, /hypothetical pre-feature profile/i);
-  assert.match(finalVerifier, /return `binding_suspect`/i);
 });

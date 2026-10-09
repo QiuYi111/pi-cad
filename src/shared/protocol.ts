@@ -281,12 +281,6 @@ export interface AcceptanceAssertion {
   canonicalCheck?: { field: CanonicalAssertionField };
 }
 
-export interface AcceptanceContract {
-  requirementsHash: string;
-  assertionsHash: string;
-  assertions: AcceptanceAssertion[];
-}
-
 export type FinalReviewVerdict = "pass" | "fail" | "unresolved";
 export type AssertionReviewVerdict = FinalReviewVerdict | "binding_suspect";
 
@@ -352,19 +346,6 @@ export interface EvidenceObligations {
      */
     cases?: SimulationCaseObligation[];
   };
-}
-
-export interface CadPlan {
-  summary: string;
-  protected: string[];
-  plannedChanges: string[];
-  interfaces: Array<Record<string, unknown>>;
-  datums: string[];
-  reviewPlan: string[];
-  evidenceObligations?: EvidenceObligations;
-  architecture?: string[];
-  selectionRationale?: string;
-  workstreams?: Array<{ name: string; status: "open" | "complete" | "not_applicable" | "blocked_external" }>;
 }
 
 export interface CadRunState {
@@ -551,12 +532,3 @@ export interface FaceFingerprint {
   r?: number;
 }
 
-export interface MeasurePayload {
-  units?: string;
-  metric?: string;
-  a?: string;
-  b?: string | null;
-  value?: unknown;
-  detail?: Record<string, unknown>;
-  error?: string;
-}

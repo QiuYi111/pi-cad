@@ -1,55 +1,10 @@
-import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerKernelActionTool, registerMechanicalActionTool } from "../domains/mechanical/register-action.ts";
-import { existsSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 
-import {
-  type CadPlan,
-  type CadRequirements,
-  type CadRunState,
-  type EvidenceRef,
-  type FinalReviewRef,
-  type Route,
-  isRoute,
-  routeKey,
-} from "../shared/protocol.ts";
-import { CadProjectStore, hashRecord, migrateProjectOnce, nowIso, sha256File } from "../shared/store.ts";
-import { workflowSpec } from "./state-machine.ts";
-import {
-  commitPhaseRecord,
-  commitPlan,
-  commitRequirements,
-  createIntakeState,
-  finish,
-  deferClarification,
-  declareHeadlessBlocker,
-  reroute,
-  reviseRequirements,
-  route,
-  transition,
-  validateRequirementsRecord,
-  waitForUser,
-} from "./state-machine.ts";
-import { loadPrompt } from "./context.ts";
-import { verifyCurrentArtifacts, verifyEvidenceFilesForHash, verifyPresentationDeliverables } from "./evidence.ts";
-import type { PersistFn } from "./auto-actions.ts";
-import { runFinalReviewPreflight } from "../control/final-review/preflight.ts";
-import { REVIEWER_PROMPT_VERSION, freshReviewerRunner, type ReviewerRunner } from "../control/final-review/reviewer.ts";
-import { collectReviewerEvidenceIndex } from "../control/final-review/evidence-index.ts";
-import {
-  aggregateReviewVotes,
-  type StoredReviewVote,
-} from "../control/final-review/voting.ts";
-import { finalReviewerEnabled, finalSubmissionAllowed } from "./policies.ts";
-import { transitionFailureDetails } from "./agent-contract.ts";
-import {
-  interactionModeFromEnvironment,
-  isHeadless,
-  isTerminalStatus,
-} from "./interaction-mode.ts";
-import { selectKernelEngine } from "../harness/engine-router.ts";
+import { type CadRequirements, type Route, isRoute, routeKey } from "../shared/protocol.ts";
+import { finalReviewerEnabled } from "./policies.ts";
+import { interactionModeFromEnvironment } from "../shared/interaction-mode.ts";
 import { CadStartParamsSchema, cadStart } from "../harness/kernel.ts";
 import { cadRerouteV7, cadRouteV7 } from "../domains/mechanical/actions-v7.ts";
 import { mechanicalBuiltinWorkflows } from "../domains/mechanical/workflows.ts";
@@ -78,99 +33,7 @@ import {
   InterfaceContractsRecordSchema,
 } from "../domains/mechanical/tool-schemas.ts";
 
-/** Route a failed closure review through the process's existing editable regression edge. */
-function regressFinalReview(state: CadRunState, note: string) {
-  for (const event of ["revise", "repair", "engineering_issue", "artifact_issue"]) {
-    const result = transition(state, event, note);
-    if (result.ok) return result;
-  }
-  return null;
-}
-
-export interface ControllerDeps {
-  pi: ExtensionAPI;
-  persist: PersistFn;
-  runBaselineAuto: (
-    pi: ExtensionAPI,
-    store: CadProjectStore,
-    state: CadRunState,
-    artifactRel: string,
-    persist: PersistFn,
-  ) => Promise<{ state: CadRunState; images: Array<{ type: "image"; data: string; mimeType: string }>; warnings: string[] }>;
-  runCandidateAuto: (
-    pi: ExtensionAPI,
-    store: CadProjectStore,
-    state: CadRunState,
-    source: string,
-    label: string,
-    persist: PersistFn,
-  ) => Promise<{ ok: boolean; text?: string; images?: Array<{ type: "image"; data: string; mimeType: string }>; details?: unknown }>;
-  runConvertCandidateAuto: (
-    pi: ExtensionAPI,
-    store: CadProjectStore,
-    state: CadRunState,
-    source: string,
-    label: string,
-    format: string,
-    output: string,
-    persist: PersistFn,
-  ) => Promise<{ ok: boolean; text?: string; images?: Array<{ type: "image"; data: string; mimeType: string }>; details?: unknown }>;
-  reviewerRunner?: ReviewerRunner;
-}
-
-async function guardState(store: CadProjectStore): Promise<CadRunState | null> {
-  const state = await store.load();
-  if (!state || isTerminalStatus(state.status)) return null;
-  return state;
-}
-
-async function baselineArtifactCandidate(
-  record: CadRequirements,
-  cwd: string,
-  store: CadProjectStore,
-): Promise<string | null> {
-  const input = (record.inputs ?? []).find((item) => /\.(step|stp)$/i.test(item));
-  if (input) return input;
-  const project = await store.loadProject();
-  const head = project?.head.artifactPath;
-  return head && /\.(step|stp)$/i.test(head) ? head : null;
-}
-
-function acceptedEvidenceKinds(state: CadRunState): EvidenceRef["kind"][] {
-  const spec = workflowSpec(state);
-  return spec?.acceptedEvidence(state) ?? ["visual", "geometry"];
-}
-
-async function loadCurrentRequirements(store: CadProjectStore, state: CadRunState): Promise<CadRequirements | null> {
-  if (state.requirementsVersion) {
-    try {
-      return await store.readRequirementsVersion<CadRequirements>(state.requirementsVersion);
-    } catch {
-      return null;
-    }
-  }
-  const run = store.run(state.runId);
-  try {
-    return JSON.parse(await readFile(join(run.recordsDir, "requirements.json"), "utf-8")) as CadRequirements;
-  } catch {
-    return null;
-  }
-}
-
-async function verifyCurrentFinalReview(cwd: string, state: CadRunState): Promise<string | null> {
-  const review = state.finalReview;
-  if (!review || review.verdict !== "pass") return "current independent reviewer PASS is missing";
-  if (review.artifactHash !== state.currentArtifactHash) return "review PASS belongs to a different artifact";
-  if (review.requirementsHash !== state.requirementsVersion || review.assertionsHash !== state.assertionsVersion) {
-    return "review PASS belongs to a different requirements contract";
-  }
-  const path = resolve(cwd, review.path);
-  if (!existsSync(path)) return `review report is missing: ${review.path}`;
-  if (await sha256File(path) !== review.sha256) return `review report hash changed: ${review.path}`;
-  return null;
-}
-
-export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): void {
+export function registerControlTools(pi: ExtensionAPI): void {
   registerKernelActionTool(pi, {
     name: "cad_start",
     label: "Pi-CAD Start v7 Workflow",
@@ -206,59 +69,13 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const nextRoute: Route = buildRoute(params);
       if (typeof nextRoute === "string") return errTool(nextRoute);
       if (!isRoute(nextRoute)) return errTool("invalid route");
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        const project = new (await import("../harness/run-store.ts")).HarnessProjectStoreV7(ctx.cwd);
-        const activeV7 = await project.currentRun(mechanicalRegistries);
-        if (!activeV7 || ["done", "aborted", "blocked_external", "budget_exhausted"].includes(activeV7.state.status)) {
-          await cadStart({ cwd: ctx.cwd, registries: mechanicalRegistries, builtins: mechanicalBuiltinWorkflows(), reason: params.reason, interactionMode: interactionModeFromEnvironment() });
-        }
-        const loaded = await cadRouteV7({ cwd: ctx.cwd, route: nextRoute, reason: params.reason });
-        return okTool(`Routed v7 workflow to ${routeKey(nextRoute)}.`, { state: loaded.state, workflow: loaded.workflow });
+      const project = new (await import("../harness/run-store.ts")).HarnessProjectStoreV7(ctx.cwd);
+      const activeV7 = await project.currentRun(mechanicalRegistries);
+      if (!activeV7 || ["done", "aborted", "blocked_external", "budget_exhausted"].includes(activeV7.state.status)) {
+        await cadStart({ cwd: ctx.cwd, registries: mechanicalRegistries, builtins: mechanicalBuiltinWorkflows(), reason: params.reason, interactionMode: interactionModeFromEnvironment() });
       }
-      const store = new CadProjectStore(ctx.cwd);
-      await migrateProjectOnce(store);
-      const project = await store.ensureProject();
-      let state = await store.load();
-      if (!state) {
-        const existingRunId = await store.currentRunId();
-        const run = existingRunId
-          ? store.run(existingRunId)
-          : await store.createRun();
-        await run.ensureDirs();
-        state = createIntakeState({
-          runId: run.runId,
-          projectId: project.projectId,
-          interactionMode: interactionModeFromEnvironment(),
-        });
-        const head = project.head;
-        if (head.artifactPath) {
-          state = {
-            ...state,
-            baselineSourcePath: head.sourcePath,
-            baselineSourceHash: head.sourceHash,
-            baselineArtifactPath: head.artifactPath,
-            baselineArtifactHash: head.artifactHash,
-          };
-        }
-        if (nextRoute.objective === "design" && nextRoute.maturity === "release" && head.artifactPath) {
-          state = {
-            ...state,
-            currentSourcePath: head.sourcePath,
-            currentSourceHash: head.sourceHash,
-            currentArtifactPath: head.artifactPath,
-            currentArtifactHash: head.artifactHash,
-          };
-        }
-        await run.save(state);
-        await run.appendEvent("RunStarted", { runId: run.runId, projectId: project.projectId });
-      }
-      const result = route(state, nextRoute, params.reason);
-      if (!result.ok) return errTool(result.reason);
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        `Routed to ${routeKey(nextRoute)}. Harness state is now authoritative.\n\n${await loadPrompt("requirements")}`,
-        { state: result.state },
-      );
+      const loaded = await cadRouteV7({ cwd: ctx.cwd, route: nextRoute, reason: params.reason });
+      return okTool(`Routed v7 workflow to ${routeKey(nextRoute)}.`, { state: loaded.state, workflow: loaded.workflow });
     },
   });
 
@@ -297,107 +114,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       const nextRoute = buildRoute(params);
       if (typeof nextRoute === "string") return errTool(nextRoute);
       if (!isRoute(nextRoute)) return errTool("invalid route");
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await cadRerouteV7({ cwd: ctx.cwd, route: nextRoute, reason: params.reason });
-          return okTool(`Rerouted v7 workflow to ${routeKey(nextRoute)}.`, { state: loaded.state, workflow: loaded.workflow });
-        } catch (error) {
-          return errTool(error instanceof Error ? error.message : String(error));
-        }
+      try {
+        const loaded = await cadRerouteV7({ cwd: ctx.cwd, route: nextRoute, reason: params.reason });
+        return okTool(`Rerouted v7 workflow to ${routeKey(nextRoute)}.`, { state: loaded.state, workflow: loaded.workflow });
+      } catch (error) {
+        return errTool(error instanceof Error ? error.message : String(error));
       }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const result = reroute(state, nextRoute, params.reason, params.authorityToken);
-      if (!result.ok) {
-        if (result.requiresAuthority) {
-          // Record the pending reroute so the user can approve it with
-          // /cad-approve-reroute. A request for a DIFFERENT route voids any
-          // outstanding approval (it was granted for another request); a
-          // re-request of the same approved route keeps its token.
-          const sameAsApproved =
-            Boolean(state.rerouteAuthorityToken) &&
-            state.rerouteAuthorityRoute === routeKey(nextRoute);
-          let pending: CadRunState = {
-            ...state,
-            pendingReroute: { route: nextRoute, reason: params.reason },
-            ...(sameAsApproved
-              ? {}
-              : { rerouteAuthorityToken: null, rerouteAuthorityRoute: null }),
-          };
-          const events: Array<{ type: string; data?: unknown }> = [
-            {
-              type: "RerouteAuthorityRequested",
-              data: { route: routeKey(nextRoute), reason: params.reason },
-            },
-          ];
-          if (isHeadless(state)) {
-            const blocked = declareHeadlessBlocker(pending, {
-              type: "user_authority",
-              reason: `reroute to ${routeKey(nextRoute)} drops obligations`,
-              needed: "explicit user approval through /cad-approve-reroute",
-            });
-            if (blocked.ok) {
-              pending = blocked.state;
-              events.push(...blocked.events);
-            }
-          }
-          await deps.persist(pi, store, pending, events);
-          return errTool(
-            isHeadless(state)
-              ? `${result.reason}. Headless workflow is now BLOCKED_USER; user approval cannot be fabricated.`
-              : `${result.reason}.\n\nPending reroute recorded: ${routeKey(nextRoute)}. Ask the user (cad_wait_for_user); when they agree, they must run /cad-approve-reroute themselves — an ordinary reply issues nothing. The command issues a one-time authorityToken bound to exactly this route, shown in the state summary.`,
-          );
-        }
-        return errTool(result.reason);
-      }
-      if (state.routeRequiresReassessment && workflowSpec(result.state)?.requiresBaselineInput) {
-        const requirements = await loadCurrentRequirements(store, state);
-        const baselineInput = requirements
-          ? (requirements.inputs ?? []).find((item) => /\.(step|stp)$/i.test(item))
-          : null;
-        let blocker: CadRunState["blocker"] | undefined;
-        if (!baselineInput) {
-          blocker = {
-            type: "external_input",
-            reason: "the revised route requires a baseline STEP that is not available",
-            needed: "provide a readable project-contained .step/.stp baseline input",
-            createdAt: nowIso(),
-          };
-        } else {
-          try {
-            await sha256File(resolve(ctx.cwd, baselineInput));
-          } catch {
-            blocker = {
-              type: "external_input",
-              reason: `the revised route baseline is unavailable: ${baselineInput}`,
-              needed: `provide a readable baseline at ${baselineInput}`,
-              createdAt: nowIso(),
-            };
-          }
-        }
-        if (blocker) {
-          const blocked: CadRunState = { ...result.state, status: "blocked_external", blocker };
-          await deps.persist(pi, store, blocked, result.events);
-          return errTool(`Route was reassessed, but execution is BLOCKED_EXTERNAL: ${blocker.needed}`, { state: blocked });
-        }
-        await deps.persist(pi, store, result.state, result.events);
-        const baseline = await deps.runBaselineAuto(pi, store, result.state, baselineInput!, deps.persist);
-        return {
-          content: [{ type: "text", text: `Rerouted ${routeKey(state.route!)} -> ${routeKey(nextRoute)} and rebound baseline ${baselineInput}.` }, ...baseline.images],
-          details: { state: baseline.state },
-        };
-      }
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        [
-          `Rerouted ${routeKey(state.route!)} -> ${routeKey(nextRoute)} (authority: ${result.events[0].data?.authority}).`,
-          `Harness resumed at ${result.state.phase.toUpperCase()} — the earliest phase with unmet obligations. No progress was granted.`,
-          "",
-          await loadPrompt(result.state.phase),
-        ].join("\n"),
-        { state: result.state },
-      );
     },
   });
 
@@ -436,58 +158,12 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       evidenceObligations: Type.Optional(EvidenceObligationsSchema),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        const inputFailure = validateInputDeclarations(params as unknown as CadRequirements, ctx.cwd);
-        if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
-        try {
-          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "requirements", value: params });
-          return okTool(`Requirements committed to v7 (${loaded.state.records["record:requirements"]?.sha256.slice(0, 12)}). Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      if (state.requirementsVersion) return errTool("requirements are already committed; use cad_revise_requirements");
-      const record = params as unknown as CadRequirements;
-      const validationFailure = validateRequirementsRecord(state, record) ?? validateInputDeclarations(record, ctx.cwd);
-      if (validationFailure) {
-        return errTool(`invalid requirements record: ${validationFailure}. The workflow state is unchanged.`);
-      }
-      const result = commitRequirements(state, record);
-      if (!result.ok) return errTool(result.reason);
-      let next = result.state;
-      const spec = workflowSpec(next);
-      const baselineInput = await baselineArtifactCandidate(record, ctx.cwd, store);
-      if (spec?.requiresBaselineInput && !baselineInput) {
-        return errTool(
-          `${next.route ? routeKey(next.route) : "route"} requires requirements.inputs[] to reference an existing .step/.stp baseline artifact.`,
-        );
-      }
-      if (baselineInput) {
-        const baselineAbs = resolve(ctx.cwd, baselineInput);
-        if (!existsSync(baselineAbs)) {
-          return errTool(`requirements.inputs references missing artifact: ${baselineInput}`);
-        }
-        await store.writeRequirementsVersion(next.requirementsVersion!, record);
-        await store.writeRecord("requirements", record);
-        await deps.persist(pi, store, next, result.events);
-        const baseline = await deps.runBaselineAuto(pi, store, next, baselineInput, deps.persist);
-        next = baseline.state;
-        const text = [
-          `Requirements committed. Harness bound baseline artifact ${baselineInput} and auto-inspected it.`,
-          ...(baseline.warnings.length ? [`warnings: ${baseline.warnings.join("; ")}`] : []),
-          "",
-          await loadPrompt(next.phase),
-        ].join("\n");
-        return { content: [{ type: "text", text }, ...baseline.images], details: { state: next } };
-      }
-      await store.writeRequirementsVersion(next.requirementsVersion!, record);
-      await store.writeRecord("requirements", record);
-      await deps.persist(pi, store, next, result.events);
-      return okTool(
-        `Requirements committed (${next.requirementsVersion?.slice(0, 12)}). Harness phase is now ${next.phase.toUpperCase()}.\n\n${await loadPrompt(next.phase)}`,
-        { state: next, requirementsVersion: next.requirementsVersion },
-      );
+      const inputFailure = validateInputDeclarations(params as unknown as CadRequirements, ctx.cwd);
+      if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
+      try {
+        const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "requirements", value: params });
+        return okTool(`Requirements committed to v7 (${loaded.state.records["record:requirements"]?.sha256.slice(0, 12)}). Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -528,96 +204,13 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       }, { additionalProperties: false }),
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        const { reason, routeAssessment, ...record } = params;
-        const inputFailure = validateInputDeclarations(record as unknown as CadRequirements, ctx.cwd);
-        if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
-        try {
-          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "requirements", value: record, revise: true, advance: false });
-          return okTool(`Requirements revised in v7 (${reason}); dependent records/evidence were invalidated. Route assessment: ${routeAssessment.outcome}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow with committed requirements.");
-      const { reason, routeAssessment, ...recordParams } = params;
-      const record = recordParams as unknown as CadRequirements;
-      const inputFailure = validateInputDeclarations(record, ctx.cwd);
-      if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}. The canonical requirements are unchanged.`);
-      const previous = await loadCurrentRequirements(store, state);
-      if (!previous) return errTool("current immutable requirements record is missing or corrupt");
-
-      const declaredBaseline = (record.inputs ?? []).find((item) => /\.(step|stp)$/i.test(item));
-      const baselineInput = declaredBaseline;
-      const spec = workflowSpec(state);
-      let baselineIdentityChanged = declaredBaseline !== state.baselineArtifactPath;
-      let externalBlocker: { reason: string; needed: string } | undefined;
-      let baselineAvailable = false;
-      if (routeAssessment.outcome === "unchanged" && spec?.requiresBaselineInput && !baselineInput) {
-        externalBlocker = {
-          reason: "the revised authoritative requirements require a baseline STEP that is not available",
-          needed: "provide a readable project-contained .step/.stp baseline input",
-        };
-      } else if (baselineInput) {
-        try {
-          const baselineHash = await sha256File(resolve(ctx.cwd, baselineInput));
-          // Hash identity, not path spelling, controls whether frame_context
-          // can survive the revision.
-          baselineIdentityChanged = baselineHash !== state.baselineArtifactHash;
-          baselineAvailable = true;
-        } catch {
-          baselineIdentityChanged = true;
-          if (routeAssessment.outcome === "unchanged" && spec?.requiresBaselineInput) {
-            externalBlocker = {
-              reason: `the revised authoritative baseline is unavailable: ${baselineInput}`,
-              needed: `provide a readable baseline at ${baselineInput}`,
-            };
-          }
-        }
-      }
-
-      const result = reviseRequirements(state, previous, record, {
-        reason,
-        routeAssessment,
-        baselineIdentityChanged,
-        externalBlocker,
-      });
-      if (!result.ok) return errTool(result.reason);
-
-      if (result.events[0]?.type === "RequirementsRevised") {
-        await store.writeRequirementsVersion(result.state.requirementsVersion!, record);
-      }
-      await deps.persist(pi, store, result.state, result.events);
-
-      if (
-        routeAssessment.outcome === "unchanged" &&
-        spec?.requiresBaselineInput &&
-        baselineInput && baselineAvailable &&
-        result.state.status === "active"
-      ) {
-        const baseline = await deps.runBaselineAuto(pi, store, result.state, baselineInput, deps.persist);
-        const text = [
-          `Requirements revised (${result.state.requirementsVersion?.slice(0, 12)}); route confirmed unchanged.`,
-          `Baseline ${baselineInput} was rebound and observed for the new requirements version.`,
-          ...(baseline.warnings.length ? [`warnings: ${baseline.warnings.join("; ")}`] : []),
-          "",
-          await loadPrompt(baseline.state.phase),
-        ].join("\n");
-        return { content: [{ type: "text", text }, ...baseline.images], details: { state: baseline.state } };
-      }
-
-      if (result.state.status === "blocked_external") {
-        return errTool(
-          `Requirements V${result.state.requirementsVersion?.slice(0, 12)} are canonical, but execution is BLOCKED_EXTERNAL: ${result.state.blocker?.needed}`,
-          { state: result.state },
-        );
-      }
-      return okTool(
-        routeAssessment.outcome === "changed"
-          ? `Requirements revised (${result.state.requirementsVersion?.slice(0, 12)}). Route reassessment lock is active: ${routeAssessment.reason} Call cad_reroute before downstream engineering.`
-          : `Requirements revised (${result.state.requirementsVersion?.slice(0, 12)}); route confirmed unchanged. Harness resumed at ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
-        { state: result.state, requirementsVersion: result.state.requirementsVersion },
-      );
+      const { reason, routeAssessment, ...record } = params;
+      const inputFailure = validateInputDeclarations(record as unknown as CadRequirements, ctx.cwd);
+      if (inputFailure) return errTool(`invalid requirements record: ${inputFailure}`);
+      try {
+        const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "requirements", value: record, revise: true, advance: false });
+        return okTool(`Requirements revised in v7 (${reason}); dependent records/evidence were invalidated. Route assessment: ${routeAssessment.outcome}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -657,24 +250,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "plan", value: params });
-          return okTool(`Plan committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const record = params as unknown as CadPlan;
-      const result = commitPlan(state, record);
-      if (!result.ok) return errTool(result.reason);
-      await store.writeRecord("plan", record);
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        `Plan committed (${result.state.planVersion?.slice(0, 12)}). Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
-        { state: result.state, planVersion: result.state.planVersion },
-      );
+      try {
+        const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "plan", value: params });
+        return okTool(`Plan committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -730,60 +309,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       { additionalProperties: false },
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "frame_context", value: params });
-          return okTool(`Frame context committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const axes = new Set(params.axes.map((axis) => axis.axis));
-      if (axes.size !== 3) {
-        return errTool("axes must map each of x, y, z exactly once");
-      }
-      if (params.disposition === "confirmed" && params.howConfirmed.trim().length < 3) {
-        return errTool("disposition=confirmed requires howConfirmed to state what the user pointed at or said");
-      }
-      if (
-        isHeadless(state) &&
-        (params.disposition === "confirmed" || params.disposition === "user_declined")
-      ) {
-        return errTool(
-          "headless mode cannot claim user confirmation or refusal; use already_provided, genuinely not_applicable, or assumed_headless",
-        );
-      }
-      if (!isHeadless(state) && params.disposition === "assumed_headless") {
-        return errTool("assumed_headless frame disposition is only valid in headless mode");
-      }
-      let recordState = state;
-      const extraEvents: Array<{ type: string; data?: unknown }> = [];
-      if (params.disposition === "assumed_headless") {
-        const fallback = params.axes.map((axis) => `${axis.axis}=${axis.mapsTo}`).join(", ");
-        const deferred = deferClarification(state, {
-          question: "How do the artifact's local axes map to functional reality?",
-          reason: params.howConfirmed,
-          alternatives: [
-            `Use the evidence-based provisional mapping: ${fallback}`,
-            "Wait for a user-confirmed functional mapping",
-          ],
-          fallback,
-          impact: params.notes?.trim() || "Directional interpretation may need revision when user context becomes available.",
-          affectsContract: false,
-        });
-        if (!deferred.ok) return errTool(deferred.reason);
-        recordState = deferred.state;
-        extraEvents.push(...deferred.events);
-      }
-      const result = commitPhaseRecord(recordState, "frame_context", params);
-      if (!result.ok) return errTool(result.reason);
-      await store.writeRecord("frame_context", params);
-      await deps.persist(pi, store, result.state, [...extraEvents, ...result.events]);
-      return okTool(
-        `Frame context recorded (${params.disposition}: ${params.howConfirmed.slice(0, 80)}). Phase remains ${result.state.phase.toUpperCase()}; call cad_transition(baseline_understood) when the baseline is understood.`,
-        { state: result.state },
-      );
+      try {
+        const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "frame_context", value: params });
+        return okTool(`Frame context committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -799,23 +328,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     ],
     parameters: AssemblyDesignRecordSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "assembly_design", value: params });
-          return okTool(`Assembly design committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const result = commitPhaseRecord(state, "assembly_design", params);
-      if (!result.ok) return errTool(result.reason);
-      await store.writeRecord("assembly_design", params);
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        `Assembly design committed (${result.state.phaseRecords?.length ?? 0} phase records). Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
-        { state: result.state },
-      );
+      try {
+        const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "assembly_design", value: params });
+        return okTool(`Assembly design committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -831,23 +347,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     ],
     parameters: InterfaceContractsRecordSchema,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "interface_contracts", value: params });
-          return okTool(`Interface contracts committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const result = commitPhaseRecord(state, "interface_contracts", params);
-      if (!result.ok) return errTool(result.reason);
-      await store.writeRecord("interface_contracts", params);
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        `Interface contracts committed (${params.contracts.length} pairs). Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
-        { state: result.state },
-      );
+      try {
+        const loaded = await commitMechanicalRecordV7({ cwd: ctx.cwd, type: "interface_contracts", value: params });
+        return okTool(`Interface contracts committed to v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -869,52 +372,13 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       output: Type.Optional(Type.String()),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const result = await commitMechanicalCandidateV7({ cwd: ctx.cwd, sources: params.sources, label: params.label, ...(params.format ? { format: params.format } : {}), ...(params.output ? { output: params.output } : {}) });
-          return {
-            content: [{ type: "text", text: `Candidate ${params.label} committed to v7; artifactHash=${result.proposal.artifactHash.slice(0, 12)}; phase=${result.loaded.state.phase}${result.pending.length ? `; remaining obligations=${result.pending.join(",")}` : ""}.` }, ...result.images],
-            details: { state: result.loaded.state, proposal: result.proposal },
-          };
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const source = params.sources[0];
-      const sourceExt = extname(source).toLowerCase();
-      if (
-        state.phase === "convert" &&
-        [".step", ".stp"].includes(sourceExt)
-      ) {
-        if (!params.format) {
-          return errTool("convert route with a STEP/STP source requires format (step, stl, glb, brep) and optional output");
-        }
-        const output =
-          params.output ??
-          `${source.replace(/\.(step|stp)$/i, "")}.${params.format}`;
-        const result = await deps.runConvertCandidateAuto(
-          pi,
-          store,
-          state,
-          source,
-          params.label,
-          params.format,
-          output,
-          deps.persist,
-        );
-        if (!result.ok) return errTool(result.text ?? "conversion failed", result.details);
+      try {
+        const result = await commitMechanicalCandidateV7({ cwd: ctx.cwd, sources: params.sources, label: params.label, ...(params.format ? { format: params.format } : {}), ...(params.output ? { output: params.output } : {}) });
         return {
-          content: [{ type: "text", text: result.text ?? "" }, ...(result.images ?? [])],
-          details: result.details,
+          content: [{ type: "text", text: `Candidate ${params.label} committed to v7; artifactHash=${result.proposal.artifactHash.slice(0, 12)}; phase=${result.loaded.state.phase}${result.pending.length ? `; remaining obligations=${result.pending.join(",")}` : ""}.` }, ...result.images],
+          details: { state: result.loaded.state, proposal: result.proposal },
         };
-      }
-      const result = await deps.runCandidateAuto(pi, store, state, source, params.label, deps.persist);
-      if (!result.ok) return errTool(result.text ?? "candidate failed", result.details);
-      return {
-        content: [{ type: "text", text: result.text ?? "" }, ...(result.images ?? [])],
-        details: result.details,
-      };
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -934,209 +398,17 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       { additionalProperties: false },
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        if (!finalReviewerEnabled()) return errTool("cad_submit_for_review is disabled by PI_CAD_FINAL_REVIEWER=0");
-        try {
-          const active = await new (await import("../harness/run-store.ts")).HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
-          if (!active) return errTool("No active v7 workflow.");
-          const profileId = active.workflow.phases[active.state.phase]!.reviewProfile;
-          if (profileId !== "mechanical.design-review" && profileId !== "mechanical.final-review") return errTool(`cad_submit_for_review is not enabled for phase ${active.state.phase}`);
-          const reviewed = await runFreshReviewV7({ cwd: ctx.cwd, workflowRunId: active.state.runId, registries: mechanicalRegistries, profile: mechanicalReviewProfile(profileId), executor: mechanicalReviewExecutorV7(ctx) });
-          if (reviewed.state.latestReview?.verdict !== "pass") return errTool(`Independent v7 review ${reviewed.state.latestReview?.verdict ?? "unresolved"}; phase remains ${reviewed.state.phase}.`, { state: reviewed.state, review: reviewed.state.latestReview });
-          const advanced = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: "accepted", note: params.summary ?? "fresh independent review PASS" });
-          return okTool(`Independent v7 review PASS. Phase is now ${advanced.state.phase.toUpperCase()}.`, { state: advanced.state, review: reviewed.state.latestReview });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      if (!finalReviewerEnabled()) {
-        return errTool("cad_submit_for_review is disabled by PI_CAD_FINAL_REVIEWER=0");
-      }
-      if (!finalSubmissionAllowed(state)) {
-        return errTool(`cad_submit_for_review is only valid on a final closure edge; current phase is ${state.phase}`);
-      }
-      const spec = workflowSpec(state);
-      const artifactVerification = await verifyCurrentArtifacts(ctx.cwd, state);
-      if (artifactVerification) return errTool(`review preflight blocked: ${artifactVerification}`);
-      if (!state.currentArtifactHash) return errTool("review preflight blocked: current artifact hash is not bound");
-      const evidenceVerification = await verifyEvidenceFilesForHash(
-        ctx.cwd,
-        state,
-        state.currentArtifactHash,
-        acceptedEvidenceKinds(state),
-      );
-      if (evidenceVerification) return errTool(`review preflight blocked: ${evidenceVerification}`);
-      if (state.evidenceObligations?.simulation?.disposition === "required") {
-        const simulationVerification = await verifyEvidenceFilesForHash(
-          ctx.cwd,
-          state,
-          state.currentArtifactHash,
-          ["simulation"],
-        );
-        if (simulationVerification) return errTool(`review preflight blocked: ${simulationVerification}`);
-      }
-      const presentationVerification = await verifyPresentationDeliverables(ctx.cwd, state);
-      if (presentationVerification) return errTool(`review preflight blocked: ${presentationVerification}`);
-      const closureGuard = spec?.completionGuard?.(state);
-      if (closureGuard) return errTool(`review preflight blocked: ${closureGuard}`);
-      const requirements = await loadCurrentRequirements(store, state);
-      if (!requirements || !state.requirementsVersion || !state.assertionsVersion) {
-        return errTool("review preflight blocked: canonical requirements/assertions record is missing");
-      }
-      const preflight = await runFinalReviewPreflight(ctx.cwd, state, requirements);
-      if (preflight.contradictions.length > 0) {
-        const regressed = regressFinalReview(state, "deterministic final-review preflight contradiction");
-        const nextState = regressed?.state ?? state;
-        await deps.persist(pi, store, nextState, [{
-          type: "FinalReviewPreflightFailed",
-          data: { contradictions: preflight.contradictions, artifactHash: state.currentArtifactHash },
-        }, ...(regressed?.events ?? [])]);
-        return errTool(
-          `Independent review not started: deterministic preflight found ${preflight.contradictions.length} contradiction(s).${regressed ? ` Returned to editable ${regressed.state.phase.toUpperCase()}.` : ""}\n${preflight.contradictions.map((item) => `- ${item.assertionId}: ${item.finding}`).join("\n")}`,
-          { state: nextState, preflight },
-        );
-      }
-      let reviewer;
+      if (!finalReviewerEnabled()) return errTool("cad_submit_for_review is disabled by PI_CAD_FINAL_REVIEWER=0");
       try {
-        reviewer = await (deps.reviewerRunner ?? freshReviewerRunner).run(ctx, state, requirements, preflight);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        reviewer = {
-          result: {
-            verdict: "unresolved" as const,
-            assertionChecks: requirements.assertions.map((assertion) => ({
-              assertionId: assertion.id,
-              verdict: "unresolved" as const,
-              finding: `reviewer failed safely: ${message}`,
-              evidenceRefs: [],
-            })),
-            semanticObjections: [],
-            summary: `reviewer failed safely: ${message}`,
-          },
-          evidenceIndex: collectReviewerEvidenceIndex(state),
-          probeCalls: 0,
-          usage: [],
-          reviewerModel: "unavailable",
-          probeEvidence: [],
-        };
-      }
-      const createdAt = nowIso();
-      const priorReports = await store.listReviewsNewestFirst<{
-        sourceHash?: string;
-        requirementsHash?: string;
-        assertionsHash?: string;
-        result?: { verdict?: string };
-      }>();
-      const history: StoredReviewVote[] = priorReports.flatMap(({ path, data }) => {
-        const verdict = data.result?.verdict;
-        if (
-          !data.requirementsHash ||
-          !data.assertionsHash ||
-          (verdict !== "pass" && verdict !== "fail" && verdict !== "unresolved")
-        ) return [];
-        return [{
-          path: store.relative(path),
-          sourceHash: data.sourceHash,
-          requirementsHash: data.requirementsHash,
-          assertionsHash: data.assertionsHash,
-          verdict,
-        }];
-      });
-      const aggregate = aggregateReviewVotes(
-        {
-          sourceHash: state.currentSourceHash,
-          requirementsHash: state.requirementsVersion,
-          assertionsHash: state.assertionsVersion,
-        },
-        reviewer.result.verdict,
-        history,
-      );
-      const report = {
-        version: 2,
-        createdAt,
-        submissionSummary: params.summary,
-        sourceHash: state.currentSourceHash,
-        requirementsHash: state.requirementsVersion,
-        assertionsHash: state.assertionsVersion,
-        artifactHash: state.currentArtifactHash,
-        evidenceSnapshotHash: reviewer.evidenceIndex.snapshotHash,
-        evidenceIndex: reviewer.evidenceIndex,
-        reviewerModel: reviewer.reviewerModel,
-        reviewerPromptVersion: REVIEWER_PROMPT_VERSION,
-        probeCalls: reviewer.probeCalls,
-        probeEvidence: reviewer.probeEvidence,
-        usage: reviewer.usage,
-        preflight,
-        result: reviewer.result,
-        aggregate,
-      };
-      const reportPath = await store.writeReview(report);
-      const finalReview: FinalReviewRef = {
-        path: store.relative(reportPath),
-        sha256: await sha256File(reportPath),
-        sourceHash: state.currentSourceHash,
-        artifactHash: state.currentArtifactHash,
-        requirementsHash: state.requirementsVersion,
-        assertionsHash: state.assertionsVersion,
-        evidenceSnapshotHash: reviewer.evidenceIndex.snapshotHash,
-        individualVerdict: reviewer.result.verdict,
-        verdict: aggregate.verdict,
-        reviewerModel: reviewer.reviewerModel,
-        reviewerPromptVersion: REVIEWER_PROMPT_VERSION,
-        createdAt,
-      };
-      const reviewedState: CadRunState = { ...state, finalReview, updatedAt: createdAt };
-      const reviewEvent = {
-        type: "FinalReviewCompleted",
-        data: {
-          individualVerdict: reviewer.result.verdict,
-          verdict: aggregate.verdict,
-          votes: { pass: aggregate.pass, fail: aggregate.fail },
-          report: finalReview.path,
-          artifactHash: state.currentArtifactHash,
-          probeCalls: reviewer.probeCalls,
-        },
-      };
-      if (aggregate.verdict !== "pass") {
-        const regressed = regressFinalReview(
-          reviewedState,
-          `independent final review aggregate ${aggregate.verdict}`,
-        );
-        const nextState = regressed?.state ?? reviewedState;
-        await deps.persist(pi, store, nextState, [reviewEvent, ...(regressed?.events ?? [])]);
-        const findings = reviewer.result.assertionChecks
-          .filter((check) => check.verdict !== "pass")
-          .map((check) => `- ${check.assertionId} ${check.verdict.toUpperCase()}: ${check.finding}`);
-        return errTool(
-          `Independent final review ${aggregate.verdict.toUpperCase()} (current vote ${reviewer.result.verdict.toUpperCase()}; recent votes PASS ${aggregate.pass}, FAIL ${aggregate.fail}).${regressed ? ` Returned to editable ${regressed.state.phase.toUpperCase()}.` : ` Phase remains ${state.phase.toUpperCase()}.`}\nReport: ${finalReview.path}\n${findings.join("\n") || reviewer.result.summary}`,
-          { state: nextState, finalReview, result: reviewer.result, aggregate },
-        );
-      }
-      const accepted = transition(reviewedState, "accepted", "independent final review aggregate PASS");
-      if (!accepted.ok) {
-        await deps.persist(pi, store, reviewedState, [reviewEvent]);
-        return errTool(`review PASS could not close workflow: ${accepted.reason}`, { state: reviewedState, finalReview });
-      }
-      if (
-        spec?.updatesHeadOnAccept &&
-        accepted.state.currentArtifactPath &&
-        accepted.state.currentArtifactHash &&
-        /\.(step|stp)$/i.test(accepted.state.currentArtifactPath)
-      ) {
-        await store.updateHead({
-          sourcePath: accepted.state.currentSourcePath,
-          sourceHash: accepted.state.currentSourceHash,
-          artifactPath: store.relative(accepted.state.currentArtifactPath),
-          artifactHash: accepted.state.currentArtifactHash,
-          evidence: accepted.state.evidence,
-        });
-      }
-      await deps.persist(pi, store, accepted.state, [reviewEvent, ...accepted.events]);
-      return okTool(
-        `Independent final review PASS (current vote ${reviewer.result.verdict.toUpperCase()}; recent votes PASS ${aggregate.pass}, FAIL ${aggregate.fail}). Phase is now READY.\nReport: ${finalReview.path}\n\n${await loadPrompt("ready")}`,
-        { state: accepted.state, finalReview, result: reviewer.result, aggregate },
-      );
+        const active = await new (await import("../harness/run-store.ts")).HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+        if (!active) return errTool("No active v7 workflow.");
+        const profileId = active.workflow.phases[active.state.phase]!.reviewProfile;
+        if (profileId !== "mechanical.design-review" && profileId !== "mechanical.final-review") return errTool(`cad_submit_for_review is not enabled for phase ${active.state.phase}`);
+        const reviewed = await runFreshReviewV7({ cwd: ctx.cwd, workflowRunId: active.state.runId, registries: mechanicalRegistries, profile: mechanicalReviewProfile(profileId), executor: mechanicalReviewExecutorV7(ctx) });
+        if (reviewed.state.latestReview?.verdict !== "pass") return errTool(`Independent v7 review ${reviewed.state.latestReview?.verdict ?? "unresolved"}; phase remains ${reviewed.state.phase}.`, { state: reviewed.state, review: reviewed.state.latestReview });
+        const advanced = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: "accepted", note: params.summary ?? "fresh independent review PASS" });
+        return okTool(`Independent v7 review PASS. Phase is now ${advanced.state.phase.toUpperCase()}.`, { state: advanced.state, review: reviewed.state.latestReview });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -1156,105 +428,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       note: Type.String(),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: params.event, note: params.note });
-          return okTool(`Transition ${params.event} accepted by v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-
-      const spec = workflowSpec(state);
-      if (params.event === "accepted" && spec?.acceptedPhases.includes(state.phase)) {
-        // The transition table is authoritative for where acceptance
-        // leads: "ready" CLOSES the run; any other target (audit, when a
-        // release suffix follows the design core) merely continues the
-        // process. Closure deliverables (presentation, workstreams) gate
-        // the closure only — the design review must not demand release
-        // artifacts it cannot even produce in that phase.
-        const acceptedTarget = spec.transitions[state.phase]?.accepted ?? "ready";
-        const isClosureAcceptance = acceptedTarget === "ready";
-        if (isClosureAcceptance && finalReviewerEnabled()) {
-          return errTool("final acceptance requires cad_submit_for_review; cad_transition(accepted) cannot enter READY directly");
-        }
-        const verification = await verifyCurrentArtifacts(ctx.cwd, state);
-        if (verification) return errTool(`cannot accept: ${verification}`);
-        if (!state.currentArtifactHash) {
-          return errTool("cannot accept: current artifact hash is not bound");
-        }
-        const evidenceVerification = await verifyEvidenceFilesForHash(
-          ctx.cwd,
-          state,
-          state.currentArtifactHash,
-          acceptedEvidenceKinds(state),
-        );
-        if (evidenceVerification) return errTool(`cannot accept: ${evidenceVerification}`);
-        if (state.evidenceObligations?.simulation?.disposition === "required") {
-          const simVerification = await verifyEvidenceFilesForHash(
-            ctx.cwd,
-            state,
-            state.currentArtifactHash,
-            ["simulation"],
-          );
-          if (simVerification) return errTool(`cannot accept: ${simVerification}`);
-        }
-        if (isClosureAcceptance) {
-          const presentationVerification = await verifyPresentationDeliverables(ctx.cwd, state);
-          if (presentationVerification) return errTool(`cannot accept: ${presentationVerification}`);
-          const guard = spec.completionGuard?.(state);
-          if (guard) return errTool(`cannot accept: ${guard}`);
-        }
-      }
-      if (
-        params.event === "baseline_understood" &&
-        (state.phase === "baseline" || state.phase === "source_baseline") &&
-        state.baselineArtifactHash
-      ) {
-        const verification = await verifyEvidenceFilesForHash(
-          ctx.cwd,
-          state,
-          state.baselineArtifactHash,
-          ["visual", "geometry"],
-        );
-        if (verification) return errTool(`cannot leave baseline: ${verification}`);
-      }
-
-      const result = transition(state, params.event, params.note);
-      if (!result.ok) {
-        const details = transitionFailureDetails(state, params.event);
-        const choices = details.allowedEvents.map((entry) => `${entry.event}->${entry.target}`).join(", ") || "none";
-        return errTool(
-          `${result.reason}\nAllowed events now: ${choices}\nSuggested action: ${details.suggestedActions[0]}`,
-          details,
-        );
-      }
-      // Head commits only when acceptance CLOSES the run (phase becomes
-      // ready). A design-review accepted that hands into a release suffix
-      // must not move the head: if the audit/gap_closure then fails or the
-      // user aborts, "abort leaves the project head unchanged" still holds.
-      if (
-        params.event === "accepted" &&
-        result.state.phase === "ready" &&
-        spec?.updatesHeadOnAccept &&
-        result.state.currentArtifactPath &&
-        result.state.currentArtifactHash &&
-        /\.(step|stp)$/i.test(result.state.currentArtifactPath)
-      ) {
-        await store.updateHead({
-          sourcePath: result.state.currentSourcePath,
-          sourceHash: result.state.currentSourceHash,
-          artifactPath: store.relative(result.state.currentArtifactPath),
-          artifactHash: result.state.currentArtifactHash,
-          evidence: result.state.evidence,
-        });
-      }
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        `Transition ${params.event} accepted. Phase is now ${result.state.phase.toUpperCase()}.\n\n${await loadPrompt(result.state.phase)}`,
-        { state: result.state },
-      );
+      try {
+        const loaded = await transitionMechanicalRunV7({ cwd: ctx.cwd, event: params.event, note: params.note });
+        return okTool(`Transition ${params.event} accepted by v7. Phase is now ${loaded.state.phase.toUpperCase()}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -1272,27 +449,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     ],
     parameters: Type.Object({ reason: Type.String() }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await waitMechanicalRunV7({ cwd: ctx.cwd, reason: params.reason });
-          return okTool(`v7 workflow paused in ${loaded.state.phase}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      if (isHeadless(state)) {
-        return errTool(
-          "HEADLESS mode cannot wait for a user. Use cad_defer_clarification for an engineering fallback or cad_declare_blocker for user-owned authority.",
-        );
-      }
-      const result = waitForUser(state, params.reason);
-      if (!result.ok) return errTool(result.reason);
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        `Workflow paused in ${result.state.phase}. Waiting for the user decision.\nReason: ${params.reason}`,
-        { state: result.state },
-      );
+      try {
+        const loaded = await waitMechanicalRunV7({ cwd: ctx.cwd, reason: params.reason });
+        return okTool(`v7 workflow paused in ${loaded.state.phase}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -1316,24 +476,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       affectsContract: Type.Boolean(),
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await deferMechanicalClarificationV7({ cwd: ctx.cwd, ...params });
-          return okTool(`Headless clarification recorded in v7; continue in ${loaded.state.phase.toUpperCase()} using the fallback.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const result = deferClarification(state, params);
-      if (!result.ok) return errTool(result.reason);
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        params.affectsContract
-          ? "Headless clarification recorded. Acceptance may change; returned to REQUIREMENTS for explicit re-commit."
-          : `Headless clarification recorded. Continue in ${result.state.phase.toUpperCase()} using the fallback.`,
-        { state: result.state, clarification: result.state.deferredClarifications?.at(-1) },
-      );
+      try {
+        const loaded = await deferMechanicalClarificationV7({ cwd: ctx.cwd, ...params });
+        return okTool(`Headless clarification recorded in v7; continue in ${loaded.state.phase.toUpperCase()} using the fallback.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -1354,22 +500,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
       needed: Type.String({ minLength: 1 }),
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await blockMechanicalRunV7({ cwd: ctx.cwd, status: params.type === "user_authority" ? "blocked_user" : "blocked_external", type: params.type, reason: params.reason, needed: params.needed });
-          return okTool(`v7 workflow blocked as ${loaded.state.status.toUpperCase()}: ${params.reason}`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const result = declareHeadlessBlocker(state, params);
-      if (!result.ok) return errTool(result.reason);
-      await deps.persist(pi, store, result.state, result.events);
-      return okTool(
-        `Headless workflow terminated as ${result.state.status?.toUpperCase()}: ${params.reason}`,
-        { state: result.state, blocker: result.state.blocker },
-      );
+      try {
+        const loaded = await blockMechanicalRunV7({ cwd: ctx.cwd, status: params.type === "user_authority" ? "blocked_user" : "blocked_external", type: params.type, reason: params.reason, needed: params.needed });
+        return okTool(`v7 workflow blocked as ${loaded.state.status.toUpperCase()}: ${params.reason}`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 
@@ -1382,62 +516,10 @@ export function registerControlTools(pi: ExtensionAPI, deps: ControllerDeps): vo
     promptGuidelines: ["Only call after cad_submit_for_review has produced READY (analyze routes keep their existing findings-delivered closure)."],
     parameters: Type.Object({}),
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      if (await selectKernelEngine(ctx.cwd) === "v7") {
-        try {
-          const loaded = await finishMechanicalRunV7({ cwd: ctx.cwd });
-          return okTool(`v7 workflow finished. Status is ${loaded.state.status.toUpperCase()}.`, { state: loaded.state });
-        } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
-      }
-      const store = new CadProjectStore(ctx.cwd);
-      const state = await guardState(store);
-      if (!state) return errTool("No active Pi-CAD workflow. Call cad_route first.");
-      const verification = await verifyCurrentArtifacts(ctx.cwd, state);
-      if (verification) return errTool(`cad_finish blocked: ${verification}`);
-      const spec = workflowSpec(state);
-      if (finalReviewerEnabled() && state.route?.objective !== "analyze") {
-        const reviewVerification = await verifyCurrentFinalReview(ctx.cwd, state);
-        if (reviewVerification) return errTool(`cad_finish blocked: ${reviewVerification}`);
-      }
-      if (state.route?.objective === "analyze" && state.baselineArtifactHash) {
-        const analyzeKinds: EvidenceRef["kind"][] =
-          state.evidenceObligations?.simulation?.disposition === "required"
-            ? ["visual", "geometry", "simulation"]
-            : ["visual", "geometry"];
-        const evidenceVerification = await verifyEvidenceFilesForHash(
-          ctx.cwd,
-          state,
-          state.baselineArtifactHash,
-          analyzeKinds,
-        );
-        if (evidenceVerification) return errTool(`cad_finish blocked: ${evidenceVerification}`);
-      } else if (state.currentArtifactHash) {
-        const evidenceVerification = await verifyEvidenceFilesForHash(
-          ctx.cwd,
-          state,
-          state.currentArtifactHash,
-          spec?.finishEvidence(state) ?? ["visual", "geometry"],
-        );
-        if (evidenceVerification) return errTool(`cad_finish blocked: ${evidenceVerification}`);
-        if (state.evidenceObligations?.simulation?.disposition === "required") {
-          const simVerification = await verifyEvidenceFilesForHash(
-            ctx.cwd,
-            state,
-            state.currentArtifactHash,
-            ["simulation"],
-          );
-          if (simVerification) return errTool(`cad_finish blocked: ${simVerification}`);
-        }
-        const finishPresentation = await verifyPresentationDeliverables(ctx.cwd, state);
-        if (finishPresentation) return errTool(`cad_finish blocked: ${finishPresentation}`);
-      }
-      const result = finish(state);
-      if (!result.ok) return errTool(result.reason);
-      await deps.persist(pi, store, result.state, result.events);
-      await store.setCurrentRun(null);
-      return okTool(
-        `Run ${result.state.runId} (${result.state.route ? routeKey(result.state.route) : "unset"}) finished. Project head is unchanged unless this run accepted a new candidate.`,
-        { state: result.state },
-      );
+      try {
+        const loaded = await finishMechanicalRunV7({ cwd: ctx.cwd });
+        return okTool(`v7 workflow finished. Status is ${loaded.state.status.toUpperCase()}.`, { state: loaded.state });
+      } catch (error) { return errTool(error instanceof Error ? error.message : String(error)); }
     },
   });
 }
