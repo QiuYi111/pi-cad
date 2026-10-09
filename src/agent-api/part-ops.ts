@@ -196,6 +196,16 @@ async function openDocument(cwd: string, request: Extract<PartRequest, { op: "pa
 
 async function applyOps(cwd: string, request: Extract<PartRequest, { op: "part-apply" }>) {
   const paths = resolvePartPaths(cwd, request.doc, request.output);
+  if (request.observe === false) {
+    // A step on the way to a finished assembly: commit the revision and stop. Exporting, inspecting and drawing
+    // the whole assembly after each of 80 links costs more than the links; the apply that follows observes.
+    const committed = (await partRequest(cwd, paths, {
+      op: "apply",
+      args: { ops: request.ops, message: request.message, observe: false },
+      ...budget(request),
+    })) as WorkerBuildResult;
+    return { part: jsonValue(committed as never), images: [], changes: null, highlighted: false, artifact: null, observed: false };
+  }
   const result = (await partRequest(cwd, paths, {
     op: "apply",
     args: { ops: request.ops, message: request.message },

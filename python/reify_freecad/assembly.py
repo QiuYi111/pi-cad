@@ -50,6 +50,14 @@ def rekey_path(source_body: str | None, unit_path: str, path: str) -> str:
     return f"{unit_path}/{path}"
 
 
+#: (document name, occurrence name) -> (part shape the world shape was made from, pose stamp, world shape)
+_WORLD_SHAPES: dict[tuple[str, str], tuple[Any, tuple, Any]] = {}
+
+
+def _matrix_key(placement: Any) -> tuple:
+    return tuple(round(v, 9) + 0.0 for v in placement.toMatrix().A)
+
+
 @dataclass
 class Unit:
     """Something with a pose and a shape: a body, an occurrence of a linked part, or a reference."""
@@ -82,12 +90,28 @@ class Unit:
         return None
 
     def shape(self) -> Any:
-        """World shape; a body's single solid is unwrapped from FreeCAD's compound."""
+        """World shape; a body's single solid is unwrapped from FreeCAD's compound.
+
+        An occurrence's world shape is kept while its part shape and pose stay the same. One apply asks for the
+        shape of every unit a dozen times, and each ask copied the whole shape: with 80 parts that was most of the
+        time of every link. Callers only read the shape."""
         if self.kind == BODY:
             shape = self.obj.Shape
         else:
-            shape = self.local_shape().copy()
+            leaf_shape = self.local_shape()
+            key = (self.obj.Document.Name, self.obj.Name)
+            stamp = (_matrix_key(self.obj.Placement), _matrix_key(leaf_shape.Placement) if not leaf_shape.isNull() else None)
+            cached = _WORLD_SHAPES.get(key)
+            if cached is not None and cached[1] == stamp and not leaf_shape.isNull() and cached[0].isSame(leaf_shape):
+                return cached[2]
+            shape = leaf_shape.copy()
             shape.Placement = self.obj.Placement.multiply(shape.Placement)
+            if not shape.isNull() and shape.ShapeType == "Compound" and len(shape.Solids) == 1:
+                shape = shape.Solids[0]
+            if len(_WORLD_SHAPES) > 4000:
+                _WORLD_SHAPES.clear()
+            _WORLD_SHAPES[key] = (leaf_shape, stamp, shape)
+            return shape
         if shape.isNull():
             return shape
         if shape.ShapeType == "Compound" and len(shape.Solids) == 1:
@@ -275,6 +299,7 @@ def refresh_links(session: Any) -> list[str]:
                 leaf.Shape = occurrence_shape(source, body)
                 obj.SourceSha256 = digest
                 session.occurrence_roles.pop(obj.Name, None)
+                session.declaration_cache.pop(path, None)
                 changed.append(path)
         elif kind == REFERENCE:
             absolute = session.resolve_project_path(obj.LinkFile)
@@ -385,17 +410,70 @@ def joint(ctx: Any, op: dict[str, Any]) -> None:
     apply_joints(session)
 
 
+def _joint_path(item: Any) -> str:
+    return get_path(item) or item.Label
+
+
+def _selector(stored: str) -> dict[str, Any]:
+    """The role selector of one side of a joint, without the unit it was resolved to when the joint was made."""
+    side = json.loads(stored)
+    return {k: side[k] for k in ("feature", "role") if k in side}
+
+
+def joint_order(items: list[Any]) -> list[Any]:
+    """The joints in the order they apply: a joint runs after the joint that drives its parent unit.
+
+    A child unit has one driving joint, and the drivers must form a chain: a unit driven twice, or a loop of
+    joints, has no pose that is right, so both are refused."""
+    driver: dict[str, Any] = {}
+    for item in items:
+        child = json.loads(item.Child)["unit"]
+        if child in driver:
+            raise ReifyOpError("OP_SCHEMA_INVALID", f"{child} is driven by two joints, {_joint_path(driver[child])} and {_joint_path(item)}",
+                               detail={"path": "child", "reason": "two joints"})
+        driver[child] = item
+    order: list[Any] = []
+    placed: set[str] = set()
+    for item in items:
+        chain: list[Any] = []
+        node: Any = item
+        while node is not None and node.Name not in placed:
+            names = [member.Name for member in chain]
+            if node.Name in names:
+                loop = chain[names.index(node.Name):] + [node]
+                raise ReifyOpError("OP_SCHEMA_INVALID", "joints form a cycle: " + " -> ".join(_joint_path(member) for member in loop),
+                                   detail={"path": "parent", "reason": "cycle"})
+            chain.append(node)
+            node = driver.get(json.loads(node.Parent)["unit"])
+        for member in reversed(chain):
+            order.append(member)
+            placed.add(member.Name)
+    return order
+
+
+def joint_warnings(session: Any) -> list[dict[str, Any]]:
+    """JOINT_DANGLING for each joint whose parent or child role selector no longer names one face."""
+    out = []
+    for item in joint_objects(session):
+        for stored in (item.Parent, item.Child):
+            selector = _selector(stored)
+            try:
+                find_role_face(session, selector)
+            except ReifyOpError:
+                out.append({"code": "JOINT_DANGLING", "joint": _joint_path(item), "missing": selector})
+                break
+    return out
+
+
 def apply_joints(session: Any) -> bool:
     """Set the pose of every joint's child from its current value; True when a pose changed."""
     changed = False
-    for item in joint_objects(session):
-        parent = json.loads(item.Parent)
-        child = json.loads(item.Child)
+    for item in joint_order(joint_objects(session)):
         try:
-            parent_unit, parent_face = find_role_face(session, {k: parent[k] for k in ("feature", "role") if k in parent})
-            child_unit, child_face = find_role_face(session, {k: child[k] for k in ("feature", "role") if k in child})
+            parent_unit, parent_face = find_role_face(session, _selector(item.Parent))
+            child_unit, child_face = find_role_face(session, _selector(item.Child))
         except ReifyOpError:
-            continue  # a dangling joint is reported by the requirement check, not here
+            continue  # a dangling joint is reported by joint_warnings, not here
         parent_roles = parent_unit.roles(session)
         frame_parent = parent_roles.placement.multiply(face_frame(parent_face))
         frame_child = face_frame(child_face)

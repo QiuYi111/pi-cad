@@ -363,5 +363,203 @@ class SplitFaceTests(unittest.TestCase):
         self.assertEqual(sorted(c["face"] for c in error["detail"]["candidates"]), ["twin/left/cyl/side.0~0", "twin/left/cyl/side.0~1"])
 
 
+@unittest.skipUnless(HAVE_FREECAD, "FreeCAD is not importable in this interpreter")
+class JointChainTests(unittest.TestCase):
+    """Joints in a chain are applied parent first, whatever order they were made in."""
+
+    def setUp(self) -> None:
+        self.p = Project()
+        self.addCleanup(self.p.close)
+        self.p.open("parts/shaft.FCStd", "shaft")
+        self.p.call("parts/shaft.FCStd", "apply", ops=grooved_shaft())
+        self.p.open("assembly/chain.FCStd", "chain")
+
+    def session(self) -> Any:
+        return self.p.worker.sessions[self.p.path("assembly/chain.FCStd")]
+
+    def unit_box(self, path: str) -> Any:
+        from reify_freecad.assembly import unit_by_path
+
+        return unit_by_path(self.session(), path).shape().BoundBox
+
+    def joint(self, path: str) -> Any:
+        from reify_freecad.assembly import joint_objects
+        from reify_freecad.core import get_path
+
+        return next(item for item in joint_objects(self.session()) if get_path(item) == path)
+
+    def test_the_last_unit_follows_a_joint_made_after_its_child_joint(self) -> None:
+        # j3 (upper arm -> forearm) is made before j2 (base -> upper arm): j2 must still be applied first.
+        self.p.call("assembly/chain.FCStd", "apply", ops=[
+            {"op": "link", "name": "chain/a", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "chain/b", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "chain/c", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "joint", "name": "chain/j3", "type": "prismatic",
+             "parent": {"feature": "chain/b/cyl", "role": "top"}, "child": {"feature": "chain/c/cyl", "role": "bottom"}},
+            {"op": "joint", "name": "chain/j2", "type": "prismatic", "value": 0,
+             "parent": {"feature": "chain/a/cyl", "role": "top"}, "child": {"feature": "chain/b/cyl", "role": "bottom"}},
+        ])
+        self.assertAlmostEqual(self.unit_box("chain/c").ZMin, 80.0, places=3)
+        # Set j2 the way a sweep does, then recompute: the forearm must move with the upper arm.
+        self.joint("chain/j2").Value = 5.0
+        self.session().recompute()
+        self.assertAlmostEqual(self.unit_box("chain/b").ZMin, 45.0, places=3)
+        self.assertAlmostEqual(self.unit_box("chain/c").ZMin, 85.0, places=3, msg="j3 follows the upper arm moved by j2")
+
+    def test_a_joint_whose_role_no_longer_resolves_is_reported(self) -> None:
+        self.p.call("assembly/chain.FCStd", "apply", ops=[
+            {"op": "link", "name": "chain/a", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "chain/b", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "joint", "name": "chain/j2", "type": "prismatic", "value": 0,
+             "parent": {"feature": "chain/a/cyl", "role": "top"}, "child": {"feature": "chain/b/cyl", "role": "bottom"}},
+        ])
+        # The role is gone (as after an edit that removes the face): set the selector to one that matches nothing.
+        self.joint("chain/j2").Parent = json.dumps({"feature": "chain/a/cyl", "role": "missing", "unit": "chain/a"})
+        dangling = {"code": "JOINT_DANGLING", "joint": "chain/j2", "missing": {"feature": "chain/a/cyl", "role": "missing"}}
+        self.assertEqual(self.p.call("assembly/chain.FCStd", "tree")["warnings"], [dangling])
+        result = self.p.call("assembly/chain.FCStd", "apply", ops=[{"op": "param", "name": "spare", "value": 1}])
+        self.assertIn(dangling, result["warnings"])
+
+
+@unittest.skipUnless(HAVE_FREECAD, "FreeCAD is not importable in this interpreter")
+class AssemblyScaleTests(unittest.TestCase):
+    """An apply must not redo the work of every part already in the assembly (80 parts took hours)."""
+
+    def setUp(self) -> None:
+        self.p = Project()
+        self.addCleanup(self.p.close)
+        self.p.open("parts/base.FCStd", "base")
+        self.p.call("parts/base.FCStd", "apply", ops=base_part())
+        self.p.open("assembly/many.FCStd", "many")
+
+    def link(self, index: int) -> dict[str, Any]:
+        return {"op": "link", "name": f"many/p{index}", "part": "parts/base.FCStd", "body": "base", "position": [index * 60.0, 0, 0]}
+
+    def session(self) -> Any:
+        return self.p.worker.sessions[self.p.path("assembly/many.FCStd")]
+
+    def test_declarations_of_unchanged_occurrences_are_reused(self) -> None:
+        from reify_freecad import export as export_module
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(i) for i in range(4)])
+        built = {"n": 0}
+        original = export_module._Facts
+
+        class Counting(original):  # type: ignore[misc, valid-type]
+            def __init__(self, face: Any) -> None:
+                built["n"] += 1
+                super().__init__(face)
+
+        export_module._Facts = Counting
+        self.addCleanup(setattr, export_module, "_Facts", original)
+        full = export_module.build_declarations(self.session())
+        self.assertEqual(built["n"], 0, "nothing changed since the apply, so nothing is read from FreeCAD again")
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(4)])
+        self.assertGreater(built["n"], 0)
+        one_part = built["n"]
+        again = export_module.build_declarations(self.session())
+        self.assertEqual(built["n"], one_part)
+        self.assertEqual(len(again["entities"]), len(full["entities"]) + len(full["entities"]) // 4, "one more occurrence, its own declarations")
+
+    def test_a_moved_occurrence_gets_new_declarations(self) -> None:
+        from reify_freecad import export as export_module
+        from reify_freecad.assembly import units
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(i) for i in range(2)])
+        session = self.session()
+        before = export_module.build_declarations(session)
+        moved = [u for u in units(session) if u.path == "many/p1"][0]
+        pose = moved.obj.Placement
+        moved.obj.Placement = App.Placement(pose.Base + App.Vector(0, 0, 25), pose.Rotation)
+        after = export_module.build_declarations(session)
+        by_path = lambda doc: {e["path"]: e for e in doc["entities"]}
+        self.assertEqual(by_path(before)["many/p0/plate/top"], by_path(after)["many/p0/plate/top"])
+        self.assertNotEqual(by_path(before)["many/p1/plate/top"]["selector"]["centroid"], by_path(after)["many/p1/plate/top"]["selector"]["centroid"])
+        self.assertEqual(by_path(after)["many/p1/plate/top"]["selector"]["centroid"][2], by_path(before)["many/p1/plate/top"]["selector"]["centroid"][2] + 25)
+
+    def test_a_changed_part_file_is_not_served_from_the_cache(self) -> None:
+        from reify_freecad import export as export_module
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0)])
+        before = export_module.build_declarations(self.session())
+        self.p.call("parts/base.FCStd", "apply", ops=[
+            {"op": "sketch", "name": "base/boss_profile", "on": {"feature": "base/plate", "role": "top"}, "shapes": [{"circle": {"center": [15, 15], "diameter": 6}}]},
+            {"op": "pad", "name": "base/boss", "sketch": "base/boss_profile", "length": 4},
+        ])
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(1)])
+        after = export_module.build_declarations(self.session())
+        self.assertGreater(len({e["path"] for e in after["entities"] if e["path"].startswith("many/p0/boss")}), 0, "the refreshed occurrence shows the new feature")
+        self.assertEqual({e["path"] for e in before["entities"] if e["path"].startswith("many/p0/boss")}, set())
+
+    def fresh_worker(self) -> Any:
+        """A new worker on the same project, as after a restart; it has opened the part from its saved file."""
+        from reify_freecad.worker import Worker
+
+        worker = Worker()
+        self.addCleanup(worker.registry.close)
+        opened = worker.handle({"id": 0, "op": "open", "doc": self.p.path("parts/base.FCStd"), "budgetS": 60, "args": {
+            "output": self.p.path("build/base.step"), "historyDir": self.p.path(".history/base"), "root": str(self.p.root), "body": "base", "create": False}})
+        self.assertTrue(opened["ok"], opened)
+        return worker
+
+    def test_saved_roles_are_read_back_instead_of_found_again(self) -> None:
+        """A part's roles are found once per revision: a fresh worker (restart, another process) reads them."""
+        import reify_freecad.session as session_module
+        from reify_freecad.worker import Worker
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0), self.link(1)])
+        saved = json.loads(Path(self.p.path("parts/base.FCStd.roles.json")).read_text())
+        self.assertIn("base", saved["bodyRoles"], "the part's roles are saved next to its file")
+        expected = self.p.call("parts/base.FCStd", "query", target="base/plate", what=["faces"])
+
+        searches = {"n": 0}
+        original = session_module.compute_body_roles
+
+        def counting(body: Any) -> Any:
+            searches["n"] += 1
+            return original(body)
+
+        session_module.compute_body_roles = counting
+        self.addCleanup(setattr, session_module, "compute_body_roles", original)
+        fresh = self.fresh_worker()
+        answer = fresh.handle({"id": 1, "op": "query", "doc": self.p.path("parts/base.FCStd"), "args": {"target": "base/plate", "what": ["faces"]}, "budgetS": 60})
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual(answer["result"], expected)
+        self.assertEqual(searches["n"], 0, "the roles came from the saved file")
+
+    def test_saved_roles_are_not_used_after_the_part_changed(self) -> None:
+        from reify_freecad.worker import Worker
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0)])
+        self.p.call("parts/base.FCStd", "apply", ops=[
+            {"op": "sketch", "name": "base/boss_profile", "on": {"feature": "base/plate", "role": "top"}, "shapes": [{"circle": {"center": [15, 15], "diameter": 6}}]},
+            {"op": "pad", "name": "base/boss", "sketch": "base/boss_profile", "length": 4},
+        ])
+        fresh = self.fresh_worker()
+        answer = fresh.handle({"id": 1, "op": "query", "doc": self.p.path("parts/base.FCStd"), "args": {"target": "base/boss", "what": ["faces"]}, "budgetS": 60})
+        self.assertTrue(answer["ok"], answer)
+        self.assertTrue(answer["result"], "the new feature has roles: the old file's saved roles were not served")
+
+    def test_an_apply_that_does_not_observe_commits_without_exporting(self) -> None:
+        quiet = self.p.call("assembly/many.FCStd", "apply", ops=[self.link(i) for i in range(3)], observe=False)
+        self.assertEqual(quiet["rev"], 1)
+        self.assertIs(quiet["observed"], False)
+        self.assertNotIn("step", quiet)
+        self.assertNotIn("annotations", quiet)
+        self.assertFalse(Path(self.p.path("build/many.step")).exists(), "no STEP was written")
+        self.assertTrue(Path(self.p.path("assembly/many.FCStd")).exists(), "the revision is saved")
+        seen = self.p.call("assembly/many.FCStd", "apply", ops=[self.link(3)])
+        self.assertEqual(seen["rev"], 2)
+        self.assertIn("step", seen)
+        self.assertTrue(Path(seen["step"]).exists())
+
+    def test_a_failing_unobserved_apply_still_rolls_back(self) -> None:
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0)], observe=False)
+        error = self.p.error("assembly/many.FCStd", "apply", observe=False, ops=[
+            {"op": "link", "name": "many/nowhere", "part": "parts/missing.FCStd", "body": "base"}])
+        self.assertTrue(error.get("rolledBack"))
+        self.assertEqual(self.p.call("assembly/many.FCStd", "tree")["rev"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

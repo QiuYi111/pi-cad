@@ -246,7 +246,9 @@ export function buildReviewerBwrapArgs(paths: LaunchPaths, input: { reviewId: st
     "--setenv", "PI_OFFLINE", "1",
   );
   bindSharedAgentDirectory(args, input.reviewerAgentDir, paths.primeAgentDir);
-  for (const name of ["TERM", "LANG", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) passEnvironment(args, name, process.env[name]);
+  passEnvironment(args, "TERM", process.env.TERM);
+  passEnvironment(args, "LANG", process.env.LANG);
+  forwardProxyEnvironment(args);
   args.push(
     "--", "/opt/prime/prime-agent.sh", "--dist", "--cwd", "/workspace",
     "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
@@ -287,6 +289,34 @@ function passEnvironment(args: string[], name: string, value: string | undefined
   if (value !== undefined && value !== "") args.push("--setenv", name, value);
 }
 
+const PROXY_URL_ENVIRONMENT = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] as const;
+
+// Removes `user:password@` from a scheme://authority proxy URL, keeping scheme,
+// host, port and path. Values without a scheme are not URLs and pass unchanged.
+function stripProxyUserinfo(value: string): { value: string; stripped: boolean } {
+  const match = /^([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/?#]*@/.exec(value);
+  if (!match) return { value, stripped: false };
+  return { value: `${match[1]}${value.slice(match[0].length)}`, stripped: true };
+}
+
+function warnProxyCredentialsStripped(): void {
+  process.stderr.write("[pi-cad] warning: authenticated proxy credentials are not forwarded to the Prime sandbox; the proxy URL was passed without user:password\n");
+}
+
+function forwardProxyEnvironment(args: string[], environment: NodeJS.ProcessEnv = process.env): void {
+  let stripped = false;
+  for (const name of PROXY_URL_ENVIRONMENT) {
+    const value = environment[name];
+    if (value === undefined) continue;
+    const sanitized = stripProxyUserinfo(value);
+    stripped ||= sanitized.stripped;
+    passEnvironment(args, name, sanitized.value);
+  }
+  if (stripped) warnProxyCredentialsStripped();
+  passEnvironment(args, "NO_PROXY", environment.NO_PROXY);
+  passEnvironment(args, "no_proxy", environment.no_proxy);
+}
+
 export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], permission: "workspace" | "read-only" = "workspace"): string[] {
   const args = [
     "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-uts",
@@ -308,6 +338,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--ro-bind", join(paths.repository, "src", "integrations", "prime"), "/opt/pi-cad/prime-extension",
     "--ro-bind", join(paths.repository, "skills", "cad"), "/opt/pi-cad/cad",
     "--ro-bind", join(paths.repository, "skills", "parametric-cad-modeling"), "/opt/pi-cad/skills/parametric-cad-modeling",
+    "--ro-bind", join(paths.repository, "skills", "assembly-design"), "/opt/pi-cad/skills/assembly-design",
     "--ro-bind", join(paths.repository, "skills", "grill-me"), "/opt/pi-cad/grill-me",
     "--ro-bind", join(paths.repository, "skills", "blender-product-rendering"), "/opt/pi-cad/blender-product-rendering",
     "--ro-bind", join(paths.repository, "third_party", "blender-mcp"), "/opt/pi-cad/blender-mcp",
@@ -340,9 +371,8 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--setenv", "PI_OFFLINE", process.env.PI_OFFLINE ?? "1",
   );
   bindSharedAgentDirectory(args, paths.ephemeralAgentDir, paths.primeAgentDir);
-  for (const name of ["TERM", "COLORTERM", "LANG", "LC_ALL", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy", "all_proxy"]) {
-    passEnvironment(args, name, process.env[name]);
-  }
+  for (const name of ["TERM", "COLORTERM", "LANG", "LC_ALL"]) passEnvironment(args, name, process.env[name]);
+  forwardProxyEnvironment(args);
   args.push(
     "--", "/bin/sh", "-c", '"$1" -c "$2" || { printf "PRIME_KERNEL_PROVENANCE_FAILURE prime=%s pi_cad=%s venv=%s executable=%s prefix=unavailable\\n" "$PRIME_AGENT_GIT_SHA" "$PI_CAD_GIT_SHA" "$PRIME_AGENT_KERNEL_VENV" "$1" >&2; exit 1; }; shift 2; exec "$@"',
     "prime-kernel-provenance", "/opt/prime-kernel-venv/bin/python", KERNEL_PROVENANCE,
@@ -354,6 +384,7 @@ export function buildPrimeBwrapArgs(paths: LaunchPaths, primeArgs: string[], per
     "--extension", "/opt/pi-cad/imagegen/index.ts",
     "--skill", "/opt/pi-cad/cad/SKILL.md",
     "--skill", "/opt/pi-cad/skills/parametric-cad-modeling/SKILL.md",
+    "--skill", "/opt/pi-cad/skills/assembly-design/SKILL.md",
     "--skill", "/opt/pi-cad/grill-me/SKILL.md",
     "--skill", "/opt/pi-cad/blender-product-rendering/SKILL.md",
     "--skill", "/opt/pi-cad/imagegen/skills/imagegen/SKILL.md",
@@ -650,8 +681,10 @@ async function bootstrapPrimeKernel(primeRoot: string, primeAgentDir: string, pr
   };
   delete env.PRIME_AGENT_KERNEL_PYTHON;
   const packagedBootstrap = join(primeRoot, "packages", "coding-agent", "dist", "core", "kernel", "bootstrap-cli.js");
-  const bootstrapCli = existsSync(packagedBootstrap) ? packagedBootstrap : join(primeRoot, "packages", "coding-agent", "src", "core", "kernel", "bootstrap-cli.ts");
-  const result = await capturedChildExit(process.execPath, [join(primeRoot, "node_modules", "tsx", "dist", "cli.mjs"), bootstrapCli], env);
+  const bootstrapArgs = existsSync(packagedBootstrap)
+    ? [packagedBootstrap]
+    : [tsxCli(primeRoot), join(primeRoot, "packages", "coding-agent", "src", "core", "kernel", "bootstrap-cli.ts")];
+  const result = await capturedChildExit(process.execPath, bootstrapArgs, env);
   if (result.code !== 0) {
     const failure = JSON.stringify({ primeSha: gitRevision(primeRoot), piCadSha: gitRevision(repository), venv: primeKernelVenv, executable: join(primeKernelVenv, "bin", "python"), prefix: "unavailable", stage: "bootstrap" });
     throw new Error(`PRIME_KERNEL_PROVENANCE_FAILURE ${failure}\nPrime kernel bootstrap failed: ${result.diagnostic.trim() || `exit code ${result.code}`}`);
@@ -665,6 +698,12 @@ async function bootstrapPrimeKernel(primeRoot: string, primeAgentDir: string, pr
   if (provenance.code !== 0) {
     throw new Error(`Prime kernel venv provenance check failed for ${primeKernelVenv}: ${provenance.diagnostic.trim() || `exit code ${provenance.code}`}`);
   }
+}
+
+function tsxCli(primeRoot: string): string {
+  const cli = join(primeRoot, "node_modules", "tsx", "dist", "cli.mjs");
+  if (!existsSync(cli)) throw new Error(`Prime kernel bootstrap needs the tsx CLI to run the TypeScript bootstrap, but it is missing: ${cli}`);
+  return cli;
 }
 
 const KERNEL_PROVENANCE = [
@@ -708,8 +747,18 @@ function capturedChildExit(command: string, args: string[], env: NodeJS.ProcessE
 }
 
 function nativeEnvironment(paths: LaunchPaths, agentDir: string, socket: string, reviewer = false): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  let stripped = false;
+  for (const name of PROXY_URL_ENVIRONMENT) {
+    const value = process.env[name];
+    if (value === undefined) continue;
+    const sanitized = stripProxyUserinfo(value);
+    stripped ||= sanitized.stripped;
+    environment[name] = sanitized.value;
+  }
+  if (stripped) warnProxyCredentialsStripped();
   return {
-    ...process.env,
+    ...environment,
     HOME: dirname(dirname(agentDir)), TMPDIR: join(paths.runtimeDirectory, "tmp"),
     PATH: `${process.env.PI_CAD_NODE_WRAPPER ? dirname(process.env.PI_CAD_NODE_WRAPPER) : join(paths.nodeRoot, "bin")}:${paths.primeRoot}:${join(paths.primeRoot, "node_modules", ".bin")}:/usr/local/bin:/usr/bin:/bin`,
     PI_CAD_PROJECT_CWD: reviewer ? join(paths.runtimeDirectory, "reviewer-workspace") : paths.project,
@@ -753,6 +802,8 @@ function nativePrimeArgs(paths: LaunchPaths, primeArgs: string[]): string[] {
     "--extension", join(paths.repository, "src", "integrations", "prime", "extension.ts"),
     "--extension", join(paths.repository, "packages", "prime-codex-image-gen", "index.ts"),
     "--skill", join(paths.repository, "skills", "cad", "SKILL.md"),
+    "--skill", join(paths.repository, "skills", "parametric-cad-modeling", "SKILL.md"),
+    "--skill", join(paths.repository, "skills", "assembly-design", "SKILL.md"),
     "--skill", join(paths.repository, "skills", "grill-me", "SKILL.md"),
     "--skill", join(paths.repository, "skills", "blender-product-rendering", "SKILL.md"),
     "--skill", join(paths.repository, "packages", "prime-codex-image-gen", "skills", "imagegen", "SKILL.md"), ...primeArgs];
