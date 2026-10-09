@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..common import sha256_file
+from ..shape_facts import enumerate_surfaces
 from .artifact import ArtifactModel
 from .manifest import identity_path, legacy_path, load_manifest
 from .protocol import IdentityError, canonicalize_path, parent_path
@@ -329,8 +330,6 @@ class IdentityIndex:
 
     def _surface_ids(self) -> set[str]:
         if self._surfaces is None:
-            from ..simulation.surface_selector import enumerate_surfaces
-
             self._surfaces = {surface["id"] for surface in enumerate_surfaces(self.artifact)["surfaces"]}
         return self._surfaces
 

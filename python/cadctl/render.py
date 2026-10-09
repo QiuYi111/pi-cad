@@ -8,6 +8,8 @@ import build123d as bd
 import numpy as np
 from PIL import Image, ImageDraw
 
+from .shape_facts import _tessellate
+
 DEFAULT_VIEW_NAMES = ("iso", "front", "back", "left", "right", "top", "bottom")
 VIEW_NAMES = (*DEFAULT_VIEW_NAMES, "iso_opposite")
 
@@ -63,30 +65,6 @@ def _normalize(v: tuple[float, float, float]) -> tuple[float, float, float]:
     return (v[0] / n, v[1] / n, v[2] / n)
 
 
-def _tessellate(shape: bd.Shape, tolerance: float) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    vertices: list[tuple[float, float, float]] = []
-    triangles: list[tuple[int, int, int]] = []
-    offset = 0
-    solids = shape.solids()
-    if len(solids) == 0:
-        # A single shell/face-only STEP is still renderable.
-        solids = [shape]
-    for solid in solids:
-        verts, tris = solid.tessellate(tolerance, 0.2)
-        vertices.extend((float(v.X), float(v.Y), float(v.Z)) for v in verts)
-        triangles.extend((a + offset, b + offset, c + offset) for a, b, c in tris)
-        offset += len(verts)
-    if not vertices or not triangles:
-        raise ValueError("STEP contains no tessellatable geometry")
-    pts = np.asarray(vertices, dtype=np.float64)
-    tri = np.asarray(triangles, dtype=np.int64)
-    normals = np.cross(pts[tri[:, 1]] - pts[tri[:, 0]], pts[tri[:, 2]] - pts[tri[:, 0]])
-    norms = np.linalg.norm(normals, axis=1)
-    valid = norms > 1e-12
-    pts = pts
-    tri = tri[valid]
-    normals = normals[valid] / norms[valid, None]
-    return pts, tri, normals
 
 
 HIGHLIGHT_COLOR = (255, 140, 0)
