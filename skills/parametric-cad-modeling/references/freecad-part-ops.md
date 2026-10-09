@@ -97,6 +97,7 @@ Declare a parameter once with `{"op": "param", "name": "width", "value": 40, "un
 | `import_step` | `name`, `file` (a project STEP path) | `position`, `rotation` | a bought-in part, kept as a reference |
 | `joint` | `name`, `type` (`revolute`, `prismatic`, `fixed`), `parent`, `child` (face selectors with a `role`) | `value`, `limits` `[low, high]`, `flip` | seats the child on the parent from two role frames; see "Assemblies" |
 | `require` | `name`, `kind`, `target`, `limit` | `tolerance` | an intent, checked after every apply |
+| `dfm_profile` | `rulepack` (`quanzhou.cnc_mill`, or `null` to remove the profile) | `material` (`al6061`, `al7075`, `steel_45`; required with a rulepack) | sets the DFM rulepack and material of the document; see "DFM lint" |
 
 `set` changes `Length`, `Length2`, `Depth`, `Diameter`, `Radius`, `Size`, `Occurrences`, `Angle`, `Reversed`, `Midplane`, `Type`, any parameter (`target: "Params"`), or a named sketch constraint (`prop: "constraint:s0_w"`). Anything else is `PROP_NOT_ALLOWED`, and the error lists what is allowed.
 
@@ -118,6 +119,10 @@ Each shape is fully constrained when it is built, and its dimensions are named s
 ### Intents
 
 `require` kinds: `min_wall` (target path, limit mm), `min_clearance` (target `{"a", "b"}`, limit mm), `max_mass` (target path or null, limit g; density is the parameter `density` in g/cm3, default 2.7), `bbox_within` (target path, limit `[x, y, z]`), `dimension` (target `{"target", "prop"}`, limit). A failed intent is a result (`status: "fail"` in `r.intent`), not an error.
+
+## DFM lint
+
+With a `dfm_profile` set, every `apply` and `try` result has a `dfm` field: `{"rulepack", "material", "layer": "lint", "counts": {"error", "warn", "info", "pass"}, "issues", "truncated", "geometry"}`. `issues` lists the error and warn items (at most 8, errors first); each has `rule`, `severity`, `target` (the semantic path of the hole, pocket or body), `measured`, `limit`, `unit`, `message`, `hints` and `source` (vendor, version and page). `dfm` is `null` without a profile. The lint runs on the recomputed document only, within 50 ms; `truncated: true` means it stopped early. `geometry.state` is `none` until the second layer runs. A feature that the lint cannot judge (for example a floor fillet, or a bodies imported with `import_step`, which have no feature tree) is reported as skipped, never as passed. `mass` uses the profile's material density when no `density` is given.
 
 ## Assemblies
 

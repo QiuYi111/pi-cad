@@ -28,6 +28,7 @@ _HANDLERS: dict[str, tuple[str, str]] = {
     "import_step": ("..assembly", "import_step"),
     "joint": ("..assembly", "joint"),
     "require": ("..intent", "require"),
+    "dfm_profile": ("..dfm.profile", "dfm_profile"),
 }
 
 OP_REGISTRY = {name: {"schema": SCHEMAS[name], "handler": _HANDLERS[name]} for name in OP_NAMES}

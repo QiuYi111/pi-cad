@@ -207,6 +207,12 @@ def c_any(value: Any, index: int | None, where: str) -> Any:
     return value
 
 
+def c_rulepack_or_null(value: Any, index: int | None, where: str) -> str | None:
+    if value is None:
+        return None
+    return c_str(value, index, where)
+
+
 def c_attach(value: Any, index: int | None, where: str) -> dict[str, Any]:
     return c_selector(value, index, where)
 
@@ -266,6 +272,7 @@ SCHEMAS: dict[str, tuple[dict[str, Check], dict[str, Check]]] = {
         {"name": c_path, "kind": c_enum(*REQUIRE_KINDS), "target": c_any, "limit": c_any},
         {"tolerance": c_value},
     ),
+    "dfm_profile": ({"rulepack": c_rulepack_or_null}, {"material": c_str}),
 }
 
 #: Ops that add or change geometry, in the order they are listed in documentation.
@@ -301,6 +308,8 @@ def validate_op(op: Any, index: int | None = None) -> dict[str, Any]:
         for side in ("parent", "child"):
             if "role" not in out[side]:
                 raise fail(index, side, "a joint frame needs a role (a cylinder, cone or plane face)")
+    if kind == "dfm_profile" and out["rulepack"] is not None and "material" not in out:
+        raise fail(index, "material", "required when a rulepack is set")
     if kind == "set" and not isinstance(out["prop"], str):
         raise fail(index, "prop", "expected a string")
     return out

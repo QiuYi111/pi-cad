@@ -14,6 +14,7 @@ import FreeCAD as App
 
 from . import export as export_module
 from . import intent as intent_module
+from .dfm import lint as lint_module
 from . import summary
 from .core import (
     PARAMS_NAME, REQUIREMENTS_NAME, bodies, body_features, get_path, is_feature, is_sketch,
@@ -438,6 +439,7 @@ class DocumentSession:
     def _result(self, before: dict[str, Any], after: dict[str, Any], warnings: list[dict[str, Any]]) -> dict[str, Any]:
         ctx = OpContext(self)
         intents = intent_module.evaluate_all(ctx)
+        dfm = lint_module.evaluate(ctx)
         paths_before, paths_after = set(before["paths"]), set(after["paths"])
         features = summary.diff_features(paths_before, paths_after, self._recomputed)
         params = summary.diff_params(before["params"], after["params"])
@@ -452,6 +454,7 @@ class DocumentSession:
             "features": features,
             "params": params,
             "intent": intents,
+            "dfm": dfm,
             "warnings": [json.loads(item) for item in deduped],
             "highlight": {"paths": highlight},
             "annotations": self._annotations(highlight, changed_roles),
