@@ -115,8 +115,11 @@ describe('workspace Kubernetes client', () => {
 
 describe('workspace template', () => {
   it('uses only the placeholders the controller fills, and renders the three objects', () => {
+    // Every placeholder in the file must be one the controller fills. The reverse does not hold: a value such as
+    // SECCOMP_LOCALHOST_PROFILE is consumed in code (template.ts sets localhostProfile), so it is not in the file.
     const names = [...new Set([...TEMPLATE.matchAll(/\$\{([A-Z0-9_]+)\}/g)].map((m) => m[1]))].sort();
-    expect(names).toEqual([...TEMPLATE_PLACEHOLDERS].sort());
+    const filled = new Set<string>(TEMPLATE_PLACEHOLDERS);
+    expect(names.filter((n) => !filled.has(n))).toEqual([]);
   });
 
   it('the default template path points at the shipped file', () => {

@@ -17,6 +17,9 @@ jobs:
   desktop:
     uses: ./.github/workflows/desktop.yml
 
+  cloud:
+    uses: ./.github/workflows/cloud.yml
+
   chaos:
     name: "Chaos suites"
     runs-on: ubuntu-latest
@@ -57,7 +60,7 @@ jobs:
 
   report:
     name: Report nightly failure
-    needs: [ci, desktop, chaos]
+    needs: [ci, desktop, cloud, chaos]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 10
