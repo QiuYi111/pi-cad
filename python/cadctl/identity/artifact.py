@@ -18,7 +18,6 @@ The three reference families kept here are:
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -26,15 +25,8 @@ import build123d as bd
 from OCP.gp import gp_XYZ
 
 from ..assembly import _location_dict, assembly_tree_from_shape
+from ..common import sha256_file
 from .protocol import IdentityError
-
-
-def _hash_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _location_point(location: bd.Location, point: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -96,7 +88,7 @@ class ArtifactModel:
         self.path = Path(artifact).resolve()
         if not self.path.is_file():
             raise IdentityError("missing-artifact", f"artifact does not exist: {self.path}")
-        self.artifact_hash = _hash_file(self.path)
+        self.artifact_hash = sha256_file(self.path)
         self.token = self.artifact_hash[:12]
         self.shape = shape if shape is not None else bd.import_step(str(self.path))
         self.face_shapes: dict[str, Any] = {}

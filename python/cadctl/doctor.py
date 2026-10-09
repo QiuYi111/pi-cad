@@ -195,7 +195,3 @@ def doctor() -> dict[str, Any]:
             "note": "diagnostic only; public simulation and optimization never execute in this host environment",
         },
     }
-
-
-def doctor_json() -> str:
-    return json.dumps(doctor(), indent=2, sort_keys=True)

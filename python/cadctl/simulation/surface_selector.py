@@ -23,15 +23,9 @@ import math
 from pathlib import Path
 from typing import Any
 
+from ..common import sha256_file
+
 _MAX_VIEW_LABELS = 64
-
-
-def _hash_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _vec(values: Any, digits: int = 9) -> list[float]:
@@ -110,7 +104,7 @@ def _enumerate_surface_shapes(
     import build123d as bd
 
     artifact = Path(artifact)
-    artifact_hash = _hash_file(artifact)
+    artifact_hash = sha256_file(artifact)
     shape = bd.import_step(artifact)
     from ..assembly import assembly_tree_from_shape
 
@@ -161,21 +155,6 @@ def enumerate_surfaces(artifact: str | Path) -> dict[str, Any]:
     """Enumerate hash-bound boundary-surface facts for any STEP artifact."""
     report, _ = _enumerate_surface_shapes(artifact)
     return report
-
-
-def resolve_surface_shapes(
-    artifact: str | Path,
-    requested: list[str],
-) -> dict[str, Any]:
-    """Resolve surface IDs to faces, failing closed on another artifact version."""
-    report, by_id = _enumerate_surface_shapes(artifact)
-    unknown = [sid for sid in requested if sid not in by_id]
-    if unknown:
-        raise ValueError(
-            f"unknown surface IDs {unknown} for artifact {report['artifactHash'][:12]}; "
-            f"run preset='surfaces' again"
-        )
-    return {sid: by_id[sid] for sid in requested}
 
 
 def resolve_surface_ids(

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
 import build123d as bd
+
+from .common import sha256_file
 
 
 def _location_dict(loc: bd.Location) -> dict[str, Any]:
@@ -15,14 +16,6 @@ def _location_dict(loc: bd.Location) -> dict[str, Any]:
         "yAxis": [round(float(v), 6) for v in (loc.y_axis.direction.X, loc.y_axis.direction.Y, loc.y_axis.direction.Z)],
         "zAxis": [round(float(v), 6) for v in (loc.z_axis.direction.X, loc.z_axis.direction.Y, loc.z_axis.direction.Z)],
     }
-
-
-def _hash_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _walk(
@@ -140,5 +133,5 @@ def assembly_tree_from_shape(shape: bd.Shape, artifact_hash: str) -> dict[str, A
 
 def assembly_tree(artifact: str | Path) -> dict[str, Any]:
     artifact = Path(artifact)
-    artifact_hash = _hash_file(artifact)
+    artifact_hash = sha256_file(artifact)
     return assembly_tree_from_shape(bd.import_step(artifact), artifact_hash)
