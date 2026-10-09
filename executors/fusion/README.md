@@ -113,7 +113,7 @@ Items 5, 7, 9, 14, 15, 16, 20, 21, 22 (sketch on a tilted face), 23 and 25 held.
 - A rotation rounded to 6 decimals is rejected by `addNewComponent`; the frame is orthonormalized first.
 - The midpoint of a full circle is where the kernel's seam is, so circle edge references match on centre, radius and axis.
 - The equivalence check places cylinders and cones by axis, not by centroid, for the same reason.
-- A part keeps its place in the assembly (an aircraft tail is 800 mm from the origin) and the new document's camera looks at the origin, so the add-in fits the view before it writes the .f3d. Otherwise the file opens on an empty canvas.
+- A part keeps its place in the assembly (an aircraft tail is 800 mm from the origin) and the new document's camera looks at the origin, so the add-in fits the view before it writes the .f3d. Otherwise the file opens on an empty canvas, and `fit` on it does nothing: a body saved without display graphics draws nothing until Fusion generates them. Fitting before the save generates them and stores them in the file (checked by importing the .f3d again: camera on the body, solid drawn).
 - Fusion refuses a dimension on geometry it already holds in place (`VCS_SKETCH_OVER_CONSTRAINTS`): the second of two concentric circles, rectangles that line up with each other. The dimension is skipped with a warning; the equivalence check still proves the shape.
 
 Still UNVERIFIED: items 1 to 4, 6, 8, 10 to 13, 17, 19, 24, 26.
