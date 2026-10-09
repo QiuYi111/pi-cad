@@ -25,11 +25,11 @@
  * and every phaseRecord traces back to an obligation.
  */
 
-import type { CadPhase, CadRunState, EvidenceRef } from "../shared/protocol.ts";
+import type { CadPhase, EvidenceKind } from "../shared/protocol.ts";
 import type { CadMaturity, ObligationKey, Route } from "../shared/route.ts";
 import type { DesignRoute } from "../shared/route.ts";
 import { MATURITY_RANK, obligationsOf, recordObligations, RELEASE_WORKSTREAMS } from "../shared/route.ts";
-import type { EvidenceKindsResolver, WorkflowSpec } from "./types.ts";
+import type { EvidenceKindsResolver, WorkflowGuardState, WorkflowSpec } from "./types.ts";
 
 export interface CompiledProcess extends WorkflowSpec {
   route: Route;
@@ -47,7 +47,7 @@ export interface CompiledProcess extends WorkflowSpec {
 // Release workstream guard (carried over from the 0.7 release workflow)
 // ---------------------------------------------------------------------------
 
-export function releaseCompletionGuard(state: CadRunState): string | null {
+export function releaseCompletionGuard(state: WorkflowGuardState): string | null {
   for (const name of RELEASE_WORKSTREAMS) {
     const value = state.workstreamStatuses?.[name];
     if (!value || value === "open") {
@@ -57,15 +57,15 @@ export function releaseCompletionGuard(state: CadRunState): string | null {
   return null;
 }
 
-const visualGeometry = (): EvidenceRef["kind"][] => ["visual", "geometry"];
+const visualGeometry = (): EvidenceKind[] => ["visual", "geometry"];
 
-const visualGeometryCompare = (): EvidenceRef["kind"][] => [
+const visualGeometryCompare = (): EvidenceKind[] => [
   "visual",
   "geometry",
   "compare",
 ];
 
-const releaseClosureEvidence = (state: CadRunState): EvidenceRef["kind"][] =>
+const releaseClosureEvidence = (state: WorkflowGuardState): EvidenceKind[] =>
   state.baselineArtifactHash &&
   state.currentArtifactHash &&
   state.baselineArtifactHash !== state.currentArtifactHash
@@ -389,7 +389,7 @@ export function compileWorkflow(route: Route): CompiledProcess {
  * release suffix and must not demand release deliverables prematurely.
  */
 function applyOverlays(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
-  const extra: EvidenceRef["kind"][] = [];
+  const extra: EvidenceKind[] = [];
   const rank = MATURITY_RANK[route.maturity];
   if (rank >= MATURITY_RANK.manufacturing) {
     // A design you intend to manufacture must have been drawn.
@@ -407,11 +407,11 @@ function applyOverlays(spec: WorkflowSpec, route: DesignRoute): WorkflowSpec {
   }
   if (extra.length === 0) return spec;
 
-  const withExtra = (kinds: EvidenceRef["kind"][]): EvidenceRef["kind"][] => [
+  const withExtra = (kinds: EvidenceKind[]): EvidenceKind[] => [
     ...kinds,
     ...extra.filter((kind) => !kinds.includes(kind)),
   ];
-  const isClosureReview = (state: CadRunState): boolean =>
+  const isClosureReview = (state: WorkflowGuardState): boolean =>
     route.maturity !== "release" || state.phase === "final_review";
 
   const acceptedEvidence: EvidenceKindsResolver = (state) => {

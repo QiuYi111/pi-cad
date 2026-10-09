@@ -1,11 +1,22 @@
 import type {
   CadPhase,
-  CadRunState,
-  EvidenceRef,
+  EvidenceKind,
   MutationPolicy,
 } from "../shared/protocol.ts";
 
-export type EvidenceKindsResolver = (state: CadRunState) => EvidenceRef["kind"][];
+/**
+ * The run facts a process guard reads. Structural on purpose: guards depend on
+ * these fields, not on a particular run-state record.
+ */
+export interface WorkflowGuardState {
+  phase: CadPhase;
+  workstreamStatuses?: Record<string, "open" | "complete" | "not_applicable" | "blocked_external">;
+  currentArtifactPath?: string;
+  currentArtifactHash?: string;
+  baselineArtifactHash?: string;
+}
+
+export type EvidenceKindsResolver = (state: WorkflowGuardState) => EvidenceKind[];
 
 export interface WorkflowSpec {
   /** Phase entered when requirements are committed. */
@@ -49,7 +60,7 @@ export interface WorkflowSpec {
    * Optional process-specific completion guard. The generic engine calls it
    * on accepted/finish and only understands a non-null error string.
    */
-  completionGuard?: (state: CadRunState) => string | null;
+  completionGuard?: (state: WorkflowGuardState) => string | null;
   /** True when accepted candidate should become the new Project Head. */
   updatesHeadOnAccept?: boolean;
   /**

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
-import type { EvidenceRef } from "./protocol.ts";
+import type { EvidenceKind } from "./protocol.ts";
 
 function sha256(data: string | Buffer): string {
   return createHash("sha256").update(data).digest("hex");
@@ -34,7 +34,7 @@ export function nowIso(): string {
 }
 
 export function makeEvidenceId(
-  kind: EvidenceRef["kind"],
+  kind: EvidenceKind,
   artifactHash: string,
   specHash?: string,
   caseId?: string,
