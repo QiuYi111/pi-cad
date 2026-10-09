@@ -1,17 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-export type KernelEngine = "v7";
-
 const TERMINAL_V6_STATUSES = ["done", "aborted", "blocked_external", "budget_exhausted"];
 
 /**
- * The v6 kernel was removed; v7 (Harness Kernel) is the only engine.
- * A project whose v6 run is still unfinished is refused, not migrated: the
- * owner must move or delete the old run state to start fresh.
- * @deprecated Engine selection is gone; callers should use the v7 services directly. The lead deletes this after merge.
+ * v7 (Harness Kernel) is the only engine. A project whose legacy v3-v6 run is
+ * still unfinished is refused, not migrated: the owner must move or delete the
+ * old run state to start fresh.
  */
-export async function selectKernelEngine(cwd: string): Promise<KernelEngine> {
+export async function assertNoLegacyRun(cwd: string): Promise<void> {
   const piCad = join(resolve(cwd), ".pi-cad");
   const pointer = await readFile(join(piCad, "project.json"), "utf-8")
     .then((raw) => JSON.parse(raw) as { schemaVersion?: number; currentRunId?: string | null })
@@ -30,5 +27,4 @@ export async function selectKernelEngine(cwd: string): Promise<KernelEngine> {
       );
     }
   }
-  return "v7";
 }

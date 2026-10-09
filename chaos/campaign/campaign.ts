@@ -94,7 +94,6 @@ function environmentSnapshot(): Record<string, string | null> {
     "CHAOS_REIFY_PAUSE_MS",
     "CHAOS_REIFY_FINAL_SETTLE_MS",
     "CHAOS_REIFY_CPU_WORKERS",
-    "PI_CAD_KERNEL",
   ];
   return Object.fromEntries(keys.map((key) => [key, process.env[key] ?? null]));
 }

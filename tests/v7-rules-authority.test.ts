@@ -34,16 +34,12 @@ function fakePi() {
 }
 
 async function withV7<T>(body: (cwd: string) => Promise<T>): Promise<T> {
-  const previous = process.env.PI_CAD_KERNEL;
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-v7-rules-authority-"));
   try {
-    process.env.PI_CAD_KERNEL = "v7";
     for (const extension of [core, probe, geometry, drawing, simulation, presentation]) extension(fakePi());
     await cadStart({ cwd, registries: mechanicalRegistries, builtins: mechanicalBuiltinWorkflows(), reason: "v7 rules test" });
     return await body(cwd);
   } finally {
-    if (previous === undefined) delete process.env.PI_CAD_KERNEL;
-    else process.env.PI_CAD_KERNEL = previous;
     await rm(cwd, { recursive: true, force: true });
   }
 }
@@ -76,10 +72,8 @@ test("v7 rules: reroute downgrade is authorized only by a single-use token for t
 // Rule 8: external (non Pi-CAD) tools survive every phase transition.
 test("v7 rules: external plugin tools stay active across v7 phase transitions", async () => {
   const EXTERNAL = ["goal_complete", "goal_blocked", "goal_wait", "some_other_plugin_tool"];
-  const previous = process.env.PI_CAD_KERNEL;
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-v7-rules-external-"));
   try {
-    process.env.PI_CAD_KERNEL = "v7";
     const pi = fakePi();
     for (const extension of [core, probe, geometry, drawing, simulation, presentation]) extension(pi);
     pi.active = [...EXTERNAL];
@@ -109,8 +103,6 @@ test("v7 rules: external plugin tools stay active across v7 phase transitions", 
     assert.ok(build.has("cad_commit_candidate"), "build exposes candidate commit");
     assert.ok(!build.has("cad_commit_plan"));
   } finally {
-    if (previous === undefined) delete process.env.PI_CAD_KERNEL;
-    else process.env.PI_CAD_KERNEL = previous;
     await rm(cwd, { recursive: true, force: true });
   }
 });

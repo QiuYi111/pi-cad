@@ -62,8 +62,6 @@ function fakePi() {
 
 // Rule 9: v7 context archive is durable per checkpoint, and a failed refresh quarantines the stale brain.
 test("v7 rules: compaction archives every checkpoint and a failed refresh quarantines the stale working context", async () => {
-  const previous = process.env.PI_CAD_KERNEL;
-  process.env.PI_CAD_KERNEL = "v7";
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-v7-rules-context-"));
   try {
     for (const extension of [core, probe, geometry, drawing, simulation, presentation]) extension({ registerTool() {}, registerCommand() {}, on() {}, setActiveTools() {}, getActiveTools() { return []; }, getAllTools() { return []; }, appendEntry() {}, sendUserMessage() {}, setSessionName() {}, events: { emit() {}, on() {} } } as any);
@@ -111,8 +109,6 @@ test("v7 rules: compaction archives every checkpoint and a failed refresh quaran
     assert.match(rendered, /BRAIN-THREE/);
     assert.ok(existsSync(join(contextDir, "archive", "ctx-003.json")));
   } finally {
-    if (previous === undefined) delete process.env.PI_CAD_KERNEL;
-    else process.env.PI_CAD_KERNEL = previous;
     await rm(cwd, { recursive: true, force: true });
   }
 });

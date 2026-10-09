@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { assertLinuxRuntime } from "../shared/platform.ts";
-import { selectKernelEngine } from "../harness/engine-router.ts";
+import { assertNoLegacyRun } from "./legacy-run.ts";
 import { PermissionEngineV7, assertScopedWrite } from "../harness/permissions.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
@@ -28,7 +28,7 @@ function applyV7ToolOverlay(pi: ExtensionAPI, enabled: readonly string[]): void 
 
 /**
  * Pi-CAD v7 extension entry. Every hook first passes the engine guard, which
- * refuses projects that still carry an unfinished v6 run.
+ * refuses projects that still carry an unfinished legacy run.
  */
 export default function cadCore(pi: ExtensionAPI) {
   assertLinuxRuntime("Pi-CAD extension");
@@ -36,7 +36,7 @@ export default function cadCore(pi: ExtensionAPI) {
   pi.registerCommand("cad", {
     description: "Show the Pi-CAD workspace: project, design head, and active run",
     handler: async (args, ctx) => {
-      await selectKernelEngine(ctx.cwd);
+      await assertNoLegacyRun(ctx.cwd);
       const project = new HarnessProjectStoreV7(ctx.cwd);
       const [{ state }, run] = await Promise.all([project.load(), project.currentRun(mechanicalRegistries)]);
       if (ctx.hasUI) {
@@ -55,7 +55,7 @@ export default function cadCore(pi: ExtensionAPI) {
   pi.registerCommand("cad-abort", {
     description: "Abort the active workflow run only; project head is untouched",
     handler: async (_args, ctx) => {
-      await selectKernelEngine(ctx.cwd);
+      await assertNoLegacyRun(ctx.cwd);
       const state = await abortMechanicalRunV7(ctx.cwd);
       if (state && ctx.hasUI) ctx.ui.notify(`Run ${state.runId} aborted; v7 Project Head unchanged`, "warning");
     },
@@ -68,7 +68,7 @@ export default function cadCore(pi: ExtensionAPI) {
   pi.registerCommand("cad-approve-reroute", {
     description: "Approve the pending Pi-CAD reroute (issues a one-time authority token for that exact route)",
     handler: async (_args, ctx) => {
-      await selectKernelEngine(ctx.cwd);
+      await assertNoLegacyRun(ctx.cwd);
       try {
         const loaded = await approveMechanicalRerouteV7(ctx.cwd);
         if (ctx.hasUI) ctx.ui.notify(`Exact v7 reroute authority issued for run ${loaded.state.runId}`, "info");
@@ -85,13 +85,13 @@ export default function cadCore(pi: ExtensionAPI) {
   // projection remains read-only and never repairs/migrates state.
   pi.on("input", async (event, ctx) => {
     if (event.source === "extension") return { action: "continue" as const };
-    await selectKernelEngine(ctx.cwd);
+    await assertNoLegacyRun(ctx.cwd);
     await resumeMechanicalRunV7(ctx.cwd);
     return { action: "continue" as const };
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    await selectKernelEngine(ctx.cwd);
+    await assertNoLegacyRun(ctx.cwd);
     const project = new HarnessProjectStoreV7(ctx.cwd);
     const loaded = await project.currentRun(mechanicalRegistries);
     if (!loaded || ["done", "aborted"].includes(loaded.state.status)) {
@@ -115,7 +115,7 @@ export default function cadCore(pi: ExtensionAPI) {
 
   pi.on("tool_call", async (event, ctx) => {
     try {
-      await selectKernelEngine(ctx.cwd);
+      await assertNoLegacyRun(ctx.cwd);
     } catch (error) {
       return { block: true, reason: error instanceof Error ? error.message : String(error) };
     }
@@ -141,7 +141,7 @@ export default function cadCore(pi: ExtensionAPI) {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    await selectKernelEngine(ctx.cwd);
+    await assertNoLegacyRun(ctx.cwd);
     const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
     if (loaded && loaded.state.status === "active") maybeRebuildContextV7(pi, loaded, ctx);
   });
