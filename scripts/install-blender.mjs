@@ -178,22 +178,10 @@ if (process.argv[1] && process.argv[1].endsWith("install-blender.mjs")) {
     console.error("Run Reify and its installers inside Linux or a WSL distribution.");
     process.exit(2);
   }
-  if (!process.env.PI_CAD_SKIP_BLENDER && !process.env.PI_CAD_BLENDER_BIN) {
-    // Runtime updates may only change app files. Do not sync Python (which can
-    // require network) when the pinned Blender runtime is already present.
-    try {
-      const manifest = JSON.parse(readFileSync(join(root, "scripts", "blender-manifest.json"), "utf-8"));
-      const key = process.arch === "arm64" ? "linux-arm64" : "linux-x64";
-      const version = manifest.version ?? "unknown";
-      const target = join(root, ".runtime", "blender", version, key, "blender");
-      if (existsSync(target)) {
-        console.log(`[pi-cad] Blender ${version} already installed (${key})`);
-        process.exit(0);
-      }
-    } catch {
-      // Fall through to installBlender, which reports the precise failure.
-    }
-  }
+  // Always sync the simulation extra, even when the pinned Blender runtime is
+  // already present: setup:python records a base-only sync, so a lock marker
+  // cannot prove the extra is current. A no-op sync is cheap. installBlender
+  // below still skips the Blender download when the runtime exists.
   execFileSync(process.env.PI_CAD_UV ?? "uv", ["sync", "--project", join(root, "python"), "--extra", "simulation"], { cwd: root, stdio: "inherit" });
   const python = join(root, "python", ".venv", "bin", "python");
   const result = await installBlender({ root, python });
