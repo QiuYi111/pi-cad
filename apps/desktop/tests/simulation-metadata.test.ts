@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 const exec = promisify(execFile);
 const repository = resolve(import.meta.dirname, "../../..");
 const inspector = resolve(repository, "scripts/desktop-inspect-vtk.py");
-const python = resolve(repository, "python/.venv/bin/python");
+const python = resolve(repository, "python/.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 
 describe("VTU simulation metadata", () => {
   it("reports fixed mesh, field ranges, units, and model provenance", async () => {
