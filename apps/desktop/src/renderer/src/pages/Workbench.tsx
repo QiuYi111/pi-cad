@@ -11,7 +11,7 @@ import { StatusBar } from "../components/StatusBar";
 import { ConceptBoard, type ConceptImage, type ConceptSelection } from "../components/ConceptBoard";
 import { automaticConversationTitle } from "../lib/conversation-title";
 
-export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }: { settings: AppSettings; prime: PrimeRuntimeController; onSettingsChange: (settings: AppSettings) => void; onOpenSettings: () => void }) {
+export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChange, onOpenSettings }: { settings: AppSettings; prime: PrimeRuntimeController; /** Cloud mode: the conversation list needs the workspace, so it is read again once the workspace is running. */ cloudWorkspaceState?: string; onSettingsChange: (settings: AppSettings) => void; onOpenSettings: () => void }) {
   const [projectMenu, setProjectMenu] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("reify.sidebar-open.v1") !== "0");
   const [newProject, setNewProject] = useState(false);
@@ -244,7 +244,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
     }
     void refreshSessions();
     return () => { sessionRequest.current += 1; };
-  }, [settings.projectPath, prime.status.sessionId]);
+  }, [settings.projectPath, prime.status.sessionId, cloudWorkspaceState === "running"]);
   const newSession = async () => {
     if (runtimeTurnActive(prime.status) || prime.status.state === "starting") throw new Error("Stop the current response before starting another conversation.");
     setConversationStorageKey(crypto.randomUUID());

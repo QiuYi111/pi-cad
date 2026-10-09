@@ -1,6 +1,7 @@
 # Caddy: the only route into the cluster from Tailscale Funnel (plan 8.3).
-# Container port 8443 is published as hostPort 127.0.0.1:18443 on compute.
-# Mirrored WSL networking makes that address reachable from Windows, where
+# Caddy runs in the host network namespace and listens on 127.0.0.1:18443 inside WSL.
+# A hostPort mapping is only an iptables rule, which WSL localhost forwarding does not see;
+# a real listening socket is forwarded to 127.0.0.1:18443 on Windows, where
 # "tailscale funnel" points (see cloud/deploy/wsl/funnel.sh).
 apiVersion: v1
 kind: ConfigMap
@@ -19,7 +20,9 @@ data:
     	admin off
     }
 
-    :8443 {
+    # Any Host header, loopback only (bind below). Funnel forwards the public hostname, so a 127.0.0.1 site address would not match.
+    http://:18443 {
+    	bind 127.0.0.1
     	handle /v1/* {
     		reverse_proxy platform-api.reify-system.svc.cluster.local:8080
     	}
@@ -59,6 +62,8 @@ spec:
         app.kubernetes.io/part-of: reify
     spec:
       automountServiceAccountToken: false
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -79,13 +84,13 @@ spec:
               value: /config
           ports:
             - name: https-local
-              containerPort: 8443
-              hostPort: 18443
-              hostIP: 127.0.0.1
+              containerPort: 18443
               protocol: TCP
           readinessProbe:
-            tcpSocket:
-              port: https-local
+            # hostNetwork + bind 127.0.0.1: a kubelet tcpSocket probe targets the node IP and is refused, so probe inside the container.
+            # /v1/healthz goes through Caddy to platform-api, so it also checks the backend.
+            exec:
+              command: ["wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:18443/v1/healthz"]
             periodSeconds: 10
           resources:
             requests:
@@ -98,6 +103,10 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+              # The official caddy binary carries cap_net_bind_service as a file capability.
+              # With drop ALL and no_new_privs, exec fails with EPERM unless the cap is in the bounding set.
+              # Caddy listens on 18443, so it never binds a privileged port.
+              add: ["NET_BIND_SERVICE"]
           volumeMounts:
             - name: config
               mountPath: /etc/caddy

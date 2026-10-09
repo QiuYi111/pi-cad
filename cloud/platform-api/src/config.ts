@@ -13,7 +13,8 @@ export interface Config {
   workspaceNamespace: string; // reify-ws
   workspaceImage: string;
   workspaceTemplatePath: string; // cloud/deploy/k3s/workspace-template.yaml
-  workspaceSeccompType: string; // RuntimeDefault | Unconfined (plan 0.5)
+  workspaceSeccompType: string; // RuntimeDefault | Unconfined | Localhost (plan 0.5)
+  workspaceSeccompProfile: string; // profile path under the kubelet seccomp dir, used when the type is Localhost
   workspaceHostUsers: string; // "true" | "false" (plan 0.5)
   httpsProxyForWorkspaces: string; // http://<windows-host>:7890, no credentials
   platformInternalUrl: string; // in-cluster base URL of the internal port, used for activity reports
@@ -41,6 +42,7 @@ export const DEFAULT_CONFIG: Config = {
   workspaceImage: 'reify-workspace:dev',
   workspaceTemplatePath: fileURLToPath(new URL('../../deploy/k3s/workspace-template.yaml', import.meta.url)),
   workspaceSeccompType: 'RuntimeDefault',
+  workspaceSeccompProfile: '',
   workspaceHostUsers: 'true',
   httpsProxyForWorkspaces: '',
   platformInternalUrl: 'http://platform-api.reify-system.svc.cluster.local:8081',
@@ -82,6 +84,7 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env) {
       workspaceImage: env.WORKSPACE_IMAGE ?? DEFAULT_CONFIG.workspaceImage,
       workspaceTemplatePath: env.WORKSPACE_TEMPLATE_PATH ?? DEFAULT_CONFIG.workspaceTemplatePath,
       workspaceSeccompType: env.WORKSPACE_SECCOMP_TYPE ?? DEFAULT_CONFIG.workspaceSeccompType,
+      workspaceSeccompProfile: env.WORKSPACE_SECCOMP_PROFILE ?? DEFAULT_CONFIG.workspaceSeccompProfile,
       workspaceHostUsers: env.WORKSPACE_HOST_USERS ?? DEFAULT_CONFIG.workspaceHostUsers,
       httpsProxyForWorkspaces: env.HTTPS_PROXY_FOR_WORKSPACES ?? DEFAULT_CONFIG.httpsProxyForWorkspaces,
       platformInternalUrl: env.PLATFORM_INTERNAL_URL ?? DEFAULT_CONFIG.platformInternalUrl,

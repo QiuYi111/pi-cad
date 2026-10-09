@@ -10,6 +10,7 @@ export const TEMPLATE_PLACEHOLDERS = [
   'PROJECT_IDS',
   'REPLICAS',
   'SECCOMP_TYPE',
+  'SECCOMP_LOCALHOST_PROFILE',
   'HOST_USERS',
   'HTTPS_PROXY_FOR_WORKSPACES',
   'PLATFORM_INTERNAL_URL',
@@ -27,6 +28,12 @@ export function renderWorkspaceManifests(template: string, vars: TemplateVars): 
   const docs = loadAllYaml(text).filter((doc) => doc && typeof doc === 'object') as K8sObject[];
   for (const doc of docs) {
     if (doc.kind !== 'Deployment') continue;
+    // localhostProfile is only valid with type Localhost, so it is set here instead of in the template.
+    if (vars.SECCOMP_TYPE === 'Localhost') {
+      if (!vars.SECCOMP_LOCALHOST_PROFILE) throw new Error('workspace template: seccomp type Localhost needs WORKSPACE_SECCOMP_PROFILE');
+      const podSpec = (doc.spec as { template: { spec: { securityContext: { seccompProfile: Record<string, string> } } } }).template.spec;
+      podSpec.securityContext.seccompProfile.localhostProfile = vars.SECCOMP_LOCALHOST_PROFILE;
+    }
     // An empty placeholder (for example PROJECT_IDS with no projects) parses as null. Env values must be strings.
     const containers = (doc.spec as { template: { spec: { containers: Array<{ env?: Array<{ value?: unknown }> }> } } }).template.spec
       .containers;

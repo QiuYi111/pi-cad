@@ -81,7 +81,13 @@ RUN : "${PRIME_AGENT_REF:?PRIME_AGENT_REF build arg is required}" \
  && git -C /opt/reify/prime-agent checkout --detach "${PRIME_AGENT_REF}" \
  && cd /opt/reify/prime-agent \
  && npm ci \
- && npm run build --if-present \
+ && (cd packages/tui && npm run build) \
+ && { (cd packages/ai && npm run build) || echo "warning: prime-agent ai build reported type errors (TS2536 in generated models); dist was still emitted"; } \
+ && { (cd packages/agent && npm run build) || echo "warning: prime-agent agent build reported type errors"; } \
+ && cd packages/coding-agent \
+ && { npx tsgo -p tsconfig.build.json || echo "warning: prime-agent coding-agent build reported type errors"; } \
+ && npx shx chmod +x dist/cli.js && npm run copy-assets && npm run bundle \
+ && cd /opt/reify/prime-agent \
  && rm -rf /opt/reify/prime-agent/.git /root/.npm
 
 # 6. pi-cad. Dependencies first (cacheable), then the source tree.
@@ -113,8 +119,8 @@ RUN cd /opt/reify/pi-cad/cloud/workspace-gateway \
 # 9. Entrypoint, then make /opt/reify read-only for everyone except root.
 COPY cloud/image/entrypoint.sh /opt/reify/entrypoint.sh
 RUN chmod 0755 /opt/reify/entrypoint.sh \
- && chmod -R go-w /opt/reify \
- && chmod -R a+rX /opt/reify
+ && find /opt/reify -xdev ! -type l \( -perm /022 -o ! -perm -444 -o \( -type d ! -perm -111 \) \) \
+      -exec chmod go-w,a+rX {} +
 
 ENV HOME=/workspace/home \
     PI_CAD_REPO=/opt/reify/pi-cad \

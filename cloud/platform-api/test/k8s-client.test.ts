@@ -19,6 +19,7 @@ const VARS = {
   PROJECT_IDS: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   REPLICAS: '1',
   SECCOMP_TYPE: 'RuntimeDefault',
+  SECCOMP_LOCALHOST_PROFILE: '',
   HOST_USERS: 'true',
   HTTPS_PROXY_FOR_WORKSPACES: 'http://10.0.0.5:7890',
   PLATFORM_INTERNAL_URL: 'http://platform-api.reify-system.svc.cluster.local:8081',

@@ -46,7 +46,7 @@ fi
 if [ "$IMPORT" = 1 ]; then
   command -v k3s >/dev/null 2>&1 || { echo "k3s not found; cannot import (use --no-import)" >&2; exit 1; }
   "$RUNTIME" save "$TAG" | sudo k3s ctr -n k8s.io images import -
-  if ! sudo k3s ctr -n k8s.io images ls -q | grep -Fxq "$TAG"; then
+  if ! sudo k3s ctr -n k8s.io images ls -q | grep -Fq "/$TAG"; then
     echo "import finished but $TAG is not listed in k8s.io" >&2
     exit 1
   fi

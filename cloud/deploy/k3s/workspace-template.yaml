@@ -69,7 +69,9 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           # PLACEHOLDER decided by verify-runtime.sh (plan 0.5 and 14).
-          # RuntimeDefault is the default. Unconfined is the fallback if bwrap is blocked.
+          # RuntimeDefault is the default, but it blocks the namespace calls bwrap needs.
+          # Localhost uses deploy/k3s/seccomp/reify-userns.json (RuntimeDefault plus those calls).
+          # Unconfined also works but drops all syscall filtering. The controller adds localhostProfile for Localhost.
           type: ${SECCOMP_TYPE}
       containers:
         - name: workspace

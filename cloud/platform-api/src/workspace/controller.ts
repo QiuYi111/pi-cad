@@ -56,6 +56,7 @@ export function createController(d: Deps & { workspace: WorkspaceDeps }, log: (m
       PROJECT_IDS: ids.join(','),
       REPLICAS: '1',
       SECCOMP_TYPE: config.workspaceSeccompType,
+      SECCOMP_LOCALHOST_PROFILE: config.workspaceSeccompProfile,
       HOST_USERS: config.workspaceHostUsers,
       HTTPS_PROXY_FOR_WORKSPACES: config.httpsProxyForWorkspaces,
       PLATFORM_INTERNAL_URL: config.platformInternalUrl,
