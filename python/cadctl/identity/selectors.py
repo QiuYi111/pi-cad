@@ -26,6 +26,8 @@ _FACE_KEYS = {
     "radius",
     "area",
     "centroid",
+    "axisPoint",
+    "bboxCenter",
     "tolerance",
 }
 _EDGE_KEYS = {"entity", "type", "length", "radius", "centroid", "tolerance"}
@@ -163,6 +165,27 @@ def _match_face(record: dict[str, Any], selector: dict[str, Any], tolerance: flo
         return False
     if "centroid" in selector and not _point_close(record["centroid"], _as_point(selector["centroid"], "centroid"), tolerance):
         return False
+    if "axisPoint" in selector:
+        # The axis of a cylinder or cone passes through this point. Unlike
+        # `centroid` (a parametric centre for curved faces) it does not depend
+        # on where the seam sits, so another kernel can reproduce it.
+        axis = record.get("axis")
+        if not axis:
+            return False
+        origin = [float(v) for v in axis["position"]]
+        direction = [float(v) for v in axis["direction"]]
+        length = sum(v * v for v in direction) ** 0.5
+        if length < 1e-12:
+            return False
+        direction = [v / length for v in direction]
+        offset = [a - b for a, b in zip(_as_point(selector["axisPoint"], "axisPoint"), origin)]
+        along = sum(a * b for a, b in zip(offset, direction))
+        perpendicular = sum((a - along * b) ** 2 for a, b in zip(offset, direction)) ** 0.5
+        if perpendicular > tolerance:
+            return False
+    if "bboxCenter" in selector:
+        if "bboxCenter" not in record or not _point_close(record["bboxCenter"], _as_point(selector["bboxCenter"], "bboxCenter"), tolerance):
+            return False
     return True
 
 

@@ -1,12 +1,24 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { promisify } from "node:util";
-import { realpath } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
+import { join } from "node:path";
 import type { AppSettings, DependencyCheck, RuntimeStatus } from "../../src/shared/contracts.js";
 import { engineeringKnowledgeProbe, managedPythonProbe, runtimeChecksReady, type RuntimeBridge } from "./runtime-bridge.js";
 
 export { runtimeChecksReady } from "./runtime-bridge.js";
 
 const execFileAsync = promisify(execFile);
+
+const WSL_PROXY_ENV_KEYS = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "all_proxy",
+  "no_proxy",
+] as const;
 
 const WSL_RUNTIME_ENV_KEYS = [
   "PI_CAD_CANONICAL_PROJECT_DIR",
@@ -34,6 +46,9 @@ const WSL_RUNTIME_ENV_KEYS = [
 export function forwardWslRuntimeEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const entries = (source.WSLENV || "").split(":").filter(Boolean);
   const present = new Set(entries.map((entry) => entry.split("/")[0]));
+  for (const key of WSL_PROXY_ENV_KEYS) {
+    if (source[key] !== undefined && !present.has(key)) entries.push(key);
+  }
   for (const key of WSL_RUNTIME_ENV_KEYS) {
     if (source[key] !== undefined && !present.has(key)) entries.push(key);
   }
@@ -141,12 +156,215 @@ function uncWslPath(value: string): { distro: string; path: string } | null {
   return { distro: match[1]!, path: `/${match[2]!.replaceAll("\\", "/")}` };
 }
 
+/** Proxy variables that are URLs (NO_PROXY is a host list and is forwarded untouched). */
+const WSL_PROXY_URL_KEYS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] as const;
+const WINDOWS_USER_ENV_PROXY_KEYS = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"] as const;
+const WINDOWS_INTERNET_SETTINGS_KEY = "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings";
+
+/** Marker written under python/.venv after a successful setup:python for the lock hash below. */
+export const CAD_PYTHON_LOCK_MARKER = ".pi-cad-lock-sha256";
+
+/** Prints the sha256 of python/uv.lock followed by python/pyproject.toml (run inside the distribution). */
+export function cadPythonLockHashCommand(): string {
+  return "cat python/uv.lock python/pyproject.toml | sha256sum | cut -d ' ' -f1";
+}
+
+type SystemProxy = { http?: string; https?: string };
+
+function withProxyScheme(value: string): string {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+}
+
+/** Removes `user:password@` from a proxy URL so credentials never travel into WSL. */
+export function stripProxyCredentials(value: string): string {
+  return value.replace(/^((?:[a-z][a-z0-9+.-]*:\/\/)?)[^/]*@/i, "$1");
+}
+
+export function isLoopbackProxy(value: string): boolean {
+  try {
+    const host = new URL(withProxyScheme(value)).hostname.toLowerCase();
+    return host === "localhost" || host === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(host);
+  } catch {
+    return false;
+  }
+}
+
+export function rewriteLoopbackProxy(value: string, gateway: string): string {
+  const url = new URL(withProxyScheme(value));
+  url.hostname = gateway;
+  const text = url.toString();
+  return value.endsWith("/") ? text : text.replace(/\/$/, "");
+}
+
+export function parseDefaultGateway(routeOutput: string): string | undefined {
+  return routeOutput.match(/^default\s+via\s+(\d{1,3}(?:\.\d{1,3}){3})\b/m)?.[1];
+}
+
+/** NAT is the WSL2 default; only an explicit `[wsl2] networkingMode=mirrored` shares loopback with Windows. */
+export function wslNetworkingIsMirrored(wslConfig: string): boolean {
+  let section = "";
+  let mode: string | undefined;
+  for (const raw of wslConfig.split(/\r?\n/)) {
+    const line = raw.trim();
+    const header = line.match(/^\[(.+)\]$/);
+    if (header) {
+      section = header[1]!.trim().toLowerCase();
+      continue;
+    }
+    const pair = line.match(/^([^=#;]+?)\s*=\s*(.*)$/);
+    if (section === "wsl2" && pair && pair[1]!.trim().toLowerCase() === "networkingmode") mode = pair[2]!.trim().toLowerCase();
+  }
+  return mode === "mirrored";
+}
+
+/** Parses the WinINET system proxy: ProxyEnable=1 with `host:port` or `http=...;https=...`. */
+export function systemProxyUrls(enable: string | undefined, server: string | undefined): SystemProxy {
+  const value = server?.trim();
+  if (Number(enable) !== 1 || !value) return {};
+  if (!value.includes("=")) return { http: withProxyScheme(value), https: withProxyScheme(value) };
+  const entries = new Map<string, string>();
+  for (const part of value.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq > 0) entries.set(part.slice(0, eq).trim().toLowerCase(), part.slice(eq + 1).trim());
+  }
+  const http = entries.get("http");
+  const https = entries.get("https");
+  return {
+    ...(http ? { http: withProxyScheme(http) } : {}),
+    ...(https ? { https: withProxyScheme(https) } : {}),
+  };
+}
+
+/** Precedence: process environment, then the HKCU user environment, then the system proxy. */
+export function windowsProxyEnvironment(processEnv: NodeJS.ProcessEnv, userEnv: NodeJS.ProcessEnv, system: SystemProxy): NodeJS.ProcessEnv {
+  const pick = (name: string, ...fallbacks: (string | undefined)[]): string | undefined =>
+    [processEnv[name], processEnv[name.toLowerCase()], userEnv[name], ...fallbacks]
+      .map((value) => value?.trim())
+      .find((value) => Boolean(value));
+  const http = pick("HTTP_PROXY", system.http);
+  const https = pick("HTTPS_PROXY", system.https);
+  const all = pick("ALL_PROXY");
+  const no = pick("NO_PROXY");
+  return {
+    ...(http ? { HTTP_PROXY: http, http_proxy: http } : {}),
+    ...(https ? { HTTPS_PROXY: https, https_proxy: https } : {}),
+    ...(all ? { ALL_PROXY: all, all_proxy: all } : {}),
+    ...(no ? { NO_PROXY: no, no_proxy: no } : {}),
+  };
+}
+
+/** Returns the proxy variables to forward into WSL, with credentials stripped and loopback hosts rewritten in NAT mode. */
+export function wslProxyEnvironment(proxy: NodeJS.ProcessEnv, options: { mirrored: boolean; gateway?: string }): { env: NodeJS.ProcessEnv; unresolvedLoopback: boolean } {
+  const env: NodeJS.ProcessEnv = { ...proxy };
+  let unresolvedLoopback = false;
+  for (const key of WSL_PROXY_URL_KEYS) {
+    const value = proxy[key];
+    if (value === undefined) continue;
+    let url = stripProxyCredentials(value);
+    if (!options.mirrored && isLoopbackProxy(url)) {
+      if (!options.gateway) {
+        delete env[key];
+        unresolvedLoopback = true;
+        continue;
+      }
+      url = rewriteLoopbackProxy(url, options.gateway);
+    }
+    env[key] = url;
+  }
+  return { env, unresolvedLoopback };
+}
+
+export function hasLoopbackProxy(env: NodeJS.ProcessEnv): boolean {
+  return WSL_PROXY_URL_KEYS.some((key) => env[key] !== undefined && isLoopbackProxy(stripProxyCredentials(env[key]!)));
+}
+
+async function readRegistryValue(key: string, name: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("reg.exe", ["query", key, "/v", name], {
+      encoding: "utf8", timeout: 5000, windowsHide: true,
+    });
+    const match = String(stdout).match(new RegExp(`^\\s*${name}\\s+REG_\\w+\\s+(.*)$`, "m"));
+    return match?.[1]?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readWindowsProxySettings(): Promise<{ userEnv: NodeJS.ProcessEnv; system: SystemProxy }> {
+  if (process.platform !== "win32") return { userEnv: {}, system: {} };
+  const [userValues, enable, server] = await Promise.all([
+    Promise.all(WINDOWS_USER_ENV_PROXY_KEYS.map((name) => readRegistryValue("HKCU\\Environment", name))),
+    readRegistryValue(WINDOWS_INTERNET_SETTINGS_KEY, "ProxyEnable"),
+    readRegistryValue(WINDOWS_INTERNET_SETTINGS_KEY, "ProxyServer"),
+  ]);
+  const userEnv: NodeJS.ProcessEnv = {};
+  WINDOWS_USER_ENV_PROXY_KEYS.forEach((name, index) => {
+    const value = userValues[index];
+    if (value) userEnv[name] = value;
+  });
+  return { userEnv, system: systemProxyUrls(enable, server) };
+}
+
+async function readWslNetworkingMirrored(): Promise<boolean> {
+  const profile = process.env.USERPROFILE;
+  if (process.platform !== "win32" || !profile) return false;
+  try {
+    return wslNetworkingIsMirrored(await readFile(join(profile, ".wslconfig"), "utf8"));
+  } catch {
+    return false;
+  }
+}
+
 export class WslBridge implements RuntimeBridge {
   readonly kind = "wsl" as const;
   private homePromise?: Promise<string>;
-  constructor(readonly distro: string, readonly bundledRuntimePath?: string) {}
+  private readonly windowsProxy: Promise<{ userEnv: NodeJS.ProcessEnv; system: SystemProxy }>;
+  private readonly mirroredNetworking: Promise<boolean>;
+  private gatewayAddress?: string;
+  /** Last resolved environment; spawn() is synchronous and uses it, and every awaited exec/pipe refreshes it. */
+  private proxyEnv?: NodeJS.ProcessEnv;
+  private proxyWarned = false;
+
+  constructor(readonly distro: string, readonly bundledRuntimePath?: string) {
+    // Registry and .wslconfig reads start at bridge start. The WSL gateway is looked up
+    // lazily because the distribution may not exist yet when the bridge is created.
+    this.windowsProxy = readWindowsProxySettings();
+    this.mirroredNetworking = readWslNetworkingMirrored();
+    void this.desktopEnv().catch(() => undefined);
+  }
+
+  private async desktopEnv(): Promise<NodeJS.ProcessEnv> {
+    if (process.platform !== "win32") return (this.proxyEnv = { ...process.env });
+    const [windows, mirrored] = await Promise.all([this.windowsProxy, this.mirroredNetworking]);
+    const merged = windowsProxyEnvironment(process.env, windows.userEnv, windows.system);
+    const gateway = !mirrored && hasLoopbackProxy(merged) ? await this.windowsHostAddress() : undefined;
+    const { env, unresolvedLoopback } = wslProxyEnvironment(merged, { mirrored, gateway });
+    if (unresolvedLoopback && !this.proxyWarned) {
+      this.proxyWarned = true;
+      console.warn("[pi-cad] Windows proxy is bound to loopback and the WSL default gateway could not be read; not forwarding the proxy into WSL. Set networkingMode=mirrored in .wslconfig or use a non-loopback proxy.");
+    }
+    const base = Object.fromEntries(Object.entries(process.env).filter(([key]) => !(WSL_PROXY_ENV_KEYS as readonly string[]).includes(key)));
+    return (this.proxyEnv = { ...base, ...env });
+  }
+
+  /** The Windows host as seen from NAT-mode WSL. Not memoized on failure, so a later call can succeed. */
+  private async windowsHostAddress(): Promise<string | undefined> {
+    if (!this.gatewayAddress) {
+      try {
+        const { stdout } = await this.runWsl(["ip", "route", "show", "default"], { timeout: 10_000 }, process.env);
+        this.gatewayAddress = parseDefaultGateway(stdout);
+      } catch {
+        this.gatewayAddress = undefined;
+      }
+    }
+    return this.gatewayAddress;
+  }
 
   async exec(args: string[], options: { input?: string; timeout?: number; user?: string } = {}): Promise<{ stdout: string; stderr: string }> {
+    return this.runWsl(args, options, await this.desktopEnv());
+  }
+
+  private async runWsl(args: string[], options: { input?: string; timeout?: number; user?: string } = {}, env: NodeJS.ProcessEnv): Promise<{ stdout: string; stderr: string }> {
     const prefix = ["-d", this.distro, ...(options.user ? ["-u", options.user] : []), "--"];
     const result = await execFileAsync("wsl.exe", [...prefix, ...args], {
       encoding: "utf8",
@@ -154,21 +372,25 @@ export class WslBridge implements RuntimeBridge {
       maxBuffer: 16 * 1024 * 1024,
       windowsHide: true,
       input: options.input,
-      env: forwardWslRuntimeEnvironment(process.env),
+      env: forwardWslRuntimeEnvironment(env),
     } as Parameters<typeof execFileAsync>[2]);
     return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? "") };
   }
 
   spawn(args: string[], user?: string): ChildProcessWithoutNullStreams {
+    return this.spawnWithEnv(args, user, this.proxyEnv ?? process.env);
+  }
+
+  private spawnWithEnv(args: string[], user: string | undefined, env: NodeJS.ProcessEnv): ChildProcessWithoutNullStreams {
     return spawn("wsl.exe", ["-d", this.distro, ...(user ? ["-u", user] : []), "--", ...args], {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
-      env: forwardWslRuntimeEnvironment(process.env),
+      env: forwardWslRuntimeEnvironment(env),
     });
   }
 
   async pipe(args: string[], input: string, timeout = 30_000, user?: string): Promise<{ stdout: string; stderr: string }> {
-    const child = this.spawn(args, user);
+    const child = this.spawnWithEnv(args, user, await this.desktopEnv());
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString("utf8"); });
@@ -180,7 +402,7 @@ export class WslBridge implements RuntimeBridge {
       child.once("exit", (code) => {
         clearTimeout(timer);
         if (code === 0) accept({ stdout, stderr });
-        else reject(new Error(stderr.trim() || `WSL command exited with code ${code}`));
+        else reject(Object.assign(new Error(stderr.trim() || `WSL command exited with code ${code}`), { stdout, stderr, code }));
       });
     });
   }
@@ -412,11 +634,28 @@ export class WslBridge implements RuntimeBridge {
     } catch {
       throw new Error(`Bundled engineering runtime is not staged at ${paths.piCadRepo}. Reinstall Reify or select development checkouts in Settings.`);
     }
-    await runStep("Installing the core CAD packages…", 0.78,
-      () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif test -d python/.venv && ! test -x python/.venv/bin/python; then rm -rf python/.venv; fi\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\n`, 15 * 60_000));
-    await runStep("Preparing Blender system libraries…", 0.84, () => execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", "DEBIAN_FRONTEND=noninteractive apt-get install -y libsm6 libxext6 libxrender1 libx11-6 libxi6 libxfixes3 libxxf86vm1 libxkbcommon0 libgl1 libegl1"], {
-      encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
-    }).then(() => undefined));
+    await runStep("Installing the core CAD packages…", 0.78, async () => {
+      const probe = await this.pipe(["bash", "-s"], [
+        "set -e",
+        `cd ${JSON.stringify(paths.piCadRepo)}`,
+        `if test -x python/.venv/bin/python && python/.venv/bin/python -c 'import build123d, cadctl' >/dev/null 2>&1 && test "$(cat python/.venv/${CAD_PYTHON_LOCK_MARKER} 2>/dev/null)" = "$(${cadPythonLockHashCommand()})"; then echo cadpython=ready; else echo cadpython=missing; fi`,
+      ].join(";\n") + "\n", 60_000);
+      if (probe.stdout.trim().endsWith("cadpython=ready")) return;
+      // The lock hash marker records the lock state the venv was synced to; a changed lock must re-run setup.
+      await this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\nexport PI_CAD_BASE_RUNTIME=1\ncd ${JSON.stringify(paths.piCadRepo)}\nif test -d python/.venv && ! test -x python/.venv/bin/python; then rm -rf python/.venv; fi\nif ! test -d node_modules/jiti -a -d node_modules/typebox -a -d node_modules/yaml; then npm install --omit=dev --legacy-peer-deps; fi\nnpm run setup:python\nmkdir -p python/.venv\n${cadPythonLockHashCommand()} > python/.venv/${CAD_PYTHON_LOCK_MARKER}\n`, 15 * 60_000);
+    });
+    await runStep("Preparing Blender system libraries…", 0.84, async () => {
+      const libraries = ["libsm6", "libxext6", "libxrender1", "libx11-6", "libxi6", "libxfixes3", "libxxf86vm1", "libxkbcommon0", "libgl1", "libegl1"];
+      // `dpkg -s` also succeeds for removed packages that keep config files; require the installed state.
+      const installed = libraries.map((name) => `[ "$(dpkg-query -W -f='\${Status}' ${name} 2>/dev/null)" = "install ok installed" ] || exit 1`).join("; ");
+      try {
+        await execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", installed], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+        return;
+      } catch {}
+      await execFileAsync("wsl.exe", ["-d", this.distro, "-u", "root", "--", "bash", "-lc", `DEBIAN_FRONTEND=noninteractive apt-get install -y ${libraries.join(" ")}`], {
+        encoding: "utf8", timeout: 5 * 60_000, maxBuffer: 16 * 1024 * 1024, windowsHide: true,
+      });
+    });
     await runStep("Preparing the managed Blender runtime…", 0.88,
       () => this.pipe(["bash", "-s"], `set -e\nexport PATH="$HOME/.local/bin:$PATH"\ncd ${JSON.stringify(paths.piCadRepo)}\nnode scripts/install-blender.mjs\n`, 30 * 60_000));
     await runStep("Connecting Prime Agent to Reify…", 0.94, () => this.pipe(["bash", "-s"], [

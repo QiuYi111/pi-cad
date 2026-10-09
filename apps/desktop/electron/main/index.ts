@@ -6,7 +6,7 @@ import { mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { extname } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AppSettings, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, ThinkingLevel, WorkflowDocument } from "../../src/shared/contracts.js";
+import type { AppSettings, CadTransferTarget, ModelFavorite, ModelParameterValue, ModelSelection, ReleaseResult, RuntimeStatus, ThinkingLevel, WorkflowDocument } from "../../src/shared/contracts.js";
 import { IPC } from "../../src/shared/contracts.js";
 import { SettingsStore } from "./settings-store.js";
 import { WslBridge } from "./wsl.js";
@@ -23,6 +23,12 @@ import { ParaViewBackend } from "./paraview.js";
 import { BlenderBackend } from "./blender.js";
 import { HumanApprovalStore } from "./approvals.js";
 import { importStepIntoProject } from "./step-import.js";
+import { homedir } from "node:os";
+import { AgentApiClient } from "./agent-api-client.js";
+import { CadTransferService } from "./cad-transfer.js";
+import { BridgeProjectIO, NativeProjectIO } from "./cad-transfer-project-io.js";
+import { nodeFs, nodeRunner, regExeReader, systemClock } from "./cad-transfer-node.js";
+import type { ProjectIO } from "./cad-transfer-paths.js";
 import {
   NO_CONVERSATION,
   projectedConversationScope,
@@ -277,6 +283,53 @@ async function ensureBlender() {
   return blender;
 }
 
+let transfer: CadTransferService | null = null;
+let transferBridge: RuntimeBridge | null = null;
+
+/** The CAD transfer dispatcher. It is rebuilt when the runtime bridge changes. */
+async function ensureTransfer(): Promise<CadTransferService> {
+  const current = await bridge();
+  if (transfer && transferBridge === current) return transfer;
+  await transfer?.stop();
+  const appRoot = app.getAppPath();
+  const resources = (...parts: string[]) => is.dev || !app.isPackaged ? join(appRoot, "../../executors", ...parts) : join(process.resourcesPath, "executors", ...parts);
+  transfer = new CadTransferService({
+    host: {
+      platform: process.platform, env: process.env, home: homedir(),
+      insideWsl: process.platform === "linux" && Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP),
+    },
+    fs: nodeFs, registry: regExeReader, runner: nodeRunner, clock: systemClock,
+    bundledFusionAddin: resources("fusion", "ReifyExport"),
+    bundledSolidworksExe: process.env.REIFY_SOLIDWORKS_EXECUTOR
+      || (app.isPackaged ? join(process.resourcesPath, "executors", "solidworks", "ReifyExport.exe") : join(appRoot, "../../executors/solidworks/publish/ReifyExport.exe")),
+    projectInWsl: current.kind === "wsl",
+    pid: process.pid,
+    emit: (event) => send(IPC.cadTransferEvent, event),
+    agent: async (body, timeout) => new AgentApiClient(await bridge()).request(await settingsStore.get(), body, timeout),
+  });
+  transferBridge = current;
+  return transfer;
+}
+
+async function transferProject(): Promise<ProjectIO | null> {
+  const current = await bridge();
+  const { projectPath } = await current.resolveRuntimePaths(await settingsStore.get());
+  if (!projectPath) return null;
+  return current.kind === "native" ? new NativeProjectIO(projectPath) : new BridgeProjectIO(current, projectPath);
+}
+
+/** Start the spool watcher for the active project. A failure here never blocks the runtime. */
+async function startTransferDispatcher() {
+  if (desktopE2E) return;
+  try {
+    const service = await ensureTransfer();
+    const io = await transferProject();
+    if (io) await service.start(io);
+  } catch (error) {
+    send(IPC.runtimeEvent, { type: "runtime_diagnostic", message: `CAD transfer is off: ${String(error)}` });
+  }
+}
+
 function demoMesh(path: string, values: Record<string, ModelParameterValue> = {}) {
   const width = Number(values.width ?? 40);
   const depth = Number(values.depth ?? 24);
@@ -360,12 +413,13 @@ function registerIpc() {
   ipcMain.handle(IPC.runtimeStart, async () => {
     const started = await (await ensureRuntime()).start(await settingsStore.get());
     publishConversation();
+    void startTransferDispatcher();
     return started;
   });
   ipcMain.handle(IPC.runtimeRestore, async () => runtime
     ? { status: runtime.status, messages: await runtime.getMessages() }
     : { status: { state: "idle", checks: [] }, messages: [] });
-  ipcMain.handle(IPC.runtimeStop, async () => { await runtime?.stop(); runtime = null; conversation = NO_CONVERSATION; publishConversation(); });
+  ipcMain.handle(IPC.runtimeStop, async () => { void transfer?.stop(); await runtime?.stop(); runtime = null; conversation = NO_CONVERSATION; publishConversation(); });
   ipcMain.handle(IPC.runtimePrompt, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).prompt(message, images));
   ipcMain.handle(IPC.runtimeSteer, async (_event, message: string, images?: Array<{ data: string; mimeType: string }>) => (await ensureRuntime()).steer(message, images));
   ipcMain.handle(IPC.runtimeNewConversation, async () => {
@@ -566,6 +620,30 @@ function registerIpc() {
   });
   ipcMain.handle(IPC.tracesValidateCandidate, async (_event, jobPath: string) => new TraceStore(await bridge()).candidateAction(await settingsStore.get(), jobPath, "validate"));
   ipcMain.handle(IPC.tracesAdoptCandidate, async (_event, jobPath: string) => new TraceStore(await bridge()).candidateAction(await settingsStore.get(), jobPath, "adopt"));
+  ipcMain.handle(IPC.cadTransferStatus, async (_event, refresh?: boolean) => {
+    const service = await ensureTransfer();
+    service.setProject(await transferProject());
+    return service.getStatus(Boolean(refresh));
+  });
+  ipcMain.handle(IPC.cadTransferInstallFusionAddin, async () => (await ensureTransfer()).installFusionAddin());
+  ipcMain.handle(IPC.cadTransferOpenFolder, async (_event, target: CadTransferTarget, path?: string) => {
+    const service = await ensureTransfer();
+    const status = await service.getStatus();
+    const folder = path || status.jobRoot;
+    if (existsSync(folder)) shell.showItemInFolder(folder);
+    else if (target) await shell.openPath(status.jobRoot);
+  });
+  ipcMain.handle(IPC.cadTransferExportPart, async (_event, target: CadTransferTarget, artifactPath: string) => {
+    const service = await ensureTransfer();
+    service.setProject(await transferProject());
+    return service.startExport(target, artifactPath);
+  });
+  ipcMain.handle(IPC.cadTransferCancel, async (_event, jobId: string) => { (await ensureTransfer()).cancel(jobId); });
+  ipcMain.handle(IPC.cadTransferTestExport, async (_event, target: CadTransferTarget) => {
+    const service = await ensureTransfer();
+    service.setProject(await transferProject());
+    return service.testExport(target);
+  });
   ipcMain.handle(IPC.shellReveal, async (_event, path: string) => {
     const target = await (await bridge()).revealPath(path);
     if (existsSync(target)) shell.showItemInFolder(target);
@@ -584,5 +662,5 @@ app.whenReady().then(() => {
   app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
 
-app.on("before-quit", () => { void runtime?.stop(); void paraView?.stop(); viewer?.stop(); });
+app.on("before-quit", () => { void transfer?.stop(); void runtime?.stop(); void paraView?.stop(); viewer?.stop(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

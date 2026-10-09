@@ -1,0 +1,20 @@
+[
+  {"op": "param", "name": "width", "value": 80, "unit": "mm"},
+  {"op": "param", "name": "depth", "value": 50, "unit": "mm"},
+  {"op": "param", "name": "thickness", "value": 6, "unit": "mm"},
+  {"op": "param", "name": "hole_d", "value": 6, "unit": "mm"},
+  {"op": "param", "name": "edge_offset", "value": 10, "unit": "mm"},
+  {"op": "sketch", "name": "bracket/base_profile", "plane": "XY",
+   "shapes": [{"rect": {"center": [0, 0], "size": ["=width", "=depth"]}}]},
+  {"op": "pad", "name": "bracket/base", "sketch": "bracket/base_profile", "length": "=thickness"},
+  {"op": "sketch", "name": "bracket/hole_profile", "on": {"feature": "bracket/base", "role": "top"},
+   "shapes": [
+     {"circle": {"center": ["=-(width / 2 - edge_offset)", "=-(depth / 2 - edge_offset)"], "diameter": "=hole_d"}},
+     {"circle": {"center": ["=width / 2 - edge_offset", "=-(depth / 2 - edge_offset)"], "diameter": "=hole_d"}},
+     {"circle": {"center": ["=-(width / 2 - edge_offset)", "=depth / 2 - edge_offset"], "diameter": "=hole_d"}},
+     {"circle": {"center": ["=width / 2 - edge_offset", "=depth / 2 - edge_offset"], "diameter": "=hole_d"}}]},
+  {"op": "hole", "name": "bracket/mount_hole", "sketch": "bracket/hole_profile", "diameter": "=hole_d", "type": "through_all"},
+  {"op": "fillet", "name": "bracket/edge_round", "edges": {"feature": "bracket/base", "role": "top_outer"}, "radius": 2},
+  {"op": "require", "name": "bracket/max_mass", "kind": "max_mass", "target": "bracket", "limit": 80},
+  {"op": "require", "name": "bracket/fits", "kind": "bbox_within", "target": "bracket", "limit": [100, 100, 20]}
+]

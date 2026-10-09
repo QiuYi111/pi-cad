@@ -261,6 +261,8 @@ def _cmd_render(args: argparse.Namespace) -> int:
             hide=json.loads(args.hide_json) if args.hide_json else None,
             explode=args.explode,
             ghost_others=args.ghost_others,
+            highlight=json.loads(args.highlight_json) if args.highlight_json else None,
+            annotations=json.loads(args.annotations_json) if args.annotations_json else None,
         )
         artifacts = [
             {"path": view["path"], "kind": "visual", "sha256": sha256_file(view["path"])}
@@ -481,6 +483,39 @@ def _cmd_assembly_tree(args: argparse.Namespace) -> int:
             duration_ms=int((time.monotonic() - started) * 1000),
         )
         return 0
+
+
+def _cmd_bind_identity(args: argparse.Namespace) -> int:
+    from .identity import IdentityError
+    from .identity.bind import bind_identity
+
+    started = time.monotonic()
+    artifact = Path(args.artifact)
+    declarations = Path(args.declarations)
+    input_hashes = {
+        "artifact": sha256_file(artifact) if artifact.exists() else "",
+        "declarations": sha256_file(declarations) if declarations.exists() else "",
+    }
+    try:
+        payload = bind_identity(artifact, declarations)
+        manifest = Path(payload["identityManifest"])
+        emit(
+            "cad_bind_identity",
+            payload,
+            input_hashes=input_hashes,
+            artifacts=[{"path": str(manifest), "kind": "identity", "sha256": sha256_file(manifest)}],
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+    except (IdentityError, OSError, ValueError) as exc:
+        failed = exc.details.get("path") if isinstance(exc, IdentityError) else None
+        emit_error(
+            "cad_bind_identity",
+            exc.message if isinstance(exc, IdentityError) else str(exc),
+            input_hashes=input_hashes,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            detail={"code": "IDENTITY_BIND_FAILED", "paths": [failed] if failed else []},
+        )
+    return 0
 
 
 def _cmd_identity(args: argparse.Namespace) -> int:
@@ -894,6 +929,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--artifact", required=True)
     p.set_defaults(func=_cmd_mesh)
 
+    p = sub.add_parser("bind-identity", help="Bind a declarations.json (e.g. from the FreeCAD backend) to a STEP and write its identity manifest")
+    p.add_argument("--artifact", required=True)
+    p.add_argument("--declarations", required=True)
+    p.set_defaults(func=_cmd_bind_identity)
+
     p = sub.add_parser("render", help="Render orthographic STEP views")
     p.add_argument("--artifact", required=True)
     p.add_argument("--out-dir", required=True)
@@ -903,6 +943,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--display", default="solid", choices=("solid", "solid_with_edges", "hidden_edges", "wireframe"))
     p.add_argument("--focus-json", default=None, help="JSON array of occurrence refs or unique aliases")
     p.add_argument("--hide-json", default=None, help="JSON array of occurrence refs or unique aliases")
+    p.add_argument("--highlight-json", default=None, help='JSON array of face fingerprints to colour orange, e.g. [{"type":"PLANE","c":[0,0,1],"a":12.3,"n":[0,0,1]}]')
+    p.add_argument("--annotations-json", default=None, help='JSON array of [{"text": "name", "at": [x, y, z]}] labels (max 8 per view)')
     p.add_argument("--explode", type=float, default=0.0, help="Exploded-view distance, 0..5")
     p.add_argument("--ghost-others", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--labels", action=argparse.BooleanOptionalAction, default=True, help="Render view names and the world-frame triad (use --no-labels for a clean render)")

@@ -11,9 +11,44 @@ from typing import Any
 
 
 class CadApiError(RuntimeError):
-    def __init__(self, message: str, *, error_type: str = "CadApiError") -> None:
+    """A failed cad.* call.
+
+    Part backend failures also carry the stable ``code`` (for example
+    ``FILLET_FAILED``), the ``target`` semantic path, structured ``detail``,
+    ``hints``, and ``rolled_back`` (true when the document is back at its
+    previous revision).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_type: str = "CadApiError",
+        code: str | None = None,
+        target: str | None = None,
+        detail: dict[str, Any] | None = None,
+        hints: list[str] | None = None,
+        rolled_back: bool | None = None,
+    ) -> None:
         super().__init__(message)
         self.error_type = error_type
+        self.code = code
+        self.target = target
+        self.detail = detail
+        self.hints = hints
+        self.rolled_back = rolled_back
+
+    @classmethod
+    def from_response(cls, detail: dict[str, Any], fallback: str) -> "CadApiError":
+        return cls(
+            detail.get("message") or fallback,
+            error_type=detail.get("type", "CadApiError"),
+            code=detail.get("code"),
+            target=detail.get("target"),
+            detail=detail.get("detail"),
+            hints=detail.get("hints"),
+            rolled_back=detail.get("rolledBack"),
+        )
 
 
 def package_root() -> Path:
@@ -100,8 +135,7 @@ async def request(op: str, **payload: Any) -> Any:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
             raise CadApiError(f"Pi-CAD authority sidecar failed closed: {error}", error_type="SidecarUnavailable") from error
         if not response.get("ok"):
-            detail = response.get("error") or {}
-            raise CadApiError(detail.get("message") or "Pi-CAD authority sidecar rejected the request", error_type=detail.get("type", "CadApiError"))
+            raise CadApiError.from_response(response.get("error") or {}, "Pi-CAD authority sidecar rejected the request")
         return response.get("result")
 
     root = package_root()
@@ -120,6 +154,5 @@ async def request(op: str, **payload: Any) -> Any:
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise CadApiError(f"Pi-CAD bridge returned invalid JSON: {stderr.decode(errors='replace')[-1000:]}") from error
     if process.returncode != 0 or not response.get("ok"):
-        detail = response.get("error") or {}
-        raise CadApiError(detail.get("message") or stderr.decode(errors="replace")[-1000:] or "Pi-CAD bridge failed", error_type=detail.get("type", "CadApiError"))
+        raise CadApiError.from_response(response.get("error") or {}, stderr.decode(errors="replace")[-1000:] or "Pi-CAD bridge failed")
     return response.get("result")

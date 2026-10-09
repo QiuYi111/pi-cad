@@ -6,6 +6,7 @@ import { Conversation } from "../components/Conversation";
 import { Composer } from "../components/Composer";
 import { WorkflowRail } from "../components/WorkflowRail";
 import { EngineeringViewer } from "../components/EngineeringViewer";
+import { CadExportButtons } from "../components/CadExportButtons";
 import { StatusBar } from "../components/StatusBar";
 import { ConceptBoard, type ConceptImage, type ConceptSelection } from "../components/ConceptBoard";
 import { automaticConversationTitle } from "../lib/conversation-title";
@@ -438,6 +439,7 @@ export function Workbench({ settings, prime, onSettingsChange, onOpenSettings }:
         <div className="current-version"><Box size={14} /><span><small>Current model</small><strong>{modelName}</strong></span></div>
         {!!conceptImages.length && <div className="canvas-content-switch"><button className={canvasContent === "concept" ? "active" : ""} onClick={() => setCanvasContent("concept")}>Concepts</button><button className={canvasContent === "artifact" ? "active" : ""} disabled={!currentArtifact} onClick={() => setCanvasContent("artifact")}>Model</button></div>}
         <span />
+        <CadExportButtons artifact={currentArtifact} onOpenSettings={onOpenSettings} />
         {prime.status.state === "idle" || prime.status.state === "error" ? <button className="start-runtime" onClick={() => void start()}><Play size={14} fill="currentColor" />Start</button> : null}
       </header>
       <WorkflowRail />

@@ -45,6 +45,7 @@ from . import mesh as _preheated_mesh  # noqa: F401, E402
 SAFE_COMMANDS = frozenset(
     {
         "assembly-tree",
+        "bind-identity",
         "capability",
         "compare",
         "export",

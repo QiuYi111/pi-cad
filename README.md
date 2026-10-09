@@ -109,6 +109,15 @@ system `sandbox-exec` boundary for author and reviewer processes. Public builds
 must be Developer ID signed and notarized; unsigned CI artifacts are for
 testing only.
 
+## Optional FreeCAD part backend
+
+For parts that are edited again and again, the agent can use `cad.part`: a
+parametric FreeCAD model that it changes with small JSON operations. Every
+change returns the seven standard views (changed faces in orange, features
+labelled by name), a summary of what changed, and a structured error when it
+fails. It is optional. Install it with `npm run setup:freecad` (about 4 GB, no
+sudo; see `docs/installing-reify.md`). Without it, build123d works as before.
+
 ## First design
 
 Open Reify, choose a folder, sign in, and enter a request in the Workbench.

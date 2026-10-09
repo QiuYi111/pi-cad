@@ -6,6 +6,9 @@ import { reviseEvidenceRef, transitionRun } from "../harness/reducer.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
 import { executeCadProbe } from "../modules/probe/tool.ts";
+import { observeCandidate, projectRelativePath } from "./observe.ts";
+import { handlePartOperation } from "./part-ops.ts";
+import { handleTransferOperation } from "./transfer-ops.ts";
 import { artifactPathForKind, buildStep, envelopeArtifactHash, FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
 import { executeMechanicalRecipeV7 } from "../domains/mechanical/recipe-actions-v7.ts";
 import { cadStartSnapshot } from "../harness/kernel.ts";
@@ -36,6 +39,14 @@ export const AGENT_API_MUTATION_OPERATIONS = {
   commit: "workspace.commit",
   probe: "probe.run",
   "model-build": "model.build",
+  "part-open": "model.build",
+  "part-apply": "model.build",
+  "part-undo": "model.build",
+  "part-try": "probe.run",
+  "part-tree": "probe.run",
+  "part-query": "probe.run",
+  "part-check": "probe.run",
+  "part-sweep": "probe.run",
   "simulation-run": "simulation.run",
   "review-submit": "review.submit",
 } as const satisfies Partial<Record<AgentApiRequest["op"], Operation>>;
@@ -145,35 +156,6 @@ async function viewerCatalog(cwd: string) {
   });
 }
 
-function projectRelativePath(cwd: string, path: string): string {
-  const value = relative(resolve(cwd), resolve(cwd, path));
-  if (value === ".." || value.startsWith(`..${sep}`) || isAbsolute(value)) {
-    throw new Error(`managed CAD output escaped the project root: ${path}`);
-  }
-  return value.replaceAll("\\", "/");
-}
-
-function phaseCardEvidenceRef(cwd: string, path: string): string {
-  const project = relative(resolve(cwd), resolve(path));
-  if (project !== ".." && !project.startsWith(`..${sep}`) && !isAbsolute(project)) return project.replaceAll("\\", "/");
-  const storage = relative(resolve(harnessStorageRoot(cwd)), resolve(path));
-  if (storage === ".." || storage.startsWith(`..${sep}`) || isAbsolute(storage)) {
-    throw new Error(`managed CAD evidence escaped canonical storage: ${path}`);
-  }
-  return `@canonical/${storage.replaceAll("\\", "/")}`;
-}
-
-async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-    await rename(temporary, path);
-  } finally {
-    await unlink(temporary).catch(() => {});
-  }
-}
-
 async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
   const importingReference = request.importMode === "reference";
   const solidifying = request.importMode === "solidify";
@@ -194,116 +176,19 @@ async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { 
   if (!build.ok) return { build, visual: null, images: [] };
 
   const artifact = artifactPathForKind(build, "step") ?? request.output;
-  const geometry = await inspectGeometry(
-    cwd,
-    artifact,
-    runGeometryEvidencePath(cwd, activeBeforeBuild.state.runId, artifact),
-    request.validation === "full" ? FULL_GEOMETRY_VALIDATION_TIMEOUT_MS : undefined,
-    request.validation ?? "auto",
-  );
-  if (!geometry.ok) {
-    const payload = geometry.payload as { error?: string } | undefined;
-    throw new Error(payload?.error || "Pi-CAD built the model but mandatory geometry inspection failed");
-  }
-  const geometryPayload = geometry.payload as { validity?: { ok?: boolean; reasons?: string[]; checks?: { topology?: boolean }; solids?: Array<{ reasons?: string[] }> }; solidCount?: number; faceCount?: number };
-  const validity = geometryPayload.validity;
-  if (importingReference && (!validity?.checks?.topology || !geometryPayload.faceCount)) {
-    throw new Error("STEP reference import failed: the file has no valid displayable B-Rep faces");
-  }
-  if (!importingReference && !validity?.ok) {
-    const reasons = [
-      ...(validity?.reasons ?? []),
-      ...(validity?.solids ?? []).flatMap((solid) => solid.reasons ?? []),
-    ];
-    throw new Error(`Pi-CAD built the model but generic B-Rep validation failed${reasons.length ? `: ${[...new Set(reasons)].join(", ")}` : ""}`);
-  }
-  const visual = await inspectVisual(cwd, artifact, runVisualEvidenceDir(cwd, activeBeforeBuild.state.runId, artifact));
-  if (!visual.ok) {
-    const payload = visual.payload as { error?: string } | undefined;
-    throw new Error(payload?.error || "Pi-CAD built the model but mandatory visual inspection failed");
-  }
-  const views = visualPayload(visual).views ?? [];
-  if (!views.length) throw new Error("Pi-CAD built the model but mandatory visual inspection produced no images");
-  const images = views.map((view) => view.path);
-
-  // Attach the complete seven-view set to the build result so both Prime and
-  // the desktop activity card can inspect the same orientation-complete
-  // observation.  Phase Cards still carry only the bounded ISO/FRONT pair.
-  const contextRefs = Object.fromEntries(views.map((view) => [
-    `mandatoryImage${view.name.charAt(0).toUpperCase()}${view.name.slice(1)}`,
-    phaseCardEvidenceRef(cwd, view.path),
-  ]));
   const artifactHash = envelopeArtifactHash(build, "step");
   if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
-  const referenceType = importingReference ? (geometryPayload.solidCount ? "solid-reference" : "surface-reference") : undefined;
-  const sourcePath = projectRelativePath(cwd, request.source);
-  const sourceHash = await sha256File(resolve(cwd, request.source));
-  let parameterManifest: StoredModelParameterManifest | undefined;
-  if (parameterContract) {
-    const outputPath = projectRelativePath(cwd, artifact);
-    const modelId = `model-${canonicalDigest({ source: sourcePath, output: outputPath }).slice(0, 20)}`;
-    const manifest: ModelParameterManifestV1 = {
-      schema: 1,
-      modelId,
-      source: { path: sourcePath, sha256: sourceHash, entrypoint: "build" },
-      output: { path: outputPath, sha256: artifactHash },
-      parameters: parameterContract.parameters,
-    };
-    const manifestPath = `${resolve(cwd, artifact)}.parameters.json`;
-    await writeJsonAtomic(manifestPath, manifest);
-    parameterManifest = {
-      path: projectRelativePath(cwd, manifestPath),
-      sha256: await sha256File(manifestPath),
-      manifest,
-    };
-  }
-  if (!importingReference) await new HarnessRunStoreV7(cwd, activeBeforeBuild.state.runId).mutate(mechanicalRegistries, (loaded) => {
-    let state = {
-      ...loaded.state,
-      artifacts: {
-        ...loaded.state.artifacts,
-        "candidate:authoritative": { id: "candidate:authoritative", path: projectRelativePath(cwd, artifact), sha256: artifactHash, role: "authoritative-candidate-design" },
-        "candidate:source": { id: "candidate:source", path: sourcePath, sha256: sourceHash, role: "candidate-source" },
-        ...(parameterManifest ? {
-          [`model-parameters:${parameterManifest.manifest.modelId}`]: {
-            id: `model-parameters:${parameterManifest.manifest.modelId}`,
-            path: parameterManifest.path,
-            sha256: parameterManifest.sha256,
-            role: "model-parameter-manifest",
-          },
-        } : {}),
-      },
-      contextRefs: { ...loaded.state.contextRefs, ...contextRefs },
-    };
-    const payloads: Record<string, JsonValue> = {};
-    const envelopes = new Map([["visual", visual], ["geometry", geometry]]);
-    for (const obligation of loaded.workflow.phases[state.phase]!.evidenceObligations.filter((item) => item.closeWith === "cad_build_step")) {
-      const envelope = envelopes.get(obligation.type);
-      if (!envelope) throw new Error(`cad.model.build cannot produce required ${obligation.type} evidence`);
-      const sha256 = canonicalDigest(envelope);
-      const evidence = {
-        id: `evidence-${obligation.type}-${sha256.slice(0, 20)}`,
-        obligationRef: obligation.ref, type: obligation.type,
-        path: `evidence/${obligation.type}/evidence-${obligation.type}-${sha256.slice(0, 20)}.json`,
-        sha256, workflowHash: loaded.workflow.hash, registryContractHash: loaded.registryContract.hash,
-        computeIdentity: canonicalDigest({ tool: envelope.tool, toolVersion: envelope.toolVersion, inputHashes: envelope.inputHashes, outputHashes: envelope.outputHashes }),
-        createdAt: new Date().toISOString(),
-      };
-      state = reviseEvidenceRef(state, loaded.workflow, loaded.registryContract, evidence);
-      payloads[evidence.path] = jsonValue({ schema: 1, evidence, envelope });
-    }
-    return {
-      state,
-      payloads,
-      event: { type: "ModelBuildObserved", data: { artifact: projectRelativePath(cwd, artifact), images: Object.values(contextRefs), evidence: [...envelopes.keys()] } },
-    };
+  const observed = await observeCandidate(cwd, activeBeforeBuild, {
+    artifact,
+    sourcePath: projectRelativePath(cwd, request.source),
+    sourceHash: await sha256File(resolve(cwd, request.source)),
+    artifactHash,
+    validation: request.validation ?? "auto",
+    ...(request.importMode ? { importMode: request.importMode } : {}),
+    ...(parameterContract ? { parameters: parameterContract } : {}),
+    backend: "build123d",
   });
-  const inlineImages = await Promise.all(views.map(async (view) => ({
-    name: view.name,
-    data: (await readFile(view.path)).toString("base64"),
-    mimeType: "image/png",
-  })));
-  return { build, visual, geometry, images: inlineImages, ...(referenceType ? { referenceType } : {}), ...(parameterManifest ? { parameterManifest } : {}) };
+  return { build, ...observed };
 }
 
 /**
@@ -404,7 +289,12 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
         args: request.args,
       });
       const details = "details" in rendered ? rendered.details as any : undefined;
-      const value = preset === "python" ? details?.envelope?.payload?.result : details?.envelope?.payload;
+      const rawValue = preset === "python" ? details?.envelope?.payload?.result : details?.envelope?.payload;
+      // Face fingerprints exist for change detection between builds; a probe
+      // answer must not carry thousands of them into the agent's context.
+      const value = rawValue && typeof rawValue === "object" && Array.isArray(rawValue.faceFingerprints)
+        ? (({ faceFingerprints, ...rest }) => ({ ...rest, faceFingerprintCount: faceFingerprints.length }))(rawValue)
+        : rawValue;
       if (details?.presetFailed || value === undefined) throw new Error(rendered.content.map((item) => item.type === "text" ? item.text : "").join("\n") || `probe preset ${preset} failed`);
       const visuals = Array.isArray(details?.observation?.visuals) ? details.observation.visuals : [];
       const images = rendered.content.filter((item) => item.type === "image").map((item, index) => ({
@@ -426,6 +316,11 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
     case "model-build": {
       return jsonValue(await buildAndObserve(cwd, request));
     }
+    case "part-open": case "part-apply": case "part-undo": case "part-try":
+    case "part-tree": case "part-query": case "part-check": case "part-sweep":
+      return handlePartOperation(cwd, request);
+    case "transfer-status": case "transfer-features": case "transfer-export":
+      return handleTransferOperation(cwd, request);
     case "simulation-run": {
       const executed = await executeMechanicalRecipeV7({ cwd, kind: "simulation", recipe: request.recipe, action: request.action, obligationRef: request.obligationRef, outputs: request.outputs });
       return jsonValue({

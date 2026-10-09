@@ -1,0 +1,6 @@
+name: pi-cad-freecad
+channels: [conda-forge]
+dependencies:
+  - python=3.11
+  - freecad=1.1.0
+  - numpy

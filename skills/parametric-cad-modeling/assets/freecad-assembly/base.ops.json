@@ -1,0 +1,6 @@
+[
+  {"op": "sketch", "name": "base/plate_profile", "plane": "XY", "shapes": [{"rect": {"center": [0, 0], "size": [50, 50]}}]},
+  {"op": "pad", "name": "base/plate", "sketch": "base/plate_profile", "length": 6},
+  {"op": "sketch", "name": "base/pivot_profile", "on": {"feature": "base/plate", "role": "top"}, "shapes": [{"circle": {"center": [0, 0], "diameter": 8}}]},
+  {"op": "hole", "name": "base/pivot", "sketch": "base/pivot_profile", "diameter": 8, "type": "through_all"}
+]

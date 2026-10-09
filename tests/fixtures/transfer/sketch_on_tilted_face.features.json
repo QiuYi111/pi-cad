@@ -1,0 +1,382 @@
+{
+  "schema": "reify.features/1",
+  "units": "mm",
+  "part": "part",
+  "source": {
+    "doc": "part.FCStd"
+  },
+  "bodies": [
+    {
+      "name": "part",
+      "sketches": [
+        {
+          "name": "part/profile",
+          "frame": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              1.0,
+              0.0
+            ],
+            "n": [
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 0.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                -20.0,
+                -15.0
+              ],
+              "end": [
+                20.0,
+                -15.0
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                20.0,
+                -15.0
+              ],
+              "end": [
+                20.0,
+                15.0
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                20.0,
+                15.0
+              ],
+              "end": [
+                -20.0,
+                15.0
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -20.0,
+                15.0
+              ],
+              "end": [
+                -20.0,
+                -15.0
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 1200.0
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "s0_w",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  0,
+                  1
+                ],
+                [
+                  0,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 40.0
+              }
+            },
+            {
+              "name": "s0_h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 30.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -20.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  1
+                ]
+              ],
+              "value": {
+                "value": -15.0
+              }
+            }
+          ]
+        },
+        {
+          "name": "part/dimple_profile",
+          "frame": {
+            "origin": [
+              0.0,
+              -8.5,
+              8.5
+            ],
+            "u": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "v": [
+              0.0,
+              0.707107,
+              0.707107
+            ],
+            "n": [
+              0.0,
+              -0.707107,
+              0.707107
+            ]
+          },
+          "plane": null,
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                0.0,
+                -7.071068
+              ],
+              "radius": 2.0
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 12.566371
+            }
+          ],
+          "face_ref": {
+            "origin": [
+              0.0,
+              -13.5,
+              3.5
+            ],
+            "normal": [
+              0.0,
+              -0.707107,
+              0.707107
+            ],
+            "area": 169.705627
+          },
+          "dimensions": [
+            {
+              "name": "s0_d",
+              "kind": "diameter",
+              "refs": [
+                [
+                  0,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 4.0
+              }
+            },
+            {
+              "name": "s0_c_x",
+              "kind": "distance_x",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": 0.0
+              }
+            },
+            {
+              "name": "s0_c_y",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  -1,
+                  1
+                ],
+                [
+                  0,
+                  3
+                ]
+              ],
+              "value": {
+                "value": -7.071068
+              }
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "name": "part/base",
+          "type": "pad",
+          "sketch": "part/profile",
+          "direction": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 5.0
+            }
+          },
+          "midplane": false,
+          "reversed": false
+        },
+        {
+          "name": "part/slope",
+          "type": "chamfer",
+          "edges": [
+            {
+              "curve": "line",
+              "midpoint": [
+                0.0,
+                -15.0,
+                5.0
+              ],
+              "length": 40.0,
+              "start": [
+                -20.0,
+                -15.0,
+                5.0
+              ],
+              "end": [
+                20.0,
+                -15.0,
+                5.0
+              ]
+            }
+          ],
+          "size": {
+            "value": 3.0
+          }
+        },
+        {
+          "name": "part/dimple",
+          "type": "pocket",
+          "sketch": "part/dimple_profile",
+          "direction": [
+            0.0,
+            0.707107,
+            -0.707107
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 1.0
+            }
+          },
+          "reversed": false
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "volume_mm3": 5807.433629,
+    "bbox": {
+      "min": [
+        -20.0,
+        -15.0,
+        0.0
+      ],
+      "max": [
+        20.0,
+        15.0,
+        5.0
+      ]
+    },
+    "feature_volumes": [
+      {
+        "name": "part/base",
+        "volume_mm3": 6000.0
+      },
+      {
+        "name": "part/slope",
+        "volume_mm3": 5820.0
+      },
+      {
+        "name": "part/dimple",
+        "volume_mm3": 5807.433629
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Pure logic. No SolidWorks interop, no Windows APIs: builds and tests on any OS. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Reify.Export</RootNamespace>
+    <AssemblyName>ReifyExport.Core</AssemblyName>
+  </PropertyGroup>
+</Project>

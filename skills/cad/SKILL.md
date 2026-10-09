@@ -34,7 +34,19 @@ cad.commit(
 ) -> Commit
 cad.plan.current() -> Commit | None
 cad.plan.update(*, variables: dict | None = None, artifacts: list | None = None) -> Commit
-cad.model.build(
+cad.part.open(path: str | Path, *, output: str | Path | None = None, create: bool = False, body: str | None = None, validation: str = "auto") -> PartDocument
+PartDocument.apply(ops: list[dict], *, message: str | None = None, validation: str = "auto", budget_s: float | None = None, observe: bool = True) -> PartResult
+PartDocument.try_(ops: list[dict], *, budget_s: float | None = None) -> PartResult
+PartDocument.undo(*, to_empty: bool = False, validation: str = "auto") -> PartResult
+PartDocument.tree() -> dict
+PartDocument.query(target: str, what: list[str] | None = None) -> dict
+PartDocument.check(kind: str, *, budget_s: float | None = None, **args) -> dict
+PartDocument.sweep(param: str, range: tuple[float, float], *, step: float, check: tuple[str, dict], refine: bool = False, budget_s: float | None = None) -> dict
+cad.transfer.status() -> TransferStatus
+cad.transfer.features(doc: str | Path | PartDocument) -> TransferFeatures
+cad.transfer.export(doc: str | Path | PartDocument, *, target: str, output: str | Path | None = None, check: bool = True) -> TransferJob
+TransferJob.result() -> TransferResult
+cad.model.build(   # build123d compatibility path
     source: str | Path,
     output: str | Path | None = None,
     *,
@@ -57,8 +69,9 @@ cad.review.current(handle: dict) -> dict | None
 cad.review.prepare(candidate: Commit) -> dict
 ```
 
-The three engineering calls are therefore canonical exactly as
-`await cad.model.build("part.py", "part.step")`,
+Model new parts and assemblies with `cad.part` (next section). The build123d calls
+below are the compatibility path, canonical exactly as
+`await cad.model.build("part.py", "part.step")` for an existing build123d source,
 `await cad.model.import_step("imports/reference.step")` for existing STEP files in the project,
 including face-only supplier models. This returns a reference artifact with seven
 views. A reference is not an authoritative CAD candidate; a solid candidate
@@ -71,6 +84,133 @@ fail clearly; do not write ad hoc OCP code or add arbitrary thickness.
 `await cad.probe.run(subject=artifact, purpose="...", code="result = {...}")`,
 and `await cad.commit("name", variables={...}, artifacts=[...])`. There is no
 reason to call `inspect.signature()` before using them.
+
+## Parts and assemblies: `cad.part` is the default
+
+`cad.part` creates and edits a parametric FreeCAD model with small JSON ops
+instead of rewriting a script. Use it first for every new part and every
+assembly: dimensions that change, features added one at a time, poses swept for
+collisions, parts linked into an assembly. `cad.model.build` with build123d is
+only a compatibility path (below).
+
+```python
+doc = await cad.part.open("parts/bracket.FCStd", create=True, body="bracket")
+r = await doc.apply([
+    {"op": "param", "name": "width", "value": 40, "unit": "mm"},
+    {"op": "sketch", "name": "bracket/base_profile", "plane": "XY",
+     "shapes": [{"rect": {"center": [0, 0], "size": ["=width", 20]}}]},
+    {"op": "pad", "name": "bracket/base", "sketch": "bracket/base_profile", "length": 5},
+])
+r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
+```
+
+- Every `open`, `apply`, `undo` and `try_` attaches the seven standard views and
+  names what changed. All seven views are always attached; do not skip or reduce
+  them. Faces on a surface the previous build did not have are orange; features
+  are labelled by name. The first image's text starts with
+  `Changes since previous build:`. Read it, then look at the views, before the
+  next edit.
+- `apply` is one transaction. If an op or the recompute fails, nothing changed:
+  the `CadApiError` carries `code`, `target`, `detail`, `hints` and
+  `rolled_back`. The message states the revision the document is at. Fix the
+  named op and send the batch again. **Do not call `undo` after a failed
+  `apply`**: it is already rolled back, and `undo` would remove the last good
+  revision. `undo` of the only revision raises `UNDO_WOULD_EMPTY` unless you pass
+  `to_empty=True` (start over from an empty document).
+- Part requests are processed one at a time per project, so
+  `asyncio.gather(d.apply(...))` over several documents is safe; each document
+  keeps its own geometry. It is not faster than awaiting them in a loop, and the
+  last document applied is the run's current candidate.
+- Faces and edges are named by role (`bracket/mount_hole/wall`, `top_outer`),
+  never `Face12`. The names survive dimension edits and added features.
+- `FEATURE_NO_EFFECT` means a pad added no material, or a pocket or hole removed
+  none (for example the sketch is on the bottom face and the cut goes outward).
+  The op is rolled back. Read `hints` and try `reversed=true`.
+- `delete` of a middle feature relinks the chain. It stops only when something
+  really uses the feature; `detail` lists those users by path.
+- `check("interference", ...)` returns `interferences` (real overlap) and
+  `contacts` (touching or closer than `contact_tol`, 0.2 mm by default) as two
+  lists. Only `interferences` are defects. Decide about each contact on purpose.
+- `try_` shows an edit and discards it. `check` and `sweep` read the in-memory
+  model (clearance, interference, wall thickness, mass, pose sweeps) without
+  exporting a STEP.
+- In an assembly, use `link` for every part made in this project. Use `import_step`
+  only for bought-in or outside STEP files. A STEP that Reify built from a project
+  part has no semantic face names in the assembly, and `cad.transfer` can use it
+  only if it is current (the part document did not change since the STEP).
+- Every observed `apply` on an assembly exports, inspects and renders the whole
+  assembly. Link parts in batches of 20 to 40 per `apply`, not one per call, and
+  pass `observe=False` for every batch but the last: it commits the revision and
+  returns at once (no views, no change summary, no STEP), and the last apply
+  observes everything. The evidence the build step needs comes from that last
+  apply, so never end on an `observe=False` apply. If a batch fails nothing is
+  kept (it rolls back), so fix the named op and send the batch again. Do not drop to one link per call to find
+  the bad one: the error names the occurrence.
+- One part, one document. One assembly, one document. A part is
+  `parts/<name>.FCStd` with one owner; the assembly is
+  `assembly/<name>.FCStd` and links the parts with `link`, adds bought-in STEP
+  files with `import_step`, and seats parts with `joint` (revolute, prismatic,
+  fixed). A joint name can be swept like a parameter. A new revision of a part
+  reaches the assembly on its next call.
+- Delegating an assembly: give each subagent one part document (see "Delegated
+  CAD work" for its folder). The parent builds none of the parts: it links their
+  documents, joints them, and checks interference and clearance on occurrence
+  paths.
+- If a call raises `CadApiError` with `code == "FREECAD_NOT_INSTALLED"`, this is
+  a normal first-run state. Tell the user the one command, `npm run setup:freecad`
+  (about 4.2 GB, no sudo, once), and stop. Do not try to install FreeCAD
+  yourself, and do not fall back to build123d on your own.
+- Read the `references/freecad-part-ops.md` file of the `parametric-cad-modeling`
+  skill (next to that skill's SKILL.md) before the first `cad.part` call in a task: the full op table, role names, assemblies,
+  error codes, and worked examples. The copyable starting points are the
+  `freecad-part` and `freecad-assembly` assets of the `parametric-cad-modeling`
+  skill.
+
+## Fusion and SolidWorks files: `cad.transfer`
+
+Use `cad.transfer` only when the user asks for a Fusion (`.f3d`) or SolidWorks
+(`.SLDPRT`) file with feature history. For a plain exchange file, export a STEP.
+The CAD program runs on the user's computer and the Reify desktop app starts it.
+
+```python
+features = await cad.transfer.features("parts/bracket.FCStd")   # dry run first
+job = await cad.transfer.export("parts/bracket.FCStd", target="fusion", output="exports/bracket.f3d")
+result = await job.result()    # TransferResult(..., check='passed', ...)
+```
+
+- Run `features` first. It needs no CAD program. It raises
+  `TRANSFER_UNSUPPORTED_OP` and names the feature (`target`) that the targets
+  cannot build yet. Supported: `pad` (also up to a planar face), `pocket`,
+  `hole` (through, blind, counterbore, countersink, drill point, cosmetic
+  thread), `fillet`, `chamfer`, `polar_pattern`, `linear_pattern`, `mirror`,
+  sketch dimensions, Reify parameters, density, sketches on planar faces, and
+  assemblies (part positions only; a bought-in STEP is not supported). Not
+  supported: modeled threads, taper, midplane pockets, variable fillets,
+  non-planar faces. Tell the user which feature blocks the
+  export. Do not change the model only to make an export pass.
+- Joints and mates are not exported. An assembly with joints still exports, at
+  the pose the joints solved to, and the parts are placed, not jointed. The
+  `notes` of the `features` and `export` results say so when the assembly has
+  joints. Always tell the user, and that they must add joints in the CAD
+  program to move the parts. Never say the joints were kept.
+- `features` on an assembly document returns `kind='assembly'`. A SolidWorks
+  assembly export ends in `.SLDASM`; leave `output` out and the tool picks the name.
+- `status()` shows if a target is ready. `export` reads the committed document and
+  never changes it. `check=True` compares the exported shape with the Reify
+  STEP. Never give the user a file from a failed check.
+- Error codes: `TRANSFER_TARGET_NOT_READY` (tell the user to open Settings, CAD
+  exports), `TRANSFER_UNSUPPORTED_OP`, `TRANSFER_EXECUTOR_FAILED`,
+  `TRANSFER_CHECK_FAILED` (`detail` names the first feature that differs),
+  `TRANSFER_TIMEOUT`, `TRANSFER_UNAVAILABLE` (no desktop app: offer a STEP).
+- The coordinate system stays Z up in the exported file. Use `check='skipped'`
+  results (`check=False`) only to debug.
+
+## build123d compatibility
+
+Use `cad.model.build` only to edit an existing build123d source, to build
+geometry the `cad.part` ops cannot express yet, or when the user asks for
+build123d. For the second case, say in your reply which op is missing, so it can
+be added. The mandatory seven views and every build rule below stay the same.
 
 ## Delegated CAD work
 
@@ -90,9 +230,16 @@ own Prime conversation and kernel; it must not use or change the parent's run
 binding or candidate. The parent inspects the returned artifact and explicitly
 chooses whether to use it in the assembly.
 
+For a `cad.part` assembly, the split is one part document per subagent, such as
+`subagents/<task-name>/parts/<part>.FCStd`. The subagent applies ops to its own
+document and returns the document path, the body path, and the roles the parent
+needs for joints. The parent owns the assembly document: it uses `link` with
+those paths, `joint` between roles, and `check`/`sweep` on occurrence paths. A
+subagent never edits the assembly or another part's document.
+
 For delegated CAD work, have the child validate a plausible initial mistake
-before it repairs the model: probe the wrong result, change the source, rebuild,
-and probe the corrected `ArtifactRef`. Resolve identity through semantic paths
+before it repairs the model: probe the wrong result, apply the corrected ops (or
+change the source and rebuild), and probe the corrected `ArtifactRef`. Resolve identity through semantic paths
 from the artifact's hash-bound manifest when checking reordered assemblies;
 solid indices are evidence for one artifact only. Treat missing or stale
 identity manifests and deleted named features as explicit failures. Once a
@@ -122,7 +269,7 @@ not restart the workflow to inspect completed geometry.
   `canonicalCall`; execute that closer instead of guessing an operation from
   the obligation's name. Only `type == "workspace_commit"` is closed by
   `cad.commit(ref, ...)`; visual and geometry evidence commonly share one
-  managed `cad.model.build(...)` closer. After every obligation is closed, use
+  managed `cad.part` `apply(...)` or `cad.model.build(...)` closer. After every obligation is closed, use
   one of the returned `transitions` events with
   `await cad.workflow.advance(event)`; do not invent a friendlier commit name,
   guess legacy semantic APIs, or inspect Pi-CAD source to discover events.
@@ -136,14 +283,15 @@ not restart the workflow to inspect completed geometry.
 - Load handoffs by ID with `await cad.load(id)`; do not copy child transcripts.
 - Use `cad.templates` only as optional conveniences. Workflow never requires
   their schema unless a project workflow says so explicitly.
-- Author project-local model source with build123d and expose a build123d `Shape` as
-  `result`; `await cad.model.build(source, output)` exports the STEP artifact
+- Author new parts and assemblies with `cad.part`. When the compatibility path
+  applies, author project-local model source with build123d and expose a
+  build123d `Shape` as `result`; `await cad.model.build(source, output)` exports the STEP artifact
   only after the v7 visual inspection chain has produced and attached all
   standard views to Prime. Missing visual output or attachment is a failed
   build. CadQuery source is not a supported model backend. When a benchmark or
   legacy task asks for CadQuery, preserve its requested geometry and dimensions
-  but implement the managed candidate with build123d; do not probe for or try
-  to install CadQuery.
+  but implement the managed candidate with `cad.part`, or with build123d only
+  if the ops cannot express it; do not probe for or try to install CadQuery.
 - Choose build validation deliberately: `validation="auto"` fully checks small
   parts and defers expensive per-solid self-intersection checks for large
   assemblies; `validation="fast"` is for iteration; `validation="full"` runs

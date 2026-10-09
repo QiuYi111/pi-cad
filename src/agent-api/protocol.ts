@@ -45,6 +45,17 @@ export type AgentApiRequest = AgentApiConversationV1 & (
   | { schema: 1; op: "evidence-read"; path: string }
   | { schema: 1; op: "probe"; preset?: string; subject?: "current" | "baseline" | AgentArtifactSubject; purpose?: string; code?: string; script?: string; args?: Record<string, JsonValue> }
   | { schema: 1; op: "model-build"; source: string; output: string; force?: boolean; validation?: "auto" | "fast" | "full"; parameters?: Record<string, ModelParameterDefinitionInput>; importMode?: "reference" | "solidify" }
+  | { schema: 1; op: "part-open"; doc: string; output?: string; body?: string; create?: boolean; validation?: "auto" | "fast" | "full" }
+  | { schema: 1; op: "part-apply"; doc: string; ops: JsonValue[]; message?: string; output?: string; validation?: "auto" | "fast" | "full"; budgetS?: number; observe?: boolean }
+  | { schema: 1; op: "part-try"; doc: string; ops: JsonValue[]; output?: string; budgetS?: number }
+  | { schema: 1; op: "part-undo"; doc: string; output?: string; toEmpty?: boolean; validation?: "auto" | "fast" | "full" }
+  | { schema: 1; op: "part-tree"; doc: string; output?: string }
+  | { schema: 1; op: "part-query"; doc: string; target: string; what?: string[]; output?: string }
+  | { schema: 1; op: "part-check"; doc: string; kind: string; args: Record<string, JsonValue>; output?: string; budgetS?: number }
+  | { schema: 1; op: "part-sweep"; doc: string; param: string; range: [number, number]; step: number; check: { kind: string; args: Record<string, JsonValue> }; refine?: boolean; output?: string; budgetS?: number }
+  | { schema: 1; op: "transfer-status" }
+  | { schema: 1; op: "transfer-features"; doc: string }
+  | { schema: 1; op: "transfer-export"; doc: string; target: "fusion" | "solidworks"; output?: string; check?: boolean; jobId?: string }
   | { schema: 1; op: "simulation-run"; recipe: string; obligationRef?: string; outputs?: string[]; action?: string }
   | { schema: 1; op: "review-submit"; subjectCommit: string }
   | { schema: 1; op: "review-current"; reviewId?: string }
@@ -56,5 +67,14 @@ export interface AgentApiResponse {
   schema: 1;
   ok: boolean;
   result?: JsonValue;
-  error?: { type: string; message: string };
+  error?: {
+    type: string;
+    message: string;
+    /** Part backend errors carry a stable code and structured context. */
+    code?: string;
+    target?: string;
+    detail?: Record<string, JsonValue>;
+    hints?: string[];
+    rolledBack?: boolean;
+  };
 }

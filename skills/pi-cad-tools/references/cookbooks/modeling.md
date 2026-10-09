@@ -1,8 +1,14 @@
 # Modeling and derivation cookbook
 
+## Default: `cad.part` (FreeCAD)
+
+New parts and assemblies are modeled with `cad.part`: JSON ops on a parametric `.FCStd` document, one part per document, one assembly per document (`link`, `import_step`, `joint`). Every `apply` returns the seven standard views and a change summary, and closes the same build evidence as a managed build. Start from `parametric-cad-modeling/assets/freecad-part` or `freecad-assembly`; the op reference is `parametric-cad-modeling/references/freecad-part-ops.md`. If FreeCAD is not installed, the call fails with `FREECAD_NOT_INSTALLED`: tell the user to run `npm run setup:freecad` (about 4.2 GB, once) and stop.
+
+The rest of this cookbook describes the build123d compatibility path.
+
 ## Applicable / not applicable
 
-Use for deterministic build123d execution and provenance-bound analysis derivations. Use the parametric modeling skill for source design. Do not treat a solver convenience model as Project Head.
+Use, on the compatibility path, for deterministic build123d execution and provenance-bound analysis derivations. Use the parametric modeling skill for source design. Do not treat a solver convenience model as Project Head.
 
 ## Environment and permissions
 

@@ -6,6 +6,7 @@ type InteractiveProcess = ReturnType<typeof spawnInteractiveProcess>;
 const MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const HOT_COMMANDS = new Set([
   "assembly-tree",
+  "bind-identity",
   "build",
   "capability",
   "compare",

@@ -1,0 +1,479 @@
+{
+  "schema": "reify.features/1",
+  "units": "mm",
+  "part": "p3",
+  "source": {
+    "doc": "x",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "parameters": [
+    {
+      "name": "width",
+      "value": 40.0,
+      "unit": "mm"
+    },
+    {
+      "name": "thickness",
+      "value": 5.0,
+      "unit": "mm"
+    },
+    {
+      "name": "bore_d",
+      "value": 6.0,
+      "unit": "mm"
+    }
+  ],
+  "material": {
+    "name": "Steel",
+    "density_kg_m3": 7850.0
+  },
+  "bodies": [
+    {
+      "name": "p3",
+      "sketches": [
+        {
+          "name": "p3/base_profile",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 0.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                -20,
+                -15
+              ],
+              "end": [
+                20,
+                -15
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                20,
+                -15
+              ],
+              "end": [
+                20,
+                15
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                20,
+                15
+              ],
+              "end": [
+                -20,
+                15
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -20,
+                15
+              ],
+              "end": [
+                -20,
+                -15
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 1200.0
+            }
+          ],
+          "dimensions": [
+            {
+              "name": "w",
+              "kind": "distance",
+              "refs": [
+                [
+                  0,
+                  0
+                ]
+              ],
+              "value": {
+                "value": 40.0,
+                "expr": "=width"
+              }
+            },
+            {
+              "name": "h",
+              "kind": "distance_y",
+              "refs": [
+                [
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  2
+                ]
+              ],
+              "value": {
+                "value": 30.0
+              }
+            }
+          ]
+        },
+        {
+          "name": "p3/bore_profile",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              5
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 5.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "circle",
+              "center": [
+                10,
+                0
+              ],
+              "radius": 3
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 28.27
+            }
+          ]
+        },
+        {
+          "name": "p3/boss_profile",
+          "frame": {
+            "origin": [
+              0,
+              0,
+              5
+            ],
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              0,
+              0,
+              1
+            ]
+          },
+          "plane": {
+            "base": "XY",
+            "offset": 5.0
+          },
+          "geometry": [
+            {
+              "id": 0,
+              "type": "line",
+              "start": [
+                -5,
+                -5
+              ],
+              "end": [
+                5,
+                -5
+              ]
+            },
+            {
+              "id": 1,
+              "type": "line",
+              "start": [
+                5,
+                -5
+              ],
+              "end": [
+                5,
+                5
+              ]
+            },
+            {
+              "id": 2,
+              "type": "line",
+              "start": [
+                5,
+                5
+              ],
+              "end": [
+                -5,
+                5
+              ]
+            },
+            {
+              "id": 3,
+              "type": "line",
+              "start": [
+                -5,
+                5
+              ],
+              "end": [
+                -5,
+                -5
+              ]
+            }
+          ],
+          "loops": [
+            {
+              "id": 0,
+              "geometry": [
+                0,
+                1,
+                2,
+                3
+              ],
+              "closed": true,
+              "depth": 0,
+              "area": 1200.0
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "name": "p3/base",
+          "type": "pad",
+          "sketch": "p3/base_profile",
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "extent": {
+            "type": "length",
+            "length": {
+              "value": 5.0,
+              "expr": "=thickness"
+            }
+          },
+          "midplane": false
+        },
+        {
+          "name": "p3/bore",
+          "type": "hole",
+          "sketch": "p3/bore_profile",
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "extent": {
+            "type": "blind",
+            "depth": {
+              "value": 3.0,
+              "expr": "=thickness - 2"
+            }
+          },
+          "diameter": {
+            "value": 6.0,
+            "expr": "=bore_d"
+          },
+          "positions": [
+            [
+              10,
+              0
+            ]
+          ],
+          "counterbore": {
+            "diameter": {
+              "value": 10.0
+            },
+            "depth": {
+              "value": 1.5
+            }
+          },
+          "drill_point": {
+            "type": "angled",
+            "angle_deg": 118
+          },
+          "thread": {
+            "standard": "ISO",
+            "size": "M6",
+            "pitch_mm": 1.0,
+            "modeled": false
+          }
+        },
+        {
+          "name": "p3/round",
+          "type": "fillet",
+          "edges": [
+            {
+              "curve": "line",
+              "midpoint": [
+                0,
+                -15,
+                5
+              ],
+              "length": 40.0,
+              "start": [
+                -20,
+                -15,
+                5
+              ],
+              "end": [
+                20,
+                -15,
+                5
+              ]
+            },
+            {
+              "curve": "line",
+              "midpoint": [
+                0,
+                15,
+                5
+              ],
+              "length": 40.0,
+              "start": [
+                20,
+                15,
+                5
+              ],
+              "end": [
+                -20,
+                15,
+                5
+              ]
+            }
+          ],
+          "radius": {
+            "value": 1.0
+          }
+        },
+        {
+          "name": "p3/edge",
+          "type": "chamfer",
+          "edges": [
+            {
+              "curve": "circle",
+              "midpoint": [
+                15,
+                0,
+                5
+              ],
+              "length": 31.42,
+              "centre": [
+                10,
+                0,
+                5
+              ],
+              "radius": 5.0,
+              "axis": [
+                0,
+                0,
+                1
+              ]
+            }
+          ],
+          "size": {
+            "value": 0.5
+          }
+        },
+        {
+          "name": "p3/boss",
+          "type": "pad",
+          "sketch": "p3/boss_profile",
+          "direction": [
+            0,
+            0,
+            1
+          ],
+          "extent": {
+            "type": "up_to_face",
+            "face_ref": {
+              "origin": [
+                0,
+                0,
+                12
+              ],
+              "normal": [
+                0,
+                0,
+                1
+              ],
+              "area": 100.0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "volume_mm3": null,
+    "bbox": null,
+    "feature_volumes": []
+  }
+}

@@ -178,6 +178,10 @@ if (process.argv[1] && process.argv[1].endsWith("install-blender.mjs")) {
     console.error("Run Reify and its installers inside Linux or a WSL distribution.");
     process.exit(2);
   }
+  // Always sync the simulation extra, even when the pinned Blender runtime is
+  // already present: setup:python records a base-only sync, so a lock marker
+  // cannot prove the extra is current. A no-op sync is cheap. installBlender
+  // below still skips the Blender download when the runtime exists.
   execFileSync(process.env.PI_CAD_UV ?? "uv", ["sync", "--project", join(root, "python"), "--extra", "simulation"], { cwd: root, stdio: "inherit" });
   const python = join(root, "python", ".venv", "bin", "python");
   const result = await installBlender({ root, python });

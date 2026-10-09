@@ -37,6 +37,7 @@
     "desktop:test:e2e": "npm --prefix apps/desktop run test:e2e",
     "desktop:package:win": "npm --prefix apps/desktop run package:win",
     "prime:setup": "node scripts/prime-cad.mjs",
+    "setup:freecad": "bash scripts/bootstrap-freecad.sh",
     "generate:agent-contract": "node scripts/generate-agent-contract.mjs",
     "check:agent-contract": "node scripts/generate-agent-contract.mjs --check",
     "test": "npm run check:agent-contract && bash scripts/test.sh",

@@ -1,5 +1,9 @@
 # Probe and observation cookbook
 
+## FreeCAD parts and assemblies
+
+A model built with `cad.part` has an identity manifest, so the semantic paths of its features, roles and occurrences (`bracket/mount_hole`, `arm/link/bearing`) work in every preset and in Python probes. Use `cad.part`'s own `query`, `check` and `sweep` for facts that need no STEP (clearance, interference, wall thickness, mass, pose sweeps); use the Probe for facts about the exported artifact. The visual preset takes occurrence paths in `focus` and `hide` (for example `["arm/link"]`).
+
 ## Applicable / not applicable
 
 Use the unified Probe for read-only facts, views, selectors, measurements, sections, comparison, assembly hierarchy, interference, or a bounded programmable B-Rep calculation. Do not use it to mutate CAD or assign engineering semantics to geometric selectors.

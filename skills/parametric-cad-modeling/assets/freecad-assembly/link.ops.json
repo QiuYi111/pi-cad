@@ -1,0 +1,6 @@
+[
+  {"op": "sketch", "name": "link/arm_profile", "plane": "XY", "shapes": [{"rect": {"center": [0, 0], "size": [80, 10]}}]},
+  {"op": "pad", "name": "link/arm", "sketch": "link/arm_profile", "length": 6},
+  {"op": "sketch", "name": "link/bearing_profile", "on": {"feature": "link/arm", "role": "top"}, "shapes": [{"circle": {"center": [0, 0], "diameter": 8}}]},
+  {"op": "hole", "name": "link/bearing", "sketch": "link/bearing_profile", "diameter": 8, "type": "through_all"}
+]

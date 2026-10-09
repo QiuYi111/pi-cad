@@ -17,6 +17,7 @@
     "test:package": "playwright test tests/e2e/package.spec.ts",
     "test:windows:host": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Test-PiCadInstaller.ps1",
     "test:windows:sandbox": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File tests/windows/Open-PiCadSandbox.ps1",
+    "build:executor:solidworks": "node scripts/build-solidworks-executor.mjs",
     "stage:runtime": "node scripts/stage-runtime.mjs",
     "package:win": "npm run stage:runtime && npm run build && node scripts/package-windows.mjs",
     "package:linux": "npm run stage:runtime && npm run build && electron-builder --linux AppImage deb",
@@ -72,6 +73,18 @@
       }
     ],
     "win": {
+      "extraResources": [
+        {
+          "from": "../../executors/fusion/ReifyExport",
+          "to": "executors/fusion/ReifyExport",
+          "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
+        },
+        {
+          "from": "../../executors/solidworks/publish",
+          "to": "executors/solidworks",
+          "filter": ["**/*", "!**/*.pdb"]
+        }
+      ],
       "icon": "build/icon.ico",
       "target": [
         "nsis",
@@ -91,6 +104,13 @@
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools",
       "target": ["dmg", "zip"],
+      "extraResources": [
+        {
+          "from": "../../executors/fusion/ReifyExport",
+          "to": "executors/fusion/ReifyExport",
+          "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
+        }
+      ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",

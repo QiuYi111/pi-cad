@@ -128,7 +128,7 @@ function renderTools(value, category) {
 
 function renderCookbookCatalog(value) {
   const assets = {
-    cad_build_step: ["parametric-cad-modeling/assets/build123d-part", "parametric-cad-modeling/assets/build123d-assembly"],
+    cad_build_step: ["parametric-cad-modeling/assets/freecad-part", "parametric-cad-modeling/assets/freecad-assembly", "parametric-cad-modeling/assets/build123d-part", "parametric-cad-modeling/assets/build123d-assembly"],
     cad_simulate: ["thermal-fluid-analysis/assets/recipes", "structural-analysis/assets/recipes"],
     cad_sim_observe: ["thermal-fluid-analysis/assets/recipes", "structural-analysis/assets/recipes"],
     cad_optimize: ["structural-analysis/assets/recipes/torch-fem-differentiable-sensitivity"],

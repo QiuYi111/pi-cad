@@ -557,6 +557,186 @@ class CadPackageTests(unittest.TestCase):
 
         asyncio.run(scenario())
 
+    # ------------------------------------------------------------ part backend
+
+    def test_part_open_forwards_paths_and_returns_a_snapshotable_handle(self) -> None:
+        part_module = importlib.import_module("cad.part")
+        response = {"part": {"rev": 0}, "images": [], "changes": None, "artifact": None, "created": True}
+        request = AsyncMock(return_value=response)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), \
+                patch.object(part_module, "request", request):
+            doc = asyncio.run(cad.part.open("parts/bracket.FCStd", create=True, body="bracket"))
+        request.assert_awaited_once_with(
+            "part-open", doc="parts/bracket.FCStd", output="build/bracket.step", create=True, validation="auto", body="bracket",
+        )
+        self.assertEqual(doc.path, Path("parts/bracket.FCStd"))
+        encoded = cad.snapshot.registry.encode(doc)
+        self.assertEqual(encoded["codec"], "cad.part")
+        decoded = cad.snapshot.registry.decode(encoded)
+        self.assertEqual((decoded.path, decoded.output, decoded.body), (doc.path, doc.output, "bracket"))
+
+    def test_part_apply_returns_artifact_with_changes_and_attaches_the_views(self) -> None:
+        part_module = importlib.import_module("cad.part")
+        changes = {
+            "schema": 1, "baseline": {"sha256": "c" * 64},
+            "volumeMm3": {"before": 100.0, "after": 96.0, "delta": -4.0},
+            "bboxMm": {"before": [1, 2, 3], "after": [1, 2, 3], "changed": False},
+            "faces": {"before": 8, "after": 9, "new": 3, "removed": 2},
+        }
+        response = {
+            "part": {"rev": 13, "features": {"recomputed": ["bracket/hole"]}, "params": {"changed": {"hole_d": [6, 8]}}, "warnings": [{"code": "SKETCH_UNDER_CONSTRAINED"}]},
+            "images": [{"name": "iso", "data": base64.b64encode(b"PNG").decode(), "mimeType": "image/png"}],
+            "changes": changes, "highlighted": True, "artifact": {"path": "build/bracket.step", "sha256": "d" * 64},
+        }
+        request = AsyncMock(return_value=response)
+        attach = AsyncMock()
+        doc = cad.part.PartDocument(Path("parts/bracket.FCStd"), Path("build/bracket.step"))
+        ops = [{"op": "set", "target": "bracket/hole", "prop": "Diameter", "value": 8}]
+        with patch.object(part_module, "request", request), patch.object(part_module, "_attach_images", attach):
+            result = asyncio.run(doc.apply(ops, message="wider hole", budget_s=45))
+        request.assert_awaited_once_with(
+            "part-apply", doc="parts/bracket.FCStd", output="build/bracket.step", ops=ops, validation="auto",
+            message="wider hole", budgetS=45,
+        )
+        self.assertEqual(result.rev, 13)
+        self.assertEqual(result.artifact.sha256, "d" * 64)
+        self.assertEqual(result.artifact.role, "candidate")
+        self.assertEqual(result.artifact.changes, changes)
+        self.assertEqual(result.params, {"hole_d": [6, 8]})
+        text = repr(result)
+        self.assertIn("rev=13", text)
+        self.assertIn("volume -4 mm³", text)
+        self.assertIn("faces +3/-2", text)
+        self.assertIn("warnings=1", text)
+        args, kwargs = attach.await_args
+        self.assertEqual(args[0], response["images"])
+        self.assertEqual(kwargs["changes"], changes)
+        self.assertTrue(kwargs["highlighted"])
+        self.assertIn("rev 13", kwargs["subject"])
+
+    def test_part_try_is_not_applied_and_labels_itself_a_trial(self) -> None:
+        part_module = importlib.import_module("cad.part")
+        response = {"part": {"rev": 4}, "images": [{"name": "iso", "data": "UE5H", "mimeType": "image/png"}], "changes": None, "highlighted": False}
+        attach = AsyncMock()
+        doc = cad.part.PartDocument(Path("parts/a.FCStd"), Path("build/a.step"))
+        with patch.object(part_module, "request", AsyncMock(return_value=response)), patch.object(part_module, "_attach_images", attach):
+            result = asyncio.run(doc.try_([{"op": "param", "name": "w", "value": 1}]))
+        self.assertFalse(result.applied)
+        self.assertIsNone(result.artifact)
+        self.assertIn("not applied", repr(result))
+        self.assertIn("trial", attach.await_args.kwargs["subject"])
+
+    def test_part_error_fields_cross_the_client_boundary(self) -> None:
+        client = importlib.import_module("cad.client")
+        body = {
+            "ok": False,
+            "error": {
+                "type": "PartOpError", "message": "bracket/edge failed to recompute", "code": "FILLET_FAILED",
+                "target": "bracket/edge", "detail": {"failedOpIndex": 1, "freecadStatus": "BRep_API: command not done"},
+                "hints": ["reduce radius"], "rolledBack": True,
+            },
+        }
+        encoded = json.dumps(body).encode()
+
+        class OneShotReader:
+            def __init__(self) -> None:
+                self._chunks = [encoded, b""]
+
+            async def read(self, _limit: int) -> bytes:
+                return self._chunks.pop(0)
+
+        writer = SimpleNamespace(write=Mock(), drain=AsyncMock(), write_eof=Mock(), close=Mock(), wait_closed=AsyncMock())
+        with (
+            patch.dict(os.environ, {"PI_CAD_AUTHOR_SOCKET": "/run/pi-cad/authority.sock"}),
+            patch.object(client.asyncio, "open_unix_connection", AsyncMock(return_value=(OneShotReader(), writer))),
+        ):
+            with self.assertRaises(cad.CadApiError) as raised:
+                asyncio.run(client.request("part-apply", doc="parts/a.FCStd", ops=[]))
+        error = raised.exception
+        self.assertEqual(error.code, "FILLET_FAILED")
+        self.assertEqual(error.target, "bracket/edge")
+        self.assertEqual(error.detail["failedOpIndex"], 1)
+        self.assertEqual(error.hints, ["reduce radius"])
+        self.assertIs(error.rolled_back, True)
+        self.assertEqual(error.error_type, "PartOpError")
+
+    def test_errors_without_part_fields_keep_none_defaults(self) -> None:
+        error = cad.CadApiError("plain")
+        self.assertEqual((error.code, error.target, error.detail, error.hints, error.rolled_back), (None, None, None, None, None))
+
+    def test_first_image_label_carries_the_change_summary(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        attach = Mock()
+        changes = {
+            "schema": 1, "baseline": {"sha256": "c" * 64},
+            "volumeMm3": {"before": 12000.0, "after": 11903.7, "delta": -96.3},
+            "bboxMm": {"before": [40, 20, 10], "after": [40, 20, 10], "changed": False},
+            "faces": {"before": 14, "after": 15, "new": 3, "removed": 2},
+            "features": {"recomputed": ["bracket/mount_hole", "bracket/edge_round"]},
+            "params": {"changed": {"hole_d": [6, 8]}},
+            "intent": [{"path": "bracket/min_wall", "status": "pass", "value": 2.1, "limit": 2.0}],
+        }
+        images = [{"name": "iso", "data": base64.b64encode(b"a").decode(), "mimeType": "image/png"},
+                  {"name": "front", "data": base64.b64encode(b"b").decode(), "mimeType": "image/png"}]
+        with patch("IPython.display.display", attach):
+            artifact = cad.ArtifactRef(Path("build/part.step"), "a" * 64, "candidate", changes)
+            asyncio.run(model_module._attach_images(images, artifact, changes=changes, highlighted=True))
+        label = attach.call_args_list[0].args[0]["text/plain"]
+        self.assertIn("primary observation", label)
+        self.assertIn("Changes since previous build: volume -96.3 mm³; faces +3/-2; bbox unchanged.", label)
+        self.assertIn("Recomputed: bracket/mount_hole, bracket/edge_round. Params: hole_d 6→8.", label)
+        self.assertIn("Highlighted in orange: faces changed by this build.", label)
+        self.assertIn("Intent: bracket/min_wall pass (2.1 vs 2.0).", label)
+        self.assertTrue(label.rstrip().endswith("[ISO]"))
+        self.assertEqual(attach.call_args_list[1].args[0]["text/plain"], "[FRONT]")
+
+    def test_change_text_is_short_and_handles_first_builds(self) -> None:
+        from cad._changes import describe_changes
+
+        self.assertEqual(describe_changes(None), [])
+        self.assertEqual(describe_changes({"schema": 1, "baseline": None}), ["First build of this output: there is no previous build to compare."])
+        many = {
+            "baseline": {"sha256": "x"}, "volumeMm3": {"delta": 0}, "bboxMm": {"changed": True, "before": [1, 2, 3], "after": [1, 2, 4]},
+            "faces": {"new": 0, "removed": 0},
+            "features": {"recomputed": [f"p/f{i}" for i in range(9)]},
+            "params": {"changed": {"a": [1, 2]}},
+            "intent": [{"path": f"p/r{i}", "status": "fail"} for i in range(5)],
+            "warnings": [{"code": "W", "target": "p/x"}],
+        }
+        lines = describe_changes(many, True)
+        self.assertLessEqual(len(lines), 6)
+        self.assertIn("volume unchanged", lines[0])
+        self.assertIn("bbox 1×2×3 → 1×2×4 mm", lines[0])
+        self.assertIn("…", lines[1])
+
+    def test_artifact_ref_changes_do_not_alter_equality_or_snapshot(self) -> None:
+        plain = cad.ArtifactRef(Path("build/a.step"), "a" * 64, "candidate")
+        with_changes = cad.ArtifactRef(Path("build/a.step"), "a" * 64, "candidate", {"schema": 1})
+        self.assertEqual(plain, with_changes)
+        self.assertEqual(plain.__cad_snapshot__(), with_changes.__cad_snapshot__())
+        self.assertNotIn("changes", repr(with_changes))
+
+    def test_model_build_fills_changes_on_the_artifact_ref(self) -> None:
+        model_module = importlib.import_module("cad.model")
+        changes = {"schema": 1, "baseline": None}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "build" / "part.step"
+            output.parent.mkdir()
+            output.write_bytes(b"STEP")
+            response = {
+                "build": {"ok": True, "artifacts": [{"kind": "step", "sha256": "b" * 64}]},
+                "images": [{"data": base64.b64encode(b"PNG").decode(), "mimeType": "image/png"}],
+                "changes": changes, "highlighted": False,
+            }
+            attach = AsyncMock()
+            with patch.dict(os.environ, {"PI_CAD_PROJECT_CWD": directory}), \
+                    patch.object(model_module, "request", AsyncMock(return_value=response)), \
+                    patch.object(model_module, "_attach_images", attach):
+                artifact = asyncio.run(cad.model.build("part.py", "build/part.step"))
+        self.assertEqual(artifact.changes, changes)
+        self.assertEqual(attach.await_args.kwargs, {"changes": changes, "highlighted": False})
+
 
 if __name__ == "__main__":
     unittest.main()

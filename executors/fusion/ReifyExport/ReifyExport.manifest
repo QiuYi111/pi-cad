@@ -1,0 +1,13 @@
+{
+  "autodeskProduct": "Fusion",
+  "type": "addin",
+  "id": "7c1f3a52-9b1e-4d3a-8e6f-2a5d0c4b9e11",
+  "author": "Reify",
+  "description": {
+    "": "Executes Reify canonical feature JSON jobs (cad.transfer) and exports .f3d and STEP."
+  },
+  "version": "0.2.0",
+  "runOnStartup": false,
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}

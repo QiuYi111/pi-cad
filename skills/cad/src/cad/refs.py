@@ -2,7 +2,7 @@ from __future__ import annotations
 
 """Compact, provenance-bearing references returned to Prime IPython."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +12,9 @@ class ArtifactRef:
     path: Path
     sha256: str | None = None
     role: str = "artifact"
+    # What this build changed against the previous build of the same output.
+    # Not part of the snapshot and ignored by equality.
+    changes: dict[str, Any] | None = field(default=None, compare=False, repr=False)
 
     def __repr__(self) -> str:
         digest = f"sha256:{self.sha256[:12]}…" if self.sha256 else "unhashed"

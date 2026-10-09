@@ -1,0 +1,80 @@
+{
+ "description": "different type or area beyond 1e-3 never matches",
+ "diagonal": 100.0,
+ "before": [
+  {
+   "i": 0,
+   "type": "PLANE",
+   "c": [
+    0,
+    0,
+    0
+   ],
+   "a": 10,
+   "n": [
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "i": 0,
+   "type": "PLANE",
+   "c": [
+    20,
+    0,
+    0
+   ],
+   "a": 10,
+   "n": [
+    0,
+    0,
+    1
+   ]
+  }
+ ],
+ "after": [
+  {
+   "i": 0,
+   "type": "CYLINDER",
+   "c": [
+    0,
+    0,
+    0
+   ],
+   "a": 10,
+   "ax": [
+    0,
+    0,
+    1
+   ],
+   "r": 1.0
+  },
+  {
+   "i": 0,
+   "type": "PLANE",
+   "c": [
+    20,
+    0,
+    0
+   ],
+   "a": 10.02,
+   "n": [
+    0,
+    0,
+    1
+   ]
+  }
+ ],
+ "expected": {
+  "pairs": [],
+  "unmatchedBefore": [
+   0,
+   1
+  ],
+  "unmatchedAfter": [
+   0,
+   1
+  ]
+ }
+}

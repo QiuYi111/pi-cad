@@ -1,0 +1,47 @@
+{
+ "description": "plane normal outside the 0.9999 dot threshold does not match",
+ "diagonal": 100.0,
+ "before": [
+  {
+   "i": 0,
+   "type": "PLANE",
+   "c": [
+    0,
+    0,
+    5
+   ],
+   "a": 800,
+   "n": [
+    0,
+    0,
+    1
+   ]
+  }
+ ],
+ "after": [
+  {
+   "i": 0,
+   "type": "PLANE",
+   "c": [
+    0,
+    0,
+    5
+   ],
+   "a": 800,
+   "n": [
+    0,
+    0.02,
+    0.9998
+   ]
+  }
+ ],
+ "expected": {
+  "pairs": [],
+  "unmatchedBefore": [
+   0
+  ],
+  "unmatchedAfter": [
+   0
+  ]
+ }
+}

@@ -4,7 +4,15 @@ import { withCanonicalProjectEnvironment, type RuntimeBridge } from "./runtime-b
 interface AgentApiEnvelope<T> {
   ok: boolean;
   result?: T;
-  error?: { message?: string };
+  error?: { message?: string; code?: string; target?: string; detail?: Record<string, unknown>; hints?: string[] };
+}
+
+/** An Agent API error with its stable code, target and detail (for example TRANSFER_CHECK_FAILED). */
+export class AgentApiError extends Error {
+  constructor(message: string, readonly code?: string, readonly target?: string, readonly detail?: Record<string, unknown>, readonly hints?: string[]) {
+    super(message);
+    this.name = "AgentApiError";
+  }
 }
 
 /**
@@ -41,13 +49,25 @@ export class AgentApiClient {
     const { piCadRepo, projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) throw new Error("Choose a project before reading Reify state.");
     const node = await this.bridge.commandPath("node");
-    const { stdout } = await this.bridge.pipe(
-      await withCanonicalProjectEnvironment(this.bridge, projectPath, [node, `${piCadRepo}/scripts/pi-cad-agent-api.mjs`, "agent-api", projectPath]),
-      JSON.stringify({ schema: 1, ...body }),
-      timeout,
-    );
+    let stdout: string;
+    try {
+      ({ stdout } = await this.bridge.pipe(
+        await withCanonicalProjectEnvironment(this.bridge, projectPath, [node, `${piCadRepo}/scripts/pi-cad-agent-api.mjs`, "agent-api", projectPath]),
+        JSON.stringify({ schema: 1, ...body }),
+        timeout,
+      ));
+    } catch (error) {
+      // The Agent API exits non-zero on a request error but still prints the error envelope on stdout. Without it the
+      // user would only see stderr, which is usually a Node warning.
+      const printed = (error as { stdout?: unknown }).stdout;
+      if (typeof printed !== "string" || !printed.trim().startsWith("{")) throw error;
+      stdout = printed;
+    }
     const response = JSON.parse(stdout) as AgentApiEnvelope<T>;
-    if (!response.ok) throw new Error(response.error?.message || "Reify rejected the request.");
+    if (!response.ok) {
+      const error = response.error;
+      throw new AgentApiError(error?.message || "Reify rejected the request.", error?.code, error?.target, error?.detail, error?.hints);
+    }
     return response.result as T;
   }
 }

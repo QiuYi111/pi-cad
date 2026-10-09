@@ -1,0 +1,50 @@
+{
+ "description": "cylinder axis sign is ignored",
+ "diagonal": 100.0,
+ "before": [
+  {
+   "i": 0,
+   "type": "CYLINDER",
+   "c": [
+    0,
+    0,
+    0
+   ],
+   "a": 10,
+   "ax": [
+    0,
+    0,
+    1
+   ],
+   "r": 2.0
+  }
+ ],
+ "after": [
+  {
+   "i": 0,
+   "type": "CYLINDER",
+   "c": [
+    0,
+    0,
+    0
+   ],
+   "a": 10,
+   "ax": [
+    0,
+    0,
+    -1
+   ],
+   "r": 2.0
+  }
+ ],
+ "expected": {
+  "pairs": [
+   [
+    0,
+    0
+   ]
+  ],
+  "unmatchedBefore": [],
+  "unmatchedAfter": []
+ }
+}

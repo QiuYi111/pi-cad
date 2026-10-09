@@ -47,3 +47,8 @@ chaos/campaigns/*/rounds.jsonl
 chaos/campaigns/*/status.json
 chaos/campaigns/*/artifacts/
 chaos/campaigns/progress-sync.mjs
+
+# Published SolidWorks executor (built by apps/desktop/scripts/build-solidworks-executor.mjs)
+executors/solidworks/publish/
+executors/solidworks/**/bin/
+executors/solidworks/**/obj/

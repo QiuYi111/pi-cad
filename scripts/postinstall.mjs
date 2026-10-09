@@ -45,3 +45,4 @@ writeFileSync(join(root, ".pi-cad-runtime.json"), JSON.stringify({ mode: "linux-
 console.log(`[pi-cad] Python runtime ready (${process.platform}): ${doctor.python}`);
 console.log("[pi-cad] OpenFOAM 14 managed runtime is bootstrapped separately with scripts/bootstrap-openfoam14.sh");
 console.log("[pi-cad] SU2 and torch-fem managed runtimes are bootstrapped explicitly; npm postinstall never downloads solvers");
+console.log("[pi-cad] FreeCAD part backend is optional; install with npm run setup:freecad (about 4.2 GB, no sudo, once)");

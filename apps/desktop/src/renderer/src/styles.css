@@ -627,3 +627,10 @@ body { background: radial-gradient(circle at 84% -20%, #344039 0, #171a17 20%, v
 .workbench-page.mode-conversation .design-pane{display:none;visibility:hidden;pointer-events:none}
 .workbench-page.mode-canvas .design-pane,.workbench-page.mode-recent .design-pane{visibility:visible}
 .trace-list-state{margin:18px 12px;color:#777e77;font-size:10px;line-height:1.5}.trace-entry.tool>button{justify-self:start;margin-top:6px;padding:4px 7px;border:1px solid #cbc8c0;border-radius:6px;background:#f0ede7;color:#465048;font-size:9px}
+
+/* CAD exports (Settings) and export buttons (Workbench) */
+.cad-target{border-top:1px solid var(--line);padding-top:14px;margin-top:14px;display:grid;gap:8px}.cad-target h3{font-size:13px;margin:0;display:flex;gap:10px;align-items:center;font-weight:570}
+.cad-state{font-size:11px;color:var(--muted);font-weight:400}.cad-state.ok{color:#7fd69a}.cad-steps{margin:0;padding-left:18px;font-size:12px;color:#c4c9cf;line-height:1.6}
+.cad-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11px}.cad-row button,.cad-export button{border:1px solid #32373d;background:#171a1d;border-radius:7px;padding:5px 11px;color:#d4d7da;font-size:11px}.cad-row button:disabled,.cad-export button:disabled{opacity:.5}
+.cad-row i{width:8px;height:8px;border-radius:50%;background:#6a7078;display:inline-block}.cad-row i.online{background:#7fd69a}.cad-test{display:grid;gap:3px;font-size:11px}
+.cad-export-buttons{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.cad-export{display:inline-flex;gap:6px;align-items:center;font-size:11px}.cad-export .link{border:0;background:transparent;text-decoration:underline;color:#9db8e8;padding:0}.cad-export-error{color:#ff9b8f}

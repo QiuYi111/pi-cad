@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Reify.Export.Sw</RootNamespace>
+    <AssemblyName>ReifyExport</AssemblyName>
+    <Version>0.1.0</Version>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Classic COM interop assemblies (built for .NET Framework) referenced from net8.0: expected warning. -->
+    <NoWarn>$(NoWarn);NU1701;MSB3277;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!--
+      SolidWorks interop assemblies. They are NOT in this repository. They ship with every SolidWorks install in
+      <install>\api\redist and are the redistributable ones. The packaging step either builds on a machine with
+      SolidWorks installed (default path below) or passes /p:SwApiDir=<folder with the two DLLs>.
+      Private=true copies them next to ReifyExport.exe so the published folder is self-sufficient.
+      EmbedInteropTypes=false: the SolidWorks interops are not designed for type embedding.
+    -->
+    <SwApiDir Condition="'$(SwApiDir)' == ''">C:\Program Files\SOLIDWORKS Corp\SOLIDWORKS\api\redist</SwApiDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ReifyExport.Core\ReifyExport.Core.csproj" />
+    <Reference Include="SolidWorks.Interop.sldworks">
+      <HintPath>$(SwApiDir)\SolidWorks.Interop.sldworks.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="SolidWorks.Interop.swconst">
+      <HintPath>$(SwApiDir)\SolidWorks.Interop.swconst.dll</HintPath>
+      <EmbedInteropTypes>false</EmbedInteropTypes>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
