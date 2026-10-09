@@ -48,6 +48,7 @@ npm run chaos:run             # 随机生成 action/fault 序列并检查 invari
 chaos/
   actions/      用户/系统动作
   faults/       进程故障 + 外部依赖故障，以及注入/恢复运行时
+  support/      进程控制、/proc 读取、CLI 参数、artifact 写入（两套 harness 共用）
   invariants/   不变量检查
   model/        fast-check 序列生成
   runner/       执行、artifact、replay、shrink
@@ -138,7 +139,7 @@ export const archiveRun: ActionDefinition = {
 
 ## 新增一个 Fault
 
-加 `inject` 和 `recover` 两个方法，放进 `chaos/faults/index.ts` 的对应数组：
+加 `inject` 和 `recover` 两个方法，放进 `chaos/faults/index.ts` 的对应数组（真 Reify 的 fault 按边界放在 `chaos/reify/faults/` 下各自一个文件里）：
 
 ```ts
 export const killWorkerAfterDelay: FaultDefinition = {
@@ -308,7 +309,7 @@ owner 一没就先杀掉 fork 出来的 build 子树，再自己退出；fork �
 处理。手工起的 cadctl 没有这份身份，行为不变；每个 kernel 只认自己的 owner，不会
 碰别的 run 的进程。
 
-`tests/chaos-reify.test.ts` 覆盖：owner 被 SIGKILL、正常 stop、runtime 重启、
+`tests/chaos-reify-process.test.ts` 覆盖：owner 被 SIGKILL、正常 stop、runtime 重启、
 两个 run 只清自己的 kernel，以及原失败 artifact 重放不再复现。
 
 反过来，build 途中 SIGKILL / SIGSTOP kernel 都能正确恢复：控制面报
@@ -331,7 +332,7 @@ pauseKernelDuringBuild → restartRuntimeDuringBuild`）。
 重活之前 arm `PR_SET_PDEATHSIG`，owner 一死由内核送 SIGKILL，进程停在 `T` 也照杀。
 没有 owner 身份、或 owner 不是父进程（中间还夹着 launcher）时不 arm，行为照旧。
 
-`tests/chaos-reify.test.ts` 覆盖：被 SIGSTOP 的 warm kernel 在 owner 被 SIGKILL 后不用
+`tests/chaos-reify-process.test.ts` 覆盖：被 SIGSTOP 的 warm kernel 在 owner 被 SIGKILL 后不用
 SIGCONT 也自己退，以及上面那条 artifact 重放不再复现。
 
 顺带修正：`*DuringBuild` 这类故障现在会等到真 build 子进程（kernel fork 出来、
@@ -353,7 +354,7 @@ arm 着」，还记着前面那一步 arm 的。同一轮里 `missingDesktopProj
 `Injected` 的那一步记进待回收列表；`missingDesktopProjection.recover` 再兜一层，
 没有 arm 记录就直接跳过。`Injected` / `NotApplicable` 的记账口径没变。
 
-`tests/chaos-reify.test.ts` 覆盖：这条 artifact 按序列和按 seed+path 重放都不再复现，
+`tests/chaos-reify-core.test.ts` 覆盖：这条 artifact 按序列和按 seed+path 重放都不再复现，
 并且同一条序列跑完只回收真注入过的那一次。
 
 ### 这一段的环境变量
