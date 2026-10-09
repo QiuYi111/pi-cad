@@ -50,6 +50,7 @@ await jiti.import("./engine-router.test.ts", { default: true });
 await jiti.import("./v7-extension-routing.test.ts", { default: true });
 await jiti.import("./v7-walking-skeleton.test.ts", { default: true });
 await jiti.import("./v7-rules-workflow.test.ts", { default: true });
+await jiti.import("./v7-stale-records.test.ts", { default: true });
 await jiti.import("./v7-rules-authority.test.ts", { default: true });
 await jiti.import("./v7-rules-context.test.ts", { default: true });
 await jiti.import("./review-v7.test.ts", { default: true });
