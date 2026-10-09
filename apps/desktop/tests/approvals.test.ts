@@ -35,7 +35,8 @@ describe("trusted local human approvals", () => {
 });
 
 describe("formal local release package", () => {
-  it("publishes atomically, verifies hashes in another directory, and reuses the same release", async () => {
+  // NativeBridge and the Unix runtime are not used on Windows; the WSL bridge is, and tests/wsl.test.ts covers it.
+  it.skipIf(process.platform === "win32")("publishes atomically, verifies hashes in another directory, and reuses the same release", async () => {
     const project = await mkdtemp(join(tmpdir(), "reify-release-project-")); const destination = await mkdtemp(join(tmpdir(), "reify-release-destination-")); roots.push(project, destination);
     await writeFile(join(project, "part.step"), "trusted model\n");
     const sha = createHash("sha256").update("trusted model\n").digest("hex");

@@ -3,6 +3,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { posix } from "node:path";
 import type { AppSettings, BlenderRender, BlenderScene } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
+import { sha256Command } from "./sha256.js";
 
 function resultLine<T>(stdout: string): T {
   const line = stdout.split("\n").reverse().find((value: string) => value.startsWith("REIFY_JSON:"));
@@ -33,7 +34,7 @@ export class BlenderBackend {
   async inspect(settings: AppSettings, source: string): Promise<BlenderScene> {
     const paths = await this.paths(settings, source);
     const { stdout } = await this.bridge.exec([paths.blender, "--background", paths.scene, "--python", paths.script, "--", "inspect"], { timeout: 120_000 });
-    const hash = (await this.bridge.exec(["sha256sum", "--", paths.scene])).stdout.split(/\s+/)[0];
+    const hash = (await this.bridge.exec(sha256Command(paths.scene))).stdout.split(/\s+/)[0];
     return { ...resultLine<Omit<BlenderScene, "source">>(stdout), source, sha256: hash };
   }
 

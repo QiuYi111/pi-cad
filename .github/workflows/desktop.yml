@@ -2,10 +2,10 @@ name: desktop
 
 on:
   pull_request:
-    paths: ["apps/desktop/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
+    paths: ["apps/desktop/**", "src/**", "skills/cad/**", "python/**", "tests/fixtures/**", "scripts/desktop-inspect-vtk.py", "scripts/postinstall.mjs", "package.json", "package-lock.json", ".github/workflows/desktop.yml"]
   push:
     branches: [master]
-    paths: ["apps/desktop/**", "src/authority/**", "scripts/postinstall.mjs", ".github/workflows/desktop.yml"]
+    paths: ["apps/desktop/**", "src/**", "skills/cad/**", "python/**", "tests/fixtures/**", "scripts/desktop-inspect-vtk.py", "scripts/postinstall.mjs", "package.json", "package-lock.json", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 jobs:
@@ -23,7 +23,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/desktop/package-lock.json
+      # uv runs the stdlib-only VTU inspector and the CAD worker test. The base
+      # sync (no simulation extra) installs cadctl and build123d into python/.venv.
+      - uses: astral-sh/setup-uv@v6
+      # Root dependencies (typebox, jiti, yaml, undici) are imported by the desktop
+      # tests through src/. Lifecycle scripts stay off, as in the smoke jobs.
+      - run: npm ci --ignore-scripts
+      - run: uv sync --frozen --project python
       - run: npm ci
         working-directory: apps/desktop
       - run: npm test
@@ -45,7 +54,15 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci --ignore-scripts
-      - run: npm ci && npm run build
+      # packages/ai's build regenerates src/models.generated.ts from live model
+      # catalogs, and the regenerated file does not type-check. Build the same
+      # packages as the root `npm run build`, with the committed generated file.
+      - run: |
+          npm ci
+          (cd packages/tui && npm run build)
+          (cd packages/ai && npx tsgo -p tsconfig.build.json)
+          (cd packages/agent && npm run build)
+          (cd packages/coding-agent && npm run build)
         working-directory: prime-agent
       - run: npm ci
         working-directory: apps/desktop
@@ -53,7 +70,8 @@ jobs:
         working-directory: apps/desktop
         env:
           PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent
-      - run: PI_CAD_PACKAGED_EXE="$PWD/release/linux-unpacked/reify" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: xvfb-run -a env PI_CAD_PACKAGED_EXE="$PWD/release/linux-unpacked/Reify" PI_CAD_NATIVE_PACKAGE=1 npx playwright test tests/e2e/native-package.spec.ts
         working-directory: apps/desktop
       - uses: actions/upload-artifact@v4
         with:
@@ -76,13 +94,23 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci --ignore-scripts
-      - run: npm ci && npm run build
+      # packages/ai's build regenerates src/models.generated.ts from live model
+      # catalogs, and the regenerated file does not type-check. Build the same
+      # packages as the root `npm run build`, with the committed generated file.
+      - run: |
+          npm ci
+          (cd packages/tui && npm run build)
+          (cd packages/ai && npx tsgo -p tsconfig.build.json)
+          (cd packages/agent && npm run build)
+          (cd packages/coding-agent && npm run build)
         working-directory: prime-agent
       - run: npm ci
         working-directory: apps/desktop
       - run: bash scripts/make-mac-icon.sh
         working-directory: apps/desktop
-      - run: npm run package:mac
+      # Unsigned CI smoke build. The release script (package:mac) refuses to run
+      # without signing and notarization credentials, and this job has none.
+      - run: npm run package:mac:unsigned
         working-directory: apps/desktop
         env:
           PRIME_AGENT_REPO: ${{ github.workspace }}/prime-agent

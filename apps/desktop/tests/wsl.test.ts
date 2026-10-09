@@ -1,8 +1,46 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WslBridge, classifyWslInstallResult, forwardWslRuntimeEnvironment, initializeWslUserScript, isNonRootWslUid, missingDistroStatus, nodeInstallScript, runtimeChecksReady, wslDefaultUserName, wslElevatedInstallScript, wslInstallHeartbeat, wslInstallPowerShellCommand } from "../electron/main/wsl";
 import { engineeringKnowledgeProbe, managedPythonProbe, withCanonicalProjectEnvironment } from "../electron/main/runtime-bridge";
 import type { AppSettings } from "../src/shared/contracts";
 import { setupErrorMessage } from "../src/renderer/src/pages/FirstRun";
+
+// Every process call made by wsl.ts goes through node:child_process. Unless a test
+// installs an answer, a call fails loudly, so no test can spawn a real wsl.exe.
+const childProcess = vi.hoisted(() => {
+  const unmocked = (command: string): string => { throw new Error(`Unmocked process call: ${command}`); };
+  return { unmocked, answer: unmocked as (command: string) => string };
+});
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const { promisify } = await import("node:util");
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const execFile = vi.fn();
+  Object.defineProperty(execFile, promisify.custom, {
+    value: (file: string, args: string[]) => new Promise((accept, reject) => {
+      try { accept({ stdout: childProcess.answer([file, ...args].join(" ")), stderr: "" }); }
+      catch (error) { reject(error); }
+    }),
+  });
+  const spawn = vi.fn(() => { throw new Error("Unmocked process spawn"); });
+  return { ...actual, execFile, spawn };
+});
+
+beforeEach(() => {
+  childProcess.answer = childProcess.unmocked;
+});
+
+// check() lists the WSL distributions and reads the default Linux user before its runtime script.
+function answerHealthyDistro(command: string): string {
+  if (command === "wsl.exe -l -q") return "Ubuntu\n";
+  if (command === "wsl.exe -d Ubuntu -- id -u") return "1000\n";
+  return childProcess.unmocked(command);
+}
+
+// install() installs the Blender system libraries through wsl.exe as root.
+function answerSystemLibraryInstall(command: string): string {
+  if (command.includes("apt-get install -y libsm6")) return "";
+  return childProcess.unmocked(command);
+}
 
 describe("WSL path conversion", () => {
   const bridge = new WslBridge("Ubuntu");
@@ -63,6 +101,7 @@ describe("first-run setup errors", () => {
 
 describe("WSL runtime environment", () => {
   it("streams the multi-line runtime check over stdin", async () => {
+    childProcess.answer = answerHealthyDistro;
     const bridge = new WslBridge("Ubuntu", "/bundle");
     vi.spyOn(bridge, "toLinuxPath").mockImplementation(async (value) => value === "/bundle" ? "/bundle" : value);
     vi.spyOn(bridge, "homeDirectory").mockResolvedValue("/home/tester");
@@ -82,6 +121,7 @@ describe("WSL runtime environment", () => {
   });
 
   it("does not report ready when the managed CAD interpreter is broken", async () => {
+    childProcess.answer = answerHealthyDistro;
     const bridge = new WslBridge("Ubuntu");
     vi.spyOn(bridge, "homeDirectory").mockResolvedValue("/home/tester");
     vi.spyOn(bridge, "resolveRuntimePaths").mockResolvedValue({ piCadRepo: "/runtime/pi-cad", primeAgentRepo: "/runtime/prime-agent", projectPath: "/workspace" });
@@ -245,6 +285,7 @@ describe("WSL first-install status", () => {
   });
 
   it("continues setup after copying a previously missing bundled runtime", async () => {
+    childProcess.answer = answerSystemLibraryInstall;
     const bridge = new WslBridge("Ubuntu", "C:\\Pi-CAD\\runtime");
     const settings: AppSettings = {
       distro: "Ubuntu", projectPath: "/workspace", piCadRepo: "", primeAgentRepo: "",
@@ -275,6 +316,7 @@ describe("WSL first-install status", () => {
   });
 
   it("streams shell programs over stdin instead of placing them on the Windows command line", async () => {
+    childProcess.answer = answerSystemLibraryInstall;
     const bridge = new WslBridge("Ubuntu");
     const missing = {
       state: "error", checks: [
