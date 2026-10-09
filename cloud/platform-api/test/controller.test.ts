@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sha256 } from '../src/crypto.js';
 import { createController } from '../src/workspace/controller.js';
-import type { UserEvent } from '../src/workspace/events.js';
+import type { UserEvent } from '../../protocol/src/index.js';
 import { bearer, get, makeEnv, PASSWORD, post, signUp, type Env } from './helpers/env.js';
 
 const SEC = 1000;
