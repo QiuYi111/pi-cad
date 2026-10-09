@@ -38,7 +38,7 @@ function SourceSelect({ value, sources, onChange }: { value?: string; sources: V
   </label>;
 }
 
-export function EngineeringViewer({ projectPath, latestArtifact, revision, openedMesh, mediaArtifacts = [], agentRunning = false, onAskAgent, onStopAgent }: { projectPath: string; latestArtifact?: string; revision: number; openedMesh?: MeshDocument | null; mediaArtifacts?: MediaAttachment[]; agentRunning?: boolean; onAskAgent?: (request: string) => void; onStopAgent?: () => void }) {
+export function EngineeringViewer({ projectPath, latestArtifact, revision, openedMesh, mediaArtifacts = [], agentRunning = false, cloudMode = false, onAskAgent, onStopAgent }: { projectPath: string; latestArtifact?: string; revision: number; openedMesh?: MeshDocument | null; mediaArtifacts?: MediaAttachment[]; agentRunning?: boolean; cloudMode?: boolean; onAskAgent?: (request: string) => void; onStopAgent?: () => void }) {
   const [catalog, setCatalog] = useState<ViewerCatalog>(EMPTY);
   const [selected, setSelected] = useState("");
   const [compare, setCompare] = useState(false);
@@ -64,7 +64,11 @@ export function EngineeringViewer({ projectPath, latestArtifact, revision, opene
   const [remoteName, setRemoteName] = useState("origin");
   const [releaseTag, setReleaseTag] = useState("");
   const selectionPinned = useRef(false);
-  const sources = useMemo(() => sourcesFromCatalog(catalog, latestArtifact), [catalog, latestArtifact]);
+  // Blender and ParaView views are not provisioned in cloud workspaces during stage 1.
+  const sources = useMemo(() => {
+    const all = sourcesFromCatalog(catalog, latestArtifact);
+    return cloudMode ? all.filter((source) => source.kind !== "blender" && source.kind !== "simulation") : all;
+  }, [catalog, latestArtifact, cloudMode]);
   const primarySource = sources.find((source) => source.id === selected) ?? preferredSource(sources);
   const currentModel = preferredSource(sources.filter((source) => source.kind === "cad")) as Extract<ViewerSource, { kind: "cad" }> | undefined;
   const allMedia = [...renderArtifacts, ...mediaArtifacts];

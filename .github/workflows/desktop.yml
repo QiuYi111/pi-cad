@@ -2,10 +2,10 @@ name: desktop
 
 on:
   pull_request:
-    paths: ["apps/desktop/**", "src/**", "skills/cad/**", "python/**", "tests/fixtures/**", "scripts/desktop-inspect-vtk.py", "scripts/postinstall.mjs", "package.json", "package-lock.json", ".github/workflows/desktop.yml"]
+    paths: ["apps/desktop/**", "cloud/protocol/**", "cloud/workspace-gateway/**", "src/**", "skills/cad/**", "python/**", "tests/fixtures/**", "scripts/desktop-inspect-vtk.py", "scripts/postinstall.mjs", "package.json", "package-lock.json", ".github/workflows/desktop.yml"]
   push:
     branches: [master]
-    paths: ["apps/desktop/**", "src/**", "skills/cad/**", "python/**", "tests/fixtures/**", "scripts/desktop-inspect-vtk.py", "scripts/postinstall.mjs", "package.json", "package-lock.json", ".github/workflows/desktop.yml"]
+    paths: ["apps/desktop/**", "cloud/protocol/**", "cloud/workspace-gateway/**", "src/**", "skills/cad/**", "python/**", "tests/fixtures/**", "scripts/desktop-inspect-vtk.py", "scripts/postinstall.mjs", "package.json", "package-lock.json", ".github/workflows/desktop.yml"]
   workflow_dispatch:
 
 jobs:
@@ -26,6 +26,8 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             apps/desktop/package-lock.json
+            cloud/protocol/package-lock.json
+            cloud/workspace-gateway/package-lock.json
       # uv runs the stdlib-only VTU inspector and the CAD worker test. The base
       # sync (no simulation extra) installs cadctl and build123d into python/.venv.
       - uses: astral-sh/setup-uv@v6
@@ -35,6 +37,10 @@ jobs:
       - run: uv sync --frozen --project python
       - run: npm ci
         working-directory: apps/desktop
+      - run: npm ci
+        working-directory: cloud/protocol
+      - run: npm ci
+        working-directory: cloud/workspace-gateway
       - run: npm test
         working-directory: apps/desktop
       - run: npm run build

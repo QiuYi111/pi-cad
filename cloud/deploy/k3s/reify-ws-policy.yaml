@@ -1,0 +1,91 @@
+# Policies for the reify-ws namespace (plan 8.2).
+# Every workspace pod carries the label reify.dev/role=workspace.
+#
+# Egress allows only:
+#   - cluster DNS (kube-dns)
+#   - the platform API internal port 8081
+#   - the Windows host proxy (mihomo, port 7890)
+# Everything else is denied. That includes PostgreSQL and the Kubernetes API.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: reify-ws-quota
+  namespace: reify-ws
+  labels:
+    app.kubernetes.io/part-of: reify
+spec:
+  hard:
+    requests.cpu: "24"
+    requests.memory: 72Gi
+    pods: "6"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workspace-ingress-from-platform-api
+  namespace: reify-ws
+  labels:
+    app.kubernetes.io/part-of: reify
+spec:
+  podSelector:
+    matchLabels:
+      reify.dev/role: workspace
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: reify-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: platform-api
+      ports:
+        - protocol: TCP
+          port: 7000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: workspace-egress-allowlist
+  namespace: reify-ws
+  labels:
+    app.kubernetes.io/part-of: reify
+spec:
+  podSelector:
+    matchLabels:
+      reify.dev/role: workspace
+  policyTypes: ["Egress"]
+  egress:
+    # 1. Cluster DNS.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2. Platform API internal port (activity reports only).
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: reify-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: platform-api
+      ports:
+        - protocol: TCP
+          port: 8081
+    # 3. Windows host proxy (mihomo). PLACEHOLDER: replace 203.0.113.10/32 with the host address
+    #    from HTTPS_PROXY_FOR_WORKSPACES in platform-api.yaml (the same address, as <ip>/32).
+    #    Until then, model access is blocked (fail closed).
+    - to:
+        - ipBlock:
+            cidr: 203.0.113.10/32
+      ports:
+        - protocol: TCP
+          port: 7890

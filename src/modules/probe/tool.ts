@@ -123,14 +123,14 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
   const registryName = params.preset;
   const preset = probePreset(registryName);
   if (!preset) {
-    return { content: [{ type: "text" as const, text: `cad_probe failed: preset ${registryName} not registered` }] };
+    return { content: [{ type: "text" as const, text: `cad_probe failed: preset ${registryName} not registered` }], isError: true };
   }
   const args = { ...(params.args ?? {}) } as Record<string, unknown>;
   if (params.subject && args.artifact) {
-    return { content: [{ type: "text" as const, text: "cad_probe failed: subject and args.artifact are mutually exclusive; choose one exact target" }] };
+    return { content: [{ type: "text" as const, text: "cad_probe failed: subject and args.artifact are mutually exclusive; choose one exact target" }], isError: true };
   }
   if (!params.subject && !args.artifact && params.preset !== "compare") {
-    return { content: [{ type: "text" as const, text: "cad_probe failed: provide exactly one target via subject=current|baseline or args.artifact" }] };
+    return { content: [{ type: "text" as const, text: "cad_probe failed: provide exactly one target via subject=current|baseline or args.artifact" }], isError: true };
   }
   const direct = params.subject && typeof params.subject !== "string" ? await resolveArtifactSubject(cwd, params.subject) : null;
   const targetSource = typeof args.artifact === "string" ? "explicit" : direct ? "artifact-ref" : params.subject ?? "current";
@@ -144,6 +144,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
         type: "text" as const,
         text: "cad_probe failed: no artifact in args and no active run artifact to resolve — pass args.artifact (or run inside a Pi-CAD workflow)",
       }],
+      isError: true,
     };
   }
   applyPresetDefaults(params.preset, args);
@@ -151,6 +152,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
   if (direct?.expectedHash && result.envelope.inputHashes.artifact !== direct.expectedHash) {
     return {
       content: [{ type: "text" as const, text: `cad_probe failed: ArtifactRef changed while probing ${params.subject && typeof params.subject !== "string" ? params.subject.path : args.artifact}` }],
+      isError: true,
       details: { presetFailed: true, envelope: result.envelope },
     };
   }
@@ -223,10 +225,10 @@ async function runPythonProbe(
   const rel = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline");
   const label = typeof params.subject === "string" ? params.subject : params.subject.path;
   if (!rel) {
-    return { content: [{ type: "text" as const, text: `cad_probe failed: no ${label} artifact bound in run state` }] };
+    return { content: [{ type: "text" as const, text: `cad_probe failed: no ${label} artifact bound in run state` }], isError: true };
   }
   if (Boolean((params.code ?? "").trim()) === Boolean(params.script?.trim())) {
-    return { content: [{ type: "text" as const, text: "cad_probe failed: preset=python requires exactly one of code or script" }] };
+    return { content: [{ type: "text" as const, text: "cad_probe failed: preset=python requires exactly one of code or script" }], isError: true };
   }
   let code = params.code ?? "";
   if (params.script) {
@@ -240,6 +242,7 @@ async function runPythonProbe(
   if (direct?.expectedHash && envelope.inputHashes.artifact !== direct.expectedHash) {
     return {
       content: [{ type: "text" as const, text: `cad_probe failed: ArtifactRef changed while probing ${params.subject.path}` }],
+      isError: true,
       details: { presetFailed: true, envelope },
     };
   }
@@ -317,7 +320,7 @@ async function persistProbeObservation(
       rendered.details.observationStored = true;
       return rendered;
     } catch (error) {
-      return { content: [{ type: "text" as const, text: `cad_probe failed to persist v7 immutable observation: ${error instanceof Error ? error.message : String(error)}` }], details: { presetFailed: true, observationStorageFailed: true } };
+      return { content: [{ type: "text" as const, text: `cad_probe failed to persist v7 immutable observation: ${error instanceof Error ? error.message : String(error)}` }], isError: true, details: { presetFailed: true, observationStorageFailed: true } };
     }
   }
   const state = await new CadProjectStore(cwd).load();
@@ -353,6 +356,7 @@ async function persistProbeObservation(
   } catch (error) {
     return {
       content: [{ type: "text" as const, text: `cad_probe failed to persist its complete immutable observation: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true,
       details: { presetFailed: true, observationStorageFailed: true, envelope: { ...envelope, ok: false }, preset },
     };
   }

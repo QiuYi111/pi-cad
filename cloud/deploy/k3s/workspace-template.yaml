@@ -1,0 +1,143 @@
+# Workspace template (plan 8.2). The platform API controller (plan 5.4) renders this
+# file for each user. It is NOT applied by hand and is NOT in kustomization.yaml.
+#
+# Placeholders. The controller replaces each ${...} with a value and nothing else:
+#   ${WS_K8S_NAME}                  "ws-" + short id, for example ws-7f3a9c
+#   ${WORKSPACE_ID}                 workspaces.id (UUID)
+#   ${WORKSPACE_IMAGE}              image tag from platform-api-config
+#   ${PROJECT_IDS}                  comma-separated project UUIDs for this user
+#   ${REPLICAS}                     0 (stopped) or 1 (running)
+#   ${SECCOMP_TYPE}                 RuntimeDefault or Unconfined. Chosen by verify-runtime.sh (plan 0.5).
+#   ${HOST_USERS}                   true or false. Chosen by verify-runtime.sh (plan 0.5).
+#   ${HTTPS_PROXY_FOR_WORKSPACES}   http://<windows-host>:7890 (no credentials)
+#   ${PLATFORM_INTERNAL_URL}        http://platform-api.reify-system.svc.cluster.local:8081
+#   ${ACTIVITY_URL}                 ${PLATFORM_INTERNAL_URL}/internal/workspaces/<WORKSPACE_ID>/activity
+#   ${ACTIVITY_TOKEN}               per-workspace random token, plaintext (the database keeps only its sha256)
+#
+# Values must be plain YAML scalars after substitution. Do not add quotes around placeholders.
+# The PVC is ws-<id>-data (local-path, 50Gi). It survives stop and start.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ${WS_K8S_NAME}-data
+  namespace: reify-ws
+  labels:
+    reify.dev/role: workspace
+    reify.dev/workspace: ${WS_K8S_NAME}
+    reify.dev/workspace-id: ${WORKSPACE_ID}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${WS_K8S_NAME}
+  namespace: reify-ws
+  labels:
+    reify.dev/role: workspace
+    reify.dev/workspace: ${WS_K8S_NAME}
+    reify.dev/workspace-id: ${WORKSPACE_ID}
+spec:
+  replicas: ${REPLICAS}
+  # Recreate: the RWO volume must detach before the new pod starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      reify.dev/workspace: ${WS_K8S_NAME}
+  template:
+    metadata:
+      labels:
+        reify.dev/role: workspace
+        reify.dev/workspace: ${WS_K8S_NAME}
+        reify.dev/workspace-id: ${WORKSPACE_ID}
+    spec:
+      # No ServiceAccount token: a workspace must not reach the Kubernetes API (plan 7.2).
+      automountServiceAccountToken: false
+      # Set by verify-runtime.sh. "true" is the Kubernetes default.
+      hostUsers: ${HOST_USERS}
+      # Gives the gateway time to run "shutdown" (up to 30 s for Prime, plan 5.4 step 3).
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          # PLACEHOLDER decided by verify-runtime.sh (plan 0.5 and 14).
+          # RuntimeDefault is the default, but it blocks the namespace calls bwrap needs.
+          # Localhost uses deploy/k3s/seccomp/reify-userns.json (RuntimeDefault plus those calls).
+          # Unconfined also works but drops all syscall filtering. The controller adds localhostProfile for Localhost.
+          type: ${SECCOMP_TYPE}
+      containers:
+        - name: workspace
+          image: ${WORKSPACE_IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: gateway
+              containerPort: 7000
+          env:
+            - name: REIFY_WORKSPACE_NAME
+              value: ${WS_K8S_NAME}
+            - name: REIFY_WORKSPACE_ID
+              value: ${WORKSPACE_ID}
+            - name: REIFY_PROJECT_IDS
+              value: ${PROJECT_IDS}
+            - name: REIFY_HTTPS_PROXY
+              value: ${HTTPS_PROXY_FOR_WORKSPACES}
+            - name: REIFY_PLATFORM_INTERNAL_URL
+              value: ${PLATFORM_INTERNAL_URL}
+            - name: REIFY_ACTIVITY_URL
+              value: ${ACTIVITY_URL}
+            - name: REIFY_ACTIVITY_TOKEN
+              value: ${ACTIVITY_TOKEN}
+            - name: REIFY_GATEWAY_PUBKEY
+              valueFrom:
+                configMapKeyRef:
+                  name: reify-gateway-pubkey
+                  key: gateway-public-key.pem
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "4"
+              memory: 12Gi
+            limits:
+              cpu: "16"
+              memory: 24Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: ${WS_K8S_NAME}-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${WS_K8S_NAME}
+  namespace: reify-ws
+  labels:
+    reify.dev/role: workspace
+    reify.dev/workspace: ${WS_K8S_NAME}
+spec:
+  type: ClusterIP
+  selector:
+    reify.dev/workspace: ${WS_K8S_NAME}
+  ports:
+    - name: gateway
+      port: 7000
+      targetPort: gateway

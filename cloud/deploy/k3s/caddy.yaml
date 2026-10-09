@@ -1,0 +1,125 @@
+# Caddy: the only route into the cluster from Tailscale Funnel (plan 8.3).
+# Caddy runs in the host network namespace and listens on 127.0.0.1:18443 inside WSL.
+# A hostPort mapping is only an iptables rule, which WSL localhost forwarding does not see;
+# a real listening socket is forwarded to 127.0.0.1:18443 on Windows, where
+# "tailscale funnel" points (see cloud/deploy/wsl/funnel.sh).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+  namespace: reify-system
+  labels:
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/part-of: reify
+data:
+  Caddyfile: |
+    # Only the paths listed below reach the platform API. Everything else returns 404.
+    # /internal/* is never routed, even by mistake.
+    {
+    	auto_https off
+    	admin off
+    }
+
+    # Any Host header, loopback only (bind below). Funnel forwards the public hostname, so a 127.0.0.1 site address would not match.
+    http://:18443 {
+    	bind 127.0.0.1
+    	handle /v1/* {
+    		reverse_proxy platform-api.reify-system.svc.cluster.local:8080
+    	}
+    	handle /invite/* {
+    		reverse_proxy platform-api.reify-system.svc.cluster.local:8080
+    	}
+    	handle /reset/* {
+    		reverse_proxy platform-api.reify-system.svc.cluster.local:8080
+    	}
+    	handle /internal/* {
+    		respond 404
+    	}
+    	handle {
+    		respond 404
+    	}
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: caddy
+  namespace: reify-system
+  labels:
+    app.kubernetes.io/name: caddy
+    app.kubernetes.io/part-of: reify
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: caddy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: caddy
+        app.kubernetes.io/part-of: reify
+    spec:
+      automountServiceAccountToken: false
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: caddy
+          # Pin to a verified patch release before deployment.
+          image: caddy:2.10-alpine
+          imagePullPolicy: IfNotPresent
+          args: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+          env:
+            # Caddy writes its state under these paths. The root filesystem is read-only.
+            - name: XDG_DATA_HOME
+              value: /data
+            - name: XDG_CONFIG_HOME
+              value: /config
+          ports:
+            - name: https-local
+              containerPort: 18443
+              protocol: TCP
+          readinessProbe:
+            # hostNetwork + bind 127.0.0.1: a kubelet tcpSocket probe targets the node IP and is refused, so probe inside the container.
+            # /v1/healthz goes through Caddy to platform-api, so it also checks the backend.
+            exec:
+              command: ["wget", "-q", "-T", "3", "-O", "/dev/null", "http://127.0.0.1:18443/v1/healthz"]
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              # The official caddy binary carries cap_net_bind_service as a file capability.
+              # With drop ALL and no_new_privs, exec fails with EPERM unless the cap is in the bounding set.
+              # Caddy listens on 18443, so it never binds a privileged port.
+              add: ["NET_BIND_SERVICE"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: caddy-data
+              mountPath: /data
+            - name: caddy-config-dir
+              mountPath: /config
+      volumes:
+        - name: config
+          configMap:
+            name: caddy-config
+        - name: caddy-data
+          emptyDir: {}
+        - name: caddy-config-dir
+          emptyDir: {}

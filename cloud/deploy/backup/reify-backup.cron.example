@@ -1,0 +1,9 @@
+# Example for /etc/cron.d/reify-backup on the WSL host (plan 8.5).
+# Copy it, change the path to the checkout, and check the file mode (root, 644).
+# The cron service must run in WSL (systemd enables it).
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+RESTIC_PASSWORD_FILE=/etc/reify/restic-password
+
+# Every day at 03:00. Output goes to a log file on the WSL disk.
+0 3 * * * root /home/<user>/pi-cad/cloud/deploy/backup/backup.sh >> /var/log/reify-backup.log 2>&1

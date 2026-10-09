@@ -1,0 +1,13 @@
+# Copy to %UserProfile%\.wslconfig on the Windows host (plan 8.1).
+# After saving, run "wsl --shutdown" from Windows, then start Ubuntu again.
+#
+# WARNING: "wsl --shutdown" stops the vLLM service (qwen-server.service, port 18020).
+# Choose a time when the model is not in use.
+[wsl2]
+memory=104GB
+processors=80
+networkingMode=mirrored
+vmIdleTimeout=-1
+
+[experimental]
+autoMemoryReclaim=gradual

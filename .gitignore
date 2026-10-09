@@ -52,3 +52,7 @@ chaos/campaigns/progress-sync.mjs
 executors/solidworks/publish/
 executors/solidworks/**/bin/
 executors/solidworks/**/obj/
+
+# Reify deployment secrets. Never commit filled copies.
+cloud/deploy/**/reify-secrets*.yaml
+cloud/deploy/**/jwt-*.pem

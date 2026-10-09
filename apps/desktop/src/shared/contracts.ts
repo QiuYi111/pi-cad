@@ -37,6 +37,9 @@ export interface ModelCatalog {
   defaults: Partial<ModelSelection>;
 }
 
+/** Hosted service address used until an administrator changes it in advanced settings. */
+export const DEFAULT_CLOUD_BASE_URL = "https://desktop-pkr2go0.tailb53649.ts.net";
+
 export interface AppSettings {
   distro: string;
   projectPath: string;
@@ -49,7 +52,41 @@ export interface AppSettings {
   reviewer: { mode: "inherit" | "fixed"; provider?: string; model?: string; thinking?: ThinkingLevel };
   remotePublish: { enabled: boolean; allowedRemotes: string[] };
   onboardingComplete: boolean;
+  /** Cloud mode disables experience adoption during the internal beta. */
+  mode: "local" | "cloud";
+  /** Hosted service connection. `projectId` is the cloud project selected in this app. */
+  cloud?: { baseUrl: string; userEmail?: string; projectId?: string };
 }
+
+export interface CloudUser { id: string; email: string; displayName: string | null }
+/** Project as platform-api returns it (GET /v1/projects, POST, PATCH). */
+export interface CloudProject { id: string; name: string; role: "maintainer" | "editor" | "viewer"; createdAt: string }
+export type CloudWorkspaceState = "stopped" | "queued" | "starting" | "running" | "stopping" | "failed";
+export interface CloudWorkspaceInfo {
+  state: CloudWorkspaceState;
+  /** Queue position, present while `state` is "queued". */
+  position?: number;
+  /** Set after the server warns that the workspace will be paused for being idle. */
+  idleWarningAt?: string;
+  /** The server's lastError, present while `state` is "failed". */
+  error?: string;
+}
+export interface CloudStatus {
+  signedIn: boolean;
+  baseUrl: string;
+  user?: CloudUser;
+  workspace: CloudWorkspaceInfo;
+  /** Whether the server event channel is connected. */
+  eventsConnected: boolean;
+}
+/** Pushed on the cloudEvent channel. Bridge states come from the workspace connection. */
+export type CloudEvent =
+  | { type: "workspace_state"; state: CloudWorkspaceState; position?: number; error?: string }
+  | { type: "idle_warning"; reclaimAt: string }
+  | { type: "reclaimed" }
+  | { type: "events_connection"; connected: boolean }
+  | { type: "bridge_state"; state: "connecting" | "connected" | "reconnecting" | "closed" }
+  | { type: "session_ended"; reason: "expired" | "signed_out" };
 
 export interface DependencyCheck {
   id: "host" | "wsl" | "node" | "python" | "uv" | "sandbox" | "bwrap" | "prime" | "picad" | "paraview";
@@ -553,7 +590,8 @@ export interface DesktopApi {
     getModels(): Promise<ModelChoice[]>;
     setModel(provider: string, model: string): Promise<void>;
     setThinking(level: ThinkingLevel): Promise<void>;
-    chooseImages(): Promise<Array<{ name: string; data: string; mimeType: string }>>;
+    /** In cloud mode each image is also uploaded; `remotePath` is its path in the workspace. */
+    chooseImages(): Promise<Array<{ name: string; data: string; mimeType: string; remotePath?: string }>>;
     respondToUi(requestId: string, response: Record<string, unknown>): Promise<void>;
     onEvent(listener: (event: unknown) => void): () => void;
     onStatus(listener: (status: RuntimeStatus) => void): () => void;
@@ -623,6 +661,21 @@ export interface DesktopApi {
     onEvent(listener: (event: CadTransferEvent) => void): () => void;
   };
   shell: { reveal(path: string): Promise<void> };
+  cloud: {
+    status(): Promise<CloudStatus>;
+    login(email: string, password: string): Promise<CloudStatus>;
+    logout(): Promise<CloudStatus>;
+    changePassword(oldPassword: string, newPassword: string): Promise<void>;
+    projects(): Promise<CloudProject[]>;
+    createProject(name: string): Promise<CloudProject>;
+    renameProject(id: string, name: string): Promise<CloudProject>;
+    deleteProject(id: string): Promise<void>;
+    selectProject(id: string | null): Promise<AppSettings>;
+    workspaceStart(): Promise<CloudStatus>;
+    workspaceStop(): Promise<CloudStatus>;
+    keepalive(): Promise<void>;
+    onEvent(listener: (event: CloudEvent) => void): () => void;
+  };
 }
 
 export const IPC = {
@@ -713,4 +766,17 @@ export const IPC = {
   cadTransferTestExport: "cad-transfer:test-export",
   cadTransferEvent: "cad-transfer:event",
   shellReveal: "shell:reveal",
+  cloudStatus: "cloud:status",
+  cloudLogin: "cloud:login",
+  cloudLogout: "cloud:logout",
+  cloudChangePassword: "cloud:change-password",
+  cloudProjectsList: "cloud:projects-list",
+  cloudProjectCreate: "cloud:project-create",
+  cloudProjectRename: "cloud:project-rename",
+  cloudProjectDelete: "cloud:project-delete",
+  cloudSelectProject: "cloud:select-project",
+  cloudWorkspaceStart: "cloud:workspace-start",
+  cloudWorkspaceStop: "cloud:workspace-stop",
+  cloudWorkspaceKeepalive: "cloud:workspace-keepalive",
+  cloudEvent: "cloud:event",
 } as const;

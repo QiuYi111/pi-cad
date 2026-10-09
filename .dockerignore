@@ -1,0 +1,43 @@
+# Build context for cloud/image/Dockerfile (repository root).
+# Keep out VCS data, dependencies, caches, desktop and test trees, and cloud services that the image does not run.
+.git
+.github
+.npm-cache
+.uv-cache
+.cache
+.claude
+.scratch
+.pi
+.pi-agent
+.pi-sessions
+.pi-cad
+.python
+.scratch
+
+**/node_modules
+**/.venv
+**/.uv-cache
+**/.hf-cache
+**/__pycache__
+**/*.py[cod]
+**/*.log
+**/*.tmp
+*Zone.Identifier*
+*.tgz
+
+apps
+tests
+docs
+chaos
+refactor
+benchmarks
+packages/*/node_modules
+third_party/*/node_modules
+*.docx
+*.pptx
+*.xlsx
+
+# Cloud services are not part of the workspace image.
+cloud/platform-api
+cloud/admin
+cloud/deploy

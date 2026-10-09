@@ -1,0 +1,41 @@
+# The platform API controller manages workspaces with namespace-scoped rights only.
+# The Role below is created in reify-ws. It grants nothing in reify-system or cluster-wide.
+#
+# The verbs are the ones src/workspace/k8s.ts calls, and nothing more:
+#   Deployments: get (read status), create (first start), patch (merge patch on re-render, and scale).
+#   PersistentVolumeClaims: create (a 409 means it already exists, which is fine).
+#   Services: create (same 409 rule).
+# No list, watch, delete or update. Pods are not touched by the API (the Deployment does that).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: platform-api-workspace-controller
+  namespace: reify-ws
+  labels:
+    app.kubernetes.io/part-of: reify
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "create", "patch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: platform-api-workspace-controller
+  namespace: reify-ws
+  labels:
+    app.kubernetes.io/part-of: reify
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: platform-api-workspace-controller
+subjects:
+  - kind: ServiceAccount
+    name: platform-api
+    namespace: reify-system

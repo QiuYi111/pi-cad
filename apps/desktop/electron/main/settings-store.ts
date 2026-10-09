@@ -1,7 +1,7 @@
 import { app } from "electron";
 import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import type { AppSettings } from "../../src/shared/contracts.js";
+import { DEFAULT_CLOUD_BASE_URL, type AppSettings } from "../../src/shared/contracts.js";
 
 const defaults = (): AppSettings => ({
   distro: process.env.PI_CAD_WSL_DISTRO || "Ubuntu",
@@ -15,7 +15,20 @@ const defaults = (): AppSettings => ({
   reviewer: { mode: "inherit" },
   remotePublish: { enabled: false, allowedRemotes: ["origin"] },
   onboardingComplete: false,
+  mode: "local",
+  cloud: { baseUrl: DEFAULT_CLOUD_BASE_URL },
 });
+
+/** Anything other than an explicit "cloud" is local. */
+export function normalizeMode(value: unknown): AppSettings["mode"] {
+  return value === "cloud" ? "cloud" : "local";
+}
+
+/** A first launch (no settings file) uses the hosted service. Desktop E2E runs keep the local runtime. */
+export function newInstallMode(argv: string[] = process.argv, env: NodeJS.ProcessEnv = process.env): AppSettings["mode"] {
+  const e2e = env.PI_CAD_DESKTOP_E2E === "1" || argv.includes("--pi-cad-e2e");
+  return e2e ? "local" : "cloud";
+}
 
 export class SettingsStore {
   readonly path: string;
@@ -26,13 +39,22 @@ export class SettingsStore {
   }
 
   async get(): Promise<AppSettings> {
+    let parsed: Partial<AppSettings>;
     try {
-      const parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<AppSettings>;
-      return { ...defaults(), ...parsed, reviewer: { ...defaults().reviewer, ...parsed.reviewer }, remotePublish: { ...defaults().remotePublish, ...parsed.remotePublish } };
+      parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<AppSettings>;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return defaults();
+      return { ...defaults(), mode: newInstallMode() };
     }
+    // A file without a mode was written before cloud mode existed: that install stays local.
+    return {
+      ...defaults(),
+      ...parsed,
+      mode: normalizeMode(parsed.mode),
+      reviewer: { ...defaults().reviewer, ...parsed.reviewer },
+      remotePublish: { ...defaults().remotePublish, ...parsed.remotePublish },
+      cloud: { ...defaults().cloud!, ...parsed.cloud },
+    };
   }
 
   async update(patch: Partial<AppSettings>): Promise<AppSettings> {
@@ -41,8 +63,10 @@ export class SettingsStore {
       const next: AppSettings = {
         ...current,
         ...patch,
+        mode: patch.mode === undefined ? current.mode : normalizeMode(patch.mode),
         reviewer: patch.reviewer ? { ...current.reviewer, ...patch.reviewer } : current.reviewer,
         remotePublish: patch.remotePublish ? { ...current.remotePublish, ...patch.remotePublish } : current.remotePublish,
+        cloud: patch.cloud ? { ...current.cloud!, ...patch.cloud } : current.cloud,
       };
       await mkdir(dirname(this.path), { recursive: true });
       const temporary = `${this.path}.${process.pid}.${Date.now()}.tmp`;

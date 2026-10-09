@@ -1,0 +1,21 @@
+# Two namespaces (plan 8.2).
+# reify-system: platform API, PostgreSQL, Caddy.
+# reify-ws:     one Deployment per user workspace.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reify-system
+  labels:
+    app.kubernetes.io/part-of: reify
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: reify-ws
+  labels:
+    app.kubernetes.io/part-of: reify
+    # Warn and audit only. The workspace template uses seccompProfile Unconfined
+    # if the verify step needs it, which the "restricted" enforce level rejects.
+    # The enforce level is an open decision (see cloud/deploy/README.md).
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

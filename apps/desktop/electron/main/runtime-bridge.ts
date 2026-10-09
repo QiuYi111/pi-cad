@@ -41,6 +41,10 @@ export async function withCanonicalProjectEnvironment(
   projectPath: string,
   argv: string[],
 ): Promise<string[]> {
+  // A bridge that owns the project (cloud workspace) names the canonical directory itself.
+  const bridgeCanonical = bridge.canonicalProjectDir?.();
+  // The bridge sets PI_CAD_CANONICAL_PROJECT_DIR on every exec and spawn it runs, so argv is unchanged.
+  if (bridgeCanonical) return argv;
   let canonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;
   if (canonical) canonical = await bridge.toRuntimePath(canonical);
   else {
@@ -53,8 +57,10 @@ export async function withCanonicalProjectEnvironment(
 }
 
 export interface RuntimeBridge {
-  readonly kind: "wsl" | "native";
+  readonly kind: "wsl" | "native" | "remote";
   readonly bundledRuntimePath?: string;
+  /** Only remote bridges: the canonical project directory on the runtime host. */
+  canonicalProjectDir?(): string | undefined;
   exec(args: string[], options?: { input?: string; timeout?: number; user?: string }): Promise<{ stdout: string; stderr: string }>;
   spawn(args: string[]): ChildProcessWithoutNullStreams;
   pipe(args: string[], input: string, timeout?: number): Promise<{ stdout: string; stderr: string }>;

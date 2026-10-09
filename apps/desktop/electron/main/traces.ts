@@ -13,6 +13,11 @@ export function desktopDistillationEnvironment(
   ];
 }
 
+/** Experience adoption writes the shared rule library, so cloud mode refuses it before any file is touched. */
+export function assertCandidateAdoptionAllowed(settings: Pick<AppSettings, "mode">): void {
+  if (settings.mode === "cloud") throw new Error("内测期云端模式不支持采纳经验");
+}
+
 export function desktopDistillationPath(node: string): string {
   const separator = node.lastIndexOf("/");
   const nodeDirectory = separator > 0 ? node.slice(0, separator) : "/usr/bin";

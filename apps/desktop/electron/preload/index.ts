@@ -112,6 +112,21 @@ const api: DesktopApi = {
     onEvent: (listener) => subscribe(IPC.cadTransferEvent, listener),
   },
   shell: { reveal: (path) => ipcRenderer.invoke(IPC.shellReveal, path) },
+  cloud: {
+    status: () => ipcRenderer.invoke(IPC.cloudStatus),
+    login: (email, password) => ipcRenderer.invoke(IPC.cloudLogin, email, password),
+    logout: () => ipcRenderer.invoke(IPC.cloudLogout),
+    changePassword: (oldPassword, newPassword) => ipcRenderer.invoke(IPC.cloudChangePassword, oldPassword, newPassword),
+    projects: () => ipcRenderer.invoke(IPC.cloudProjectsList),
+    createProject: (name) => ipcRenderer.invoke(IPC.cloudProjectCreate, name),
+    renameProject: (id, name) => ipcRenderer.invoke(IPC.cloudProjectRename, id, name),
+    deleteProject: (id) => ipcRenderer.invoke(IPC.cloudProjectDelete, id),
+    selectProject: (id) => ipcRenderer.invoke(IPC.cloudSelectProject, id),
+    workspaceStart: () => ipcRenderer.invoke(IPC.cloudWorkspaceStart),
+    workspaceStop: () => ipcRenderer.invoke(IPC.cloudWorkspaceStop),
+    keepalive: () => ipcRenderer.invoke(IPC.cloudWorkspaceKeepalive),
+    onEvent: (listener) => subscribe(IPC.cloudEvent, listener),
+  },
 };
 
 contextBridge.exposeInMainWorld("piCad", api);

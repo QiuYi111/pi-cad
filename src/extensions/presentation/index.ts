@@ -124,16 +124,16 @@ export default function cadPresentationExtension(pi: ExtensionAPI) {
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (await selectKernelEngine(ctx.cwd) === "v7") {
-        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_render_scene v7 requires {recipe, stage}" }] };
+        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_render_scene v7 requires {recipe, stage}" }], isError: true };
         try {
           const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "presentation", recipe: params.recipe, action: params.stage, ...(params.obligationRef ? { obligationRef: params.obligationRef } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
           const previewParts = params.stage === "preview"
             ? await Promise.all(result.observation.exports.filter((item) => item.type === "image" && item.path).map((item) => imageContent(resolve(result.directory, "workspace", item.path!))))
             : [];
           return { content: [{ type: "text", text: `Presentation Recipe ${result.record.runId} stage=${params.stage} committed; exports=${result.observation.exports.map((item) => item.name).join(",")}.` }, ...previewParts], details: { recipeRunId: result.record.runId, observationId: result.observation.observationId, kind: "presentation" as const } };
-        } catch (error) { return { content: [{ type: "text", text: `cad_render_scene failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+        } catch (error) { return { content: [{ type: "text", text: `cad_render_scene failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true }; }
       }
-      if ("recipe" in params) return { content: [{ type: "text", text: "cad_render_scene v6 requires a structured presentation specification" }] };
+      if ("recipe" in params) return { content: [{ type: "text", text: "cad_render_scene v6 requires a structured presentation specification" }], isError: true };
       if (!existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`presentation artifact does not exist: ${params.artifact}`);
       }
