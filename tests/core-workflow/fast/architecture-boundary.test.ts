@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-const root = dirname(dirname(fileURLToPath(import.meta.url)));
+const root = dirname(dirname(dirname(dirname(fileURLToPath(import.meta.url)))));
 const src = join(root, "src");
 
 // A module is the first directory under src/. ALLOWED is the module-level

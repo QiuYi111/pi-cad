@@ -257,8 +257,11 @@ class GoldenTests(Base):
 
 
 
-class LiveFusionFindings(Base):
-    """Behaviours measured in a real Fusion 2705 (see executors/fusion/README.md)."""
+class RecordedFusionFindingsTests(Base):
+    """Fusion 2705 behaviour recorded from a live run (see executors/fusion/README.md).
+
+    These run against fake_adsk: they pin the recorded findings in the executor, not a live Fusion.
+    """
 
     def test_flat_drill_point_is_180_degrees(self):
         f = _path.fixture("holes_p3.features.json")
