@@ -49,7 +49,8 @@ function testBridge(projectPath: string): RuntimeBridge {
 }
 
 describe("real parameter preview path", () => {
-  it("measures and sections a known STEP without changing its hash", async () => {
+  // NativeBridge and the Unix runtime are not used on Windows; the WSL bridge is, and tests/wsl.test.ts covers it.
+  it.skipIf(process.platform === "win32")("measures and sections a known STEP without changing its hash", async () => {
     const project = await mkdtemp(join(tmpdir(), "pi-cad-quick-check-"));
     const artifact = join(project, "known-box.step");
     await copyFile(join(repository, "tests/fixtures/section_box.step"), artifact);
@@ -69,7 +70,8 @@ describe("real parameter preview path", () => {
     }
   }, 180_000);
 
-  it("reuses the warm worker for preview and applies through the authorized build path", async () => {
+  // NativeBridge and the Unix runtime are not used on Windows; the WSL bridge is, and tests/wsl.test.ts covers it.
+  it.skipIf(process.platform === "win32")("reuses the warm worker for preview and applies through the authorized build path", async () => {
     const project = await mkdtemp(join(tmpdir(), "pi-cad-parameter-preview-"));
     const canonical = await mkdtemp(join(tmpdir(), "pi-cad-parameter-preview-state-"));
     const previousCanonical = process.env.PI_CAD_CANONICAL_PROJECT_DIR;

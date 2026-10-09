@@ -125,7 +125,7 @@ describe("desktop viewer bridge", () => {
         : path,
       exec: async (args: string[]) => {
         commands.push(args);
-        if (args[0] === "sha256sum") return { stdout: `abc  ${args.at(-1)}`, stderr: "" };
+        if (args[0] === "sh" && args[2]?.includes("sha256sum")) return { stdout: `abc  ${args.at(-1)}`, stderr: "" };
         return { stdout: JSON.stringify({ ok: true, payload: { outputSha256: "abc" } }), stderr: "" };
       },
     };
@@ -150,7 +150,7 @@ describe("desktop viewer bridge", () => {
     const bridge = {
       resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
       toRuntimePath: async (path: string) => path,
-      exec: async (args: string[]) => args[0] === "sha256sum"
+      exec: async (args: string[]) => args[0] === "sh" && args[2]?.includes("sha256sum")
         ? { stdout: `abc  ${args.at(-1)}`, stderr: "" }
         : { stdout: JSON.stringify({ ok: false, payload: { error: "bundle publish failed and previous revision was restored" } }), stderr: "" },
     };
@@ -162,7 +162,7 @@ describe("desktop viewer bridge", () => {
     const bridge = {
       resolveRuntimePaths: async () => ({ piCadRepo: "/runtime/pi-cad", projectPath: "/projects/bracket" }),
       toRuntimePath: async (path: string) => path,
-      exec: async (args: string[]) => args[0] === "sha256sum"
+      exec: async (args: string[]) => args[0] === "sh" && args[2]?.includes("sha256sum")
         ? { stdout: `new-hash  ${args.at(-1)}`, stderr: "" }
         : { stdout: "", stderr: "" },
     };
