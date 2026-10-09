@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadReifyArtifact, type ReifyFailureArtifact } from "../reify/artifacts.ts";
-import { FAULT_BOUNDARIES } from "../reify/faults.ts";
+import { FAULT_BOUNDARIES } from "../reify/faults/index.ts";
 import { reifyInvariantDefinitions } from "../reify/invariants.ts";
 import type { Command } from "../reify/model.ts";
 import { reifyChaosRun } from "../reify/runner.ts";

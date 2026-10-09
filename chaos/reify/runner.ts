@@ -6,7 +6,7 @@ import { InvariantViolation } from "../types.ts";
 import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact, type ReifyFailureArtifact } from "./artifacts.ts";
 import { inspectReifyComponents, type ReifyComponents } from "./components.ts";
-import { reifyFaultDefinitions } from "./faults.ts";
+import { reifyFaultDefinitions } from "./faults/index.ts";
 import { checkInvariantsOn, checkReifyInvariants, reifyInvariantDefinitions } from "./invariants.ts";
 import { buildReifySequenceArbitrary, describeCommand, type Command } from "./model.ts";
 import { ReifySession } from "./session.ts";

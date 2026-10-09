@@ -8,7 +8,7 @@ import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "./artifacts.ts";
 import { boolFlag, parseArgs, type ParsedArgs } from "../support/args.ts";
 import { inspectReifyComponents, runtimeObservation, type ReifyComponents } from "./components.ts";
-import { FAULT_BOUNDARIES, reifyFaultDefinitions } from "./faults.ts";
+import { FAULT_BOUNDARIES, reifyFaultDefinitions } from "./faults/index.ts";
 import { ReifyPrimeRuntime } from "./prime.ts";
 import { ReifyRuntime } from "./runtime.ts";
 import { checkInvariantsOn, reifyInvariantDefinitions } from "./invariants.ts";
