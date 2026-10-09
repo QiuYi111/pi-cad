@@ -90,6 +90,21 @@ RUN : "${PRIME_AGENT_REF:?PRIME_AGENT_REF build arg is required}" \
  && cd /opt/reify/prime-agent \
  && rm -rf /opt/reify/prime-agent/.git /root/.npm
 
+# 5b. reify-asi, the DFM geometry analyzer (native: Analysis Situs + OCCT 7.6 from conda-forge).
+#     It only needs the bootstrap script and native/reify-asi, so it is built before the pi-cad tree is copied
+#     and stays cached when other files change. PI_CAD_ASI_HOME selects /opt/reify/asi. The script never uses sudo.
+#     The build tree, sources and download cache are not needed at run time; env/ (OCCT libraries) and bin/ are.
+#     Modes are fixed in this same layer: the global chmod in step 9 would copy every file again on overlayfs.
+COPY scripts/bootstrap-asi.sh /opt/reify/asi-build/scripts/bootstrap-asi.sh
+COPY native/reify-asi /opt/reify/asi-build/native/reify-asi
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends patch \
+ && rm -rf /var/lib/apt/lists/* \
+ && cd /opt/reify/asi-build \
+ && PI_CAD_ASI_HOME=/opt/reify/asi bash scripts/bootstrap-asi.sh \
+ && rm -rf /opt/reify/asi/build /opt/reify/asi/downloads /opt/reify/asi/mamba-root/pkgs /opt/reify/asi-build /root/.cache \
+ && find /opt/reify/asi -xdev ! -type l \( -perm /022 -o ! -perm -444 -o \( -type d ! -perm -111 \) \) -exec chmod go-w,a+rX {} +
+
 # 6. pi-cad. Dependencies first (cacheable), then the source tree.
 #    --ignore-scripts here: postinstall runs once, in setup:python below.
 ENV UV_PYTHON_INSTALL_DIR=/opt/reify/python \
@@ -125,6 +140,7 @@ RUN chmod 0755 /opt/reify/entrypoint.sh \
 ENV HOME=/workspace/home \
     PI_CAD_REPO=/opt/reify/pi-cad \
     PI_CAD_FREECAD_HOME=/opt/reify/freecad \
+    PI_CAD_ASI_HOME=/opt/reify/asi \
     PRIME_AGENT_REPO=/opt/reify/prime-agent \
     PRIME_AGENT_CODING_AGENT_DIR=/workspace/home/.prime/agent \
     PRIME_AGENT_SESSION_DIR=/workspace/home/.prime/agent/sessions \
