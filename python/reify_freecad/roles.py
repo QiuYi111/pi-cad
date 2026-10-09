@@ -119,33 +119,45 @@ def face_within(inner: Any, outer: Any, tol: float) -> bool:
     if inner.Area > outer.Area * (1 + 1e-6) + tol:
         return False
     points = [vertex.Point for vertex in inner.Vertexes] or [inner.CenterOfMass]
+    box = outer.BoundBox
+    margin = tol * 10 + 1e-9
     for point in points:
+        if (point.x < box.XMin - margin or point.x > box.XMax + margin or point.y < box.YMin - margin
+                or point.y > box.YMax + margin or point.z < box.ZMin - margin or point.z > box.ZMax + margin):
+            return False  # farther from the face than the tolerance: no need to measure it
         if outer.distToShape(Part.Vertex(point))[0] > tol * 10:
             return False
     return True
 
 
-def _boxes(faces: list[Any]) -> list[tuple[Any, Any]]:
+def _box(face: Any) -> tuple[float, float, float, float, float, float]:
+    """(xmin, ymin, zmin, xmax, ymax, zmax) as plain floats: reading six attributes of a FreeCAD box in a loop is slow."""
+    b = face.BoundBox
+    return (b.XMin, b.YMin, b.ZMin, b.XMax, b.YMax, b.ZMax)
+
+
+def _boxes(faces: list[Any]) -> list[tuple[Any, tuple]]:
     """(face, bounding box) pairs: the box test below is much cheaper than ``same_surface`` and ``distToShape``."""
-    return [(face, face.BoundBox) for face in faces]
+    return [(face, _box(face)) for face in faces]
 
 
-def _within_box(inner_box: Any, outer_box: Any, margin: float) -> bool:
+def _within_box(inner: tuple, outer: tuple, margin: float) -> bool:
     """False when ``inner`` cannot lie inside ``outer`` (``face_within`` accepts points up to ``margin`` away)."""
     return not (
-        inner_box.XMax < outer_box.XMin - margin or inner_box.XMin > outer_box.XMax + margin
-        or inner_box.YMax < outer_box.YMin - margin or inner_box.YMin > outer_box.YMax + margin
-        or inner_box.ZMax < outer_box.ZMin - margin or inner_box.ZMin > outer_box.ZMax + margin
+        inner[3] < outer[0] - margin or inner[0] > outer[3] + margin
+        or inner[4] < outer[1] - margin or inner[1] > outer[4] + margin
+        or inner[5] < outer[2] - margin or inner[2] > outer[5] + margin
     )
 
 
-def _lies_on(face: Any, candidates: list[tuple[Any, Any]], tol: float) -> bool:
+def _lies_on(face: Any, candidates: list[tuple[Any, tuple]], tol: float, box: tuple | None = None) -> bool:
     """True when ``face`` has the surface of one of ``candidates`` and lies inside it."""
-    box = face.BoundBox
-    return any(
-        _within_box(box, other_box, tol * 10 + 1e-9) and same_surface(face, other, tol) and face_within(face, other, tol)
-        for other, other_box in candidates
-    )
+    box = box if box is not None else _box(face)
+    margin = tol * 10 + 1e-9
+    for other, other_box in candidates:
+        if _within_box(box, other_box, margin) and same_surface(face, other, tol) and face_within(face, other, tol):
+            return True
+    return False
 
 
 def contained_in_base(face: Any, base: Any | None, tol: float) -> bool:
@@ -280,16 +292,34 @@ def sketch_edges(sketch: Any) -> list[Any]:
     return shapes
 
 
-def _owner_geometry_index(face: Any, sketch: Any, tol: float) -> int | None:
+def sketch_midpoints(sketch: Any) -> list[tuple[int, Any]]:
+    """(index among the non-construction geometry, midpoint) of every edge of a sketch."""
+    out = []
+    for index, edge in enumerate(sketch_edges(sketch)):
+        if not edge.Edges:
+            continue
+        out.append((index, edge.valueAt((edge.FirstParameter + edge.LastParameter) / 2)))
+    return out
+
+
+def _owner_geometry_index(face: Any, sketch: Any, tol: float, midpoints: list[tuple[int, Any]] | None = None) -> int | None:
     """Index of the non-construction sketch geometry whose midpoint lies on ``face``.
 
     The midpoint is used because a later feature may trim the face so that the
     sketch edge no longer lies on it from end to end.
+
+    ``midpoints`` are those of ``sketch``; a caller with many faces passes them once. A midpoint outside the
+    face's bounding box (grown by the tolerance) cannot lie on it, which skips most distance queries: a spiral
+    sketch has hundreds of edges, and each one was measured against each face.
     """
-    for index, edge in enumerate(sketch_edges(sketch)):
-        if not edge.Edges:
+    if midpoints is None:
+        midpoints = sketch_midpoints(sketch)
+    margin = tol * 10 + 1e-9
+    box = face.BoundBox
+    for index, middle in midpoints:
+        if (middle.x < box.XMin - margin or middle.x > box.XMax + margin or middle.y < box.YMin - margin
+                or middle.y > box.YMax + margin or middle.z < box.ZMin - margin or middle.z > box.ZMax + margin):
             continue
-        middle = edge.valueAt((edge.FirstParameter + edge.LastParameter) / 2)
         if face.distToShape(Part.Vertex(middle))[0] <= tol * 10:
             return index
     return None
@@ -350,8 +380,9 @@ def roles_for_feature(feature: Any, created: list[Any], tol: float) -> dict[str,
 
 def _number_sides(out: dict[str, list[Any]], faces: list[Any], sketch: Any, role: str, tol: float) -> None:
     unnumbered: list[Any] = []
+    midpoints = sketch_midpoints(sketch) if sketch is not None else []
     for face in faces:
-        index = _owner_geometry_index(face, sketch, tol) if sketch is not None else None
+        index = _owner_geometry_index(face, sketch, tol, midpoints) if sketch is not None else None
         if index is None:
             unnumbered.append(face)
         else:
@@ -396,12 +427,58 @@ def _hole_roles(feature: Any, created: list[Any], out: dict[str, list[Any]], ori
 
 # ---------------------------------------------------------------- body-level index
 
+class _ShapeIndex:
+    """What the role search asks a shape for again and again, read from FreeCAD once.
+
+    ``shape.Faces`` and ``shape.Edges`` build a new list of new Python objects on every call, and the role search
+    asked for them once per feature, per role and per wall edge: tens of thousands of times for a part with a
+    few hundred faces. Seconds per part became minutes for an assembly of 30 parts.
+    """
+
+    def __init__(self, shape: Any) -> None:
+        self.shape = shape  # keeps the shape alive, so its id is not reused while the index is cached
+        self.faces = list(shape.Faces)
+        self.boxes = [_box(face) for face in self.faces]
+        self._edges: list[Any] | None = None
+        self._edge_by_hash: dict[int, list[tuple[int, Any]]] | None = None
+
+    @property
+    def edges(self) -> list[Any]:
+        if self._edges is None:
+            self._edges = list(self.shape.Edges)
+        return self._edges
+
+    def edge_name(self, edge: Any) -> str | None:
+        if self._edge_by_hash is None:
+            table: dict[int, list[tuple[int, Any]]] = {}
+            for position, other in enumerate(self.edges, 1):
+                table.setdefault(other.hashCode(), []).append((position, other))
+            self._edge_by_hash = table
+        for position, other in self._edge_by_hash.get(edge.hashCode(), ()):
+            if other.isSame(edge):
+                return f"Edge{position}"
+        return None
+
+
+_SHAPE_INDEX: dict[int, _ShapeIndex] = {}
+
+
+def _index_of(shape: Any) -> _ShapeIndex:
+    found = _SHAPE_INDEX.get(id(shape))
+    if found is None or found.shape is not shape:
+        if len(_SHAPE_INDEX) > 64:
+            _SHAPE_INDEX.clear()
+        found = _SHAPE_INDEX[id(shape)] = _ShapeIndex(shape)
+    return found
+
+
 def _final_faces(shape: Any, created: list[Any], tol: float) -> list[tuple[int, Any]]:
     """(1-based face index, face) of ``shape`` that lie on a created face."""
     matches: list[tuple[int, Any]] = []
     sources = _boxes(created)
-    for position, face in enumerate(shape.Faces, 1):
-        if _lies_on(face, sources, tol):
+    index = _index_of(shape)
+    for position, (face, box) in enumerate(zip(index.faces, index.boxes), 1):
+        if _lies_on(face, sources, tol, box):
             matches.append((position, face))
     return matches
 
@@ -437,6 +514,8 @@ def compute_body_roles(body: Any) -> BodyRoles:
     _pattern_roles(result, features, created_by_feature, tol, claimed)
     _distinct_names(result, {path: feature for path, (feature, _roles) in created_by_feature.items()}, tol)
     _edge_roles(result, {path: feature for path, (feature, _roles) in created_by_feature.items()})
+    _SHAPE_INDEX.clear()
+    _PLANE_EDGES.clear()
     return result
 
 
@@ -698,10 +777,7 @@ def surface_anchor(face: Any) -> Any:
 # ---------------------------------------------------------------- edges
 
 def _edge_name(shape: Any, edge: Any) -> str | None:
-    for position, other in enumerate(shape.Edges, 1):
-        if other.isSame(edge):
-            return f"Edge{position}"
-    return None
+    return _index_of(shape).edge_name(edge)
 
 
 def _profile_plane(feature: Any) -> tuple[Any, Any]:
@@ -732,6 +808,19 @@ def _edge_roles(result: BodyRoles, features: dict[str, Any]) -> None:
                 known.extend(name for name in names if name not in known)
 
 
+_PLANE_EDGES: dict[int, tuple[Any, list[Any]]] = {}
+
+
+def _plane_edges(face: Any) -> list[Any]:
+    """Edges of a face, built once: asking a face for its edges builds them again every time."""
+    found = _PLANE_EDGES.get(id(face))
+    if found is None or found[0] is not face:
+        if len(_PLANE_EDGES) > 20000:
+            _PLANE_EDGES.clear()
+        found = _PLANE_EDGES[id(face)] = (face, face.Edges)
+    return found[1]
+
+
 def _entry_rim_edges(shape: Any, walls: list[Any], origin: Any, normal: Any, tol: float) -> list[str]:
     """Edges where the walls meet a face parallel to the sketch plane, on the side the cut opens.
 
@@ -741,7 +830,7 @@ def _entry_rim_edges(shape: Any, walls: list[Any], origin: Any, normal: Any, tol
     openings: list[tuple[float, str]] = []
     # The planes parallel to the sketch, with their edges, are found once: asking a face for
     # its edges builds them again every time, and this loop ran it for every wall edge.
-    planes = [(other, other.Edges) for other in shape.Faces if isinstance(other.Surface, Part.Plane) and _parallel(other.Surface.Axis, normal)]
+    planes = [(other, _plane_edges(other)) for other in _index_of(shape).faces if isinstance(other.Surface, Part.Plane) and _parallel(other.Surface.Axis, normal)]
     for wall in walls:
         for edge in wall.Edges:
             for other, other_edges in planes:
