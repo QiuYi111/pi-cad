@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -109,28 +110,69 @@ def _same_line(p: Any, d: Any, q: Any, e: Any, tol: float) -> bool:
     return (offset - d * offset.dot(d)).Length <= tol
 
 
-def _matches(selector: dict[str, Any], face: Any) -> bool:
-    surface = face.Surface
+class _Facts:
+    """What a selector needs to know about a face, read from FreeCAD once.
+
+    Telling whether a selector is ambiguous compares it with every face of the unit. Reading a face's normal
+    and centroid from FreeCAD for each comparison made that O(faces^2) calls into FreeCAD per unit.
+    """
+
+    __slots__ = ("kind", "normal", "centroid", "radius", "point", "axis")
+
+    def __init__(self, face: Any) -> None:
+        surface = face.Surface
+        self.normal = self.centroid = self.radius = self.point = self.axis = None
+        if isinstance(surface, Part.Plane):
+            self.kind = "plane"
+            self.normal = _normal(face)
+            c = face.CenterOfMass
+            self.centroid = (c.x, c.y, c.z)
+        elif isinstance(surface, Part.Cylinder):
+            self.kind = "cylinder"
+            self.radius, self.point, self.axis = surface.Radius, _tuple(surface.Center), _tuple(surface.Axis)
+        elif isinstance(surface, Part.Cone):
+            self.kind = "cone"
+            self.point, self.axis = _tuple(surface.Apex), _tuple(surface.Axis)
+        else:
+            self.kind = _SURFACE_NAMES.get(type(surface), "")
+
+
+def _tuple(v: Any) -> tuple[float, float, float]:
+    return (v.x, v.y, v.z)
+
+
+def _same_line_t(p: tuple, d: tuple, q: tuple, e: tuple, tol: float) -> bool:
+    cross = (d[1] * e[2] - d[2] * e[1], d[2] * e[0] - d[0] * e[2], d[0] * e[1] - d[1] * e[0])
+    if math.sqrt(cross[0] ** 2 + cross[1] ** 2 + cross[2] ** 2) > 1e-6:
+        return False
+    offset = (q[0] - p[0], q[1] - p[1], q[2] - p[2])
+    along = offset[0] * d[0] + offset[1] * d[1] + offset[2] * d[2]
+    rest = (offset[0] - d[0] * along, offset[1] - d[1] * along, offset[2] - d[2] * along)
+    return math.sqrt(rest[0] ** 2 + rest[1] ** 2 + rest[2] ** 2) <= tol
+
+
+def _matches_facts(selector: dict[str, Any], facts: _Facts) -> bool:
     kind = selector["type"]
     if kind == "plane":
-        if not isinstance(surface, Part.Plane):
+        if facts.kind != "plane":
             return False
-        n = _normal(face)
-        if sum((a - b) ** 2 for a, b in zip(n, selector["normal"])) > 1e-8:
+        if sum((a - b) ** 2 for a, b in zip(facts.normal, selector["normal"])) > 1e-8:
             return False
-        return (face.CenterOfMass - App.Vector(*selector["centroid"])).Length <= selector["tolerance"]
+        return math.dist(facts.centroid, selector["centroid"]) <= selector["tolerance"]
     if kind == "cylinder":
         return (
-            isinstance(surface, Part.Cylinder) and abs(surface.Radius - selector["radius"]) <= selector["tolerance"]
-            and _same_line(surface.Center, surface.Axis, App.Vector(*selector["axisPoint"]), App.Vector(*selector["axisDirection"]), selector["tolerance"])
+            facts.kind == "cylinder" and abs(facts.radius - selector["radius"]) <= selector["tolerance"]
+            and _same_line_t(facts.point, facts.axis, tuple(selector["axisPoint"]), tuple(selector["axisDirection"]), selector["tolerance"])
         )
     if kind == "cone":
-        return isinstance(surface, Part.Cone) and _same_line(surface.Apex, surface.Axis, App.Vector(*selector["axisPoint"]), App.Vector(*selector["axisDirection"]), selector["tolerance"])
-    return type(surface) in _SURFACE_NAMES and _SURFACE_NAMES[type(surface)] == kind
+        return facts.kind == "cone" and _same_line_t(facts.point, facts.axis, tuple(selector["axisPoint"]), tuple(selector["axisDirection"]), selector["tolerance"])
+    return facts.kind == kind
 
 
-def face_selector(face: Any, all_faces: list[Any]) -> dict[str, Any]:
-    """A selector the build123d side can evaluate on the re-imported STEP."""
+def face_selector(face: Any, all_faces: list[Any], facts: list[_Facts] | None = None) -> dict[str, Any]:
+    """A selector the build123d side can evaluate on the re-imported STEP.
+
+    ``facts`` are the precomputed facts of ``all_faces``; pass them when asking for many selectors of one shape."""
     surface = face.Surface
     tolerance = SELECTOR_TOLERANCE
     if isinstance(surface, Part.Plane):
@@ -143,10 +185,30 @@ def face_selector(face: Any, all_faces: list[Any]) -> dict[str, Any]:
         selector = {"entity": "face", "type": _SURFACE_NAMES.get(type(surface), "other"), "bboxCenter": _bbox_center(face)}
         tolerance = LOOSE_TOLERANCE
     selector["tolerance"] = tolerance
-    if "bboxCenter" not in selector and sum(1 for other in all_faces if _matches(selector, other)) > 1:
+    if facts is None:
+        facts = [_Facts(other) for other in all_faces]
+    if "bboxCenter" not in selector and sum(1 for other in facts if _matches_facts(selector, other)) > 1:
         selector["bboxCenter"] = _bbox_center(face)
         selector["tolerance"] = LOOSE_TOLERANCE
     return selector
+
+
+def _unit_fingerprint(unit: Any) -> tuple | None:
+    """What an occurrence's declarations depend on: the part file it was taken from, which body, and where it sits.
+
+    Declarations were rebuilt for every unit on every apply, so adding the 80th part redid the 79 before it
+    (about 40 s per link with real parts). A body of the document itself has no such stamp and is always rebuilt."""
+    if unit.kind != "occurrence":
+        return None
+    try:
+        matrix = unit.obj.Placement.toMatrix().A
+        return (unit.obj.LinkPart, unit.obj.LinkBody, unit.obj.SourceSha256, tuple(round(v, 9) + 0.0 for v in matrix))
+    except Exception:
+        return None
+
+
+def _declaration_cache(session: Any) -> dict[str, tuple]:
+    return session.declaration_cache
 
 
 def build_declarations(session: Any) -> dict[str, Any]:
@@ -165,7 +227,14 @@ def build_declarations(session: Any) -> dict[str, Any]:
         roles = unit.roles(session)
         if roles is None:
             continue
+        fingerprint = _unit_fingerprint(unit)
+        cache = _declaration_cache(session)
+        if fingerprint is not None and (cached := cache.get(unit.path)) is not None and cached[0] == fingerprint:
+            entities.extend(cached[1])
+            continue
+        first = len(entities)
         shape_faces = [roles.to_world(face) for face in roles.shape.Faces]
+        shape_facts = [_Facts(face) for face in shape_faces]
         declared: set[str] = {unit.path}
         for feature_path, feature in unit.features():
             keys = sorted(k for k in roles.faces if k.startswith(feature_path + "/") and "/" not in k[len(feature_path) + 1:])
@@ -176,7 +245,7 @@ def build_declarations(session: Any) -> dict[str, Any]:
             primary = _primary_role(feature.TypeId)
             primary_faces = [roles.to_world(e.face) for e in roles.faces.get(f"{feature_path}/{primary}", [])] if primary else []
             if len(primary_faces) == 1:
-                record["selector"] = face_selector(primary_faces[0], shape_faces)
+                record["selector"] = face_selector(primary_faces[0], shape_faces, shape_facts)
                 record["expect"] = "one"
             entities.append(record)
             declared.add(feature_path)
@@ -189,8 +258,10 @@ def build_declarations(session: Any) -> dict[str, Any]:
                     declared.add(path)
                     entities.append({
                         "call": "faces", "path": path, "owner": feature_path,
-                        "selector": face_selector(face, shape_faces), "expect": "one",
+                        "selector": face_selector(face, shape_faces, shape_facts), "expect": "one",
                     })
+        if fingerprint is not None:
+            cache[unit.path] = (fingerprint, entities[first:])
     only = exported[0] if len(exported) == 1 else None
     return {"schema": 1, "assembly": only.path if only is not None else None, "entities": entities}
 

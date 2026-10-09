@@ -363,5 +363,76 @@ class SplitFaceTests(unittest.TestCase):
         self.assertEqual(sorted(c["face"] for c in error["detail"]["candidates"]), ["twin/left/cyl/side.0~0", "twin/left/cyl/side.0~1"])
 
 
+@unittest.skipUnless(HAVE_FREECAD, "FreeCAD is not importable in this interpreter")
+class AssemblyScaleTests(unittest.TestCase):
+    """An apply must not redo the work of every part already in the assembly (80 parts took hours)."""
+
+    def setUp(self) -> None:
+        self.p = Project()
+        self.addCleanup(self.p.close)
+        self.p.open("parts/base.FCStd", "base")
+        self.p.call("parts/base.FCStd", "apply", ops=base_part())
+        self.p.open("assembly/many.FCStd", "many")
+
+    def link(self, index: int) -> dict[str, Any]:
+        return {"op": "link", "name": f"many/p{index}", "part": "parts/base.FCStd", "body": "base", "position": [index * 60.0, 0, 0]}
+
+    def session(self) -> Any:
+        return self.p.worker.sessions[self.p.path("assembly/many.FCStd")]
+
+    def test_declarations_of_unchanged_occurrences_are_reused(self) -> None:
+        from reify_freecad import export as export_module
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(i) for i in range(4)])
+        built = {"n": 0}
+        original = export_module._Facts
+
+        class Counting(original):  # type: ignore[misc, valid-type]
+            def __init__(self, face: Any) -> None:
+                built["n"] += 1
+                super().__init__(face)
+
+        export_module._Facts = Counting
+        self.addCleanup(setattr, export_module, "_Facts", original)
+        full = export_module.build_declarations(self.session())
+        self.assertEqual(built["n"], 0, "nothing changed since the apply, so nothing is read from FreeCAD again")
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(4)])
+        self.assertGreater(built["n"], 0)
+        one_part = built["n"]
+        again = export_module.build_declarations(self.session())
+        self.assertEqual(built["n"], one_part)
+        self.assertEqual(len(again["entities"]), len(full["entities"]) + len(full["entities"]) // 4, "one more occurrence, its own declarations")
+
+    def test_a_moved_occurrence_gets_new_declarations(self) -> None:
+        from reify_freecad import export as export_module
+        from reify_freecad.assembly import units
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(i) for i in range(2)])
+        session = self.session()
+        before = export_module.build_declarations(session)
+        moved = [u for u in units(session) if u.path == "many/p1"][0]
+        pose = moved.obj.Placement
+        moved.obj.Placement = App.Placement(pose.Base + App.Vector(0, 0, 25), pose.Rotation)
+        after = export_module.build_declarations(session)
+        by_path = lambda doc: {e["path"]: e for e in doc["entities"]}
+        self.assertEqual(by_path(before)["many/p0/plate/top"], by_path(after)["many/p0/plate/top"])
+        self.assertNotEqual(by_path(before)["many/p1/plate/top"]["selector"]["centroid"], by_path(after)["many/p1/plate/top"]["selector"]["centroid"])
+        self.assertEqual(by_path(after)["many/p1/plate/top"]["selector"]["centroid"][2], by_path(before)["many/p1/plate/top"]["selector"]["centroid"][2] + 25)
+
+    def test_a_changed_part_file_is_not_served_from_the_cache(self) -> None:
+        from reify_freecad import export as export_module
+
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(0)])
+        before = export_module.build_declarations(self.session())
+        self.p.call("parts/base.FCStd", "apply", ops=[
+            {"op": "sketch", "name": "base/boss_profile", "on": {"feature": "base/plate", "role": "top"}, "shapes": [{"circle": {"center": [15, 15], "diameter": 6}}]},
+            {"op": "pad", "name": "base/boss", "sketch": "base/boss_profile", "length": 4},
+        ])
+        self.p.call("assembly/many.FCStd", "apply", ops=[self.link(1)])
+        after = export_module.build_declarations(self.session())
+        self.assertGreater(len({e["path"] for e in after["entities"] if e["path"].startswith("many/p0/boss")}), 0, "the refreshed occurrence shows the new feature")
+        self.assertEqual({e["path"] for e in before["entities"] if e["path"].startswith("many/p0/boss")}, set())
+
+
 if __name__ == "__main__":
     unittest.main()

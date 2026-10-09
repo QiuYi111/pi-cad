@@ -85,6 +85,8 @@ class DocumentSession:
         self.refreshed: set[str] = set()
         #: occurrence container name -> (part sha the roles belong to, roles)
         self.occurrence_roles: dict[str, tuple[str, Any]] = {}
+        #: occurrence path -> (what its declarations depend on, the declaration entities); see export.build_declarations
+        self.declaration_cache: dict[str, tuple] = {}
 
     def resolve_project_path(self, relative: str | Path) -> Path:
         path = Path(relative)
@@ -140,6 +142,7 @@ class DocumentSession:
         self.doc.recompute()
         self.refreshed.clear()
         self.occurrence_roles.clear()
+        self.declaration_cache.clear()
         self._invalidate()
         self._after_recompute()
 

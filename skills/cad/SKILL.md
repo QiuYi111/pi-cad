@@ -138,6 +138,12 @@ r.artifact   # an ArtifactRef; pass it to cad.probe.run like a built artifact
   only for bought-in or outside STEP files. A STEP that Reify built from a project
   part has no semantic face names in the assembly, and `cad.transfer` can use it
   only if it is current (the part document did not change since the STEP).
+- Every `apply` on an assembly rebuilds and renders the whole assembly (about
+  0.6 s per part already in it, more for complex parts). Link parts in batches of
+  20 to 40 per `apply`, not one per call: 80 single-link calls cost far more than
+  four batches. If a batch fails nothing is kept (it rolls back), so fix the
+  named op and send the batch again. Do not drop to one link per call to find
+  the bad one: the error names the occurrence.
 - One part, one document. One assembly, one document. A part is
   `parts/<name>.FCStd` with one owner; the assembly is
   `assembly/<name>.FCStd` and links the parts with `link`, adds bought-in STEP

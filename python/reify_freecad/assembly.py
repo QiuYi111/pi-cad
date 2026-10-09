@@ -50,6 +50,14 @@ def rekey_path(source_body: str | None, unit_path: str, path: str) -> str:
     return f"{unit_path}/{path}"
 
 
+#: (document name, occurrence name) -> (part shape the world shape was made from, pose stamp, world shape)
+_WORLD_SHAPES: dict[tuple[str, str], tuple[Any, tuple, Any]] = {}
+
+
+def _matrix_key(placement: Any) -> tuple:
+    return tuple(round(v, 9) + 0.0 for v in placement.toMatrix().A)
+
+
 @dataclass
 class Unit:
     """Something with a pose and a shape: a body, an occurrence of a linked part, or a reference."""
@@ -82,12 +90,28 @@ class Unit:
         return None
 
     def shape(self) -> Any:
-        """World shape; a body's single solid is unwrapped from FreeCAD's compound."""
+        """World shape; a body's single solid is unwrapped from FreeCAD's compound.
+
+        An occurrence's world shape is kept while its part shape and pose stay the same. One apply asks for the
+        shape of every unit a dozen times, and each ask copied the whole shape: with 80 parts that was most of the
+        time of every link. Callers only read the shape."""
         if self.kind == BODY:
             shape = self.obj.Shape
         else:
-            shape = self.local_shape().copy()
+            leaf_shape = self.local_shape()
+            key = (self.obj.Document.Name, self.obj.Name)
+            stamp = (_matrix_key(self.obj.Placement), _matrix_key(leaf_shape.Placement) if not leaf_shape.isNull() else None)
+            cached = _WORLD_SHAPES.get(key)
+            if cached is not None and cached[1] == stamp and not leaf_shape.isNull() and cached[0].isSame(leaf_shape):
+                return cached[2]
+            shape = leaf_shape.copy()
             shape.Placement = self.obj.Placement.multiply(shape.Placement)
+            if not shape.isNull() and shape.ShapeType == "Compound" and len(shape.Solids) == 1:
+                shape = shape.Solids[0]
+            if len(_WORLD_SHAPES) > 4000:
+                _WORLD_SHAPES.clear()
+            _WORLD_SHAPES[key] = (leaf_shape, stamp, shape)
+            return shape
         if shape.isNull():
             return shape
         if shape.ShapeType == "Compound" and len(shape.Solids) == 1:
@@ -275,6 +299,7 @@ def refresh_links(session: Any) -> list[str]:
                 leaf.Shape = occurrence_shape(source, body)
                 obj.SourceSha256 = digest
                 session.occurrence_roles.pop(obj.Name, None)
+                session.declaration_cache.pop(path, None)
                 changed.append(path)
         elif kind == REFERENCE:
             absolute = session.resolve_project_path(obj.LinkFile)
