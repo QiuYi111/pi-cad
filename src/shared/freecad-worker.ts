@@ -16,10 +16,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { packageRoot } from "./paths.ts";
-import { kernelOwnerBinding } from "./kernel-owner.ts";
-import { processConcurrencyGate, spawnInteractiveProcess } from "./process-runner.ts";
-
-type InteractiveProcess = ReturnType<typeof spawnInteractiveProcess>;
+import { NdjsonWorker, NdjsonWorkerRegistry, type NdjsonChild, type NdjsonLaunch, type NdjsonOutcome, type NdjsonProtocol } from "./ndjson-worker.ts";
 
 export const IDLE_EXIT_MS = 10 * 60_000;
 export const DEFAULT_BUDGET_S = 30;
@@ -29,7 +26,6 @@ function killGraceSeconds(): number {
   const parsed = Number(process.env.PI_CAD_PART_KILL_GRACE_S ?? 5);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5;
 }
-const MAX_FRAME_BYTES = 32 * 1024 * 1024;
 const STDERR_TAIL_BYTES = 64 * 1024;
 
 export interface PartErrorFields {
@@ -127,54 +123,75 @@ interface Frame {
   error?: { code: string; message: string; target?: string; detail?: Record<string, unknown>; hints?: string[]; rolledBack?: boolean };
 }
 
-interface Pending {
-  id: string;
-  timer: NodeJS.Timeout;
-  resolve(value: unknown): void;
-  reject(error: Error): void;
+/** What one request puts on the wire; the worker echoes `id` back. */
+interface Wire {
+  op: string;
+  doc: string;
+  args: Record<string, unknown>;
+  budgetS: number;
 }
 
+function freecadLaunch(runtime: FreecadRuntime, cwd: string): NdjsonLaunch {
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+  delete env.FORCE_COLOR;
+  // The worker has its own interpreter; the uv environment's search path
+  // would shadow FreeCAD's modules.
+  delete env.PYTHONHOME;
+  delete env.VIRTUAL_ENV;
+  env.PYTHONPATH = [join(packageRoot(), "python"), runtime.libPath].join(":");
+  env.PYTHONNOUSERSITE = "1";
+  env.PYTHONDONTWRITEBYTECODE = "1";
+  env.QT_QPA_PLATFORM = env.QT_QPA_PLATFORM ?? "offscreen";
+  return { command: runtime.python, args: ["-m", "reify_freecad.worker"], cwd: resolve(cwd), env };
+}
+
+const PROTOCOL: NdjsonProtocol<Wire, unknown> = {
+  name: "FreeCAD",
+  wireId: (n) => `r-${n}`,
+  encode: (id, request) => ({ id, op: request.op, doc: request.doc, args: request.args, budgetS: request.budgetS }),
+  decode: (frame, stderrTail): NdjsonOutcome<unknown> => {
+    const reply = frame as Frame;
+    if (reply.ok) return { ok: true, value: reply.result };
+    const error = reply.error ?? { code: "INTERNAL_ERROR", message: "FreeCAD worker failed without an error" };
+    const detail = error.code === "INTERNAL_ERROR" ? { ...(error.detail ?? {}), stderrTail } : error.detail;
+    return {
+      ok: false,
+      error: new PartOpError(error.message, {
+        code: error.code,
+        ...(error.target !== undefined ? { target: error.target } : {}),
+        ...(detail !== undefined ? { detail } : {}),
+        ...(error.hints !== undefined ? { hints: error.hints } : {}),
+        ...(error.rolledBack !== undefined ? { rolledBack: error.rolledBack } : {}),
+      }),
+    };
+  },
+  restartError: (message, stderrTail) => new PartOpError(message, {
+    code: "FREECAD_WORKER_RESTARTED", hints: ["retry"], detail: { stderrTail },
+  }),
+  killSignal: "SIGKILL",
+  stderrTailBytes: STDERR_TAIL_BYTES,
+  idleMs: IDLE_EXIT_MS,
+  admissionError: () => new PartOpError("request cancelled", { code: "CANCELLED" }),
+  abortError: () => new PartOpError("request cancelled", { code: "CANCELLED", rolledBack: true }),
+};
+
 class PartWorker {
-  private child: InteractiveProcess | null = null;
-  private pending: Pending | null = null;
-  private buffer = Buffer.alloc(0);
-  private stderrTail = Buffer.alloc(0);
-  private counter = 0;
-  private queue: Promise<unknown> = Promise.resolve();
-  private idle: NodeJS.Timeout | null = null;
+  private readonly io: NdjsonWorker<Wire, unknown>;
   /** Documents the live child has open. */
   private openInChild = new Set<string>();
   /** How each document was last opened, to reopen it after a restart. */
   private readonly openArgs = new Map<string, Record<string, unknown>>();
 
-  constructor(private readonly cwd: string, private readonly onClose: () => void) {}
+  constructor(private readonly cwd: string) {
+    this.io = new NdjsonWorker(PROTOCOL, () => this.openInChild.clear());
+  }
 
   run(request: PartRequest): Promise<unknown> {
-    const task = this.queue.then(() => this.runOne(request), () => this.runOne(request));
-    this.queue = task.then(() => undefined, () => undefined);
-    return task;
+    return this.io.serial(() => this.runOne(request));
   }
 
-  stop(reason = "FreeCAD worker stopped"): void {
-    const child = this.child;
-    this.child = null;
-    this.openInChild.clear();
-    if (this.idle) clearTimeout(this.idle);
-    this.idle = null;
-    if (this.pending) {
-      clearTimeout(this.pending.timer);
-      this.pending.reject(new PartOpError(reason, { code: "FREECAD_WORKER_RESTARTED", hints: ["retry"], detail: { stderrTail: this.stderrText() } }));
-      this.pending = null;
-    }
-    if (child?.pid) {
-      try { process.kill(-child.pid, "SIGKILL"); }
-      catch { child.kill("SIGKILL"); }
-    }
-    this.onClose();
-  }
-
-  private stderrText(): string {
-    return this.stderrTail.toString("utf8");
+  stop(reason?: string): void {
+    this.io.stop(reason);
   }
 
   private async runOne(request: PartRequest): Promise<unknown> {
@@ -189,13 +206,8 @@ class PartWorker {
       });
     }
     if (request.signal?.aborted) throw new PartOpError("request cancelled", { code: "CANCELLED" });
-    const release = await processConcurrencyGate.acquire(request.signal).catch(() => {
-      throw new PartOpError("request cancelled", { code: "CANCELLED" });
-    });
-    try {
+    return this.io.withChild(() => freecadLaunch(runtime, this.cwd), async (child) => {
       if (request.op === "open") this.openArgs.set(request.doc, { ...(request.args ?? {}), export: true });
-      const child = this.ensureChild(runtime);
-      this.setReferenced(child, true);
       if (request.op !== "open" && !this.openInChild.has(request.doc)) {
         let reopen = this.openArgs.get(request.doc);
         if (!reopen && request.ensureOpen && existsSync(request.doc)) {
@@ -204,158 +216,24 @@ class PartWorker {
         }
         if (reopen) await this.send(child, { op: "open", doc: request.doc, args: { ...reopen, create: false, export: false }, budgetS }, budgetS, request.signal);
       }
-      const result = await this.send(child, request, budgetS, request.signal);
+      const result = await this.send(child, { op: request.op, doc: request.doc, args: request.args ?? {}, budgetS }, budgetS, request.signal);
       assertSameDocument(request, result);
       if (request.op === "open") this.openInChild.add(request.doc);
       if (request.op === "close") { this.openInChild.delete(request.doc); this.openArgs.delete(request.doc); }
       return result;
-    } finally {
-      if (this.child) this.setReferenced(this.child, false);
-      release();
-      this.armIdle();
-    }
+    }, request.signal);
   }
 
-  private send(child: InteractiveProcess, request: PartRequest, budgetS: number, signal?: AbortSignal): Promise<unknown> {
-    const id = `r-${++this.counter}`;
-    return new Promise<unknown>((resolveRequest, rejectRequest) => {
-      let onAbort: (() => void) | undefined;
-      const finish = (action: () => void) => {
-        if (signal && onAbort) signal.removeEventListener("abort", onAbort);
-        action();
-      };
-      const timer = setTimeout(() => {
-        const detail = { budgetS, stderrTail: this.stderrText() };
-        this.pending = null;
-        finish(() => rejectRequest(new PartOpError(`${request.op} exceeded its budget of ${budgetS}s and was stopped`, {
-          code: "BUDGET_EXCEEDED", detail, hints: ["increase budget_s", "split the check", "the worker was restarted; the document is at its last committed revision, so undo is not needed"],
-        })));
-        this.stop("FreeCAD worker stopped after a budget overrun");
-      }, (budgetS + killGraceSeconds()) * 1000);
-      timer.unref();
-      onAbort = () => {
-        clearTimeout(timer);
-        this.pending = null;
-        finish(() => rejectRequest(new PartOpError("request cancelled", { code: "CANCELLED", rolledBack: true })));
-        this.stop("FreeCAD worker stopped after cancellation");
-      };
-      signal?.addEventListener("abort", onAbort, { once: true });
-      this.pending = {
-        id,
-        timer,
-        resolve: (value) => finish(() => resolveRequest(value)),
-        reject: (error) => finish(() => rejectRequest(error)),
-      };
-      const line = `${JSON.stringify({ id, op: request.op, doc: request.doc, args: request.args ?? {}, budgetS })}\n`;
-      child.stdin.write(line, "utf8", (error) => {
-        if (!error || this.pending?.id !== id) return;
-        clearTimeout(timer);
-        this.pending = null;
-        finish(() => rejectRequest(error));
-        this.stop("FreeCAD worker input failed");
-      });
+  private send(child: NdjsonChild, wire: Wire, budgetS: number, signal?: AbortSignal): Promise<unknown> {
+    return this.io.exchange(child, wire, {
+      timeoutMs: (budgetS + killGraceSeconds()) * 1000,
+      timeoutError: () => new PartOpError(`${wire.op} exceeded its budget of ${budgetS}s and was stopped`, {
+        code: "BUDGET_EXCEEDED",
+        detail: { budgetS, stderrTail: this.io.stderrText() },
+        hints: ["increase budget_s", "split the check", "the worker was restarted; the document is at its last committed revision, so undo is not needed"],
+      }),
+      signal,
     });
-  }
-
-  private ensureChild(runtime: FreecadRuntime): InteractiveProcess {
-    if (this.child && this.child.exitCode === null && !this.child.killed) return this.child;
-    const env: NodeJS.ProcessEnv = { ...process.env, ...kernelOwnerBinding(), NO_COLOR: "1" };
-    delete env.FORCE_COLOR;
-    // The worker has its own interpreter; the uv environment's search path
-    // would shadow FreeCAD's modules.
-    delete env.PYTHONHOME;
-    delete env.VIRTUAL_ENV;
-    env.PYTHONPATH = [join(packageRoot(), "python"), runtime.libPath].join(":");
-    env.PYTHONNOUSERSITE = "1";
-    env.PYTHONDONTWRITEBYTECODE = "1";
-    env.QT_QPA_PLATFORM = env.QT_QPA_PLATFORM ?? "offscreen";
-    const child = spawnInteractiveProcess({
-      command: runtime.python,
-      args: ["-m", "reify_freecad.worker"],
-      cwd: resolve(this.cwd),
-      env,
-    });
-    this.child = child;
-    this.buffer = Buffer.alloc(0);
-    this.stderrTail = Buffer.alloc(0);
-    child.stdout.on("data", (chunk: Buffer) => this.onStdout(chunk));
-    child.stderr.on("data", (chunk: Buffer) => {
-      this.stderrTail = Buffer.concat([this.stderrTail, chunk]).subarray(-STDERR_TAIL_BYTES);
-    });
-    child.on("error", (error) => this.fail(new PartOpError(`FreeCAD worker failed to start: ${error.message}`, { code: "FREECAD_WORKER_RESTARTED", hints: ["retry"] })));
-    child.on("close", (code, signal) => {
-      if (this.child !== child) return;
-      this.child = null;
-      this.openInChild.clear();
-      this.fail(new PartOpError(`FreeCAD worker exited with ${code ?? signal ?? "unknown status"}`, {
-        code: "FREECAD_WORKER_RESTARTED", hints: ["retry"], detail: { stderrTail: this.stderrText() },
-      }));
-      this.onClose();
-    });
-    this.setReferenced(child, false);
-    return child;
-  }
-
-  private onStdout(chunk: Buffer): void {
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    if (this.buffer.length > MAX_FRAME_BYTES) {
-      this.stop("FreeCAD worker response exceeded its frame limit");
-      return;
-    }
-    for (;;) {
-      const newline = this.buffer.indexOf(10);
-      if (newline < 0) return;
-      const text = this.buffer.subarray(0, newline).toString("utf8");
-      this.buffer = this.buffer.subarray(newline + 1);
-      if (!text.trim()) continue;
-      let frame: Frame;
-      try { frame = JSON.parse(text) as Frame; }
-      catch {
-        this.stop(`FreeCAD worker returned invalid JSON: ${text.slice(0, 200)}`);
-        return;
-      }
-      const pending = this.pending;
-      if (!pending || frame.id !== pending.id) {
-        this.stop(`FreeCAD worker returned unexpected response id ${String(frame.id)}`);
-        return;
-      }
-      clearTimeout(pending.timer);
-      this.pending = null;
-      if (frame.ok) pending.resolve(frame.result);
-      else {
-        const error = frame.error ?? { code: "INTERNAL_ERROR", message: "FreeCAD worker failed without an error" };
-        const detail = error.code === "INTERNAL_ERROR" ? { ...(error.detail ?? {}), stderrTail: this.stderrText() } : error.detail;
-        pending.reject(new PartOpError(error.message, {
-          code: error.code,
-          ...(error.target !== undefined ? { target: error.target } : {}),
-          ...(detail !== undefined ? { detail } : {}),
-          ...(error.hints !== undefined ? { hints: error.hints } : {}),
-          ...(error.rolledBack !== undefined ? { rolledBack: error.rolledBack } : {}),
-        }));
-      }
-    }
-  }
-
-  private fail(error: Error): void {
-    if (!this.pending) return;
-    clearTimeout(this.pending.timer);
-    const reject = this.pending.reject;
-    this.pending = null;
-    reject(error);
-  }
-
-  private armIdle(): void {
-    if (this.idle) clearTimeout(this.idle);
-    this.idle = setTimeout(() => this.stop("FreeCAD worker idle"), IDLE_EXIT_MS);
-    this.idle.unref();
-  }
-
-  private setReferenced(child: InteractiveProcess, referenced: boolean): void {
-    const method = referenced ? "ref" : "unref";
-    child[method]();
-    for (const stream of [child.stdin, child.stdout, child.stderr]) {
-      (stream as unknown as Record<string, (() => void) | undefined>)[method]?.();
-    }
   }
 }
 
@@ -372,25 +250,15 @@ function assertSameDocument(request: PartRequest, result: unknown): void {
   });
 }
 
-const workers = new Map<string, PartWorker>();
-
-process.once("exit", () => {
-  for (const worker of [...workers.values()]) worker.stop("parent process exited");
-});
+const workers = new NdjsonWorkerRegistry<PartWorker>();
 
 export function runPartCommand(cwd: string, request: PartRequest): Promise<unknown> {
+  // The PartWorker object outlives its child process: queued requests and the
+  // reopen list belong to it, so a stopped child must not drop it from the map.
   const key = resolve(cwd);
-  let worker = workers.get(key);
-  if (!worker) {
-    // The PartWorker object outlives its child process: queued requests and the
-    // reopen list belong to it, so a stopped child must not drop it from the map.
-    worker = new PartWorker(key, () => {});
-    workers.set(key, worker);
-  }
-  return worker.run(request);
+  return workers.get(key, () => new PartWorker(key)).run(request);
 }
 
 export function shutdownPartWorkers(): void {
-  for (const worker of [...workers.values()]) worker.stop();
-  workers.clear();
+  workers.stopAll();
 }
