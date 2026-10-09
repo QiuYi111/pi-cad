@@ -6,13 +6,16 @@ export class FakeK8s implements WorkspaceK8s {
   readonly objects = new Map<string, K8sObject>(); // PVC and Service, by kind/name
   readonly applied: string[] = [];
   readonly scales: Array<{ name: string; replicas: number }> = [];
+  fail = false; // when true, every call throws, as an API outage would
 
   async getDeployment(name: string): Promise<DeploymentStatus | null> {
+    if (this.fail) throw new Error('fake k8s failure');
     const d = this.deployments.get(name);
     return d ? { replicas: d.replicas, readyReplicas: d.readyReplicas } : null;
   }
 
   async apply(obj: K8sObject): Promise<void> {
+    if (this.fail) throw new Error('fake k8s failure');
     this.applied.push(`${obj.kind}/${obj.metadata.name}`);
     if (obj.kind === 'Deployment') {
       const replicas = (obj.spec as { replicas: number }).replicas;
@@ -26,6 +29,7 @@ export class FakeK8s implements WorkspaceK8s {
   }
 
   async scale(name: string, replicas: number): Promise<void> {
+    if (this.fail) throw new Error('fake k8s failure');
     this.scales.push({ name, replicas });
     const d = this.deployments.get(name);
     if (!d) throw new Error(`no deployment ${name}`);
@@ -72,6 +76,8 @@ export class FakeGateway implements WorkspaceGateway {
 export class FakeFs implements WorkspaceFs {
   readonly mkdirs: Array<{ name: string; ids: string[] }> = [];
   readonly trashes: Array<{ name: string; id: string; stamp: string }> = [];
+  readonly purges: Array<{ name: string; cutoff: Date }> = [];
+  purged = 0; // what the next purge reports as removed
   fail = false;
 
   async mkdirProjects(_userId: string, name: string, ids: string[]): Promise<void> {
@@ -82,5 +88,11 @@ export class FakeFs implements WorkspaceFs {
   async trashProject(_userId: string, name: string, id: string, stamp: string): Promise<void> {
     if (this.fail) throw new Error('fake fs failure');
     this.trashes.push({ name, id, stamp });
+  }
+
+  async purgeTrash(_userId: string, name: string, cutoff: Date): Promise<number> {
+    if (this.fail) throw new Error('fake fs failure');
+    this.purges.push({ name, cutoff });
+    return this.purged;
   }
 }

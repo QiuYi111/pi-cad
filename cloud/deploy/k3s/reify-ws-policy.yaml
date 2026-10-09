@@ -80,8 +80,9 @@ spec:
       ports:
         - protocol: TCP
           port: 8081
-    # 3. Windows host proxy (mihomo). PLACEHOLDER: replace 203.0.113.10/32 with the
-    #    host address from HTTPS_PROXY_FOR_WORKSPACES. Until then, model access is blocked (fail closed).
+    # 3. Windows host proxy (mihomo). PLACEHOLDER: replace 203.0.113.10/32 with the host address
+    #    from HTTPS_PROXY_FOR_WORKSPACES in platform-api.yaml (the same address, as <ip>/32).
+    #    Until then, model access is blocked (fail closed).
     - to:
         - ipBlock:
             cidr: 203.0.113.10/32

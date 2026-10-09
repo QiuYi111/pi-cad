@@ -176,6 +176,30 @@ export function createController(d: Deps & { workspace: WorkspaceDeps }, log: (m
     });
   }
 
+  // Sets last_error to the reconcile failure, so the user (GET /v1/workspace) and reify-admin status see it.
+  async function recordError(w: WorkspaceRow, e: unknown): Promise<void> {
+    const message = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+    await db.query('update workspaces set last_error = $2 where id = $1', [w.id, message]);
+  }
+
+  // Clears a stale reconcile error after a clean pass. A row in 'failed' keeps its reason (start timeout)
+  // until the user starts it again. The state is read in the same statement, so a failStart that ran
+  // earlier in this tick is seen as 'failed'.
+  async function clearError(w: WorkspaceRow): Promise<void> {
+    await db.query("update workspaces set last_error = null where id = $1 and last_error is not null and state <> 'failed'", [w.id]);
+  }
+
+  // Daily job (plan 5.2): removes .trash entries older than the retention period. Only while the workspace runs.
+  // Failures are logged and retried on the next sweep, not recorded as last_error.
+  const trashSweptAt = new Map<string, number>(); // workspace id -> time of the last sweep attempt
+  async function sweepTrash(w: WorkspaceRow, now: Date): Promise<void> {
+    const last = trashSweptAt.get(w.id);
+    if (last !== undefined && now.getTime() - last < config.trashSweepMs) return;
+    trashSweptAt.set(w.id, now.getTime());
+    const cutoff = new Date(now.getTime() - config.trashRetentionMs);
+    await ws.fs.purgeTrash(w.user_id, w.k8s_name, cutoff).catch((e) => log(`purge trash ${w.k8s_name}`, e));
+  }
+
   return {
     async tick() {
       const now = clock.now();
@@ -186,7 +210,11 @@ export function createController(d: Deps & { workspace: WorkspaceDeps }, log: (m
           await reconcile(w, now);
         } catch (e) {
           log(`reconcile ${w.k8s_name}`, e);
+          await recordError(w, e).catch((err) => log(`record error ${w.k8s_name}`, err));
+          continue;
         }
+        if (w.last_error !== null) await clearError(w).catch((err) => log(`clear error ${w.k8s_name}`, err));
+        if (w.state === 'running') await sweepTrash(w, now);
       }
       // Capacity that a stop freed during this tick goes to the queue now, not on the next tick.
       await admitQueued(now);

@@ -41,6 +41,8 @@ export interface WorkspaceGateway {
 export interface WorkspaceFs {
   mkdirProjects(userId: string, k8sName: string, projectIds: string[]): Promise<void>;
   trashProject(userId: string, k8sName: string, projectId: string, stamp: string): Promise<void>;
+  // Deletes .trash entries whose stamp is before cutoff. Returns how many were removed.
+  purgeTrash(userId: string, k8sName: string, cutoff: Date): Promise<number>;
 }
 
 export interface WorkspaceDeps {

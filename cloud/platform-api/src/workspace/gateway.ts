@@ -92,6 +92,18 @@ export function createGatewayClient(opts: GatewayOptions): WorkspaceGateway {
   };
 }
 
+// Trash entries are named <projectId>-<stamp> (and <projectId>-<stamp>-state), where stamp is the UTC time
+// from trashProject: 20261009T051234123Z. Returns that time, or null for any other name. Names that do not
+// match are never deleted.
+const TRASH_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z(-state)?$/i;
+
+export function trashEntryTime(name: string): Date | null {
+  const m = TRASH_NAME.exec(name);
+  if (!m) return null;
+  const [y, mo, d, h, mi, s, ms] = m.slice(1, 8).map(Number);
+  return new Date(Date.UTC(y, mo - 1, d, h, mi, s, ms));
+}
+
 // File operations as exec calls through the gateway. Arguments are passed as argv, never through a shell string.
 export function createGatewayFs(gateway: WorkspaceGateway): WorkspaceFs {
   const check = (r: ExecResult, what: string) => {
@@ -123,6 +135,22 @@ export function createGatewayFs(gateway: WorkspaceGateway): WorkspaceFs {
         ]),
         'trash',
       );
+    },
+    async purgeTrash(userId, k8sName, cutoff) {
+      // The shell only lists the directory. Deciding and deleting happen here, one argv per entry.
+      const listed = await gateway.exec(userId, k8sName, ['sh', '-c', '[ -d /workspace/.trash ] && ls -1A /workspace/.trash || true']);
+      check(listed, 'list trash');
+      const old = listed.stdout
+        .split('\n')
+        .map((s) => s.trim())
+        .filter((name) => {
+          const t = trashEntryTime(name);
+          return t !== null && t.getTime() < cutoff.getTime();
+        });
+      for (const name of old) {
+        check(await gateway.exec(userId, k8sName, ['rm', '-rf', '--', `/workspace/.trash/${name}`]), 'purge trash');
+      }
+      return old.length;
     },
   };
 }

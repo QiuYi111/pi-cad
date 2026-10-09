@@ -79,6 +79,10 @@ async function run(db: ReturnType<typeof createPool>): Promise<void> {
     console.log('活跃工作区（期望运行或正在启动 / 运行）：');
     console.table(s.active);
     console.log(`最近 24 小时错误事件：${s.errorEventsLast24h}`);
+    if (s.withErrors.length) {
+      console.log('最近一次核对失败的工作区（last_error）：');
+      console.table(s.withErrors);
+    }
     console.log('CPU 和内存未显示：本工具不连接 K8s 指标 API（metrics-server）。');
   } else {
     throw new Error(USAGE);

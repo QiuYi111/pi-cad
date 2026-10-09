@@ -1,12 +1,11 @@
 # Public key that workspace gateways use to check the 60-second gateway tokens (plan 7.2).
-# The platform API signs those tokens with the ES256 private key in reify-platform-secrets.
-# This ConfigMap holds only the public half. It lives in reify-ws, because
-# configMapKeyRef cannot read across namespaces.
+# The platform API signs those tokens with GATEWAY_PRIVATE_KEY (reify-platform-secrets).
+# Never the JWT key: that is a different pair. This ConfigMap holds only the public half.
+# It lives in reify-ws, because configMapKeyRef cannot read across namespaces.
+# Name and key are read by workspace-template.yaml (REIFY_GATEWAY_PUBKEY).
 #
-# This file is a template. It is NOT in kustomization.yaml, so "kubectl apply -k" never
-# overwrites the real key. Create the real ConfigMap from the public key file instead:
-#   kubectl -n reify-ws create configmap reify-gateway-pubkey \
-#     --from-file=gateway-public-key.pem=jwt-public.pem --dry-run=client -o yaml | kubectl apply -f -
+# This file is a template and is NOT in kustomization.yaml, so "kubectl apply -k" never
+# overwrites the real key. cloud/deploy/k3s/make-secrets.sh prints the real ConfigMap; apply that.
 # See cloud/deploy/README.md, section "Secrets".
 apiVersion: v1
 kind: ConfigMap
