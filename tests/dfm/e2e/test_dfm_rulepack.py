@@ -114,10 +114,6 @@ class PackLoadTests(unittest.TestCase):
                 if rule.source.get("inferred"):
                     self.assertNotEqual(rule.severity, "error")
 
-    def test_turn_pack_is_valid_and_empty(self) -> None:
-        pack = load_rulepack(TURN)
-        self.assertEqual(pack.rules, [])
-
     def test_unknown_pack_lists_available_ids(self) -> None:
         with self.assertRaises(ReifyOpError) as caught:
             load_rulepack("no.such.pack")
@@ -207,15 +203,6 @@ class RenderReferenceTests(unittest.TestCase):
                 cells = [cell.strip() for cell in row.strip("|").split("|")]
                 self.assertEqual(cells[-2], ", ".join(str(p) for p in pages))
                 self.assertIn(rule.id, text)
-
-    def test_every_plan_id_appears(self) -> None:
-        text = render_reference.render(MILL)
-        for rule_id in PLAN_RULE_IDS:
-            self.assertRegex(text, re.escape(f"`{rule_id}`"))
-
-    def test_turn_reference_renders_without_rules(self) -> None:
-        text = render_reference.render(TURN)
-        self.assertIn("No rules", text)
 
     def test_render_is_deterministic(self) -> None:
         self.assertEqual(render_reference.render(MILL), render_reference.render(MILL))

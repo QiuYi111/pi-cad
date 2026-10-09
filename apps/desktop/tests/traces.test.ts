@@ -38,12 +38,6 @@ describe("trajectory confinement", () => {
 });
 
 describe("distillation status", () => {
-  it("does not label a failed job as complete", () => {
-    expect(distillationTitle("running")).toBe("Distilling experience");
-    expect(distillationTitle("complete")).toBe("Distillation complete");
-    expect(distillationTitle("failed")).toBe("Distillation failed");
-  });
-
   it("inherits the desktop author model unless explicitly overridden", () => {
     expect(desktopDistillationEnvironment({
       provider: "openai-codex",

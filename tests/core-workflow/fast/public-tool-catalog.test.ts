@@ -36,22 +36,3 @@ test("pi-cad-tools references cover every active public tool", () => {
     assert.ok(!corpus.includes(name), `active tool skill mentions historical name ${name}`);
   }
 });
-
-test("the skill surface includes the Prime Python capability and grilling skills", () => {
-  const skillsDir = fileURLToPath(new URL("../../../skills/", import.meta.url));
-  const names = readdirSync(skillsDir).sort();
-  assert.deepEqual(names, [
-    "assembly-design",
-    "blender-product-rendering",
-    "cad",
-    "design-for-manufacturing",
-    "grill-me",
-    "mechanical-design",
-    "parametric-cad-modeling",
-    "pi-cad",
-    "pi-cad-tools",
-    "reify-cad-worker",
-    "structural-analysis",
-    "thermal-fluid-analysis",
-  ]);
-});

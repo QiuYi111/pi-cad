@@ -29,6 +29,8 @@ class AssetTests(unittest.TestCase):
         self.assertEqual(result["warnings"], [])
         edited = harness.apply(ops("freecad-part", "edit.ops.json"))
         self.assertEqual(edited["params"]["changed"], {"hole_d": [6.0, 8.0]})
+        # Only the four hole walls and what the wider hole resized change in the edit.
+        self.assertIn("bracket/mount_hole/wall", edited["highlight"]["paths"])
         self.assertEqual(len(harness.call("query", target="bracket/mount_hole/wall", what=["faces"])["faces"]), 4)
         wall = harness.call("query", target="bracket/mount_hole/wall", what=["faces"])["faces"][0]
         self.assertAlmostEqual(wall["radius"], 4.0, places=3)

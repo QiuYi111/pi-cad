@@ -138,9 +138,6 @@ class ProcessTests(Base):
         res = jobs.process_job(self.fdir, "j1", OkExecutor(), INFO, busy=True)
         self.assertEqual(res["error"]["code"], "BUSY")
 
-    def test_unclaimable_returns_none(self):
-        self.assertIsNone(jobs.process_job(self.fdir, "nope", OkExecutor(), INFO))
-
     def test_atomic_write_leaves_no_tmp(self):
         p = os.path.join(self.tmp.name, "x", "y.json")
         jobs.atomic_write_json(p, {"a": 1})

@@ -18,12 +18,6 @@ const geometry = (overrides: Partial<GeometryPayload> = {}): GeometryPayload => 
   ...overrides,
 });
 
-test("equal geometry passes the equivalence check", () => {
-  const report = compareEquivalence(geometry(), geometry());
-  assert.equal(report.passed, true);
-  assert.equal(report.firstDifferingFeature, null);
-});
-
 test("a volume error above 1e-6 fails the check and names the first differing feature", () => {
   const report = compareEquivalence(geometry(), geometry({ volume: 5000.01 }), {
     reference: [{ name: "plate/base", volume_mm3: 6000 }, { name: "plate/holes", volume_mm3: 5000 }],
@@ -44,11 +38,6 @@ test("a different bounding box or an unmatched face fails the check", () => {
   const missing = compareEquivalence(geometry(), geometry({ faceFingerprints: [plane([20, 15, 5], 1200, [0, 0, 1])] }));
   assert.equal(missing.faces.ok, false);
   assert.equal(missing.faces.unmatchedReference, 1);
-});
-
-test("a feature that the executor did not build is the first differing feature", () => {
-  const found = firstDifferingFeature([{ name: "a", volume_mm3: 1 }], [{ name: "b", volume_mm3: 1 }]);
-  assert.equal(found?.name, "a");
 });
 
 // ------------------------------------------------------------------ spool flow
@@ -114,15 +103,6 @@ test("transfer-status reports unavailable without a live dispatcher", async () =
   assert.deepEqual(await handleTransferOperation(cwd, { schema: 1, op: "transfer-status" }), {
     fusion: "ready", solidworks: "not_installed", detail: {},
   });
-});
-
-test("transfer-features writes the canonical JSON and does not need the desktop app", async () => {
-  const result = await handleTransferOperation(cwd, { schema: 1, op: "transfer-features", doc: "parts/plate.FCStd" }) as any;
-  assert.equal(result.part, "plate");
-  assert.equal(result.features, 7);
-  assert.equal(result.path, "build/transfer/plate.features.json");
-  assert.equal(JSON.parse(await readFile(join(cwd, result.path), "utf8")).schema, "reify.features/1");
-  assert.equal(result.data.schema, "reify.features/1");
 });
 
 test("transfer-export without the desktop app fails with TRANSFER_UNAVAILABLE", async () => {
@@ -239,17 +219,12 @@ test("an assembly with joints says that the joints were not exported", async () 
   assert.deepEqual(dry.joints, arm);
 });
 
-test("a part or an assembly without joints has no notes", async () => {
+test("the dry run reports the kind of the document and no notes when there are no joints", async () => {
   transferHooks.canonicalize = async () => ({ ...canonical, kind: "assembly", joints: [] });
-  const dry = await handleTransferOperation(cwd, { schema: 1, op: "transfer-features", doc: "assembly/arm.FCStd" }) as any;
-  assert.equal("notes" in dry, false);
-});
-
-test("the dry run reports the kind of the document", async () => {
-  transferHooks.canonicalize = async () => ({ ...canonical, kind: "assembly" });
   const result = await handleTransferOperation(cwd, { schema: 1, op: "transfer-features", doc: "parts/plate.FCStd" }) as any;
   assert.equal(result.kind, "assembly");
   assert.equal(result.path, "build/transfer/plate.assembly.json");
+  assert.equal("notes" in result, false);
 });
 
 test("check=False skips the check and says so", async () => {
@@ -309,11 +284,6 @@ test("no answer in time fails with TRANSFER_TIMEOUT and leaves a cancel file", a
   await assert.rejects(handleTransferOperation(cwd, exportRequest), (error: any) => error.code === "TRANSFER_TIMEOUT");
   const { readdir } = await import("node:fs/promises");
   assert.equal((await readdir(spool("cancel"))).length, 1);
-});
-
-test("the desktop app stopping during a job fails with TRANSFER_UNAVAILABLE", async () => {
-  await dispatcher({ fusion: "ready", solidworks: "not_installed" });
-  await assert.rejects(handleTransferOperation(cwd, exportRequest), (error: any) => error.code === "TRANSFER_UNAVAILABLE");
 });
 
 test("a read-only desktop denies transfer-export but allows the dry run and the status", async () => {

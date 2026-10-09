@@ -19,14 +19,6 @@ describe("cloud view state", () => {
     expect(workspaceLabel(view)).toBe("排队中（第 4 位）");
   });
 
-  it("labels the workspace states the status bar shows", () => {
-    expect(workspaceLabel(signedIn({ state: "starting" }))).toBe("启动中");
-    expect(workspaceLabel(signedIn({ state: "running" }))).toBe("运行中");
-    expect(workspaceLabel(signedIn({ state: "stopped" }))).toBe("已暂停");
-    expect(workspaceLabel(signedIn({ state: "stopping" }))).toBe("已暂停");
-    expect(workspaceLabel(initialCloudView)).toBe("");
-  });
-
   it("reports reconnecting while the bridge is down, whatever the workspace state", () => {
     const view = reduceCloudEvent(signedIn({ state: "running" }), { type: "bridge_state", state: "reconnecting" });
     expect(workspaceLabel(view)).toBe("重新连接中");

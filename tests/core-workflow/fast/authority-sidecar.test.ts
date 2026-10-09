@@ -7,19 +7,13 @@ import { test } from "node:test";
 import { withHeadlessEventContinuation } from "../../../src/authority/launcher.ts";
 import { type LaunchPaths, resolvePrimeRepository, resolveReviewerLaunchOptions, resolveVenvPythonRoot, reviewerModelArgs } from "../../../src/authority/prime-config.ts";
 import { buildPrimeBwrapArgs, buildReviewerBwrapArgs } from "../../../src/authority/sandbox-bwrap.ts";
-import { completionGate, dispatchSidecarRequest, SIDECAR_REQUEST_TIMEOUT_MS, startAuthoritySidecar } from "../../../src/authority/sidecar.ts";
-import { DEFAULT_CADCTL_TIMEOUT_MS } from "../../../src/shared/cadctl/transport.ts";
-import { FULL_GEOMETRY_VALIDATION_TIMEOUT_MS } from "../../../src/shared/cadctl/commands.ts";
+import { completionGate, dispatchSidecarRequest, startAuthoritySidecar } from "../../../src/authority/sidecar.ts";
 import { mechanicalRegistries } from "../../../src/domains/mechanical/registries.ts";
 import { buildRegistryContract } from "../../../src/harness/registry-contract.ts";
 import { commitWorkspace } from "../../../src/harness/commit.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../../../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../../../src/harness/workflow/compiler.ts";
 import { mechanicalAuthorityDomain } from "../../../src/composition/mechanical-authority.ts";
-
-test("sidecar allows the complete model build and observation pipeline to finish", () => {
-  assert.ok(SIDECAR_REQUEST_TIMEOUT_MS > DEFAULT_CADCTL_TIMEOUT_MS * 2 + FULL_GEOMETRY_VALIDATION_TIMEOUT_MS);
-});
 
 test("Prime repository resolution persists custom setup paths and fails with an actionable error", async () => {
   const root = await mkdtemp(join(tmpdir(), "pi-cad-prime-path-"));

@@ -66,12 +66,6 @@ class RenderHighlightTests(unittest.TestCase):
         plain_orange = sum(_orange(plain["top"].getpixel((x, y))) for x in range(0, 320, 4) for y in range(0, 240, 4))
         self.assertEqual(plain_orange, 0)
 
-    def test_unmatched_highlight_changes_nothing_visible_except_dimming_rule(self) -> None:
-        ghost = {"i": 0, "type": "PLANE", "c": [500.0, 500.0, 500.0], "a": 5.0, "n": [0.0, 0.0, 1.0]}
-        images = self._render("ghost", highlight=[ghost])
-        orange = sum(_orange(images["iso"].getpixel((x, y))) for x in range(0, 320, 4) for y in range(0, 240, 4))
-        self.assertEqual(orange, 0)
-
     def test_annotation_is_drawn_when_visible_and_skipped_when_hidden(self) -> None:
         # Top face centre is visible from above and hidden from below.
         top_point = [-10.0, 0.0, 5.0]

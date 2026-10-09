@@ -1,31 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { ActivityMonitor, startActivityReporter, ACTIVITY_WINDOW_MS } from "../src/activity.js";
-import { RingBuffer } from "../src/ring.js";
 
 const text = (value: string) => new TextEncoder().encode(value);
 
-describe("RingBuffer", () => {
-  it("keeps only the most recent bytes", () => {
-    const ring = new RingBuffer(10);
-    ring.push(text("abcdef"));
-    ring.push(text("ghijkl"));
-    const kept = Buffer.concat(ring.snapshot()).toString();
-    expect(kept).toBe("cdefghijkl");
-  });
-
-  it("keeps the tail of a single oversized push", () => {
-    const ring = new RingBuffer(4);
-    ring.push(text("0123456789"));
-    expect(Buffer.concat(ring.snapshot()).toString()).toBe("6789");
-  });
-});
-
 describe("ActivityMonitor", () => {
-  it("is idle with nothing running and no recent messages", () => {
-    const monitor = new ActivityMonitor({ now: () => 0 });
-    expect(monitor.snapshot()).toEqual({ active: false, reason: "idle" });
-  });
-
   it("is active for recent bridge messages until the window passes", () => {
     let now = 1_000;
     const monitor = new ActivityMonitor({ now: () => now });

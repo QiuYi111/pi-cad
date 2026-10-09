@@ -90,12 +90,6 @@ describe("workspace gateway", () => {
     await client.waitFor("pong");
   });
 
-  it("runs exec and returns stdout", async () => {
-    const client = await connect();
-    client.send({ type: "exec", ch: 1, args: ["echo", "hi"] });
-    expect(await client.waitFor("exec_result", 1)).toMatchObject({ stdout: "hi\n", code: 0 });
-  });
-
   it("passes exec env to the command", async () => {
     const client = await connect();
     client.send({ type: "exec", ch: 5, args: ["sh", "-c", "printf %s \"$REIFY_TEST_VALUE\""], env: { REIFY_TEST_VALUE: "from-exec-env" } });

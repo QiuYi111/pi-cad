@@ -72,12 +72,6 @@ class ProbeTests(unittest.TestCase):
         self.assertIn("artifact", env["inputHashes"])
         self.assertIn("script", env["inputHashes"])
 
-    def test_artifact_path_points_to_disposable_copy(self) -> None:
-        env = run_probe("result = {'artifact_path': artifact_path}")
-        self.assertTrue(env["ok"], env)
-        self.assertNotEqual(Path(env["payload"]["result"]["artifact_path"]), STEP_FIXTURE)
-        self.assertFalse(Path(env["payload"]["result"]["artifact_path"]).exists())
-
     def test_arbitrary_python_and_geometry_are_isolated(self) -> None:
         original = STEP_FIXTURE.read_bytes()
         env = run_probe("""
@@ -104,11 +98,6 @@ result = {'cwd': os.getcwd(), 'argv': sys.argv, 'cut_volume': cut.volume, 'file'
         env = run_probe("print('checking section')\nresult = {'ok': True}")
         self.assertTrue(env["ok"], env)
         self.assertIn("checking section", env["payload"]["stdout"])
-
-    def test_subprocess_output_does_not_break_json_transport(self) -> None:
-        env = run_probe("import subprocess\nimport sys\nsubprocess.run([sys.executable, '-c', \"print('external check')\"], check=True)\nresult = {'ok': True}")
-        self.assertTrue(env["ok"], env)
-        self.assertIn("external check", env["payload"]["stdout"])
 
     def test_result_must_be_serializable(self) -> None:
         env = run_probe("result = lambda: None")

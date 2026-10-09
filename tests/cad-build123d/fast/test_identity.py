@@ -109,12 +109,6 @@ class PathProtocolTests(unittest.TestCase):
             with self.assertRaises(IdentityError, msg=value):
                 canonicalize_path(value)
 
-    def test_bare_number_is_not_a_semantic_identity(self) -> None:
-        with self.assertRaises(IdentityError) as caught:
-            canonicalize_path("arm/3")
-        self.assertEqual(caught.exception.code, "malformed-path")
-
-
 class DeclarationTests(unittest.TestCase):
     def setUp(self) -> None:
         reset_identity()

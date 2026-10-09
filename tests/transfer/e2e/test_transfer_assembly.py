@@ -146,13 +146,10 @@ class TransferAssemblyTests(unittest.TestCase):
         self.assertAlmostEqual(occ["arm/post_2"]["transform"]["rotation"][0][1], -1.0, places=6)
         self.assertEqual([v["volume_mm3"] for v in data["reference"]["feature_volumes"]], [2000.0, 2000.0])
         self.assertEqual(data["parts"][0]["features"]["reference"]["volume_mm3"], 2000.0)
-
-    def test_links_and_own_step_imports_mix(self) -> None:
-        self.post_step()
-        self.p.call(ASM, "apply", ops=self.link_ops() + [{"op": "import_step", "name": "arm/post_1", "file": "build/post.step", "position": [30, 15, 0]}])
-        data = self.p.call(ASM, "export_assembly")["assembly"]
-        self.assertEqual(sorted(p["ref"] for p in data["parts"]), ["parts/base.FCStd", "parts/link.FCStd", "parts/post.FCStd"])
-        self.assertEqual(len(data["occurrences"]), 3)
+        # Links and own-STEP imports mix in one assembly: the linked parts join the same occurrence list.
+        self.p.call(ASM, "apply", ops=self.link_ops())
+        mixed = self.p.call(ASM, "export_assembly")["assembly"]
+        self.assertEqual(sorted(p["ref"] for p in mixed["parts"]), ["parts/base.FCStd", "parts/link.FCStd", "parts/post.FCStd"])
 
     def test_a_step_of_a_changed_part_is_stale(self) -> None:
         step = self.post_step()

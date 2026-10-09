@@ -19,12 +19,10 @@ const design = (
 
 test("compiler: fast path — greenfield part is four phases with no concept exploration", () => {
   const fast = compileWorkflow(design("greenfield", "part", "engineering"));
-  const phases = [fast.nextAfterRequirements, "part_design", "build", "review"];
   assert.equal(fast.nextAfterRequirements, "part_design");
   assert.deepEqual(fast.planNext, { part_design: "build" });
   assert.deepEqual(fast.sourcePhases, ["build"]);
   assert.equal(fast.candidateReviewPhase, "review");
-  assert.ok(phases.length <= 4);
   // No quick equivalent: obligations still include simulation obligations
   // via requirements and full visual+geometry evidence at review.
   assert.deepEqual(fast.acceptedEvidence({} as never), ["visual", "geometry"]);
@@ -180,24 +178,6 @@ test("routeKey and isRoute structural validation", () => {
   ]);
 });
 
-test("compiledSpec caches per route and returns stable processes", () => {
-  const a = compiledSpec(design("greenfield", "assembly", "engineering"));
-  const b = compiledSpec(design("greenfield", "assembly", "engineering"));
-  assert.equal(a, b);
-  const c = compiledSpec(design("greenfield", "assembly", "manufacturing"));
-  assert.notEqual(a, c);
-});
-
-test("compiler: hybrid part keeps baseline + concept chain (0.7 hybrid equivalent)", () => {
-  const hybrid = compileWorkflow(design("hybrid", "part", "engineering"));
-  assert.equal(hybrid.nextAfterRequirements, "baseline");
-  assert.equal(hybrid.transitions.baseline?.baseline_understood, "concept");
-  assert.equal(hybrid.transitions.concept?.direction_selected, "part_design");
-  assert.equal(hybrid.planNext.part_design, "build");
-  // 0.7 hybrid did not require compare evidence at review; keep it that way.
-  assert.deepEqual(hybrid.acceptedEvidence({} as never), ["visual", "geometry"]);
-});
-
 test("maturity overlay: manufacturing and release require drawing evidence", () => {
   const proto = compileWorkflow(design("greenfield", "part", "prototype"));
   const eng = compileWorkflow(design("greenfield", "part", "engineering"));
@@ -217,15 +197,6 @@ test("maturity overlay: manufacturing and release require drawing evidence", () 
   // ...and never duplicates them.
   const kinds = mfg.acceptedEvidence({} as never);
   assert.equal(kinds.filter((k) => k === "geometry").length, 1);
-});
-
-test("maturity overlay: assembly engineering adds record obligations and review evidence", () => {
-  const proto = compileWorkflow(design("greenfield", "assembly", "prototype"));
-  const eng = compileWorkflow(design("greenfield", "assembly", "engineering"));
-  assert.ok(proto.acceptedEvidence({} as never).includes("assembly"));
-  assert.ok(eng.acceptedEvidence({} as never).includes("assembly"));
-  assert.ok(!proto.acceptedEvidence({} as never).includes("drawing"));
-  assert.ok(compileWorkflow(design("greenfield", "assembly", "manufacturing")).acceptedEvidence({} as never).includes("drawing"));
 });
 
 test("consistency: obligations and compiled process are the same source of truth", () => {

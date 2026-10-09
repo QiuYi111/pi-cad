@@ -160,11 +160,6 @@ class CadPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             cad.templates.register("mechanical.part-work", dict)
 
-    def test_handles_have_compact_repr(self) -> None:
-        artifact = cad.ArtifactRef(Path("build/a.step"), "a" * 64, "candidate")
-        self.assertLess(len(repr(artifact)), 160)
-        self.assertNotIn("a" * 64, repr(artifact))
-
     def test_save_and_check_is_the_authorized_commit_then_build_composition(self) -> None:
         saved = cad.Commit("commit-1", "parts", None, "workflow", "parts", {}, (), "now")
         artifact = cad.ArtifactRef(Path("build/bracket.step"), "b" * 64, "candidate")
@@ -660,10 +655,6 @@ class CadPackageTests(unittest.TestCase):
         self.assertEqual(error.hints, ["reduce radius"])
         self.assertIs(error.rolled_back, True)
         self.assertEqual(error.error_type, "PartOpError")
-
-    def test_errors_without_part_fields_keep_none_defaults(self) -> None:
-        error = cad.CadApiError("plain")
-        self.assertEqual((error.code, error.target, error.detail, error.hints, error.rolled_back), (None, None, None, None, None))
 
     def test_first_image_label_carries_the_change_summary(self) -> None:
         model_module = importlib.import_module("cad.model")

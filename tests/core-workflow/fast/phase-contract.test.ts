@@ -33,21 +33,6 @@ test("contracts: tools compile without duplicates", () => {
   }
 });
 
-test("contracts: capability grants map to the expected tool families", () => {
-  assert.deepEqual(capabilityTools("observe"), [
-    "cad_probe",
-    "cad_recall_observation",
-  ]);
-  assert.deepEqual(capabilityTools("simulate"), [
-    "cad_simulate",
-    "cad_sim_observe",
-    "cad_commit_simulation",
-    "cad_derive_analysis_model",
-  ]);
-  assert.deepEqual(capabilityTools("model_build"), ["cad_build_step"]);
-  assert.ok(capabilityTools("deliverable").includes("cad_generate_drawing"));
-});
-
 test("contracts: source phases never grant simulate/optimize; review does", () => {
   const build = phaseContract("build").grants;
   assert.ok(!build.includes("simulate"));

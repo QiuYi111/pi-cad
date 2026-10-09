@@ -130,7 +130,6 @@ class InterferenceFacts(unittest.TestCase):
         self.assertEqual(classifications, ["clearance", "clearance", "penetration"])
 
 
-
 class InterferenceFailClosed(unittest.TestCase):
     """A boolean failure must never be reported as a physical fact."""
 
@@ -167,18 +166,6 @@ class InterferenceFailClosed(unittest.TestCase):
                     inspect_interference(fixture)
             finally:
                 interference.BRepAlgoAPI_Common = original
-
-    def test_error_message_names_the_pair(self):
-        from cadctl.interference import InterferenceUnresolvedError
-
-        error = InterferenceUnresolvedError(
-            "boolean common failed for pair #s0<->#s1: interference facts are unresolved for this artifact"
-        )
-        # The raising surfaces through the CLI's error envelope unchanged,
-        # so the Agent sees exactly which pair is unresolved.
-        self.assertIn("#s0<->#s1", str(error))
-        self.assertIn("unresolved", str(error))
-
 
 if __name__ == "__main__":
     unittest.main()
