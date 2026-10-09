@@ -25,7 +25,7 @@ from .naming import canonicalize_path
 from .effects import check_feature_effect
 from .ops import handler_for, validate_ops
 from .ops.context import OpContext
-from .assembly import apply_joints, joint_objects, refresh_links, units
+from .assembly import apply_joints, joint_objects, joint_warnings, refresh_links, units
 from . import roles as roles_module
 from .roles import BodyRoles, compute_body_roles, label_anchor
 from .queries import DEFAULT_DENSITY_G_CM3
@@ -404,6 +404,7 @@ class DocumentSession:
                 warnings.extend(ctx.warnings)
                 ctx.warnings.clear()
             index = -1
+            warnings.extend(joint_warnings(self))
             self.check_bodies()
         except ReifyOpError as error:
             self._abort()
@@ -651,4 +652,4 @@ class DocumentSession:
             }
             for item in joint_objects(self)
         ]
-        return {"rev": self.rev, "params": self.param_values(), "bodies": features, "occurrences": occurrences, "joints": joints, "requirements": requirements}
+        return {"rev": self.rev, "params": self.param_values(), "bodies": features, "occurrences": occurrences, "joints": joints, "requirements": requirements, "warnings": joint_warnings(self)}

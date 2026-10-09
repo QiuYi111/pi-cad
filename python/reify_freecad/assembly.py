@@ -410,17 +410,70 @@ def joint(ctx: Any, op: dict[str, Any]) -> None:
     apply_joints(session)
 
 
+def _joint_path(item: Any) -> str:
+    return get_path(item) or item.Label
+
+
+def _selector(stored: str) -> dict[str, Any]:
+    """The role selector of one side of a joint, without the unit it was resolved to when the joint was made."""
+    side = json.loads(stored)
+    return {k: side[k] for k in ("feature", "role") if k in side}
+
+
+def joint_order(items: list[Any]) -> list[Any]:
+    """The joints in the order they apply: a joint runs after the joint that drives its parent unit.
+
+    A child unit has one driving joint, and the drivers must form a chain: a unit driven twice, or a loop of
+    joints, has no pose that is right, so both are refused."""
+    driver: dict[str, Any] = {}
+    for item in items:
+        child = json.loads(item.Child)["unit"]
+        if child in driver:
+            raise ReifyOpError("OP_SCHEMA_INVALID", f"{child} is driven by two joints, {_joint_path(driver[child])} and {_joint_path(item)}",
+                               detail={"path": "child", "reason": "two joints"})
+        driver[child] = item
+    order: list[Any] = []
+    placed: set[str] = set()
+    for item in items:
+        chain: list[Any] = []
+        node: Any = item
+        while node is not None and node.Name not in placed:
+            names = [member.Name for member in chain]
+            if node.Name in names:
+                loop = chain[names.index(node.Name):] + [node]
+                raise ReifyOpError("OP_SCHEMA_INVALID", "joints form a cycle: " + " -> ".join(_joint_path(member) for member in loop),
+                                   detail={"path": "parent", "reason": "cycle"})
+            chain.append(node)
+            node = driver.get(json.loads(node.Parent)["unit"])
+        for member in reversed(chain):
+            order.append(member)
+            placed.add(member.Name)
+    return order
+
+
+def joint_warnings(session: Any) -> list[dict[str, Any]]:
+    """JOINT_DANGLING for each joint whose parent or child role selector no longer names one face."""
+    out = []
+    for item in joint_objects(session):
+        for stored in (item.Parent, item.Child):
+            selector = _selector(stored)
+            try:
+                find_role_face(session, selector)
+            except ReifyOpError:
+                out.append({"code": "JOINT_DANGLING", "joint": _joint_path(item), "missing": selector})
+                break
+    return out
+
+
 def apply_joints(session: Any) -> bool:
     """Set the pose of every joint's child from its current value; True when a pose changed."""
     changed = False
-    for item in joint_objects(session):
-        parent = json.loads(item.Parent)
-        child = json.loads(item.Child)
+    for item in joint_order(joint_objects(session)):
         try:
-            parent_unit, parent_face = find_role_face(session, {k: parent[k] for k in ("feature", "role") if k in parent})
-            child_unit, child_face = find_role_face(session, {k: child[k] for k in ("feature", "role") if k in child})
+            parent_unit, parent_face = find_role_face(session, _selector(item.Parent))
+            child_unit, child_face = find_role_face(session, _selector(item.Child))
         except ReifyOpError:
-            continue  # a dangling joint is reported by the requirement check, not here
+            continue  # a dangling joint is reported by joint_warnings, not here
         parent_roles = parent_unit.roles(session)
         frame_parent = parent_roles.placement.multiply(face_frame(parent_face))
         frame_child = face_frame(child_face)

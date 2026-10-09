@@ -364,6 +364,64 @@ class SplitFaceTests(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_FREECAD, "FreeCAD is not importable in this interpreter")
+class JointChainTests(unittest.TestCase):
+    """Joints in a chain are applied parent first, whatever order they were made in."""
+
+    def setUp(self) -> None:
+        self.p = Project()
+        self.addCleanup(self.p.close)
+        self.p.open("parts/shaft.FCStd", "shaft")
+        self.p.call("parts/shaft.FCStd", "apply", ops=grooved_shaft())
+        self.p.open("assembly/chain.FCStd", "chain")
+
+    def session(self) -> Any:
+        return self.p.worker.sessions[self.p.path("assembly/chain.FCStd")]
+
+    def unit_box(self, path: str) -> Any:
+        from reify_freecad.assembly import unit_by_path
+
+        return unit_by_path(self.session(), path).shape().BoundBox
+
+    def joint(self, path: str) -> Any:
+        from reify_freecad.assembly import joint_objects
+        from reify_freecad.core import get_path
+
+        return next(item for item in joint_objects(self.session()) if get_path(item) == path)
+
+    def test_the_last_unit_follows_a_joint_made_after_its_child_joint(self) -> None:
+        # j3 (upper arm -> forearm) is made before j2 (base -> upper arm): j2 must still be applied first.
+        self.p.call("assembly/chain.FCStd", "apply", ops=[
+            {"op": "link", "name": "chain/a", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "chain/b", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "chain/c", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "joint", "name": "chain/j3", "type": "prismatic",
+             "parent": {"feature": "chain/b/cyl", "role": "top"}, "child": {"feature": "chain/c/cyl", "role": "bottom"}},
+            {"op": "joint", "name": "chain/j2", "type": "prismatic", "value": 0,
+             "parent": {"feature": "chain/a/cyl", "role": "top"}, "child": {"feature": "chain/b/cyl", "role": "bottom"}},
+        ])
+        self.assertAlmostEqual(self.unit_box("chain/c").ZMin, 80.0, places=3)
+        # Set j2 the way a sweep does, then recompute: the forearm must move with the upper arm.
+        self.joint("chain/j2").Value = 5.0
+        self.session().recompute()
+        self.assertAlmostEqual(self.unit_box("chain/b").ZMin, 45.0, places=3)
+        self.assertAlmostEqual(self.unit_box("chain/c").ZMin, 85.0, places=3, msg="j3 follows the upper arm moved by j2")
+
+    def test_a_joint_whose_role_no_longer_resolves_is_reported(self) -> None:
+        self.p.call("assembly/chain.FCStd", "apply", ops=[
+            {"op": "link", "name": "chain/a", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "link", "name": "chain/b", "part": "parts/shaft.FCStd", "body": "shaft"},
+            {"op": "joint", "name": "chain/j2", "type": "prismatic", "value": 0,
+             "parent": {"feature": "chain/a/cyl", "role": "top"}, "child": {"feature": "chain/b/cyl", "role": "bottom"}},
+        ])
+        # The role is gone (as after an edit that removes the face): set the selector to one that matches nothing.
+        self.joint("chain/j2").Parent = json.dumps({"feature": "chain/a/cyl", "role": "missing", "unit": "chain/a"})
+        dangling = {"code": "JOINT_DANGLING", "joint": "chain/j2", "missing": {"feature": "chain/a/cyl", "role": "missing"}}
+        self.assertEqual(self.p.call("assembly/chain.FCStd", "tree")["warnings"], [dangling])
+        result = self.p.call("assembly/chain.FCStd", "apply", ops=[{"op": "param", "name": "spare", "value": 1}])
+        self.assertIn(dangling, result["warnings"])
+
+
+@unittest.skipUnless(HAVE_FREECAD, "FreeCAD is not importable in this interpreter")
 class AssemblyScaleTests(unittest.TestCase):
     """An apply must not redo the work of every part already in the assembly (80 parts took hours)."""
 
