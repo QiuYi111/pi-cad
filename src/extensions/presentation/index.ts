@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
+import { MECHANICAL_ACTION_PARAMETERS } from "../../domains/mechanical/action-schemas.ts";
 import { resolve } from "node:path";
-import { Type } from "typebox";
 
 import { imageContent } from "../../shared/capability.ts";
 import { executeMechanicalRecipeV7 } from "../../domains/mechanical/recipe-actions-v7.ts";
@@ -20,7 +20,7 @@ export default function cadPresentationExtension(pi: ExtensionAPI) {
       "Carry the committed assembly_design sequence and explode directions into assemblyDefinition so the animation matches the real install order.",
       "unavailable/failed are honest states; never describe a scene description as a render.",
     ],
-    parameters: Type.Object({ recipe: Type.String({ minLength: 1 }), obligationRef: Type.Optional(Type.String({ minLength: 1 })), stage: Type.Enum({ validate: "validate", preview: "preview", generate: "generate", run: "run" }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))) }, { additionalProperties: false }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_render_scene,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "presentation", recipe: params.recipe, action: params.stage, ...(params.obligationRef ? { obligationRef: params.obligationRef } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });

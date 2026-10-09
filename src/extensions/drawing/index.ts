@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerMechanicalActionTool } from "../../domains/mechanical/register-action.ts";
-import { Type } from "typebox";
+import { MECHANICAL_ACTION_PARAMETERS } from "../../domains/mechanical/action-schemas.ts";
 
 import { executeMechanicalRecipeV7 } from "../../domains/mechanical/recipe-actions-v7.ts";
 
@@ -16,7 +16,7 @@ export default function cadDrawingExtension(pi: ExtensionAPI) {
       "A projection without complete manufacturing definition is not a release drawing.",
       "Treat generated files as execution evidence, not automatic drawing completeness.",
     ],
-    parameters: Type.Object({ recipe: Type.String({ minLength: 1 }), obligationRef: Type.Optional(Type.String({ minLength: 1 })), stage: Type.Enum({ validate: "validate", generate: "generate" }), outputs: Type.Optional(Type.Array(Type.String({ minLength: 1 }))) }, { additionalProperties: false }),
+    parameters: MECHANICAL_ACTION_PARAMETERS.cad_generate_drawing,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       try {
         const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "drawing", recipe: params.recipe, action: params.stage, ...(params.obligationRef ? { obligationRef: params.obligationRef } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
