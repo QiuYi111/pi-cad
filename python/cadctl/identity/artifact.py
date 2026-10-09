@@ -10,7 +10,7 @@ The three reference families kept here are:
 ``occ-<hash12>-<traversal path>``
     Same spelling and same traversal as :func:`cadctl.assembly.assembly_tree`.
 ``surf-<hash10>``
-    Same derivation as :func:`cadctl.simulation.surface_selector.enumerate_surfaces`.
+    Same derivation as :func:`cadctl.shape_facts.enumerate_surfaces`.
 ``solidIndex``
     Ordinal position inside ``shape.solids()``: an internal mapping bound to
     the artifact hash, never an outward-stable identity.
@@ -26,6 +26,7 @@ import build123d as bd
 from OCP.gp import gp_XYZ
 
 from ..assembly import _location_dict, assembly_tree_from_shape
+from ..shape_facts import _face_facts, surface_id
 from .protocol import IdentityError
 
 
@@ -168,8 +169,6 @@ class ArtifactModel:
     def _collect_faces(self) -> list[dict[str, Any]]:
         # Reuse the probe's fact extraction and hash-bound face ID so a
         # ``surf-*`` an agent saw in cad_inspect_surfaces resolves here too.
-        from ..simulation.surface_selector import _face_facts, surface_id
-
         solids = list(self.shape.solids())
         groups = [(f"solid-{index}", index, list(solid.faces())) for index, solid in enumerate(solids)]
         if not groups:
