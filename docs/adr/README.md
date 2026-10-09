@@ -17,5 +17,5 @@ An ADR records one decision that changes how the repo is built, tested or struct
 | No. | Title | Status |
 | --- | --- | --- |
 | [0001](0001-remove-v6-kernel.md) | Remove the v6 kernel | accepted |
-| [0002](0002-freecad-default-backend.md) | FreeCAD (`cad.part`) is the default modeling backend | accepted |
+| [0002](0002-freecad-default-backend.md) | FreeCAD (`cad.part`) is the default modeling path | accepted |
 | [0003](0003-test-layering.md) | Test layering: PR runs touched areas, nightly runs the rest | accepted |
