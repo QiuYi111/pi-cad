@@ -13,7 +13,7 @@ import { artifactPathForKind, buildStep, envelopeArtifactHash, FULL_GEOMETRY_VAL
 import { executeMechanicalRecipeV7 } from "../domains/mechanical/recipe-actions-v7.ts";
 import { cadStartSnapshot } from "../harness/kernel.ts";
 import { discoverWorkflowPackages, resolveWorkflowPackage } from "../harness/workflow/packages.ts";
-import type { AgentApiRequest } from "./protocol.ts";
+import type { AgentApiRequest } from "../authority/protocol.ts";
 import { bootstrapAgentApiContracts } from "./bootstrap.ts";
 import { requireCurrentAuthorization } from "./authorization.ts";
 import type { Operation, OperationAuthority } from "../harness/permissions.ts";

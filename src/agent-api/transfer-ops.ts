@@ -23,7 +23,7 @@ import { inspectGeometry } from "../shared/capability.ts";
 import { PartOpError } from "../shared/freecad-worker.ts";
 import type { GeometryPayload } from "../shared/protocol.ts";
 import { partRequest, readDfmSummary, resolvePartPaths } from "./part-ops.ts";
-import type { AgentApiRequest } from "./protocol.ts";
+import type { AgentApiRequest } from "../authority/protocol.ts";
 import { projectRelativePath } from "./observe.ts";
 import { compareEquivalence, type FeatureVolume } from "./transfer-check.ts";
 

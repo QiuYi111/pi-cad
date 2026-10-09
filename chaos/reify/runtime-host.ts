@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import { startAuthoritySidecar } from "../../src/authority/sidecar.ts";
+import { mechanicalAuthorityDomain } from "../../src/composition/mechanical-authority.ts";
 
 /**
  * Chaos-side host for the real Reify runtime.
@@ -15,7 +16,7 @@ export async function runReifyRuntimeHost(argv: string[]): Promise<void> {
   const project = argv[0];
   if (!project) throw new Error("reify runtime host requires a project directory");
   const runtimeDirectory = argv[1] ?? join(project, ".chaos-runtime");
-  const sidecar = await startAuthoritySidecar({ cwd: project, runtimeDirectory });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd: project, runtimeDirectory });
   process.stdout.write(
     `${JSON.stringify({
       ok: true,

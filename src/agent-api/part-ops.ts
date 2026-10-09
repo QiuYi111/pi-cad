@@ -27,7 +27,7 @@ import { PartOpError, runPartCommand } from "../shared/freecad-worker.ts";
 import type { FaceFingerprint, GeometryPayload } from "../shared/protocol.ts";
 import { sha256File } from "../shared/hash.ts";
 import { observeCandidate, projectRelativePath } from "./observe.ts";
-import type { AgentApiRequest } from "./protocol.ts";
+import type { AgentApiRequest } from "../authority/protocol.ts";
 
 type PartRequest = Extract<AgentApiRequest, { op: `part-${string}` }>;
 type Validation = "auto" | "fast" | "full";

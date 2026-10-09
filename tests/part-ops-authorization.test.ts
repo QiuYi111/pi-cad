@@ -10,6 +10,7 @@ import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
 import { buildRegistryContract } from "../src/harness/registry-contract.ts";
 import { HarnessProjectStoreV7 } from "../src/harness/run-store.ts";
 import { compileWorkflowDefinition } from "../src/harness/workflow/compiler.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 // An observe-only phase allows probe.run but not model.build, which is exactly
 // the line between the read-only and the mutating part-* operations.
@@ -91,11 +92,11 @@ test("part-open, part-apply and part-undo need model.build; the others need only
 test("a read-only author may run trial and read operations but not change the part", async () => {
   await withProject(async (cwd) => {
     for (const request of mutating) {
-      const denied = await dispatchSidecarRequest("author", cwd, request as never, undefined, undefined, { authorReadOnly: true });
+      const denied = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, request as never, undefined, undefined, { authorReadOnly: true });
       assert.equal(denied.ok, false, request.op);
       assert.match(denied.error!.message, /desktop read-only mode denies operation/, request.op);
     }
-    const read = await dispatchSidecarRequest("author", cwd, reading[1] as never, undefined, undefined, { authorReadOnly: true });
+    const read = await dispatchSidecarRequest(mechanicalAuthorityDomain, "author", cwd, reading[1] as never, undefined, undefined, { authorReadOnly: true });
     assert.equal(read.ok, false);
     assert.equal(read.error!.code, "FREECAD_NOT_INSTALLED", "the read passed the read-only gate and failed only for lack of FreeCAD");
     assert.deepEqual(read.error!.hints, ["run: npm run setup:freecad"]);
@@ -105,7 +106,7 @@ test("a read-only author may run trial and read operations but not change the pa
 test("the reviewer endpoint exposes part-dfm, a read that needs probe.run", async () => {
   await withProject(async (cwd) => {
     // Without a scoped reviewId the request fails at the reviewer's admission check, which only runs for exposed operations.
-    const reviewed = await dispatchSidecarRequest("reviewer", cwd, reading[5] as never);
+    const reviewed = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", cwd, reading[5] as never);
     assert.equal(reviewed.ok, false);
     assert.doesNotMatch(reviewed.error!.message, /reviewer endpoint does not expose operation/);
     assert.match(reviewed.error!.message, /missing its scoped reviewId/, "the operation passed the endpoint gate");
@@ -115,7 +116,7 @@ test("the reviewer endpoint exposes part-dfm, a read that needs probe.run", asyn
 test("the reviewer endpoint exposes no mutating part operation", async () => {
   await withProject(async (cwd) => {
     for (const request of mutating) {
-      const denied = await dispatchSidecarRequest("reviewer", cwd, request as never);
+      const denied = await dispatchSidecarRequest(mechanicalAuthorityDomain, "reviewer", cwd, request as never);
       assert.equal(denied.ok, false);
       assert.match(denied.error!.message, /reviewer endpoint does not expose operation/, request.op);
     }

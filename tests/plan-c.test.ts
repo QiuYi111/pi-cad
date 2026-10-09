@@ -21,6 +21,7 @@ import { requestAuthority } from "../src/integrations/prime/sidecar-client.ts";
 import { handleAgentApi } from "../src/agent-api/handlers.ts";
 import probeExtension from "../src/extensions/probe/index.ts";
 import { startAuthoritySidecar } from "../src/authority/sidecar.ts";
+import { mechanicalAuthorityDomain } from "../src/composition/mechanical-authority.ts";
 
 function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
@@ -625,7 +626,7 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
   const previousSessionId = process.env.PI_CAD_SESSION_ID;
   let reportedModel: unknown;
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime, onAuthorModelSelection: (selection) => { reportedModel = selection; } });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd, runtimeDirectory: runtime, onAuthorModelSelection: (selection) => { reportedModel = selection; } });
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const handlers = new Map<string, Function>();
   const registeredTools = new Map<string, unknown>();
@@ -725,7 +726,7 @@ test("thin Prime extension durably appends Phase Contracts and is silent without
   assert.match(unavailableImage.reason, /authority sidecar unavailable/i);
   const empty = await mkdtemp(join(tmpdir(), "pi-cad-plan-c-empty-"));
   const emptyRuntime = await mkdtemp(join(tmpdir(), "pi-cad-sidecar-empty-"));
-  const emptySidecar = await startAuthoritySidecar({ cwd: empty, runtimeDirectory: emptyRuntime });
+  const emptySidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd: empty, runtimeDirectory: emptyRuntime });
   process.env.PI_CAD_AUTHOR_SOCKET = emptySidecar.authorSocket;
   try {
     assert.equal(await context({ messages: original }, { cwd: empty }), undefined);
@@ -748,7 +749,7 @@ test("Prime preserves the first user mission when workflow starts in the same tu
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-pending-mission-"));
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-pending-mission-sidecar-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd, runtimeDirectory: runtime });
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const handlers = new Map<string, Function>();
   const sentMessages: Array<{ message: any; options: any }> = [];
@@ -784,7 +785,7 @@ test("Prime appends a generated concept PNG directly to model context", async ()
   const cwd = await mkdtemp(join(tmpdir(), "pi-cad-concept-grounding-"));
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-concept-grounding-sidecar-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd, runtimeDirectory: runtime });
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const handlers = new Map<string, Function>();
   const sentMessages: Array<{ message: any; options: any }> = [];
@@ -819,7 +820,7 @@ test("Prime restores the Phase Contract key before before_agent_start on resume"
   const { cwd } = await projectFixture();
   const runtime = await mkdtemp(join(tmpdir(), "pi-cad-resume-contract-"));
   const previousSocket = process.env.PI_CAD_AUTHOR_SOCKET;
-  const sidecar = await startAuthoritySidecar({ cwd, runtimeDirectory: runtime });
+  const sidecar = await startAuthoritySidecar({ domain: mechanicalAuthorityDomain, cwd, runtimeDirectory: runtime });
   process.env.PI_CAD_AUTHOR_SOCKET = sidecar.authorSocket;
   const firstHandlers = new Map<string, Function>();
   const pi = { on(name: string, handler: Function) { firstHandlers.set(name, handler); }, registerTool() {}, getThinkingLevel() { return "low"; }, sendMessage() {} } as any;
