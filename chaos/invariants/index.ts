@@ -1,5 +1,5 @@
 import { ACTIVE_WORKER_STATUSES, isTerminal } from "../sut/server.ts";
-import { isProcessAlive } from "../sut/proc.ts";
+import { isProcessAlive } from "../support/process.ts";
 import { InvariantViolation, type InvariantContext, type InvariantDefinition } from "../types.ts";
 
 /** A worker record may lag a real exit by a few ms; ignore shorter gaps. */

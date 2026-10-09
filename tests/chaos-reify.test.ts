@@ -28,7 +28,7 @@ import { injectReifyFault, recoverInjectedFaults, replayReifyArtifact, runReifyS
 import { ReifyRuntime } from "../chaos/reify/runtime.ts";
 import { ReifySession, listKernelProcesses, processTree } from "../chaos/reify/session.ts";
 import { ReifyTrace } from "../chaos/reify/trace.ts";
-import { isProcessAlive } from "../chaos/sut/proc.ts";
+import { isProcessAlive } from "../chaos/support/process.ts";
 import type { Command } from "../chaos/reify/model.ts";
 import { FaultNotApplicable } from "../chaos/reify/types.ts";
 import type { ReifyFaultDefinition } from "../chaos/reify/types.ts";

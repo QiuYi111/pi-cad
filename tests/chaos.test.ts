@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { Session, PROXY_NAME } from "../chaos/sut/session.ts";
-import { isProcessAlive } from "../chaos/sut/proc.ts";
+import { isProcessAlive } from "../chaos/support/process.ts";
 import { Trace, InvariantViolation } from "../chaos/types.ts";
 import { checkInvariants } from "../chaos/invariants/index.ts";
 import { executeCommand, runSequence, settleWindowFor } from "../chaos/runner/runner.ts";

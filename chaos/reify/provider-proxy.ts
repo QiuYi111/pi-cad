@@ -1,3 +1,4 @@
+import { sleep } from "../support/process.ts";
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
 import type { AddressInfo } from "node:net";
@@ -55,7 +56,6 @@ export interface ProviderProxyStats {
   bytesDown: number;
 }
 
-const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
 /** Split a real provider base URL into the pieces the proxy needs. */
 export function parseUpstream(baseUrl: string): ProviderUpstream {

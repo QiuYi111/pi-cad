@@ -17,7 +17,7 @@ import {
   transportTarget,
   type CredentialSandbox,
 } from "./provider.ts";
-import { processTree } from "./session.ts";
+import { processTree, sleep } from "../support/process.ts";
 import { FaultNotApplicable } from "./types.ts";
 import type { FaultPrecondition, Params, ReifyContext, ReifyFaultDefinition } from "./types.ts";
 
@@ -43,7 +43,6 @@ let recoveryCounter = 0;
 /** Build output paths must differ per conversation and per attempt. */
 let buildCounter = 0;
 
-const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
 /**
  * The conversation a generated fault param really selects.

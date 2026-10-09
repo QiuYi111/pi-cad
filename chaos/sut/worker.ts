@@ -1,4 +1,5 @@
-import { httpJson, post, sleep } from "./http.ts";
+import { httpJson, post } from "./http.ts";
+import { sleep } from "../support/process.ts";
 
 export interface WorkerOptions {
   workerId: string;

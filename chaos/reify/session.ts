@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writ
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { isProcessAlive, REPO_ROOT } from "../sut/proc.ts";
+import { isProcessAlive, procCmdline, procPids, procStat, processTree, REPO_ROOT, sleep } from "../support/process.ts";
 import type { ReifyRuntime } from "./runtime.ts";
 import type { FaultOutcome } from "./types.ts";
 
@@ -21,8 +21,8 @@ import type { FaultOutcome } from "./types.ts";
  */
 
 export const AGENT_API = join(REPO_ROOT, "scripts", "pi-cad-agent-api.mjs");
-/** Run statuses Reify treats as final; a terminal run may never go back. */
-export const TERMINAL_RUN_STATUSES = ["done", "aborted", "blocked_user", "blocked_external", "budget_exhausted"] as const;
+/** Run statuses Reify treats as final; a terminal run may never go back (one copy: the product catalog). */
+export { TERMINAL_RUN_STATUSES } from "../../src/chaos/invariants/catalog.ts";
 
 const DEFAULT_CALL_TIMEOUT_MS = 180_000;
 
@@ -85,19 +85,6 @@ export interface ReifyBuildHandle {
   kill(signal?: NodeJS.Signals): void;
 }
 
-const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
-
-/** Read one `/proc/<pid>/stat` line without tripping over `comm` parentheses. */
-function procStat(pid: number): { ppid: number; state: string; pgrp: number } | null {
-  try {
-    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const fields = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
-    return { state: fields[0] ?? "", ppid: Number(fields[1]), pgrp: Number(fields[2]) };
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Every live CAD kernel process on the machine: the warm `cadctl.worker` the
  * owner spawned and the forked build children underneath it. A runtime that
@@ -106,45 +93,14 @@ function procStat(pid: number): { ppid: number; state: string; pgrp: number } | 
  */
 export function listKernelProcesses(): { pid: number; ppid: number }[] {
   const found: { pid: number; ppid: number }[] = [];
-  for (const entry of readdirSync("/proc")) {
-    if (!/^\d+$/.test(entry)) continue;
-    const pid = Number(entry);
-    let cmdline: string;
-    try {
-      cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8");
-    } catch {
-      continue;
-    }
-    const argv = cmdline.split("\0").filter(Boolean);
+  for (const pid of procPids()) {
+    const argv = procCmdline(pid);
     if (!argv.includes("cadctl.worker") || !argv.includes("-m")) continue;
     const stat = procStat(pid);
     if (!stat) continue;
     found.push({ pid, ppid: stat.ppid });
   }
   return found;
-}
-
-/**
- * Every pid in the process tree rooted at `pid`, children before the root.
- * The warm kernel forks one build child per request, and that child calls
- * `setsid()`, so a single-pid kill can leave it stranded.
- */
-export function processTree(pid: number): number[] {
-  const children = new Map<number, number[]>();
-  for (const entry of readdirSync("/proc")) {
-    if (!/^\d+$/.test(entry)) continue;
-    const childPid = Number(entry);
-    const stat = procStat(childPid);
-    if (!stat) continue;
-    children.set(stat.ppid, [...(children.get(stat.ppid) ?? []), childPid]);
-  }
-  const ordered: number[] = [];
-  const walk = (root: number): void => {
-    for (const child of children.get(root) ?? []) walk(child);
-    ordered.push(root);
-  };
-  walk(pid);
-  return ordered;
 }
 
 /**

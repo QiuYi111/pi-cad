@@ -1,8 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { isProcessAlive, REPO_ROOT } from "../sut/proc.ts";
+import { isProcessAlive, procCmdline, procPids, REPO_ROOT } from "../support/process.ts";
 import { resolvePrimeAgentRepo } from "./inspect.ts";
 
 export interface PrimeProcess {
@@ -13,14 +12,6 @@ export interface PrimeProcess {
   sessionPath: string | null;
 }
 
-function procCmdline(pid: number): string[] {
-  try {
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 function optionValue(argv: string[], name: string): string | null {
   const index = argv.indexOf(name);
   return index >= 0 ? argv[index + 1] ?? null : null;
@@ -29,9 +20,7 @@ function optionValue(argv: string[], name: string): string | null {
 /** Every live real Prime / authority process on the machine, read from `/proc`. */
 export function inspectPrimeProcesses(): PrimeProcess[] {
   const found: PrimeProcess[] = [];
-  for (const entry of readdirSync("/proc")) {
-    if (!/^\d+$/.test(entry)) continue;
-    const pid = Number(entry);
+  for (const pid of procPids()) {
     const argv = procCmdline(pid);
     if (!argv.length) continue;
     const joined = argv.join(" ");

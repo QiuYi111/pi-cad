@@ -1,7 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
+import { readFileSync } from "node:fs";
 
-import { ARTIFACTS_DIR } from "../runner/artifacts.ts";
+import { writeArtifactJson } from "../support/artifacts.ts";
 import type { ReifyComponents } from "./components.ts";
 import type { ApiLogEntry } from "./session.ts";
 import type { ReifyTimelineEntry } from "./trace.ts";
@@ -76,12 +75,7 @@ export interface ReifyFailureArtifact {
 }
 
 export function saveReifyArtifact(artifact: ReifyFailureArtifact): string {
-  mkdirSync(ARTIFACTS_DIR, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const slug = `reify-${artifact.invariant.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 60)}`;
-  const file = path.join(ARTIFACTS_DIR, `${stamp}-${slug}.json`);
-  writeFileSync(file, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
-  return file;
+  return writeArtifactJson("reify-", artifact.invariant, artifact);
 }
 
 export function loadReifyArtifact(file: string): ReifyFailureArtifact {

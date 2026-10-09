@@ -1,9 +1,10 @@
+import { readdirSync, readFileSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Repository root: chaos/sut/proc.ts -> <repo>/ */
+/** Repository root: chaos/support/process.ts -> <repo>/ */
 export const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 export const LAUNCHER = path.join(REPO_ROOT, "scripts", "chaos.mjs");
 export const TOOLS_DIR = path.join(REPO_ROOT, ".chaos-cache", "bin");
@@ -148,4 +149,76 @@ export function spawnEntry(
   };
 
   return { child, stdout: () => out, stderr: () => err, waitForLine, stop };
+}
+
+/** Plain `setTimeout` sleep shared by every chaos module. */
+export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Numeric pids currently listed in `/proc`. */
+export function procPids(): number[] {
+  return readdirSync("/proc")
+    .filter((entry) => /^\d+$/.test(entry))
+    .map(Number);
+}
+
+/** The argv of a live process, or `[]` when it is gone or unreadable. */
+export function procCmdline(pid: number): string[] {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+/** One `/proc/<pid>/stat` line without tripping over `comm` parentheses. */
+export function procStat(pid: number): { ppid: number; state: string; pgrp: number } | null {
+  try {
+    const raw = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const fields = raw.slice(raw.lastIndexOf(")") + 2).split(" ");
+    return { state: fields[0] ?? "", ppid: Number(fields[1]), pgrp: Number(fields[2]) };
+  } catch {
+    return null;
+  }
+}
+
+/** The kernel state letter (`T` = really stopped), or `null` when the process is gone. */
+export function processState(pid: number): string | null {
+  return procStat(pid)?.state ?? null;
+}
+
+/** Every pid in the process tree rooted at `pid`, children before the root. */
+export function processTree(pid: number): number[] {
+  const children = new Map<number, number[]>();
+  for (const childPid of procPids()) {
+    const stat = procStat(childPid);
+    if (!stat) continue;
+    children.set(stat.ppid, [...(children.get(stat.ppid) ?? []), childPid]);
+  }
+  const ordered: number[] = [];
+  const walk = (root: number): void => {
+    for (const child of children.get(root) ?? []) walk(child);
+    ordered.push(root);
+  };
+  walk(pid);
+  return ordered;
+}
+
+/** Wait until every pid in the list has really stopped (SIGSTOP landed). */
+export async function waitForStopped(pids: number[], timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (pids.every((pid) => processState(pid) === "T")) return true;
+    if (Date.now() > deadline) return false;
+    await sleep(50);
+  }
+}
+
+/** Every pid that is still alive when the budget runs out. */
+export async function waitForProcessesGone(pids: number[], timeoutMs: number): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const alive = pids.filter((pid) => isProcessAlive(pid));
+    if (!alive.length || Date.now() > deadline) return alive;
+    await sleep(100);
+  }
 }
