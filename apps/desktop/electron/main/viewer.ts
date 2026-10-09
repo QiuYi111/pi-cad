@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { parameterDefinitionsWithValues, validateParameterValues } from "../../src/shared/model-parameters.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
 import { DesktopCadctlRpc } from "./cadctl-rpc.js";
+import { sha256Command } from "./sha256.js";
 import { AgentApiClient, conversationFields, type ConversationScope } from "./agent-api-client.js";
 
 interface CadctlEnvelope {
@@ -36,7 +37,7 @@ function createReleaseId(projectId: string, commitId: string, approvalId: string
 }
 
 async function hashRuntimeFile(bridge: RuntimeBridge, path: string): Promise<string> {
-  return (await bridge.exec(["sha256sum", "--", path])).stdout.split(/\s+/)[0]!;
+  return (await bridge.exec(sha256Command(path))).stdout.split(/\s+/)[0]!;
 }
 
 export class ViewerBackend {
@@ -223,9 +224,9 @@ export class ViewerBackend {
       const source = `${isolated}/${normalizePath(stored.manifest.source.path)}`;
       const sourceCheck = await this.bridge.exec(["test", "-f", source]).then(() => true).catch(() => false);
       if (!sourceCheck) throw new Error(`Rebuild input is missing at source revision ${commit.sourceRevision}: ${stored.manifest.source.path}`);
-      const built = await this.bridge.exec(["env", "-C", isolated, `${piCadRepo}/python/.venv/bin/cadctl`, "build", "--source", source, "--output", output, "--parameters-json", JSON.stringify(values), "--force"], { timeout: 180_000 });
+      const built = await this.bridge.exec(["sh", "-c", 'cd "$1" && shift && exec "$@"', "sh", isolated, `${piCadRepo}/python/.venv/bin/cadctl`, "build", "--source", source, "--output", output, "--parameters-json", JSON.stringify(values), "--force"], { timeout: 180_000 });
       const envelope = this.parseEnvelope({ exitCode: 0, ...built }, "Isolated source rebuild");
-      const actualSha256 = envelope.inputHashes?.output || (await this.bridge.exec(["sha256sum", "--", output])).stdout.split(/\s+/)[0]!;
+      const actualSha256 = envelope.inputHashes?.output || (await this.bridge.exec(sha256Command(output))).stdout.split(/\s+/)[0]!;
       let geometryMatch: boolean | null = null;
       let geometryDetail = "Original artifact is unavailable; only the recorded byte hash can be compared.";
       try {
@@ -276,14 +277,14 @@ export class ViewerBackend {
       await this.bridge.exec(["mkdir", "-p", `${staging}/files`]);
       for (const artifact of commit.artifacts) {
         const source = await this.resolveProjectPath(settings, artifact.path);
-        const before = (await this.bridge.exec(["sha256sum", "--", source])).stdout.split(/\s+/)[0];
+        const before = (await this.bridge.exec(sha256Command(source))).stdout.split(/\s+/)[0];
         if (before !== artifact.sha256) throw new Error(`Approved artifact changed before packaging: ${artifact.path}`);
         const relative = normalizePath(artifact.path);
         if (!relative || relative.startsWith("/") || relative.split("/").includes("..")) throw new Error(`Unsafe release artifact path: ${artifact.path}`);
         const target = `${staging}/files/${relative}`;
         await this.bridge.exec(["mkdir", "-p", target.slice(0, target.lastIndexOf("/"))]);
         await this.bridge.exec(["cp", "--", source, target]);
-        const copied = (await this.bridge.exec(["sha256sum", "--", target])).stdout.split(/\s+/)[0];
+        const copied = (await this.bridge.exec(sha256Command(target))).stdout.split(/\s+/)[0];
         if (copied !== artifact.sha256) throw new Error(`Packaged artifact hash mismatch: ${artifact.path}`);
         files.push({ path: `files/${relative}`, sha256: artifact.sha256, role: artifact.role });
       }

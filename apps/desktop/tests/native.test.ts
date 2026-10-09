@@ -7,13 +7,15 @@ describe("native desktop runtime", () => {
     await expect(bridge.commandPath("node")).resolves.toMatch(/\/pi-cad-desktop\/bin\/node$/);
   });
 
-  it("keeps native project paths native", async () => {
+  // NativeBridge and the Unix runtime are not used on Windows; the WSL bridge is, and tests/wsl.test.ts covers it.
+  it.skipIf(process.platform === "win32")("keeps native project paths native", async () => {
     const bridge = new NativeBridge();
     await expect(bridge.toRuntimePath("/tmp/project/model.step")).resolves.toBe("/tmp/project/model.step");
     await expect(bridge.revealPath("/tmp/project/model.step")).resolves.toBe("/tmp/project/model.step");
   });
 
-  it("pipes request bodies to native commands", async () => {
+  // NativeBridge and the Unix runtime are not used on Windows; the WSL bridge is, and tests/wsl.test.ts covers it.
+  it.skipIf(process.platform === "win32")("pipes request bodies to native commands", async () => {
     const bridge = new NativeBridge();
     await expect(bridge.pipe(["/bin/sh", "-c", "cat"], "model request\n"))
       .resolves.toEqual({ stdout: "model request\n", stderr: "" });
