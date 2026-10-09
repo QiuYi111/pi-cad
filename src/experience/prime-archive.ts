@@ -2,7 +2,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ReviewerModelSelection } from "../authority/prime-config.ts";
+import type { ReviewerModelSelection } from "../shared/reviewer-model.ts";
 import { experienceRoot, finalizeExperience } from "./store.ts";
 
 function latestPrimeSession(project: string): string | null {

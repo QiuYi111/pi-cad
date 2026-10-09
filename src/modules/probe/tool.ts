@@ -8,7 +8,7 @@ import { bundleFromEnvelope, type ObservationBundle } from "../../observations/b
 import { ensureProbePresets, probePreset, renderProbeResult } from "./index.ts";
 import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
 import { resolveActiveRun } from "../../harness/run-scope.ts";
-import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
+import type { RegistrySet } from "../../harness/registry.ts";
 import { recordObservationV7 } from "../../harness/observations.ts";
 import type { AgentArtifactSubject } from "../../authority/protocol.ts";
 
@@ -104,7 +104,11 @@ export interface CadProbeParams {
   script?: string;
 }
 
-export async function executeCadProbe(cwd: string, params: CadProbeParams, signal?: AbortSignal) {
+/**
+ * `registries` is the caller's workflow registry set (the mechanical domain
+ * supplies it); the probe capability itself does not depend on any domain.
+ */
+export async function executeCadProbe(cwd: string, params: CadProbeParams, registries: RegistrySet, signal?: AbortSignal) {
   ensureProbePresets();
   if (params.preset === "python") {
     const rendered = await runPythonProbe(cwd, {
@@ -114,8 +118,8 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
       script: params.script,
       args: params.args as Record<string, unknown> | undefined,
       signal,
-    });
-    return persistProbeObservation(cwd, params.preset, rendered);
+    }, registries);
+    return persistProbeObservation(cwd, params.preset, rendered, registries);
   }
   const registryName = params.preset;
   const preset = probePreset(registryName);
@@ -132,7 +136,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
   const direct = params.subject && typeof params.subject !== "string" ? await resolveArtifactSubject(cwd, params.subject) : null;
   const targetSource = typeof args.artifact === "string" ? "explicit" : direct ? "artifact-ref" : params.subject ?? "current";
   if (!args.artifact && params.subject) {
-    const resolved = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline");
+    const resolved = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline", registries);
     if (resolved) args.artifact = resolved;
   }
   if (!args.artifact && !args.before) {
@@ -161,7 +165,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
     : [{ source: targetSource, path: String(args.artifact), sha256: result.envelope.inputHashes.artifact }];
   result.extraDetails = { ...(result.extraDetails ?? {}), resolvedSubjects, ...(resolvedSubjects.length === 1 ? { resolvedSubject: resolvedSubjects[0] } : {}) };
   const rendered = await renderProbeResult(result, `cad_probe/${registryName}`);
-  return persistProbeObservation(cwd, params.preset, rendered);
+  return persistProbeObservation(cwd, params.preset, rendered, registries);
 }
 
 function applyPresetDefaults(preset: string, args: Record<string, unknown>): void {
@@ -176,9 +180,10 @@ function applyPresetDefaults(preset: string, args: Record<string, unknown>): voi
 async function resolveSubjectArtifact(
   cwd: string,
   subject: "current" | "baseline" | undefined,
+  registries: RegistrySet,
 ): Promise<string | null> {
   const project = new HarnessProjectStoreV7(cwd);
-  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, registries);
   if (!loaded) return null;
   if ((subject ?? "current") === "baseline") {
     const { state } = await project.load();
@@ -212,9 +217,10 @@ async function resolveArtifactSubject(cwd: string, subject: AgentArtifactSubject
 async function runPythonProbe(
   cwd: string,
   params: { subject: "current" | "baseline" | AgentArtifactSubject; purpose: string; code: string; script?: string; args?: Record<string, unknown>; signal?: AbortSignal },
+  registries: RegistrySet,
 ) {
   const direct = typeof params.subject === "string" ? null : await resolveArtifactSubject(cwd, params.subject);
-  const rel = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline");
+  const rel = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline", registries);
   const label = typeof params.subject === "string" ? params.subject : params.subject.path;
   if (!rel) {
     return { content: [{ type: "text" as const, text: `cad_probe failed: no ${label} artifact bound in run state` }], isError: true };
@@ -281,9 +287,10 @@ async function persistProbeObservation(
   cwd: string,
   preset: string,
   rendered: Awaited<ReturnType<typeof renderProbeResult>>,
+  registries: RegistrySet,
 ) {
   if (!("details" in rendered) || !rendered.details) return rendered;
-  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
+  const loaded = await resolveActiveRun(cwd, registries);
   if (!loaded) return rendered;
   const envelope = rendered.details.envelope as any;
   const observation = rendered.details.observation as ObservationBundle | undefined;
@@ -293,7 +300,7 @@ async function persistProbeObservation(
     const recorded = await recordObservationV7({
       cwd,
       workflowRunId: loaded.state.runId,
-      registries: mechanicalRegistries,
+      registries,
       tool: "cad_probe",
       headline: bundle.headline,
       ...(typeof rendered.details.artifactHash === "string" ? { subjectHash: rendered.details.artifactHash } : {}),

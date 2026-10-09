@@ -19,11 +19,11 @@ const ALLOWED: Record<string, readonly string[]> = {
   composition: ["agent-api", "authority", "domains"],
   core: ["domains", "harness", "shared", "workflows"],
   domains: ["harness", "modules", "shared", "workflows"],
-  experience: ["authority", "shared"],
+  experience: ["shared"],
   extensions: ["core", "domains", "harness", "modules", "shared"],
   harness: ["shared"],
   integrations: [],
-  modules: ["authority", "domains", "harness", "observations", "shared"],
+  modules: ["authority", "harness", "observations", "shared"],
   observations: ["shared"],
   shared: [],
   workflows: ["shared"],
@@ -60,14 +60,6 @@ const EXCEPTIONS: ReadonlyArray<{ from: string; to: string; why: string }> = [
 // component of the module graph. Any other cycle fails, and so does a listed
 // cycle that has gone away.
 const CYCLE_EXCEPTIONS: ReadonlyArray<{ modules: readonly string[]; why: string }> = [
-  {
-    modules: ["authority", "experience"],
-    why: "authority/launcher.ts and authority/sidecar.ts read experience; experience/prime-archive.ts reads authority/prime-config.ts",
-  },
-  {
-    modules: ["domains", "modules"],
-    why: "domains/mechanical registries and recipe runtime use modules/probe and modules/simulate-v2; modules/probe/tool.ts uses domains/mechanical/registries.ts",
-  },
 ];
 
 const IMPORT_SPECIFIER = /\b(?:from|import)\s*\(?\s*["'](\.{1,2}\/[^"']+)["']/g;
