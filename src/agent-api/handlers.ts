@@ -90,7 +90,7 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
 async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {
   bootstrapAgentApiContracts();
   if (!request || request.schema !== 1 || typeof request.op !== "string") throw new Error("invalid Agent API request");
-  const guardedOperation = AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS];
+  const guardedOperation = Object.hasOwn(AGENT_API_MUTATION_OPERATIONS, request.op) ? AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS] : undefined;
   if (guardedOperation) {
     const completedArtifactObservation = request.op === "probe"
       && request.subject !== undefined
@@ -101,7 +101,8 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
       && (await resolveActiveRun(cwd, mechanicalRegistries))?.state.status === "done";
     if (!completedArtifactObservation) await requireCurrentAuthorization(cwd, guardedOperation, authority);
   }
-  const route = ROUTES[request.op] as ((cwd: string, request: AgentApiRequest) => unknown) | undefined;
+  // Own properties only: an op named like an Object.prototype member is unsupported.
+  const route = Object.hasOwn(ROUTES, request.op) ? ROUTES[request.op] as ((cwd: string, request: AgentApiRequest) => unknown) : undefined;
   if (!route) throw new Error(`unsupported Agent API operation: ${(request as { op: string }).op}`);
   return await route(cwd, request) as JsonValue;
 }
