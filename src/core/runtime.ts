@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import { assertLinuxRuntime } from "../shared/platform.ts";
-import { assertNoLegacyRun } from "../harness/legacy-run.ts";
+import { assertNoLegacyRun } from "./legacy-run.ts";
 import { PermissionEngineV7, assertScopedWrite } from "../harness/permissions.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
