@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -7,12 +8,18 @@ import { test } from "node:test";
 
 const project = resolve(import.meta.dirname, "..");
 const primeRoot = resolve(process.env.PRIME_AGENT_REPO ?? resolve(project, "../prime-agent-plan-c-upstream"));
-const resourceModule = await import(pathToFileURL(join(primeRoot, "packages/coding-agent/src/core/resource-loader.ts")).href);
-const settingsModule = await import(pathToFileURL(join(primeRoot, "packages/coding-agent/src/core/settings-manager.ts")).href);
-const { DefaultResourceLoader } = resourceModule;
-const { SettingsManager } = settingsModule;
+const resourceEntry = join(primeRoot, "packages/coding-agent/src/core/resource-loader.ts");
+const settingsEntry = join(primeRoot, "packages/coding-agent/src/core/settings-manager.ts");
+// The Prime checkout is optional for the default suite; only npm run test:prime
+// requires it. Without it, skip with a reason instead of failing at import.
+const primeMissing = !existsSync(resourceEntry) || !existsSync(settingsEntry);
+const skipReason = primeMissing
+  ? `Prime checkout not found at ${primeRoot}; set PRIME_AGENT_REPO to run this boundary test (npm run test:prime)`
+  : false;
+const { DefaultResourceLoader } = primeMissing ? {} as any : await import(pathToFileURL(resourceEntry).href);
+const { SettingsManager } = primeMissing ? {} as any : await import(pathToFileURL(settingsEntry).href);
 
-test("actual Prime 0.8 discovers cad as Python-backed, preserves Prime skills, and loads only the thin extension", async () => {
+test("actual Prime 0.8 discovers cad as Python-backed, preserves Prime skills, and loads only the thin extension", { skip: skipReason }, async () => {
   const agentDir = await mkdtemp(join(tmpdir(), "prime-plan-c-agent-"));
   try {
     const settingsManager = SettingsManager.inMemory({});

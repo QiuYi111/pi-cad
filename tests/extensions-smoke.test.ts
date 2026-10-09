@@ -76,12 +76,6 @@ test("all configured extensions load and register the expected tools/events", as
   }
 });
 
-test("control tools execute through pure workflow machine", async () => {
-  // The pure-machine tests live in state-machine.test.ts; this test only
-  // verifies extension registration does not execute side effects at import.
-  assert.ok(true);
-});
-
 test("baseline prompts mandate frame handling without fabricating headless confirmation", async () => {
   const { loadPrompt } = await import("../src/core/context.ts");
   // loadPrompt falls back to generic text when a file is missing, so the
