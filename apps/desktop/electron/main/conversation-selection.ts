@@ -16,11 +16,6 @@ export interface ConversationSelection {
 
 export const NO_CONVERSATION: ConversationSelection = { pendingNew: false };
 
-/** Follow the live Prime session (started or resumed). */
-export function selectLiveSession(): ConversationSelection {
-  return NO_CONVERSATION;
-}
-
 export function selectNewConversation(replacedSessionId?: string): ConversationSelection {
   return { pendingNew: true, ...(replacedSessionId ? { replacedSessionId } : {}) };
 }

@@ -99,6 +99,7 @@
     "benchmarks/cadtestbench/run.mjs",
     "benchmarks/cadtestbench/sets",
     "scripts",
+    "chaos",
     "README.md",
     "README.zh-CN.md",
     "LICENSE",

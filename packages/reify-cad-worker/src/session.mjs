@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
 import { mkdir, readdir, readFile, realpath, stat as statFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { WorkerError, staleSession } from "./errors.mjs";
 import { PrimeRpc } from "./prime-rpc.mjs";
-import { normalizeProjectRoot, runtimePaths, runtimeConfiguration } from "./runtime.mjs";
+import { normalizeProjectRoot, runtimePaths, runtimeConfiguration, REPO_ROOT } from "./runtime.mjs";
 
 
 export class WorkerCore {
@@ -414,12 +415,23 @@ function artifactKind(path, role) {
   return null;
 }
 
+/**
+ * Canonical project directory the authority uses for `cwd`. Mirrors
+ * defaultCanonicalProjectDirectory in src/authority/storage.ts: the realpath of
+ * cwd is hashed, and XDG_DATA_HOME (resolved when set) or ~/.local/share is the base.
+ */
+export async function canonicalProjectDir(cwd) {
+  const root = await realpath(cwd);
+  const dataHome = process.env.XDG_DATA_HOME ? resolve(process.env.XDG_DATA_HOME) : join(homedir(), ".local", "share");
+  return join(dataHome, "pi-cad", createHash("sha256").update(root).digest("hex"));
+}
+
 async function agentApi(cwd, op) {
   const root = await realpath(cwd);
-  const canonical = join(process.env.XDG_DATA_HOME?.startsWith("/") ? process.env.XDG_DATA_HOME : resolve(process.env.HOME || "/", "home-placeholder", ".local/share"), "pi-cad", createHash("sha256").update(root).digest("hex"));
-  const child = spawn(process.execPath, [join(REPO_ROOT(), "scripts", "pi-cad-agent-api.mjs"), "agent-api", root], {
+  const canonical = await canonicalProjectDir(root);
+  const child = spawn(process.execPath, [join(REPO_ROOT, "scripts", "pi-cad-agent-api.mjs"), "agent-api", root], {
     cwd: root, stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, PI_CAD_REPO: REPO_ROOT(), PI_CAD_PROJECT_CWD: root, PI_CAD_CANONICAL_PROJECT_DIR: canonical },
+    env: { ...process.env, PI_CAD_REPO: REPO_ROOT, PI_CAD_PROJECT_CWD: root, PI_CAD_CANONICAL_PROJECT_DIR: canonical },
   });
   child.stdin.end(JSON.stringify(op));
   const stdout = await new Promise((accept, reject) => {
@@ -442,10 +454,6 @@ async function agentApi(cwd, op) {
   if (!response.ok) throw new WorkerError(response.error?.message || "Pi-CAD Agent API failed", "agent_api_failed");
   return response.result;
 }
-
-import { dirname as _dirname } from "node:path";
-import { fileURLToPath as _fileURLToPath } from "node:url";
-function REPO_ROOT() { return resolve(_dirname(_fileURLToPath(import.meta.url)), "../../.."); }
 
 function operationCategory(toolName = "", input = {}) {
   const code = String(input.code || input.command || input.path || "");

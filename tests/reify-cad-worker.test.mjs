@@ -5,11 +5,12 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { WorkerCore } from "../packages/reify-cad-worker/src/session.mjs";
+import { WorkerCore, canonicalProjectDir } from "../packages/reify-cad-worker/src/session.mjs";
 import { toolCatalog } from "../packages/reify-cad-worker/src/server.mjs";
 import { adaptRequest, conversionErrorResponse } from "../packages/reify-cad-worker/src/path-transport.mjs";
 import { runtimePaths } from "../packages/reify-cad-worker/src/runtime.mjs";
 import { fakeLauncherFactory } from "./reify-cad-worker-fixtures/fake-prime.mjs";
+import { createJiti } from "jiti";
 
 const sleep = (ms) => new Promise((accept) => setTimeout(accept, ms));
 const originalPiCadRepo = process.env.REIFY_PI_CAD_REPO;
@@ -262,6 +263,22 @@ await test("Windows mapped-drive conversion fails clearly and UNC paths use Wind
     return true;
   });
   assert.equal(runtimePaths("/tmp/cad-result.step", "windows", "Ubuntu").windowsPath, "\\\\wsl.localhost\\Ubuntu\\tmp\\cad-result.step");
+});
+await test("canonical project dir matches the authority's storage for the same cwd", async () => {
+  const { defaultCanonicalProjectDirectory } = await createJiti(import.meta.url).import(fileURLToPath(new URL("../src/authority/storage.ts", import.meta.url)));
+  const cwd = await mkdtemp(join(tmpdir(), "cad-worker-canonical-"));
+  const originalXdg = process.env.XDG_DATA_HOME;
+  try {
+    delete process.env.XDG_DATA_HOME;
+    assert.equal(await canonicalProjectDir(cwd), defaultCanonicalProjectDirectory(cwd));
+    process.env.XDG_DATA_HOME = join(cwd, "xdg");
+    assert.equal(await canonicalProjectDir(cwd), defaultCanonicalProjectDirectory(cwd));
+    assert.match(await canonicalProjectDir(cwd), /xdg[\\/]pi-cad[\\/][0-9a-f]{64}$/);
+  } finally {
+    if (originalXdg === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = originalXdg;
+    await rm(cwd, { recursive: true, force: true });
+  }
 });
 process.env.REIFY_PI_CAD_REPO = originalPiCadRepo;
 if (originalPrimeAgentRepo === undefined) delete process.env.PRIME_AGENT_REPO;

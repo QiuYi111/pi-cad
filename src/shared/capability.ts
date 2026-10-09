@@ -9,7 +9,6 @@ import type {
   BuildPayload,
   CadEventEnvelope,
   GeometryPayload,
-  MeasurePayload,
   VisualPayload,
 } from "./protocol.ts";
 import { CadProjectStore, sha256File } from "./store.ts";
@@ -435,54 +434,6 @@ export async function exportArtifact(
   return runCadctl(args, { cwd, timeoutMs });
 }
 
-export async function cadctlCapabilities(cwd: string, timeoutMs?: number): Promise<CadEventEnvelope> {
-  return runCadctl(["capability"], { cwd, timeoutMs });
-}
-
-/**
- * Live doctor report for the Python runtime the harness would actually use
- * right now through the uv-managed project. Cached per process: the
- * probe runs once per Pi session, so the startup cost is paid once and later
- * capability gating reads the same snapshot. `.pi-cad-runtime.json` remains
- * an install-time diagnostic, not the runtime source of truth.
- */
-export interface DoctorReport {
-  python?: string;
-  mode?: string;
-  capabilities?: {
-    simulation?: { status?: string; backend?: string };
-    differentiableOptimization?: { status?: string };
-    [name: string]: unknown;
-  };
-}
-
-let doctorProbeCache: DoctorReport | null | undefined;
-
-export async function currentDoctorReport(
-  cwd?: string,
-  timeoutMs = 30_000,
-): Promise<DoctorReport | null> {
-  if (doctorProbeCache !== undefined) return doctorProbeCache;
-  try {
-    const python = pythonInvocation(undefined, cwd);
-    const result = await runProcess({
-      command: python.command,
-      args: [...python.prefixArgs, "-m", "cadctl", "doctor", "--json"],
-      cwd: cwd ?? packageRoot(),
-      env: cadctlEnv(cwd),
-      timeoutMs,
-      maxStdoutBytes: 4 * 1024 * 1024,
-      maxStderrBytes: 256 * 1024,
-    });
-    if (result.exitCode !== 0 || result.terminationReason) throw new Error(result.terminationDetail ?? result.stderr);
-    doctorProbeCache = JSON.parse(result.stdout.trim()) as DoctorReport;
-  } catch {
-    doctorProbeCache = null;
-  }
-  return doctorProbeCache;
-}
-
-
 export async function drawingCommand(
   cwd: string,
   stage: "validate" | "generate",
@@ -715,8 +666,4 @@ export function visualPayload(envelope: CadEventEnvelope): VisualPayload {
 
 export function geometryPayload(envelope: CadEventEnvelope): GeometryPayload {
   return payloadOf<GeometryPayload>(envelope);
-}
-
-export function measurePayload(envelope: CadEventEnvelope): MeasurePayload {
-  return payloadOf<MeasurePayload>(envelope);
 }
