@@ -3,28 +3,15 @@ import { extname, isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 import {
-  CAPABILITY_TOOLS,
-  CONTROL_TOOLS,
   type CadPhase,
   type CadRunState,
 } from "../shared/protocol.ts";
 import { contractTools, phaseContract } from "../domains/mechanical/phase-contract.ts";
+import { PI_CAD_OWNED_TOOLS } from "../domains/mechanical/owned-tools.ts";
 import { compiledSpec } from "../workflows/index.ts";
 import { isHeadless, isTerminalStatus } from "./interaction-mode.ts";
 
 export const BUILTIN_READONLY = ["read", "grep", "find", "ls"];
-
-/**
- * Tools Pi-CAD is allowed to manage. Everything else in the host session —
- * other extensions' tools (Goal, Ralph, ...), builtin tools the user enabled
- * or disabled — is explicitly NOT ours: `setActiveTools` replaces the whole
- * global set, so touching anything outside this namespace would silently
- * uninstall other plugins' tools.
- */
-export const PI_CAD_OWNED_TOOLS: ReadonlySet<string> = new Set<string>([
-  ...CONTROL_TOOLS,
-  ...CAPABILITY_TOOLS,
-]);
 
 function effectivePhase(state: CadRunState | null): CadPhase {
   if (!state || isTerminalStatus(state.status)) {
