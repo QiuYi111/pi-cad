@@ -1,0 +1,152 @@
+{
+  "schema": "reify.golden/edge-match/1",
+  "about": "Edge reference matching verdicts shared by the Fusion (Python) and SolidWorks (C#) executors. Each case is one edge_ref (protocol section 7) resolved against a list of candidate BRep edges in world mm. expect.<executor> lists the candidate indices that the executor's matcher accepts.",
+  "tolerance": {
+    "fusion": "1e-4 * max(diagonal_mm, 1.0)  (executors/fusion/ReifyExport/edgematch.py tolerance)",
+    "solidworks": "1e-4 * max(diagonal_mm, 1e-6)  (executors/solidworks/ReifyExport.Core/Match.cs EdgeMatch.Tol)"
+  },
+  "cases": [
+    {
+      "name": "exact_match_shared",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [
+        {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+        {"curve": "line", "midpoint": [20, 30, 5], "length": 40},
+        {"curve": "circle", "midpoint": [13, 0, 5], "length": 18.85, "centre": [10, 0, 5], "radius": 3}
+      ],
+      "expect": {"fusion": [0], "solidworks": [0]},
+      "divergent": false
+    },
+    {
+      "name": "midpoint_inside_tolerance_diag_100",
+      "note": "tolerance 0.01 mm",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [{"curve": "line", "midpoint": [20.0099, 0, 5], "length": 40}],
+      "expect": {"fusion": [0], "solidworks": [0]},
+      "divergent": false
+    },
+    {
+      "name": "midpoint_outside_tolerance_diag_100",
+      "note": "tolerance 0.01 mm",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [{"curve": "line", "midpoint": [20.0101, 0, 5], "length": 40}],
+      "expect": {"fusion": [], "solidworks": []},
+      "divergent": false
+    },
+    {
+      "name": "midpoint_inside_tolerance_diag_1",
+      "note": "tolerance 1e-4 mm, where both floors agree",
+      "diagonal_mm": 1.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [{"curve": "line", "midpoint": [20.000099, 0, 5], "length": 40}],
+      "expect": {"fusion": [0], "solidworks": [0]},
+      "divergent": false
+    },
+    {
+      "name": "midpoint_outside_tolerance_diag_1",
+      "note": "tolerance 1e-4 mm, where both floors agree",
+      "diagonal_mm": 1.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [{"curve": "line", "midpoint": [20.000101, 0, 5], "length": 40}],
+      "expect": {"fusion": [], "solidworks": []},
+      "divergent": false
+    },
+    {
+      "name": "floor_divergence_small_part_diag_0_5",
+      "note": "Fusion tolerance is 1e-4 mm (floor 1.0 mm); SolidWorks is 5e-5 mm. Offset 7e-5 mm is inside only the Fusion tolerance.",
+      "diagonal_mm": 0.5,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [{"curve": "line", "midpoint": [20.00007, 0, 5], "length": 40}],
+      "expect": {"fusion": [0], "solidworks": []},
+      "divergent": true
+    },
+    {
+      "name": "floor_divergence_zero_diag",
+      "note": "Fusion tolerance is 1e-4 mm; SolidWorks is 1e-10 mm (the 1e-6 mm floor times 1e-4). Offset 1e-5 mm is inside only the Fusion tolerance.",
+      "diagonal_mm": 0.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [{"curve": "line", "midpoint": [20.00001, 0, 5], "length": 40}],
+      "expect": {"fusion": [0], "solidworks": []},
+      "divergent": true
+    },
+    {
+      "name": "length_inside_tolerance_shared",
+      "note": "length difference 0.005 mm, tolerance 0.01 mm (diagonal 100)",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "line", "midpoint": [500, 0, 5], "length": 1000},
+      "candidates": [{"curve": "line", "midpoint": [500, 0, 5], "length": 1000.005}],
+      "expect": {"fusion": [0], "solidworks": [0]},
+      "divergent": false
+    },
+    {
+      "name": "length_relative_floor_divergence",
+      "note": "length difference 0.05 mm. Fusion uses the diagonal tolerance 0.01 mm and rejects. SolidWorks also allows 1e-4 x ref length (0.1 mm) and accepts.",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "line", "midpoint": [500, 0, 5], "length": 1000},
+      "candidates": [{"curve": "line", "midpoint": [500, 0, 5], "length": 1000.05}],
+      "expect": {"fusion": [], "solidworks": [0]},
+      "divergent": true
+    },
+    {
+      "name": "circle_seam_midpoint_ignored",
+      "note": "a full circle is identified by centre and radius, not by its seam midpoint",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "circle", "midpoint": [13, 0, 5], "length": 18.85, "centre": [10, 0, 5], "radius": 3},
+      "candidates": [{"curve": "circle", "midpoint": [7, 0, 5], "length": 18.85, "centre": [10, 0, 5], "radius": 3, "axis": [0, 0, 1]}],
+      "expect": {"fusion": [0], "solidworks": [0]},
+      "divergent": false
+    },
+    {
+      "name": "circle_radius_outside_tolerance",
+      "note": "radius difference 0.05 mm, tolerance 0.01 mm",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "circle", "midpoint": [13, 0, 5], "length": 18.85, "centre": [10, 0, 5], "radius": 3},
+      "candidates": [{"curve": "circle", "midpoint": [7, 0, 5], "length": 18.85, "centre": [10, 0, 5], "radius": 3.05}],
+      "expect": {"fusion": [], "solidworks": []},
+      "divergent": false
+    },
+    {
+      "name": "curve_type_must_match",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "arc", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [{"curve": "line", "midpoint": [20, 0, 5], "length": 40}],
+      "expect": {"fusion": [], "solidworks": []},
+      "divergent": false
+    },
+    {
+      "name": "two_identical_candidates_are_ambiguous",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+      "candidates": [
+        {"curve": "line", "midpoint": [20, 0, 5], "length": 40},
+        {"curve": "line", "midpoint": [20, 0, 5], "length": 40}
+      ],
+      "expect": {"fusion": [0, 1], "solidworks": [0, 1]},
+      "divergent": false
+    },
+    {
+      "name": "endpoints_divergence",
+      "note": "same midpoint and length, different endpoints. Fusion compares start/end when both sides give them and rejects. SolidWorks EdgeInfo carries no endpoints and accepts.",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "line", "midpoint": [20, 0, 5], "length": 40, "start": [0, 0, 5], "end": [40, 0, 5]},
+      "candidates": [
+        {"curve": "line", "midpoint": [20, 0, 5], "length": 40, "start": [0, 0, 5], "end": [40, 0, 5]},
+        {"curve": "line", "midpoint": [20, 0, 5], "length": 40, "start": [20, -20, 5], "end": [20, 20, 5]}
+      ],
+      "expect": {"fusion": [0], "solidworks": [0, 1]},
+      "divergent": true
+    },
+    {
+      "name": "axis_divergence",
+      "note": "perpendicular circle axes. Fusion compares the axis and rejects. SolidWorks EdgeInfo carries no axis and accepts.",
+      "diagonal_mm": 100.0,
+      "ref": {"curve": "circle", "midpoint": [13, 0, 5], "length": 18.85, "centre": [10, 0, 5], "radius": 3, "axis": [0, 0, 1]},
+      "candidates": [{"curve": "circle", "midpoint": [7, 0, 5], "length": 18.85, "centre": [10, 0, 5], "radius": 3, "axis": [1, 0, 0]}],
+      "expect": {"fusion": [], "solidworks": [0]},
+      "divergent": true
+    }
+  ]
+}
