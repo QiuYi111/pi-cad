@@ -1,0 +1,29 @@
+{
+  "description": "Slot 1.0 mm wide (below the 1.25 mm minimum). Target: cavity.min_width.",
+  "lint": {
+    "must": [
+      {
+        "rule": "cavity.min_width",
+        "severity": "error",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter"
+    ]
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "cavity.min_width",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": []
+  }
+}

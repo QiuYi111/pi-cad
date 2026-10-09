@@ -9,6 +9,7 @@ Model design intent, not a single frozen shape. Keep authoritative dimensions na
 
 - Read [references/freecad-part-ops.md](references/freecad-part-ops.md) first: `cad.part` is the default way to model a part or an assembly. It has the JSON ops, role-named faces, change summaries, assemblies (`link`, `import_step`, `joint`) and pose sweeps.
 - Start from the assets: [assets/freecad-part](assets/freecad-part/README.md) for one part, [assets/freecad-assembly](assets/freecad-assembly/README.md) for parts in separate documents linked into an assembly.
+- For a part that is machined to a vendor's rules, see [design-for-manufacturing](../design-for-manufacturing/SKILL.md): set `dfm_profile` in the first batch and read `dfm` after each apply. `assets/freecad-part/dfm.ops.json` is a clean example with an M3 tapped hole.
 - Read [references/model-structure.md](references/model-structure.md) for parameter organization, datum strategy, and feature ordering.
 - Read [references/robustness.md](references/robustness.md) for topology stability, validation, and STEP delivery.
 - Read [references/repair-and-check.md](references/repair-and-check.md) after a failed build, suspicious render, or fragile regeneration.

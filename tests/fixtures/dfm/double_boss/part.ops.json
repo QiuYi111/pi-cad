@@ -1,0 +1,88 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/base_profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/base",
+    "sketch": "part/base_profile",
+    "length": 3
+  },
+  {
+    "op": "sketch",
+    "name": "part/flange_profile",
+    "on": {
+      "feature": "part/base",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            40,
+            30
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/flange",
+    "sketch": "part/flange_profile",
+    "length": 2
+  },
+  {
+    "op": "sketch",
+    "name": "part/boss_profile",
+    "on": {
+      "feature": "part/flange",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/boss",
+    "sketch": "part/boss_profile",
+    "length": 3
+  }
+]

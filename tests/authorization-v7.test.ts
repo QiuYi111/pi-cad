@@ -145,6 +145,7 @@ test("every active-run Agent API mutation is assigned to the unified authorizati
     "part-query": "probe.run",
     "part-check": "probe.run",
     "part-sweep": "probe.run",
+    "part-dfm": "probe.run",
     "simulation-run": "simulation.run",
     "review-submit": "review.submit",
   });

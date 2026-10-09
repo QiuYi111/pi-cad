@@ -22,7 +22,7 @@ import { jsonValue, type JsonValue } from "../harness/canonical.ts";
 import { inspectGeometry } from "../shared/capability.ts";
 import { PartOpError } from "../shared/freecad-worker.ts";
 import type { GeometryPayload } from "../shared/protocol.ts";
-import { partRequest, resolvePartPaths } from "./part-ops.ts";
+import { partRequest, readDfmSummary, resolvePartPaths } from "./part-ops.ts";
 import type { AgentApiRequest } from "./protocol.ts";
 import { projectRelativePath } from "./observe.ts";
 import { compareEquivalence, type FeatureVolume } from "./transfer-check.ts";
@@ -315,9 +315,11 @@ async function exportOperation(cwd: string, request: Extract<TransferRequest, { 
   const features = result.features_built ?? canonical.featureCount;
   const notes = jointNotes(canonical.joints);
   const notesField = notes.length ? { notes } : {};
+  // v1 never blocks an export on DFM; the export only states the document's latest DFM state.
+  const dfm = await readDfmSummary(cwd, paths.docRel);
 
   if (!check) {
-    return jsonValue({ target, file: nativeRel, checkStep: result.files?.check_step ?? null, check: "skipped", features, log: logRel, detail: null, ...notesField } as never);
+    return jsonValue({ target, file: nativeRel, checkStep: result.files?.check_step ?? null, check: "skipped", features, log: logRel, detail: null, dfm, ...notesField } as never);
   }
 
   const executorStepRel = result.files?.check_step ?? checkStepRel;
@@ -348,7 +350,7 @@ async function exportOperation(cwd: string, request: Extract<TransferRequest, { 
       },
     );
   }
-  return jsonValue({ target, file: nativeRel, checkStep: executorStepRel, check: "passed", features, log: logRel, detail: null, ...notesField } as never);
+  return jsonValue({ target, file: nativeRel, checkStep: executorStepRel, check: "passed", features, log: logRel, detail: null, dfm, ...notesField } as never);
 }
 
 export async function handleTransferOperation(cwd: string, request: TransferRequest): Promise<JsonValue> {

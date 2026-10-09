@@ -1,0 +1,30 @@
+{
+  "description": "A STEP without a feature tree (import_step, role bought_in). The lint layer reports no_feature_tree; the geometry layer runs on the shape and finds the phi1.0 hole.",
+  "lint": {
+    "must": [],
+    "must_not": [
+      "hole.min_diameter"
+    ],
+    "skipped_reason": "no_feature_tree"
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "hole.min_diameter",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [
+      {
+        "rule": "hole.min_diameter",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  }
+}

@@ -19,6 +19,7 @@ await doc.tree() -> dict                                     # parameters, sketc
 await doc.query(target, what=None) -> dict                   # what: params, bbox, volume, area, centroid, faces
 await doc.check(kind, *, budget_s=None, **args) -> dict      # clearance, interference, wall_thickness, mass
 await doc.sweep(param, range, *, step, check, refine=False, budget_s=None) -> dict
+await doc.dfm(*, layers=("lint", "geometry"), budget_s=None) -> DfmReport   # the DFM geometry check; see "Geometry check"
 ```
 
 - `path` is a project path ending in `.FCStd`. `output` defaults to `build/<stem>.step`. `body` is the semantic path of the first body (default: the file name).
@@ -83,7 +84,7 @@ Declare a parameter once with `{"op": "param", "name": "width", "value": 40, "un
 | `sketch` | `name`, `shapes`, and `plane` (`XY`, `XZ`, `YZ`) or `on` | `offset`, `body` | `on` is a face selector `{"feature", "role"}`; `offset` moves the sketch along its normal |
 | `pad` | `name`, `sketch`, `length` | `reversed`, `midplane`, `type` (`length`, `through_all`, `up_to_face`), `face` | `up_to_face` needs `face: {"feature", "role"}` |
 | `pocket` | `name`, `sketch`, `depth` | `type` (`length`, `through_all`), `reversed` | cuts into the material |
-| `hole` | `name`, `sketch` (circles or points), `diameter` | `depth`, `type` (`blind`, `through_all`), `thread` (`"M6"`), `counterbore` `{"diameter", "depth"}`, `countersink` `{"diameter", "angle"}` | a blind hole needs `depth` |
+| `hole` | `name`, `sketch` (circles or points), `diameter` | `depth`, `type` (`blind`, `through_all`), `thread` (`"M6"`), `thread_depth` (needs `thread`), `drill_point` (`flat`, `angled`; blind only), `counterbore` `{"diameter", "depth"}`, `countersink` `{"diameter", "angle"}` | a blind hole needs `depth` |
 | `fillet` | `name`, `edges`, `radius` | | `edges` is one edge selector or a list |
 | `chamfer` | `name`, `edges`, `size` | | |
 | `linear_pattern` | `name`, `features`, `direction` (`X`, `Y`, `Z`, `-X` ...), `length`, `count` | | `length` is the distance from the first to the last instance |
@@ -97,8 +98,22 @@ Declare a parameter once with `{"op": "param", "name": "width", "value": 40, "un
 | `import_step` | `name`, `file` (a project STEP path) | `position`, `rotation` | a bought-in part, kept as a reference |
 | `joint` | `name`, `type` (`revolute`, `prismatic`, `fixed`), `parent`, `child` (face selectors with a `role`) | `value`, `limits` `[low, high]`, `flip` | seats the child on the parent from two role frames; see "Assemblies" |
 | `require` | `name`, `kind`, `target`, `limit` | `tolerance` | an intent, checked after every apply |
+| `dfm_profile` | `rulepack` (`quanzhou.cnc_mill`, or `null` to remove the profile) | `material` (`al6061`, `al7075`, `steel_45`; required with a rulepack) | sets the DFM rulepack and material of the document; see "DFM lint" |
 
 `set` changes `Length`, `Length2`, `Depth`, `Diameter`, `Radius`, `Size`, `Occurrences`, `Angle`, `Reversed`, `Midplane`, `Type`, any parameter (`target: "Params"`), or a named sketch constraint (`prop: "constraint:s0_w"`). Anything else is `PROP_NOT_ALLOWED`, and the error lists what is allowed.
+
+### Threaded holes
+
+`hole` with `thread` is a cosmetic thread: the hole is cut at the tap drill of that size, and the thread is metadata. Write the tap drill in `diameter` (M3 is 2.5, M4 3.3, M5 4.2, M6 5.0, M8 6.8, M10 8.5, M12 10.2 mm; 铨洲 table). FreeCAD replaces `diameter` with the tap drill of the thread size, so a nominal `diameter` would be ignored; name the thread in the feature name (`bracket/m3_tap`).
+
+```json
+{"op": "hole", "name": "bracket/m3_tap", "sketch": "bracket/tap_profile", "diameter": 2.5, "thread": "M3", "type": "through_all"}
+{"op": "hole", "name": "bracket/m3_blind", "sketch": "bracket/tap_profile", "diameter": 2.5, "thread": "M3", "depth": 7.5, "thread_depth": 4.5, "drill_point": "flat"}
+```
+
+- `thread_depth` is the length of the thread. Without it the thread runs the full hole depth. With it FreeCAD sets the thread depth to that value, and clamps it to the hole depth.
+- `drill_point: "flat"` gives a flat bottom. FreeCAD's default is the angled (cone) drill point.
+- Do not model the thread: the op has no field for it. A modelled M3 thread is a helix from 2.52 to 3.02 mm in diameter, not a 2.5 mm drill, and the platform recognises the hole by its drill diameter.
 
 ### Sketch shapes
 
@@ -118,6 +133,27 @@ Each shape is fully constrained when it is built, and its dimensions are named s
 ### Intents
 
 `require` kinds: `min_wall` (target path, limit mm), `min_clearance` (target `{"a", "b"}`, limit mm), `max_mass` (target path or null, limit g; density is the parameter `density` in g/cm3, default 2.7), `bbox_within` (target path, limit `[x, y, z]`), `dimension` (target `{"target", "prop"}`, limit). A failed intent is a result (`status: "fail"` in `r.intent`), not an error.
+
+## DFM lint
+
+With a `dfm_profile` set, every `apply` and `try` result has a `dfm` field: `{"rulepack", "material", "layer": "lint", "counts": {"error", "warn", "info", "pass"}, "issues", "truncated", "geometry"}`. `issues` lists the error and warn items (at most 8, errors first); each has `rule`, `severity`, `target` (the semantic path of the hole, pocket or body), `measured`, `limit`, `unit`, `message`, `hints` and `source` (vendor, version and page). `dfm` is `null` without a profile. The lint runs on the recomputed document only, within 50 ms; `truncated: true` means it stopped early. `geometry.state` is `none` until the second layer runs. A feature that the lint cannot judge (for example a floor fillet, or a bodies imported with `import_step`, which have no feature tree) is reported as skipped, never as passed. `mass` uses the profile's material density when no `density` is given.
+
+Holes and pockets repeated by a `linear_pattern`, `polar_pattern` or `mirror` are linted once, on the original's path: the copies share its declared parameters, so an issue names the feature to edit, and the lint fact carries `pattern` (the pattern's path) and `instances` (the number of copies).
+
+The lint also reads the threaded hole's length (`thread_depth`), its tap drill and its drill point. A blind hole with a cone bottom is info (`hole.bottom_shape`). A `dimension` requirement whose tolerance is tighter than GB/T 1804-m for its nominal size is info (`tol.general`), because the platform machines to m grade.
+
+## Geometry check (`doc.dfm()`)
+
+```python
+report = await doc.dfm()                      # layers=("lint", "geometry") by default
+report = await doc.dfm(layers=("lint",))      # feature rules only; quick
+```
+
+- It needs a `dfm_profile` op in the document and checks the last applied revision, `report.rev`. It writes `build/dfm/rev-<n>.json` (`report.report_path`) and attaches the views, with error and warning faces highlighted and labelled by rule id.
+- `report.issues` has every issue, info included. `report.counts` has `error`, `warn`, `info` and `pass`. `report.coverage` has one entry per rule with `status` `checked` or `skipped` (and a `reason`). A skipped rule is not a pass.
+- `report.analyzer` is `analysis_situs`, or `builtin` when the analyzer is missing (the rules that need it are then skipped). It is `None` for a lint-only run.
+- `print(report)` shows the counts, then up to eight error and warning lines, then the number of skipped rules.
+- `PartResult.dfm` (after each `apply`) carries the lint summary. Its `geometry.state` is `none` until `doc.dfm()` has run, `fresh` for the revision it ran on, and `stale` after a later change. Export results carry the same state and error count in `dfm`. v1 never blocks an export on it.
 
 ## Assemblies
 

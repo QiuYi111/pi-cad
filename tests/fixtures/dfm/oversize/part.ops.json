@@ -1,0 +1,32 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            700,
+            100
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/base",
+    "sketch": "part/profile",
+    "length": 10
+  }
+]

@@ -1,0 +1,23 @@
+{
+  "description": "700 x 100 x 10 mm: sorted size exceeds the 650 x 440 x 30 limit. Target: stock.size_range.",
+  "lint": {
+    "must": [
+      {
+        "rule": "stock.size_range",
+        "severity": "error",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "stock.thickness_range"
+    ]
+  },
+  "geometry": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": []
+  }
+}

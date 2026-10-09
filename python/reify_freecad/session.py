@@ -14,6 +14,7 @@ import FreeCAD as App
 
 from . import export as export_module
 from . import intent as intent_module
+from .dfm import lint as lint_module
 from . import summary
 from .core import (
     PARAMS_NAME, REQUIREMENTS_NAME, bodies, body_features, get_path, is_feature, is_sketch,
@@ -79,6 +80,8 @@ class DocumentSession:
         self.registry: Any = None
         self.root: Path = fcstd.parent
         self.loaded_sha = ""
+        #: Last geometry run (``dfm`` command): revision, file sha and its error/warning marks; None until one ran.
+        self.geometry_run: dict[str, Any] | None = None
         #: Labels of the saved revision (``export_current``), kept with the role cache; reset by every load.
         self.saved_annotations: list[dict[str, Any]] | None = None
         #: Occurrences refreshed from their part files since the last commit.
@@ -422,13 +425,16 @@ class DocumentSession:
 
         result: dict[str, Any] = {}
         try:
+            # a committing apply describes the revision it creates; a try describes the current one
+            next_rev = self.rev + 1 if commit else self.rev
             if observe:
                 after = self.snapshot()
-                result = self._result(before, after, warnings)
+                result = self._result(before, after, warnings, next_rev=next_rev)
                 step = output or self.output
                 result.update(self._export(step))
             else:
-                result = {"warnings": warnings, "observed": False}
+                # DFM lint reads feature parameters only, so an unobserved apply still gets it
+                result = {"warnings": warnings, "observed": False, "dfm": lint_module.evaluate(OpContext(self), next_rev)}
         except ReifyOpError:
             self._abort()
             raise
@@ -465,9 +471,14 @@ class DocumentSession:
             pass
         self.reload()  # the saved file is the only trusted state
 
-    def _result(self, before: dict[str, Any], after: dict[str, Any], warnings: list[dict[str, Any]]) -> dict[str, Any]:
+    def record_geometry_run(self, highlight: dict[str, Any], annotations: list[dict[str, Any]]) -> None:
+        """Remember a geometry run at this revision, with its error and warning marks (shown while it is fresh)."""
+        self.geometry_run = {"rev": self.rev, "sha": self.loaded_sha, "highlight": highlight, "annotations": annotations}
+
+    def _result(self, before: dict[str, Any], after: dict[str, Any], warnings: list[dict[str, Any]], next_rev: int | None = None) -> dict[str, Any]:
         ctx = OpContext(self)
         intents = intent_module.evaluate_all(ctx)
+        dfm = lint_module.evaluate(ctx, next_rev)
         paths_before, paths_after = set(before["paths"]), set(after["paths"])
         features = summary.diff_features(paths_before, paths_after, self._recomputed)
         params = summary.diff_params(before["params"], after["params"])
@@ -475,6 +486,15 @@ class DocumentSession:
         changed_props = [p for p in after["props"] if p in before["props"] and after["props"][p] != before["props"][p]]
         highlight = sorted(set(changed_roles) | {p for p in changed_props if not any(r.startswith(p + "/") for r in changed_roles)})
         highlight = [p for p in highlight if p in paths_after or p in after["roles"]]
+        annotations = self._annotations(highlight, changed_roles)
+        if dfm is not None and dfm["geometry"]["state"] == "fresh" and self.geometry_run:
+            # the error and warning faces of the last geometry run are marked while that run is current
+            highlight = highlight + [p for p in self.geometry_run["highlight"]["paths"] if p not in highlight]
+            seen = {(a["text"], tuple(a["at"])) for a in annotations}
+            for item in self.geometry_run["annotations"]:
+                if (item["text"], tuple(item["at"])) not in seen and len(annotations) < summary.MAX_ANNOTATIONS:
+                    annotations.append(item)
+                    seen.add((item["text"], tuple(item["at"])))
         deduped: dict[str, None] = {}
         for item in warnings:
             deduped[json.dumps(item, sort_keys=True)] = None
@@ -482,9 +502,10 @@ class DocumentSession:
             "features": features,
             "params": params,
             "intent": intents,
+            "dfm": dfm,
             "warnings": [json.loads(item) for item in deduped],
             "highlight": {"paths": highlight},
-            "annotations": self._annotations(highlight, changed_roles),
+            "annotations": annotations,
         }
 
     def _annotations(self, highlight: list[str], changed_roles: list[str]) -> list[dict[str, Any]]:

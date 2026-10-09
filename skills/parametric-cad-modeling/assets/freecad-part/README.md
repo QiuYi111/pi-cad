@@ -4,8 +4,9 @@ Copy this directory into the project, replace the named parameters and feature n
 
 - `part.ops.json` builds a plate with four parameter-driven mounting holes, a rounded rim, and two intents (mass and bounding box).
 - `edit.ops.json` is one edit: a wider hole. It changes the parameter, not a script.
+- `dfm.ops.json` is a 40 x 30 x 6 mm bracket for the 铨洲 CNC milling rulepack (`dfm_profile`, al6061) with two M3 tapped through holes drilled at the tap diameter φ2.5. It builds with 0 error and 0 warn.
 - `build.py` shows the calls. Run it in the persistent IPython kernel (it uses `await`).
 
 Replace the dimensions, `bracket` paths and hole positions. Keep the structure: named parameters first, one sketch per feature, features named by what they do (not by role names), intents last.
 
-The reference for every op is `skills/parametric-cad-modeling/references/freecad-part-ops.md`.
+The reference for every op is `skills/parametric-cad-modeling/references/freecad-part-ops.md`. The DFM rules are in `skills/design-for-manufacturing/SKILL.md`.

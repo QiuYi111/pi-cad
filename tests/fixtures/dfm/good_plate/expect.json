@@ -1,0 +1,15 @@
+{
+  "description": "Clean 40x30x5 plate: four M3 tapped through holes (phi2.5), R2 slot pocket depth 3. No error, no warn.",
+  "lint": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": []
+  }
+}

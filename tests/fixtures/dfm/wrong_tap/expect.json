@@ -1,0 +1,34 @@
+{
+  "description": "M3 thread tapped at phi2.4 instead of the 2.5 tap drill. Target: hole.thread_tap_drill.",
+  "lint": {
+    "must": [
+      {
+        "rule": "hole.thread_tap_drill",
+        "severity": "error",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter",
+      "hole.depth_ratio"
+    ]
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "hole.thread_tap_drill",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter"
+    ]
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": [
+      "hole.min_diameter"
+    ]
+  }
+}

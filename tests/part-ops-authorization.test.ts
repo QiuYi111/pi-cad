@@ -66,6 +66,7 @@ const reading = [
   { schema: 1, op: "part-query", doc, target: "bracket/base" },
   { schema: 1, op: "part-check", doc, kind: "mass", args: {} },
   { schema: 1, op: "part-sweep", doc, param: "w", range: [0, 1], step: 0.5, check: { kind: "mass", args: {} } },
+  { schema: 1, op: "part-dfm", doc, layers: ["lint", "geometry"] },
 ] as const;
 
 test("every part operation needs an active workflow", async () => {
@@ -98,6 +99,16 @@ test("a read-only author may run trial and read operations but not change the pa
     assert.equal(read.ok, false);
     assert.equal(read.error!.code, "FREECAD_NOT_INSTALLED", "the read passed the read-only gate and failed only for lack of FreeCAD");
     assert.deepEqual(read.error!.hints, ["run: npm run setup:freecad"]);
+  });
+});
+
+test("the reviewer endpoint exposes part-dfm, a read that needs probe.run", async () => {
+  await withProject(async (cwd) => {
+    // Without a scoped reviewId the request fails at the reviewer's admission check, which only runs for exposed operations.
+    const reviewed = await dispatchSidecarRequest("reviewer", cwd, reading[5] as never);
+    assert.equal(reviewed.ok, false);
+    assert.doesNotMatch(reviewed.error!.message, /reviewer endpoint does not expose operation/);
+    assert.match(reviewed.error!.message, /missing its scoped reviewId/, "the operation passed the endpoint gate");
   });
 });
 

@@ -1,0 +1,27 @@
+{
+  "description": "Two blocks joined by a 0.8 x 0.8 rib, one solid. Target: ganging.forbidden (geometry only).",
+  "lint": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "ganging.forbidden",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [
+      {
+        "rule": "ganging.forbidden",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  }
+}

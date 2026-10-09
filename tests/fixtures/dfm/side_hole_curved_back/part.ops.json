@@ -1,0 +1,80 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/block_profile",
+    "plane": "XZ",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            3,
+            5
+          ],
+          "size": [
+            6,
+            10
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/block",
+    "sketch": "part/block_profile",
+    "length": 20,
+    "midplane": true
+  },
+  {
+    "op": "sketch",
+    "name": "part/curved_profile",
+    "plane": "XZ",
+    "shapes": [
+      {
+        "circle": {
+          "center": [
+            0,
+            5
+          ],
+          "diameter": 10
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/curved_back",
+    "sketch": "part/curved_profile",
+    "length": 20,
+    "midplane": true
+  },
+  {
+    "op": "sketch",
+    "name": "part/side_profile",
+    "plane": "YZ",
+    "offset": 7,
+    "shapes": [
+      {
+        "circle": {
+          "center": [
+            0,
+            5
+          ],
+          "diameter": 4
+        }
+      }
+    ]
+  },
+  {
+    "op": "hole",
+    "name": "part/side_hole",
+    "sketch": "part/side_profile",
+    "diameter": 4,
+    "type": "through_all"
+  }
+]

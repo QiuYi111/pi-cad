@@ -1,0 +1,61 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            40,
+            30
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/base",
+    "sketch": "part/profile",
+    "length": 15
+  },
+  {
+    "op": "sketch",
+    "name": "part/deep_profile",
+    "on": {
+      "feature": "part/base",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "slot": {
+          "start": [
+            -6,
+            0
+          ],
+          "end": [
+            6,
+            0
+          ],
+          "width": 2.5
+        }
+      }
+    ]
+  },
+  {
+    "op": "pocket",
+    "name": "part/deep_slot",
+    "sketch": "part/deep_profile",
+    "depth": 12
+  }
+]

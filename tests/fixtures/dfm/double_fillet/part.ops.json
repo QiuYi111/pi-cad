@@ -1,0 +1,58 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            40,
+            30
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/base",
+    "sketch": "part/profile",
+    "length": 5
+  },
+  {
+    "op": "fillet",
+    "name": "part/top_round",
+    "edges": {
+      "feature": "part/base",
+      "role": "top_outer"
+    },
+    "radius": 1
+  },
+  {
+    "op": "fillet",
+    "name": "part/bottom_round",
+    "edges": {
+      "between": [
+        {
+          "feature": "part/base",
+          "role": "side"
+        },
+        {
+          "feature": "part/base",
+          "role": "bottom"
+        }
+      ]
+    },
+    "radius": 1
+  }
+]

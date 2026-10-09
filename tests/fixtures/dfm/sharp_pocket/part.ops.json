@@ -1,0 +1,60 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            40,
+            30
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/base",
+    "sketch": "part/profile",
+    "length": 12
+  },
+  {
+    "op": "sketch",
+    "name": "part/cavity_profile",
+    "on": {
+      "feature": "part/base",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            20,
+            15
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pocket",
+    "name": "part/cavity",
+    "sketch": "part/cavity_profile",
+    "depth": 10
+  }
+]

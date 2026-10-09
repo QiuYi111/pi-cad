@@ -1,0 +1,40 @@
+{
+  "description": "phi1.0 through hole. Target: hole.min_diameter.",
+  "lint": {
+    "must": [
+      {
+        "rule": "hole.min_diameter",
+        "severity": "error",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "hole.depth_ratio",
+      "hole.thread_tap_drill"
+    ]
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "hole.min_diameter",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "hole.depth_ratio"
+    ]
+  },
+  "geometry_builtin": {
+    "must": [
+      {
+        "rule": "hole.min_diameter",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "hole.depth_ratio"
+    ]
+  }
+}

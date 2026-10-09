@@ -1,0 +1,39 @@
+{
+  "description": "90 degree countersink phi8 on phi3 hole through a 2 mm plate: the cone reaches the bottom. Target: hole.countersink_to_bottom.",
+  "lint": {
+    "must": [
+      {
+        "rule": "hole.countersink_to_bottom",
+        "severity": "error",
+        "layer": "lint"
+      },
+      {
+        "rule": "hole.countersink",
+        "severity": "warn",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter",
+      "hole.depth_ratio"
+    ]
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "hole.countersink_to_bottom",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "hole.min_diameter"
+    ]
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": [
+      "hole.min_diameter"
+    ]
+  }
+}

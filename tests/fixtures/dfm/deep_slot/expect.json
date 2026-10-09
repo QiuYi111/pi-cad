@@ -1,0 +1,33 @@
+{
+  "description": "Slot 2.5 mm wide, 12 mm deep: tool phi2 gives a limit of 10 mm. Target: cavity.depth_tool_ratio.",
+  "lint": {
+    "must": [
+      {
+        "rule": "cavity.depth_tool_ratio",
+        "severity": "error",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "cavity.min_width"
+    ]
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "cavity.depth_tool_ratio",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "cavity.min_width"
+    ]
+  },
+  "geometry_builtin": {
+    "must": [],
+    "must_not": [
+      "cavity.min_width"
+    ]
+  }
+}

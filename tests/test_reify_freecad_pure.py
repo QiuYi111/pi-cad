@@ -66,7 +66,7 @@ class OpSchemaTests(unittest.TestCase):
     def test_every_documented_op_has_a_schema_and_a_handler(self) -> None:
         self.assertEqual(
             set(OP_REGISTRY),
-            {"param", "body", "sketch", "pad", "pocket", "hole", "fillet", "chamfer", "linear_pattern", "polar_pattern", "mirror", "set", "delete", "rename", "placement", "require", "link", "import_step", "joint"},
+            {"param", "body", "sketch", "pad", "pocket", "hole", "fillet", "chamfer", "linear_pattern", "polar_pattern", "mirror", "set", "delete", "rename", "placement", "require", "link", "import_step", "joint", "dfm_profile"},
         )
 
     def test_a_valid_batch_is_normalised(self) -> None:

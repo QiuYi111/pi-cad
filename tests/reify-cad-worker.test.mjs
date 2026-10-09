@@ -98,7 +98,12 @@ await test("events identify repeated failure and steering keeps the session", as
   await core.send({ session_id: started.session_id, prompt: "Design a bracket" });
   fake.primes[0].state = "streaming";
   await assert.rejects(() => core.send({ session_id: started.session_id, prompt: "new prompt while busy" }), /busy/);
-  await sleep(20);
+  // Wait for the fake turn to finish instead of a fixed delay: on a loaded
+  // machine its timer chain can take longer than the 15 ms prompt delay.
+  for (let waited = 0; waited < 2000; waited += 5) {
+    if ((await core.status({ session_id: started.session_id })).progress_signal === "idle") break;
+    await sleep(5);
+  }
   const events = await core.events({ session_id: started.session_id });
   assert.ok(events.events.some((event) => event.type === "action_failed" && event.failure_streak === 3));
   const completionDeadline = Date.now() + 1000;

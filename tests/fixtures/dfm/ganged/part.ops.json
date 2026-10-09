@@ -1,0 +1,82 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/left_profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            -15,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/left",
+    "sketch": "part/left_profile",
+    "length": 5
+  },
+  {
+    "op": "sketch",
+    "name": "part/right_profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            15,
+            0
+          ],
+          "size": [
+            20,
+            20
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/right",
+    "sketch": "part/right_profile",
+    "length": 5
+  },
+  {
+    "op": "sketch",
+    "name": "part/rib_profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            12,
+            0.8
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/rib",
+    "sketch": "part/rib_profile",
+    "length": 0.8
+  }
+]

@@ -79,6 +79,8 @@ class TransferResult:
     detail: dict[str, Any] | None = None
     #: Things to tell the user, for example that an assembly's joints were not exported.
     notes: tuple[str, ...] = ()
+    #: The document's latest DFM state: ``counts`` (``error``, ``warn``, ...) and ``geometry`` (``state``: none, fresh or stale). None when it has no DFM profile. Never blocks the export.
+    dfm: dict[str, Any] | None = None
 
     def __repr__(self) -> str:
         notes = f", notes={list(self.notes)!r}" if self.notes else ""
@@ -115,6 +117,7 @@ def _result_from_wire(payload: dict[str, Any]) -> TransferResult:
         log=payload.get("log"),
         detail=payload.get("detail"),
         notes=tuple(payload.get("notes") or ()),
+        dfm=payload.get("dfm") or None,
     )
 
 

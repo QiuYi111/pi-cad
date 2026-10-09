@@ -1,0 +1,39 @@
+{
+  "description": "R1 on the top and bottom outer edges. Target: edge.double_side_fillet.",
+  "lint": {
+    "must": [
+      {
+        "rule": "edge.double_side_fillet",
+        "severity": "error",
+        "layer": "lint"
+      }
+    ],
+    "must_not": [
+      "edge.double_side_chamfer"
+    ]
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "edge.double_side_fillet",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "edge.double_side_chamfer"
+    ]
+  },
+  "geometry_builtin": {
+    "must": [
+      {
+        "rule": "edge.double_side_fillet",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": [
+      "edge.double_side_chamfer"
+    ]
+  }
+}

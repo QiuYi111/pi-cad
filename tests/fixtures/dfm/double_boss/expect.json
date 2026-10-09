@@ -1,0 +1,27 @@
+{
+  "description": "The widest outline is the middle flange, not the top. Target: twoside.max_outline_top (geometry only).",
+  "lint": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "twoside.max_outline_top",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [
+      {
+        "rule": "twoside.max_outline_top",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  }
+}

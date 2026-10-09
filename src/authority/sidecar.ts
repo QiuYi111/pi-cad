@@ -51,7 +51,7 @@ export type SidecarRequest = AgentApiRequest
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const AUTHOR_ONLY = new Set(["workflow-list", "workflow-start", "workflow-advance", "commit", "model-build", "part-open", "part-apply", "part-undo", "transfer-status", "transfer-features", "transfer-export", "simulation-run", "review-submit", "review-watch", "phase-card", "phase-contract", "completion-gate", "mission-capture", "author-model", "image-generated", "authorize", "experience-search", "experience-get", "experience-find", "experience-read"]);
 /** Part backend reads and trial runs: probes by authority, so reviewers may use them. */
-const PART_PROBE_OPERATIONS = ["part-try", "part-tree", "part-query", "part-check", "part-sweep"];
+const PART_PROBE_OPERATIONS = ["part-try", "part-tree", "part-query", "part-check", "part-sweep", "part-dfm"];
 const COMMON_ALLOWED = new Set(["workflow-current", "load", "probe", ...PART_PROBE_OPERATIONS, "review-current", "history"]);
 const REVIEWER_ALLOWED = new Set([...COMMON_ALLOWED, "review-evidence", "review-complete"]);
 const READ_ONLY_AUTHOR_DENIED = new Set(["workflow-start", "workflow-advance", "commit", "model-build", "part-open", "part-apply", "part-undo", "transfer-export", "simulation-run", "review-submit", "mission-capture", "image-generated"]);

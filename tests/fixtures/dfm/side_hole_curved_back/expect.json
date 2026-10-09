@@ -1,0 +1,27 @@
+{
+  "description": "Side hole along X through a flat face, exiting on a curved (cylindrical) back. Target: hole.side_support_face (geometry only).",
+  "lint": {
+    "must": [],
+    "must_not": []
+  },
+  "geometry": {
+    "must": [
+      {
+        "rule": "hole.side_support_face",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  },
+  "geometry_builtin": {
+    "must": [
+      {
+        "rule": "hole.side_support_face",
+        "severity": "error",
+        "layer": "geometry"
+      }
+    ],
+    "must_not": []
+  }
+}

@@ -1,0 +1,90 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            40,
+            30
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/base",
+    "sketch": "part/profile",
+    "length": 5
+  },
+  {
+    "op": "sketch",
+    "name": "part/left_cavity",
+    "on": {
+      "feature": "part/base",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            -9.65,
+            0
+          ],
+          "size": [
+            18.7,
+            20
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pocket",
+    "name": "part/left_cavity_cut",
+    "sketch": "part/left_cavity",
+    "depth": 5,
+    "type": "through_all"
+  },
+  {
+    "op": "sketch",
+    "name": "part/right_cavity",
+    "on": {
+      "feature": "part/base",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            9.65,
+            0
+          ],
+          "size": [
+            18.7,
+            20
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pocket",
+    "name": "part/right_cavity_cut",
+    "sketch": "part/right_cavity",
+    "depth": 5,
+    "type": "through_all"
+  }
+]

@@ -207,6 +207,12 @@ def c_any(value: Any, index: int | None, where: str) -> Any:
     return value
 
 
+def c_rulepack_or_null(value: Any, index: int | None, where: str) -> str | None:
+    if value is None:
+        return None
+    return c_str(value, index, where)
+
+
 def c_attach(value: Any, index: int | None, where: str) -> dict[str, Any]:
     return c_selector(value, index, where)
 
@@ -229,8 +235,8 @@ SCHEMAS: dict[str, tuple[dict[str, Check], dict[str, Check]]] = {
     ),
     "hole": (
         {"name": c_path, "sketch": c_path, "diameter": c_value},
-        {"depth": c_value, "type": c_enum("blind", "through_all"), "thread": c_str,
-         "counterbore": c_any, "countersink": c_any, "body": c_path},
+        {"depth": c_value, "type": c_enum("blind", "through_all"), "thread": c_str, "thread_depth": c_value,
+         "drill_point": c_enum("flat", "angled"), "counterbore": c_any, "countersink": c_any, "body": c_path},
     ),
     "fillet": ({"name": c_path, "edges": c_selectors, "radius": c_value}, {"body": c_path}),
     "chamfer": ({"name": c_path, "edges": c_selectors, "size": c_value}, {"body": c_path}),
@@ -266,6 +272,7 @@ SCHEMAS: dict[str, tuple[dict[str, Check], dict[str, Check]]] = {
         {"name": c_path, "kind": c_enum(*REQUIRE_KINDS), "target": c_any, "limit": c_any},
         {"tolerance": c_value},
     ),
+    "dfm_profile": ({"rulepack": c_rulepack_or_null}, {"material": c_str}),
 }
 
 #: Ops that add or change geometry, in the order they are listed in documentation.
@@ -297,10 +304,16 @@ def validate_op(op: Any, index: int | None = None) -> dict[str, Any]:
         raise fail(index, "face", "required when type is up_to_face")
     if kind == "hole" and out.get("type", "blind") == "blind" and "depth" not in out:
         raise fail(index, "depth", "required for a blind hole")
+    if kind == "hole" and "thread_depth" in out and "thread" not in out:
+        raise fail(index, "thread_depth", "needs thread (for example \"M3\")")
+    if kind == "hole" and "drill_point" in out and out.get("type", "blind") == "through_all":
+        raise fail(index, "drill_point", "only for a blind hole")
     if kind == "joint":
         for side in ("parent", "child"):
             if "role" not in out[side]:
                 raise fail(index, side, "a joint frame needs a role (a cylinder, cone or plane face)")
+    if kind == "dfm_profile" and out["rulepack"] is not None and "material" not in out:
+        raise fail(index, "material", "required when a rulepack is set")
     if kind == "set" and not isinstance(out["prop"], str):
         raise fail(index, "prop", "expected a string")
     return out

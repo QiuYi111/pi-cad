@@ -1,0 +1,115 @@
+[
+  {
+    "op": "dfm_profile",
+    "rulepack": "quanzhou.cnc_mill",
+    "material": "al6061"
+  },
+  {
+    "op": "sketch",
+    "name": "part/profile",
+    "plane": "XY",
+    "shapes": [
+      {
+        "rect": {
+          "center": [
+            0,
+            0
+          ],
+          "size": [
+            40,
+            30
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "op": "pad",
+    "name": "part/base",
+    "sketch": "part/profile",
+    "length": 5
+  },
+  {
+    "op": "sketch",
+    "name": "part/mount_holes",
+    "on": {
+      "feature": "part/base",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "circle": {
+          "center": [
+            -12,
+            -8
+          ],
+          "diameter": 2.5
+        }
+      },
+      {
+        "circle": {
+          "center": [
+            12,
+            -8
+          ],
+          "diameter": 2.5
+        }
+      },
+      {
+        "circle": {
+          "center": [
+            -12,
+            8
+          ],
+          "diameter": 2.5
+        }
+      },
+      {
+        "circle": {
+          "center": [
+            12,
+            8
+          ],
+          "diameter": 2.5
+        }
+      }
+    ]
+  },
+  {
+    "op": "hole",
+    "name": "part/m3_tap",
+    "sketch": "part/mount_holes",
+    "diameter": 2.5,
+    "thread": "M3",
+    "type": "through_all"
+  },
+  {
+    "op": "sketch",
+    "name": "part/slot_profile",
+    "on": {
+      "feature": "part/base",
+      "role": "top"
+    },
+    "shapes": [
+      {
+        "slot": {
+          "start": [
+            -6,
+            0
+          ],
+          "end": [
+            6,
+            0
+          ],
+          "width": 4
+        }
+      }
+    ]
+  },
+  {
+    "op": "pocket",
+    "name": "part/slot_pocket",
+    "sketch": "part/slot_profile",
+    "depth": 3
+  }
+]
