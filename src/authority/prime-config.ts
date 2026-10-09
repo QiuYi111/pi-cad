@@ -1,10 +1,12 @@
 import { existsSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import type { ReviewerModelSelection, ReviewerThinkingLevel } from "../shared/reviewer-model.ts";
+
+export type { ReviewerModelSelection, ReviewerThinkingLevel };
+
 export const PRIME_CAD_CONFIG_FILE = "prime-cad.json";
 
-export type ReviewerThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
-export interface ReviewerModelSelection { provider: string; model: string; thinking: ReviewerThinkingLevel }
 export type ReviewerModelPolicy =
   | { mode: "inherit"; thinking?: ReviewerThinkingLevel }
   | { mode: "fixed"; provider: string; model: string; thinking: ReviewerThinkingLevel };
