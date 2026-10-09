@@ -14,7 +14,6 @@ import FreeCAD as App
 
 from . import export as export_module
 from . import intent as intent_module
-from .dfm import lint as lint_module
 from . import summary
 from .core import (
     PARAMS_NAME, REQUIREMENTS_NAME, bodies, body_features, get_path, is_feature, is_sketch,
@@ -64,7 +63,9 @@ class _RecomputeRecorder:
 
 
 class DocumentSession:
-    def __init__(self, fcstd: Path, output: Path, history_dir: Path, body_path: str | None) -> None:
+    def __init__(self, fcstd: Path, output: Path, history_dir: Path, body_path: str | None, *, dfm: Any) -> None:
+        #: DFM entry points (``reify_freecad.dfm.services``); the kernel is given them instead of importing them.
+        self.dfm = dfm
         self.fcstd = fcstd
         self.output = output
         self.history_dir = history_dir
@@ -434,7 +435,7 @@ class DocumentSession:
                 result.update(self._export(step))
             else:
                 # DFM lint reads feature parameters only, so an unobserved apply still gets it
-                result = {"warnings": warnings, "observed": False, "dfm": lint_module.evaluate(OpContext(self), next_rev)}
+                result = {"warnings": warnings, "observed": False, "dfm": self.dfm.evaluate(OpContext(self), next_rev)}
         except ReifyOpError:
             self._abort()
             raise
@@ -478,7 +479,7 @@ class DocumentSession:
     def _result(self, before: dict[str, Any], after: dict[str, Any], warnings: list[dict[str, Any]], next_rev: int | None = None) -> dict[str, Any]:
         ctx = OpContext(self)
         intents = intent_module.evaluate_all(ctx)
-        dfm = lint_module.evaluate(ctx, next_rev)
+        dfm = self.dfm.evaluate(ctx, next_rev)
         paths_before, paths_after = set(before["paths"]), set(after["paths"])
         features = summary.diff_features(paths_before, paths_after, self._recomputed)
         params = summary.diff_params(before["params"], after["params"])

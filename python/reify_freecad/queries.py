@@ -316,17 +316,6 @@ def _solids_of(shapes: list[Any]) -> list[Any]:
     return solids
 
 
-def _profile_density(session: Any) -> float:
-    """The DFM profile's material density when the document sets one, else the Params density."""
-    from .dfm.profile import get_profile
-    from .dfm.rulepack import load_rulepack
-
-    profile = get_profile(session)
-    if profile and profile["material"]:
-        return float(load_rulepack(profile["rulepack"]).materials[profile["material"]]["density_g_cm3"])
-    return session.density()
-
-
 def mass(ctx: Any, target: str | None, density: float | None) -> dict[str, Any]:
     """Mass, centre of mass and inertia (about the centre of mass) of a body, feature, or every body."""
     paths = [target] if target else [unit.path for unit in units(ctx.session) if unit.solid_count()]
@@ -334,7 +323,7 @@ def mass(ctx: Any, target: str | None, density: float | None) -> dict[str, Any]:
     if not solids:
         raise ReifyOpError("RESULT_NOT_SOLID", f"'{target or 'the document'}' has no solid to weigh", target=target,
                            detail={"body": target, "solids": 0, "validity": "empty"})
-    rho = density if density is not None else _profile_density(ctx.session)
+    rho = density if density is not None else ctx.session.dfm.profile_density(ctx.session)
     scale = rho * 1e-3  # g/cm3 -> g/mm3
     volume = sum(solid.Volume for solid in solids)
     centre = App.Vector()

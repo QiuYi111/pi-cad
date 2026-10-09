@@ -19,13 +19,14 @@ class SessionRegistry:
         self.sources: dict[str, Any] = {}
 
     def get(self, path: Path) -> Any:
+        from .dfm import services as dfm_services
         from .session import DocumentSession
 
         key = str(path)
         if key in self.sessions:
             return self.sessions[key]
         if key not in self.sources:
-            session = DocumentSession(path, path.with_suffix(".step"), path.parent / ".reify-source-history", None)
+            session = DocumentSession(path, path.with_suffix(".step"), path.parent / ".reify-source-history", None, dfm=dfm_services)
             session.registry = self
             session.open(create=False)
             self.sources[key] = session
