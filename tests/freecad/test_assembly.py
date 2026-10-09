@@ -390,13 +390,14 @@ class JointChainTests(unittest.TestCase):
 
     def test_the_last_unit_follows_a_joint_made_after_its_child_joint(self) -> None:
         # j3 (upper arm -> forearm) is made before j2 (base -> upper arm): j2 must still be applied first.
+        # flip stacks each shaft on the one below (bottom face against top face), as in the twin test.
         self.p.call("assembly/chain.FCStd", "apply", ops=[
             {"op": "link", "name": "chain/a", "part": "parts/shaft.FCStd", "body": "shaft"},
             {"op": "link", "name": "chain/b", "part": "parts/shaft.FCStd", "body": "shaft"},
             {"op": "link", "name": "chain/c", "part": "parts/shaft.FCStd", "body": "shaft"},
-            {"op": "joint", "name": "chain/j3", "type": "prismatic",
+            {"op": "joint", "name": "chain/j3", "type": "prismatic", "flip": True,
              "parent": {"feature": "chain/b/cyl", "role": "top"}, "child": {"feature": "chain/c/cyl", "role": "bottom"}},
-            {"op": "joint", "name": "chain/j2", "type": "prismatic", "value": 0,
+            {"op": "joint", "name": "chain/j2", "type": "prismatic", "flip": True, "value": 0,
              "parent": {"feature": "chain/a/cyl", "role": "top"}, "child": {"feature": "chain/b/cyl", "role": "bottom"}},
         ])
         self.assertAlmostEqual(self.unit_box("chain/c").ZMin, 80.0, places=3)
