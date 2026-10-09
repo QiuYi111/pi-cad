@@ -8,7 +8,7 @@ import {
   type CadPhase,
   type CadRunState,
 } from "../shared/protocol.ts";
-import { contractTools, phaseContract } from "../control/phase-contract.ts";
+import { contractTools, phaseContract } from "../domains/mechanical/phase-contract.ts";
 import { compiledSpec } from "../workflows/index.ts";
 import { isHeadless, isTerminalStatus } from "./interaction-mode.ts";
 

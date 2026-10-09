@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { access, readFile, stat } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 
-import { phaseContract } from "../../control/phase-contract.ts";
+import { phaseContract } from "../../domains/mechanical/phase-contract.ts";
 import { writePathAllowed } from "../../core/policies.ts";
 import type { CadRunState } from "../../shared/protocol.ts";
 import { loadSimulationRecipe, parseSimulationManifest, selectSimulationOutputs, type LoadedSimulationRecipe } from "./protocol.ts";

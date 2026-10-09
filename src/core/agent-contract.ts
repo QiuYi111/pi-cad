@@ -1,4 +1,4 @@
-import { allPhaseContracts, contractTools, phaseContract } from "../control/phase-contract.ts";
+import { allPhaseContracts, contractTools, phaseContract } from "../domains/mechanical/phase-contract.ts";
 import {
   ACTIVE_PUBLIC_TOOLS,
   ACTIVE_PUBLIC_TOOL_NAMES,

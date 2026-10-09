@@ -1,5 +1,5 @@
 import { PHASE_PURPOSES } from "../../core/agent-contract.ts";
-import { contractTools, phaseContract } from "../../control/phase-contract.ts";
+import { contractTools, phaseContract } from "./phase-contract.ts";
 import type { JsonValue } from "../../harness/canonical.ts";
 import type { BuiltinWorkflowResolver } from "../../harness/workflow/loader.ts";
 import type { WorkflowDefinitionV1, WorkflowObligationDefinition, WorkflowPhaseDefinition } from "../../harness/workflow/types.ts";

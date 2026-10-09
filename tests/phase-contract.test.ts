@@ -15,7 +15,7 @@ import {
   capabilityTools,
   contractTools,
   phaseContract,
-} from "../src/control/phase-contract.ts";
+} from "../src/domains/mechanical/phase-contract.ts";
 import { CAD_PHASES } from "../src/shared/protocol.ts";
 import { toolsForPhase } from "../src/core/policies.ts";
 
@@ -79,7 +79,7 @@ test("contracts: source phases never grant simulate/optimize; review does", () =
 });
 
 test("contracts: control plane has zero backend imports", async () => {
-  const source = readFileSync(new URL("../src/control/phase-contract.ts", import.meta.url), "utf8");
+  const source = readFileSync(new URL("../src/domains/mechanical/phase-contract.ts", import.meta.url), "utf8");
   assert.ok(!source.includes("cadctl"));
   assert.ok(!source.includes("build123d"));
   assert.ok(!source.includes("capability.ts"));
