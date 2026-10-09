@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, resolvePrimeRepository, resolveReviewerLaunchOptions, resolveVenvPythonRoot, reviewerModelArgs, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
+import { withHeadlessEventContinuation } from "../src/authority/launcher.ts";
+import { type LaunchPaths, resolvePrimeRepository, resolveReviewerLaunchOptions, resolveVenvPythonRoot, reviewerModelArgs } from "../src/authority/prime-config.ts";
+import { buildPrimeBwrapArgs, buildReviewerBwrapArgs } from "../src/authority/sandbox-bwrap.ts";
 import { completionGate, dispatchSidecarRequest, SIDECAR_REQUEST_TIMEOUT_MS, startAuthoritySidecar } from "../src/authority/sidecar.ts";
 import { DEFAULT_CADCTL_TIMEOUT_MS, FULL_GEOMETRY_VALIDATION_TIMEOUT_MS } from "../src/shared/capability.ts";
 import { mechanicalRegistries } from "../src/domains/mechanical/registries.ts";
