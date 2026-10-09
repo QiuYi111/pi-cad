@@ -62,10 +62,10 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
       const { queryObservationCollection, queryObservations, readObservationSnapshot } = await import("../../core/observation-index.ts");
       const state = await new CadProjectStore(ctx.cwd).load();
       if (!state) {
-        return { content: [{ type: "text", text: "cad_recall_observation failed: no active Pi-CAD workflow" }] };
+        return { content: [{ type: "text", text: "cad_recall_observation failed: no active Pi-CAD workflow" }], isError: true };
       }
       if (params.collection && !params.observationId) {
-        return { content: [{ type: "text", text: "cad_recall_observation failed: collection requires observationId" }] };
+        return { content: [{ type: "text", text: "cad_recall_observation failed: collection requires observationId" }], isError: true };
       }
       if (params.observationId) {
         const snapshot = await readObservationSnapshot(ctx.cwd, state.runId, params.observationId);
@@ -75,6 +75,7 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
             content: [{ type: "text", text: legacy
               ? `cad_recall_observation: ${params.observationId} is a legacy summary; detailUnavailable=legacy`
               : `cad_recall_observation failed: unknown observationId ${params.observationId}` }],
+            isError: !legacy,
           };
         }
         if (params.collection) {
@@ -91,7 +92,7 @@ export default function cadProbeExtension(pi: ExtensionAPI) {
               details: { observationId: params.observationId, collection: params.collection, totalMatched: page.totalMatched, nextCursor: page.nextCursor },
             };
           } catch (error) {
-            return { content: [{ type: "text", text: `cad_recall_observation failed: ${error instanceof Error ? error.message : String(error)}` }] };
+            return { content: [{ type: "text", text: `cad_recall_observation failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
           }
         }
         const lines = [

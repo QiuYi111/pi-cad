@@ -112,7 +112,7 @@ function okTool(text: string, details: unknown): AgentToolResult<unknown> {
 }
 
 function errTool(text: string, details?: unknown): AgentToolResult<unknown> {
-  return { content: [{ type: "text", text }], details };
+  return { content: [{ type: "text", text }], details, isError: true };
 }
 
 async function guardState(store: CadProjectStore): Promise<CadRunState | null> {

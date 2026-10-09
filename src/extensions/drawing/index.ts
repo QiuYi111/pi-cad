@@ -86,13 +86,13 @@ export default function cadDrawingExtension(pi: ExtensionAPI) {
     ),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (await selectKernelEngine(ctx.cwd) === "v7") {
-        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_generate_drawing v7 requires {recipe, stage}" }] };
+        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_generate_drawing v7 requires {recipe, stage}" }], isError: true };
         try {
           const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "drawing", recipe: params.recipe, action: params.stage, ...(params.obligationRef ? { obligationRef: params.obligationRef } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
           return { content: [{ type: "text", text: `Drawing Recipe ${result.record.runId} stage=${params.stage} committed; exports=${result.observation.exports.map((item) => item.name).join(",")}.` }], details: { recipeRunId: result.record.runId, observationId: result.observation.observationId, kind: "drawing" as const } };
-        } catch (error) { return { content: [{ type: "text", text: `cad_generate_drawing failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+        } catch (error) { return { content: [{ type: "text", text: `cad_generate_drawing failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true }; }
       }
-      if ("recipe" in params) return { content: [{ type: "text", text: "cad_generate_drawing v6 requires a structured drawing specification" }] };
+      if ("recipe" in params) return { content: [{ type: "text", text: "cad_generate_drawing v6 requires a structured drawing specification" }], isError: true };
       if (!existsSync(resolve(ctx.cwd, params.artifact))) {
         throw new Error(`drawing artifact does not exist: ${params.artifact}`);
       }

@@ -31,13 +31,13 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
     ]),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (await selectKernelEngine(ctx.cwd) === "v7") {
-        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_derive_analysis_model v7 requires {recipe}" }] };
+        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_derive_analysis_model v7 requires {recipe}" }], isError: true };
         try {
           const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "analysis-model", recipe: params.recipe, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
           return { content: [{ type: "text", text: `Analysis-model Recipe ${result.record.runId} committed ${result.observation.exports.length} exports.` }], details: { recipeRunId: result.record.runId, observationId: result.observation.observationId, kind: "build" as const } };
-        } catch (error) { return { content: [{ type: "text", text: `cad_derive_analysis_model failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+        } catch (error) { return { content: [{ type: "text", text: `cad_derive_analysis_model failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true }; }
       }
-      if ("recipe" in params) return { content: [{ type: "text", text: "cad_derive_analysis_model v6 requires source/operations" }] };
+      if ("recipe" in params) return { content: [{ type: "text", text: "cad_derive_analysis_model v6 requires source/operations" }], isError: true };
       if (!existsSync(resolve(ctx.cwd, params.source))) throw new Error(`derivation source does not exist: ${params.source}`);
       if (params.output && !existsSync(resolve(ctx.cwd, params.output))) {
         const mechanical = params.operations.every((op) => op === "fused" || op === "bonded");
@@ -100,13 +100,13 @@ export default function cadSimulationExtension(pi: ExtensionAPI) {
     ]),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (await selectKernelEngine(ctx.cwd) === "v7") {
-        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_optimize v7 requires {recipe}" }] };
+        if (!("recipe" in params)) return { content: [{ type: "text", text: "cad_optimize v7 requires {recipe}" }], isError: true };
         try {
           const result = await executeMechanicalRecipeV7({ cwd: ctx.cwd, kind: "optimization", recipe: params.recipe, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
           return { content: [{ type: "text", text: `Optimization Recipe ${result.record.runId} committed; exports=${result.observation.exports.map((item) => item.name).join(",")}. Output is not accepted CAD.` }], details: { recipeRunId: result.record.runId, observationId: result.observation.observationId, computeIdentity: result.record.computeIdentity, kind: "optimization" as const } };
-        } catch (error) { return { content: [{ type: "text", text: `cad_optimize failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+        } catch (error) { return { content: [{ type: "text", text: `cad_optimize failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true }; }
       }
-      if ("recipe" in params) return { content: [{ type: "text", text: "cad_optimize v6 requires a structured topology specification" }] };
+      if ("recipe" in params) return { content: [{ type: "text", text: "cad_optimize v6 requires a structured topology specification" }], isError: true };
       const { runtime = "torch-fem-0.9-cu126", ...rest } = params;
       const spec = { ...rest, mode: rest.mode ?? "topology_2d_rect_v0", device: runtime.endsWith("-cpu") ? "cpu" : "cuda" };
       const { specPath, outputDir } = await writeRunSpec(ctx.cwd, "optimization", spec);

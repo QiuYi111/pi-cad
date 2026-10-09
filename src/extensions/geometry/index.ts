@@ -46,6 +46,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       if (!envelope.ok) {
         return {
           content: [{ type: "text", text: `cad_build_step failed: ${buildPayload(envelope).error ?? "unknown error"}` }],
+          isError: true,
           details: { envelope, sourceHash },
         };
       }
@@ -82,7 +83,7 @@ export default function cadGeometryExtension(pi: ExtensionAPI) {
       const envelope = await modelBackend().export(ctx.cwd, params);
       if (!envelope.ok) {
         const error = (envelope.payload as { error?: string }).error;
-        return { content: [{ type: "text", text: `cad_export failed: ${error ?? "unknown error"}` }], details: { envelope } };
+        return { content: [{ type: "text", text: `cad_export failed: ${error ?? "unknown error"}` }], isError: true, details: { envelope } };
       }
       const payload = envelope.payload as { output?: string };
       return renderProbeResult(

@@ -277,13 +277,13 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
     parameters: CadSimulateParametersSchema,
     async execute(_id, params, _signal, _update, ctx) {
       if (await selectKernelEngine(ctx.cwd) === "v7") {
-        if (!("obligationRef" in params)) return { content: [{ type: "text", text: "cad_simulate v7 requires recipe and obligationRef; backend/runtime come from pi-recipe.yaml" }] };
+        if (!("obligationRef" in params)) return { content: [{ type: "text", text: "cad_simulate v7 requires recipe and obligationRef; backend/runtime come from pi-recipe.yaml" }], isError: true };
         try {
           const result = await cadSimulateV7({ cwd: ctx.cwd, recipe: params.recipe, obligationRef: params.obligationRef, ...(params.action ? { action: params.action } : {}), ...(params.outputs ? { outputs: params.outputs } : {}), signal: _signal });
           return { content: [{ type: "text", text: `Simulation Recipe ${result.record.runId} ${result.record.status}; obligation=${params.obligationRef}. Call cad_sim_observe with this run.` }], details: { simulationRunId: result.record.runId, computeIdentity: result.record.computeIdentity, validForCommit: false } };
-        } catch (error) { return { content: [{ type: "text", text: `cad_simulate failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+        } catch (error) { return { content: [{ type: "text", text: `cad_simulate failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true }; }
       }
-      if (!("backend" in params)) return { content: [{ type: "text", text: "cad_simulate v6 requires backend/runtime" }] };
+      if (!("backend" in params)) return { content: [{ type: "text", text: "cad_simulate v6 requires backend/runtime" }], isError: true };
       const { store, state, workflowRunId } = await currentWorkflow(ctx.cwd);
       let prepared;
       try {
@@ -321,7 +321,7 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
         try {
           const observation = await observeMechanicalRecipeV7({ cwd: ctx.cwd, run: params.run, signal: _signal });
           return { content: [{ type: "text", text: `Observation ${observation.observationId} validForCommit=${observation.validForCommit}; exports=${observation.exports.map((item) => item.name).join(",")}` }], details: { simulationRunId: params.run, observationId: observation.observationId, validForCommit: observation.validForCommit } };
-        } catch (error) { return { content: [{ type: "text", text: `cad_sim_observe failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+        } catch (error) { return { content: [{ type: "text", text: `cad_sim_observe failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true }; }
       }
       const { workflowRunId, store, state } = await currentWorkflow(ctx.cwd);
       let result;
@@ -359,9 +359,9 @@ export default function cadSimulationV2Extension(pi: ExtensionAPI): void {
           const committed = await commitMechanicalRecipeByRefV7({ cwd: ctx.cwd, run: params.run, observation: params.observation });
           const evidence = committed.state.evidence.find((item) => item.computeIdentity);
           return { content: [{ type: "text", text: `Committed pre-bound Simulation Evidence ${evidence?.id ?? "(idempotent)"}.` }], details: { evidenceId: evidence?.id, simulationRunId: params.run, observationId: params.observation } };
-        } catch (error) { return { content: [{ type: "text", text: `cad_commit_simulation failed: ${error instanceof Error ? error.message : String(error)}` }] }; }
+        } catch (error) { return { content: [{ type: "text", text: `cad_commit_simulation failed: ${error instanceof Error ? error.message : String(error)}` }], isError: true }; }
       }
-      if (!("caseId" in params)) return { content: [{ type: "text", text: "cad_commit_simulation v6 requires caseId" }] };
+      if (!("caseId" in params)) return { content: [{ type: "text", text: "cad_commit_simulation v6 requires caseId" }], isError: true };
       try {
         const evidence = await commitSimulation(ctx.cwd, params.run, params.observation, params.caseId);
         return { content: [{ type: "text", text: `Committed simulation Evidence ${evidence.id} for case ${params.caseId}. Evidence provenance is bound to ${evidence.simulationRunId}/${evidence.observationId}; existence does not imply engineering PASS.` }], details: { evidenceId: evidence.id, simulationRunId: evidence.simulationRunId, observationId: evidence.observationId, computeIdentity: evidence.computeIdentity } };

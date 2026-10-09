@@ -81,6 +81,7 @@ export async function renderProbeResult(
     const prefix = toolLabel ?? "probe";
     return {
       content: [{ type: "text", text: `${prefix} failed: ${error}` }],
+      isError: true,
       details: {
         envelope: result.envelope,
         presetFailed: true,
