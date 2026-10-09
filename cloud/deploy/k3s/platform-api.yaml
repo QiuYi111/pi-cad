@@ -1,0 +1,122 @@
+# Platform API (plan section 5) in reify-system.
+#   port 8080  public API. Reached only through Caddy (/v1, /invite, /reset).
+#   port 8081  internal API (/internal/*). Reached only from workspace pods.
+#              Caddy never routes to it, and its Service has no external path.
+# The image name is a placeholder until the platform-api build exists.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: platform-api
+  namespace: reify-system
+  labels:
+    app.kubernetes.io/name: platform-api
+    app.kubernetes.io/part-of: reify
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-api-config
+  namespace: reify-system
+  labels:
+    app.kubernetes.io/name: platform-api
+    app.kubernetes.io/part-of: reify
+data:
+  PORT: "8080"
+  INTERNAL_PORT: "8081"
+  MAX_ACTIVE_WORKSPACES: "6"
+  WORKSPACE_NAMESPACE: "reify-ws"
+  # Placeholder. Replace with the pi-cad image tag from build.sh (for example reify-workspace:<commit>).
+  WORKSPACE_IMAGE: "reify-workspace:REPLACE_WITH_IMAGE_TAG"
+  # Placeholder. Replace with the Windows host address that mihomo listens on, on port 7890.
+  HTTPS_PROXY_FOR_WORKSPACES: "http://REPLACE_WITH_WINDOWS_HOST_IP:7890"
+  # Used by workspace gateways for activity reports. Cluster-internal only.
+  PLATFORM_INTERNAL_URL: "http://platform-api.reify-system.svc.cluster.local:8081"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-api
+  namespace: reify-system
+  labels:
+    app.kubernetes.io/name: platform-api
+    app.kubernetes.io/part-of: reify
+spec:
+  replicas: 1
+  # One replica. Recreate avoids two controllers running at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-api
+        app.kubernetes.io/part-of: reify
+    spec:
+      serviceAccountName: platform-api
+      # The controller needs the API token to manage workspaces in reify-ws.
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: platform-api
+          image: reify/platform-api:REPLACE_WITH_TAG
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: internal
+              containerPort: 8081
+          envFrom:
+            - configMapRef:
+                name: platform-api-config
+            - secretRef:
+                name: reify-platform-secrets
+          readinessProbe:
+            httpGet:
+              path: /v1/healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v1/healthz
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-api
+  namespace: reify-system
+  labels:
+    app.kubernetes.io/name: platform-api
+    app.kubernetes.io/part-of: reify
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: platform-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+    - name: internal
+      port: 8081
+      targetPort: internal

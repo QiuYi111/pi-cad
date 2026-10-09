@@ -1,0 +1,14 @@
+# Apply with: kubectl apply -k cloud/deploy/k3s
+# Not included on purpose:
+#   secret.template.yaml      (fill a copy outside the repository, apply it by hand)
+#   reify-ws-config.yaml      (holds the real gateway public key, created with kubectl from a file)
+#   workspace-template.yaml   (rendered by the platform API controller per user)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - postgres.yaml
+  - platform-api.yaml
+  - platform-api-rbac.yaml
+  - caddy.yaml
+  - reify-ws-policy.yaml
