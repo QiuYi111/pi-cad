@@ -194,8 +194,13 @@ class PartDocument:
         message: str | None = None,
         validation: str = "auto",
         budget_s: float | None = None,
+        observe: bool = True,
     ) -> PartResult:
         """Run ops in one transaction; commit, rebuild, and attach the views, or raise with nothing changed.
+
+        ``observe=False`` commits the revision and returns at once, with no views, no change summary and no STEP.
+        Use it for the batches of ``link`` ops that build up an assembly, and let the last apply observe: rendering
+        the whole assembly after every batch costs more than the batch.
 
         A pad, pocket, hole or pattern that does not change the solid's volume fails with ``FEATURE_NO_EFFECT``
         (volumes and a ``reversed`` hint in the error); a middle feature can be deleted, its successors are relinked.
@@ -204,8 +209,9 @@ class PartDocument:
         response = await request(
             "part-apply", **self._wire(), ops=ops, validation=validation,
             **({"message": message} if message else {}), **({"budgetS": budget_s} if budget_s else {}),
+            **({} if observe else {"observe": False}),
         )
-        return await self._present(response, "built")
+        return await self._present(response, "built" if observe else "built (not observed yet)")
 
     async def try_(self, ops: list[dict[str, Any]], *, budget_s: float | None = None) -> PartResult:
         """Run ops, show the result and the change summary, then throw the change away."""

@@ -26,7 +26,7 @@ from .naming import canonicalize_path
 from .effects import check_feature_effect
 from .ops import handler_for, validate_ops
 from .ops.context import OpContext
-from .assembly import apply_joints, joint_objects, refresh_links, units
+from .assembly import apply_joints, joint_objects, joint_warnings, refresh_links, units
 from . import roles as roles_module
 from .roles import BodyRoles, compute_body_roles, label_anchor
 from .queries import DEFAULT_DENSITY_G_CM3
@@ -88,6 +88,11 @@ class DocumentSession:
         self.refreshed: set[str] = set()
         #: occurrence container name -> (part sha the roles belong to, roles)
         self.occurrence_roles: dict[str, tuple[str, Any]] = {}
+        #: body path -> roles saved with this exact revision (``roles.export_body_roles``); used while nothing changed
+        self.saved_body_roles: dict[str, Any] = {}
+        self._saved_roles_generation: int | None = None
+        #: occurrence path -> (what its declarations depend on, the declaration entities); see export.build_declarations
+        self.declaration_cache: dict[str, tuple] = {}
 
     def resolve_project_path(self, relative: str | Path) -> Path:
         path = Path(relative)
@@ -138,12 +143,15 @@ class DocumentSession:
         self.doc.UndoMode = 1
         self.loaded_sha = _sha256(self.fcstd)
         self.saved_annotations = None
+        self.saved_body_roles = {}
         self._load_role_cache()  # before anything asks for roles: reopening a saved document finds nothing again
         self._ensure_scaffold()
         self.doc.recompute()
         self.refreshed.clear()
         self.occurrence_roles.clear()
+        self.declaration_cache.clear()
         self._invalidate()
+        self._saved_roles_generation = self._generation  # roles saved with this revision hold until the next change
         self._after_recompute()
 
     @property
@@ -157,6 +165,7 @@ class DocumentSession:
             if data.get("fcstdSha256") == self.loaded_sha:
                 roles_module.import_created_cache(self.doc, data)
                 self.saved_annotations = data.get("annotations")
+                self.saved_body_roles = data.get("bodyRoles") or {}
         except (OSError, ValueError, AttributeError):
             pass
 
@@ -166,6 +175,13 @@ class DocumentSession:
             data["fcstdSha256"] = self.loaded_sha
             if self.saved_annotations is not None:
                 data["annotations"] = self.saved_annotations
+            body_roles = {}
+            for obj in self.doc.Objects:
+                cached = self._roles.get(obj.Name)
+                if cached and cached[0] == self._generation and obj.TypeId == "PartDesign::Body":
+                    body_roles[get_path(obj) or obj.Name] = roles_module.export_body_roles(cached[1])
+            if body_roles:
+                data["bodyRoles"] = body_roles
             temporary = self.role_cache_path.with_name(f".{self.role_cache_path.name}.{os.getpid()}.tmp")
             temporary.write_text(json.dumps(data), encoding="utf-8")
             os.replace(temporary, self.role_cache_path)
@@ -273,7 +289,11 @@ class DocumentSession:
         cached = self._roles.get(body.Name)
         if cached and cached[0] == self._generation:
             return cached[1]
-        roles = compute_body_roles(body)
+        roles = None
+        if self.saved_body_roles and self._saved_roles_generation == self._generation:
+            roles = roles_module.import_body_roles(body, self.saved_body_roles.get(get_path(body) or body.Name))
+        if roles is None:
+            roles = compute_body_roles(body)
         self._roles[body.Name] = (self._generation, roles)
         return roles
 
@@ -361,10 +381,16 @@ class DocumentSession:
                                    detail={"body": path, "solids": 1, "validity": "invalid"})
 
     # ------------------------------------------------------------ apply / try
-    def apply(self, ops: list[Any], *, commit: bool, message: str | None, output: Path | None = None) -> dict[str, Any]:
+    def apply(self, ops: list[Any], *, commit: bool, message: str | None, output: Path | None = None, observe: bool = True) -> dict[str, Any]:
+        """Run the ops in one transaction.
+
+        ``observe=False`` commits the revision and returns without the change summary or the STEP: for the steps on
+        the way to a finished assembly, where describing and exporting the whole assembly after every link costs
+        more than the links. The next apply that observes describes everything that changed since the saved file.
+        """
         started = time.monotonic()
         normalised = validate_ops(ops)
-        before = self.snapshot()
+        before = self.snapshot() if observe else None
         self._recomputed = set()
         ctx = OpContext(self)
         warnings: list[dict[str, Any]] = []
@@ -381,6 +407,7 @@ class DocumentSession:
                 warnings.extend(ctx.warnings)
                 ctx.warnings.clear()
             index = -1
+            warnings.extend(joint_warnings(self))
             self.check_bodies()
         except ReifyOpError as error:
             self._abort()
@@ -398,11 +425,16 @@ class DocumentSession:
 
         result: dict[str, Any] = {}
         try:
-            after = self.snapshot()
             # a committing apply describes the revision it creates; a try describes the current one
-            result = self._result(before, after, warnings, next_rev=self.rev + 1 if commit else self.rev)
-            step = output or self.output
-            result.update(self._export(step))
+            next_rev = self.rev + 1 if commit else self.rev
+            if observe:
+                after = self.snapshot()
+                result = self._result(before, after, warnings, next_rev=next_rev)
+                step = output or self.output
+                result.update(self._export(step))
+            else:
+                # DFM lint reads feature parameters only, so an unobserved apply still gets it
+                result = {"warnings": warnings, "observed": False, "dfm": lint_module.evaluate(OpContext(self), next_rev)}
         except ReifyOpError:
             self._abort()
             raise
@@ -641,4 +673,4 @@ class DocumentSession:
             }
             for item in joint_objects(self)
         ]
-        return {"rev": self.rev, "params": self.param_values(), "bodies": features, "occurrences": occurrences, "joints": joints, "requirements": requirements}
+        return {"rev": self.rev, "params": self.param_values(), "bodies": features, "occurrences": occurrences, "joints": joints, "requirements": requirements, "warnings": joint_warnings(self)}

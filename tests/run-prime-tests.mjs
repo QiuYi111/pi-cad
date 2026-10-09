@@ -33,4 +33,10 @@ const desktopSubagentSmoke = spawnSync(process.execPath, [resolve(project, "test
   stdio: "inherit",
   env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
 });
-process.exitCode = desktopSubagentSmoke.status ?? 1;
+if (desktopSubagentSmoke.status !== 0) process.exit(desktopSubagentSmoke.status ?? 1);
+const daemonSubagentSmoke = spawnSync(process.execPath, [resolve(project, "tests/prime-daemon-subagent-cancel-smoke.mjs")], {
+  cwd: project,
+  stdio: "inherit",
+  env: { ...process.env, PRIME_AGENT_REPO: primeRoot, PI_CAD_REPO: project },
+});
+process.exitCode = daemonSubagentSmoke.status ?? 1;

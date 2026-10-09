@@ -100,7 +100,7 @@ class Worker:
 
     def cmd_apply(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
         session = self._session(doc)
-        return session.apply(args["ops"], commit=True, message=args.get("message"))
+        return session.apply(args["ops"], commit=True, message=args.get("message"), observe=bool(args.get("observe", True)))
 
     def cmd_try(self, doc: str, args: dict[str, Any]) -> dict[str, Any]:
         session = self._session(doc)
