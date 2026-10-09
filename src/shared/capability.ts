@@ -3,7 +3,6 @@ import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import type {
   BuildPayload,
@@ -14,6 +13,7 @@ import type {
 } from "./protocol.ts";
 import { CadProjectStore } from "./store.ts";
 import { sha256File } from "./hash.ts";
+import { packageRoot } from "./paths.ts";
 import { managedSimulationRunner } from "../modules/simulate-v2/runtime.ts";
 import { assertLinuxRuntime } from "./platform.ts";
 import { runProcess } from "./process-runner.ts";
@@ -21,15 +21,12 @@ import { isWarmCadctlCommand, runWarmCadctl } from "./cadctl-worker.ts";
 import { harnessRunDirectory, harnessStorageRoot } from "../authority/storage.ts";
 import type { ModelParameterValue } from "./model-parameters.ts";
 
+export { packageRoot } from "./paths.ts";
+
 export const DEFAULT_VIEWS = ["iso", "front", "back", "left", "right", "top", "bottom"];
 export const DEFAULT_CADCTL_TIMEOUT_MS = 180_000;
 export const FULL_GEOMETRY_VALIDATION_TIMEOUT_MS = 15 * 60_000;
 export type GeometryValidationMode = "auto" | "fast" | "full";
-
-export function packageRoot(): string {
-  // <package>/src/shared/capability.ts -> <package>
-  return fileURLToPath(new URL("../../", import.meta.url));
-}
 
 /** Reproducible uv-managed Python command inside the Linux/WSL runtime. */
 export function pythonInvocation(extra?: "simulation", _cwd?: string): { command: string; prefixArgs: string[] } {

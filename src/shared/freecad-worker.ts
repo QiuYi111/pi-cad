@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { packageRoot } from "./capability.ts";
+import { packageRoot } from "./paths.ts";
 import { kernelOwnerBinding } from "./kernel-owner.ts";
 import { processConcurrencyGate, spawnInteractiveProcess } from "./process-runner.ts";
 
