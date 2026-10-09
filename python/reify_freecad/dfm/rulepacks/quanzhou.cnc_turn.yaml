@@ -1,0 +1,18 @@
+# 铨洲智造 CNC 车铣规则包：v1 不实现。
+# 规则内容见 docs/dfm/implementation-plan.zh-CN.md §5.5（PDF p.12：303/304 不锈钢、直径 ≤ 17.9 mm 等）。
+# 本文件仅保证结构有效，rules 为空；P2 再补充规则。
+schema: reify.dfm.rulepack/1
+id: quanzhou.cnc_turn
+title: "铨洲智造 CNC 车铣（P2，未实现）"
+vendor: "铨洲智造"
+source:
+  doc: "quanzhou-cnc-design-guide-v8.14.pdf"
+  version: "8.14"
+  date: "2026-08-14"
+process:
+  type: cnc_turn
+  setup: "turning, outer diameter only"
+materials: {}
+defaults: {}
+tables: {}
+rules: []

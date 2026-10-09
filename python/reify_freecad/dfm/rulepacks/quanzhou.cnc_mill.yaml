@@ -1,0 +1,464 @@
+# 铨洲智造 CNC 智能制造打样（铣削）规则包。
+# 页码指 quanzhou-cnc-design-guide-v8.14.pdf 的 PDF 页。规则表见 docs/dfm/implementation-plan.zh-CN.md §5.1–§5.4。
+# layers: lint = 第一层文档 Lint，geometry = 第二层几何（特征识别）。
+# severity 是该规则的最高级别；分级阈值放在 params 中。
+# source.inferred: true 表示数值是从 PDF 推断的，推断规则 severity 不得为 error。
+# 本文件中每条规则的 check 名称唯一，对应 Python 检查函数名（lint_checks.py / geometry_checks.py）。
+schema: reify.dfm.rulepack/1
+id: quanzhou.cnc_mill
+title: "铨洲智造 CNC 智能制造打样（铣削）"
+vendor: "铨洲智造"
+source:
+  doc: "quanzhou-cnc-design-guide-v8.14.pdf"
+  version: "8.14"
+  date: "2026-08-14"
+process:
+  type: cnc_mill
+  setup: "3-axis, top and bottom setups"
+
+materials:
+  al6061: {density_g_cm3: 2.70, size_limited: false}
+  al7075: {density_g_cm3: 2.81, size_limited: true}
+  steel_45: {density_g_cm3: 7.85, size_limited: true}
+defaults: {material: al6061}
+
+tables:
+  # 螺纹底孔直径（mm），PDF p.1。键为螺纹规格。
+  tap_drill_mm:
+    M2: 1.6
+    M2.5: 2.05
+    M3: 2.5
+    M4: 3.3
+    M5: 4.2
+    M6: 5.0
+    M8: 6.8
+    M10: 8.5
+    M12: 10.2
+    "UNC1/4-20": 5.105
+    "UNC3/8-16": 7.937
+  # 刀具直径（mm）。φ1、φ2、φ4（D4 球刀）见 PDF；其余为推断值，标 inferred。
+  tool_diameters_mm:
+    - 1          # PDF p.8 (φ1)
+    - 1.5        # inferred
+    - 2          # PDF (φ2)
+    - 3          # inferred
+    - 4          # PDF (φ4)
+    - 6          # inferred
+    - 8          # inferred
+    - 10         # inferred
+    - 12         # inferred
+  # 标准板厚（mm）。用户确认 2026-10-09：铨洲没有标准板厚表，以下为常见铝板厚度，全部 inferred。
+  standard_thickness_mm:
+    - 1          # inferred
+    - 1.5        # inferred
+    - 2          # inferred
+    - 2.5        # inferred
+    - 3          # inferred
+    - 4          # inferred
+    - 5          # inferred
+    - 6          # inferred
+    - 8          # inferred
+    - 10         # inferred
+    - 12         # inferred
+    - 15         # inferred
+    - 16         # inferred
+    - 20         # inferred
+    - 25         # inferred
+    - 30         # inferred
+
+rules:
+  # ---- 5.1 毛坯、尺寸、材料 ----
+  - id: stock.size_range
+    check: stock_size_range
+    layers: [lint]
+    severity: error
+    params: {min_mm: [10, 10, 1], max_mm: [650, 440, 30], compare: sorted}
+    source: {page: 1, quote: "包围盒最小 10×10×1，最大 650×440×30 mm"}
+    hint: "包围盒超出打样范围（三边排序后比较）"
+
+  - id: stock.size_limited_material
+    check: stock_size_limited_material
+    layers: [lint]
+    severity: info
+    params: {}
+    source: {page: 1, quote: "材料是 7075 或 45# 钢时：尺寸范围以平台为准"}
+    hint: "7075 / 45# 钢的尺寸以平台可用范围为准，请先确认"
+
+  - id: stock.thickness_range
+    check: stock_thickness_range
+    layers: [lint]
+    severity: error
+    params: {min_mm: 1, max_mm: 30}
+    source: {page: 1, quote: "Z 向厚度 1–30 mm"}
+    hint: "Z 向厚度需在 1–30 mm 之间"
+
+  - id: stock.side_height
+    check: stock_side_height
+    layers: [geometry]
+    severity: error
+    params: {max_mm: 200}
+    source: {page: 1, quote: "侧面高度 > 200 mm 时，侧面只能有圆孔"}
+    hint: "侧面高度超过 200 mm 时，侧面只能保留圆孔"
+
+  - id: stock.standard_thickness
+    check: stock_standard_thickness
+    layers: [lint, geometry]
+    severity: info
+    params:
+      # 与 tables.standard_thickness_mm 相同（规则侧副本，修改时两处同步）。inferred。
+      standard_mm: [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 25, 30]
+    source: {page: 2, quote: "Z 厚度不是常见标准板厚时报 info", inferred: true}
+    hint: "Z 厚度不是常见标准板厚；有双面特征时存在加工风险"
+
+  - id: stock.thin_plate_large
+    check: stock_thin_plate_large
+    layers: [lint, geometry]
+    severity: warn
+    params:
+      thin_mm: 10            # Z 厚度 < 10 mm 时须为标准厚度（PDF p.7）
+      very_thin_mm: 4        # 厚度 < 4 mm 时不允许大面积切除平面（PDF p.7）
+      large_longest_mm: 200  # "大尺寸"阈值：最长边 > 200 mm。PDF 未给，推断。
+    source: {page: 7, quote: "Z 厚度 < 10 mm 且为大尺寸薄板时，必须是标准厚度", inferred: true}
+    hint: "大尺寸薄板：厚度需为标准厚度，且 < 4 mm 时不宜大面积切除平面"
+
+  - id: stock.removal_ratio
+    check: stock_removal_ratio
+    layers: [lint]
+    severity: warn
+    params: {max_ratio: 0.8}   # 去除率 = 1 - 体积 / 包围盒体积。阈值推断。
+    source: {page: 7, quote: "去除率过高会有应力变形", inferred: true}
+    hint: "去除率 {measured} 过高，有应力变形风险（阈值 {limit}）"
+
+  - id: stock.surface_treatment
+    check: stock_surface_treatment
+    layers: [lint]
+    severity: info
+    params: {materials: [al7075, steel_45]}
+    source: {page: 11, quote: "7075、45# 钢建议选表面处理"}
+    hint: "7075 / 45# 钢建议选择表面处理"
+
+  - id: tol.general
+    check: tol_general
+    layers: [lint]
+    severity: info
+    params: {standard: "GB/T 1804-m"}
+    source: {page: 1, quote: "默认精度 GB/T 1804-m"}
+    hint: "尺寸公差严于 m 级：需要精孔补偿或另行沟通"
+
+  - id: tol.precision_hole
+    check: tol_precision_hole
+    layers: [lint]
+    severity: info
+    params:
+      actual_min_mm: 0           # 精孔实际精度 0–0.02 mm
+      actual_max_mm: 0.02
+      compensation_min_mm: 0.02  # 配合孔建模放大 0.02–0.03 mm
+      compensation_max_mm: 0.03
+      trigger_below_mm: 0.03     # 孔公差 < 0.03 mm 时提示
+    source: {page: 8, quote: "精孔实际精度 0–0.02"}
+    hint: "配合孔建议建模放大 0.02–0.03 mm"
+
+  # ---- 5.2 孔 ----
+  - id: hole.min_diameter
+    check: hole_min_diameter
+    layers: [lint, geometry]
+    severity: error
+    params: {min_mm: 1.2}
+    source: {page: 1, quote: "孔 Φ1.2mm 以上"}
+    hint: "孔径增大到 ≥ 1.2 mm"
+
+  - id: hole.depth_ratio
+    check: hole_depth_ratio
+    layers: [lint, geometry]
+    severity: error          # 最高级别；分级见 params
+    params:
+      info_ratio: 3         # 3 < 孔深/孔径 ≤ 5 报 info（钻头加工，精度稍低）
+      warn_ratio: 5         # 5 < 比值 ≤ 8 报 warn（超过 p.1 表格的 5 倍径）
+      error_ratio: 8        # 比值 > 8 报 error（p.8 最大 8 倍径）
+    source: {page: 1, pages: [1, 8], quote: "孔深 / 孔径：≤ 3 无问题"}
+    hint: "孔深径比 {measured} 超过 {limit}，减小孔深"
+
+  - id: hole.thread_tap_drill
+    check: hole_thread_tap_drill
+    layers: [lint, geometry]
+    severity: error
+    params: {tolerance_mm: 0.05}   # 底孔直径取 tables.tap_drill_mm，容差 ±0.05
+    source: {page: 1, quote: "螺纹孔底孔直径必须等于底孔表"}
+    hint: "螺纹底孔直径改为底孔表中的值（M3 为 2.5 mm）"
+
+  - id: hole.thread_modeled
+    check: hole_thread_modeled
+    layers: [lint]
+    severity: warn
+    params: {}
+    source: {page: 1, quote: "平台按底孔识别，真实螺纹几何会破坏识别", inferred: true}
+    hint: "关闭建模真实螺纹，用底孔直径表示螺纹"
+
+  - id: hole.thread_length
+    check: hole_thread_length
+    layers: [lint]
+    severity: error
+    params: {max_ratio: 5}   # 螺纹有效长度 ≤ 5 × 公称直径
+    source: {page: 1, quote: "螺纹有效长度 ≤ 5 × 公称直径"}
+    hint: "螺纹有效长度超过 {limit} 倍公称直径，缩短螺纹"
+
+  - id: hole.thread_min_depth
+    check: hole_thread_min_depth
+    layers: [lint]
+    severity: warn
+    params:
+      min_ratio_from_m3: 0.6        # 公称直径 ≥ M3 时牙深 ≥ 0.6 × D
+      min_ratio_below_m3: 0.8       # 公称直径 < M3 时牙深 ≥ 0.8 × D
+      m3_mm: 3
+      lock_length_min_ratio: 1      # 建议锁紧长度 1–2 × D，info 级
+      lock_length_max_ratio: 2
+    source: {page: 1, quote: "≥ M3 时 ≥ 0.6 × D；< M3 时 ≥ 0.8 × D"}
+    hint: "螺纹牙深不足，加深螺纹（锁紧长度建议 1–2 倍直径）"
+
+  - id: hole.thread_blind_extra
+    check: hole_thread_blind_extra
+    layers: [lint]
+    severity: warn
+    params: {extra_ratio: 1}   # 盲孔底孔深度 ≥ 螺纹深度 + 1 × D。由 p.1 例子推断。
+    source: {page: 1, quote: "盲孔底孔深度应 ≥ 螺纹深度 + 1 × D", inferred: true}
+    hint: "盲孔底孔加深，预留 1 倍直径的攻牙公差"
+
+  - id: hole.thread_side_wall
+    check: hole_thread_side_wall
+    layers: [geometry]
+    severity: error
+    params: {min_margin_mm: 1}
+    source: {page: 1, quote: "螺纹孔到外壁的余量 ≥ 1 mm"}
+    hint: "螺纹孔离外壁太近，边距增大到 ≥ 1 mm"
+
+  - id: hole.blind_bottom_wall
+    check: hole_blind_bottom_wall
+    layers: [geometry]
+    severity: warn
+    params:
+      min_ratio: 0.5      # 孔底到对面的壁厚 ≥ 孔径 / 2
+      min_mm: 1           # 小孔 ≥ 1 mm（要求取 max(孔径/2, 1)）
+    source: {page: 8, quote: "盲孔孔底到对面的壁厚 ≥ 孔径 / 2"}
+    hint: "盲孔底部到对面的壁厚不足 {limit} mm"
+
+  - id: hole.bottom_shape
+    check: hole_bottom_shape
+    layers: [lint, geometry]
+    severity: error      # 球形 / 圆弧底 error；锥形钻尖底 info（见 params）
+    params:
+      cone_severity: info   # 锥形钻尖（FreeCAD 默认 DrillPoint=Angled）建议改平底。推断。
+    source: {page: 5, pages: [5, 8], quote: "球形 / 圆弧底不支持"}
+    hint: "盲孔底部改为平底（球形或圆弧底不支持）"
+
+  - id: hole.internal_chamfer
+    check: hole_internal_chamfer
+    layers: [geometry]
+    severity: warn
+    params: {}
+    source: {page: 5, quote: "孔内倒角（台阶孔中间的倒角）不支持"}
+    hint: "去掉台阶孔中间的倒角"
+
+  - id: hole.ring_groove
+    check: hole_ring_groove
+    layers: [geometry]
+    severity: warn
+    params: {}
+    source: {page: 5, quote: "孔内环槽、T 槽不支持"}
+    hint: "去掉孔内环槽或 T 槽"
+
+  - id: hole.countersink
+    check: hole_countersink
+    layers: [lint, geometry]
+    severity: warn
+    params: {recommended: counterbore}
+    source: {page: 6, quote: "沉头孔（锥形）可能 NG 或加工不完全"}
+    hint: "沉头孔改为杯头孔（Counterbore）"
+
+  - id: hole.countersink_to_bottom
+    check: hole_countersink_to_bottom
+    layers: [lint, geometry]
+    severity: error
+    params: {}
+    source: {page: 6, quote: "沉头锥面不能画到底，底部必须留圆柱底孔"}
+    hint: "沉头锥面底部留出圆柱底孔"
+
+  - id: hole.side_support_face
+    check: hole_side_support_face
+    layers: [geometry]
+    severity: error
+    params: {}
+    source: {page: 4, quote: "与孔轴垂直的对面必须有平面作为加工支撑面"}
+    hint: "侧孔对面需要平面作为加工支撑面"
+
+  - id: hole.waist_slot_depth
+    check: hole_waist_slot_depth
+    layers: [lint, geometry]
+    severity: warn
+    params:
+      max_depth_ratio: 3        # 腰孔深度 ≤ 3 × 宽度
+      relaxed_aspect_ratio: 2   # 长宽比 > 2:1 时放宽
+      relaxed_severity: info
+    source: {page: 10, quote: "腰孔深度 ≤ 3 × 宽度"}
+    hint: "腰孔深度超过 {limit} 倍宽度"
+
+  # ---- 5.3 内腔、槽、内角 ----
+  - id: cavity.min_width
+    check: cavity_min_width
+    layers: [lint, geometry]
+    severity: error
+    params:
+      min_mm: 1.25              # 以 p.8 的 1.25 为准（p.1 表格写 1.2）
+      p1_table_mm: 1.2
+      engraving_gap_min_mm: 1.25  # 刻字最小间隙
+    source: {page: 1, pages: [1, 8], quote: "内腔 / 内槽宽度 ≥ 1.25 mm"}
+    hint: "内腔或内槽宽度不足 {limit} mm（最小刀具 φ1）"
+
+  - id: cavity.depth_tool_ratio
+    check: cavity_depth_tool_ratio
+    layers: [lint, geometry]
+    severity: error
+    params:
+      max_ratio: 5    # 槽深 ≤ 5 × 刀具直径；刀具 = tables.tool_diameters_mm 中小于槽宽的最大值
+    source: {page: 8, quote: "槽深 ≤ 5 × 刀具直径"}
+    hint: "槽深超过 5 倍刀具直径，减小槽深或加宽槽"
+
+  - id: corner.inner_auto_radius
+    check: corner_inner_auto_radius
+    layers: [lint, geometry]
+    severity: warn          # info 或 warn（与配合有关时）
+    params:
+      radius_ratio: 5       # 内竖直角半径 < 深度 / 5 时，平台自动加工 R = 深度 / 5
+      info_severity: info
+      mated_severity: warn  # 该角有 min_clearance / dimension 配合意图时
+    source: {page: 9, quote: "内竖直角半径 < 深度 / 5 时：平台会自动加工出 R = 深度 / 5 的圆角"}
+    hint: "内角将被加工为约 R{limit}，设计时请预留"
+
+  - id: corner.relief_size
+    check: corner_relief_size
+    layers: [geometry]
+    severity: warn
+    params:
+      recommended_diameters_mm: [1.2, 1.7, 2.2, 3.2, 4.2]  # 推荐避空直径
+    source: {page: 9, quote: "避空半径必须 > 刀具半径，不能相等"}
+    hint: "避空半径需大于刀具半径，推荐 φ1.2 / 1.7 / 2.2 / 3.2 / 4.2"
+
+  - id: floor.chamfer
+    check: floor_chamfer
+    layers: [lint, geometry]
+    severity: warn
+    params: {}
+    source: {page: 10, quote: "底部（腔底与侧壁之间）倒 C 角不建议"}
+    hint: "腔底改为 R 角，不要倒 C 角"
+
+  - id: floor.fillet_radius
+    check: floor_fillet_radius
+    layers: [lint, geometry]
+    severity: warn
+    params:
+      min_mm: 2         # 底部 R 角需要 > R2（严格大于）
+      exclusive: true
+    source: {page: 10, quote: "底部 R 角需要 > R2"}
+    hint: "腔底 R 角需大于 R{limit}"
+
+  - id: outer.concave_narrow
+    check: outer_concave_narrow
+    layers: [geometry]
+    severity: error
+    params: {min_tool_mm: 1}   # 最小刀具 φ1
+    source: {page: 5, quote: "外形内凹区域宽度小于最小刀具时，无法生成刀路"}
+    hint: "开口窄槽宽度不足，无法生成刀路（最小刀具 φ{limit}）"
+
+  - id: wall.min_thickness
+    check: wall_min_thickness
+    layers: [geometry]
+    severity: error
+    params: {min_mm: 1}
+    source: {page: 3, quote: "薄壁 / 薄片 ≥ 1 mm"}
+    hint: "壁厚增加到 ≥ {limit} mm"
+
+  - id: wall.slender_suspended
+    check: wall_slender_suspended
+    layers: [geometry]
+    severity: warn
+    params:
+      min_floor_mm: 0.5   # 建议留 ≥ 0.5 mm 底面或加筋。长宽比阈值 PDF 未给。
+    source: {page: 7, quote: "内部悬空细长结构：建议留 ≥ 0.5 mm 底面或加筋"}
+    hint: "悬空细长薄壁：留 ≥ {limit} mm 底面或加筋"
+
+  # ---- 5.4 双面特征和外形 ----
+  - id: edge.default_chamfer
+    check: edge_default_chamfer
+    layers: [lint]
+    severity: info
+    params:
+      min_mm: 0.5          # 未倒角或 < C0.5 的锐边
+      default_min_mm: 0.1  # 平台默认 C0.1–0.5
+      default_max_mm: 0.5
+    source: {page: 1, quote: "未倒角或 < C0.5 的锐边：平台默认 C0.1–0.5"}
+    hint: "锐边将被平台默认倒 C0.1–0.5"
+
+  - id: edge.double_side_chamfer
+    check: edge_double_side_chamfer
+    layers: [lint, geometry]
+    severity: warn
+    params:
+      side_min_mm: 0.5               # 上下两面外形都 > C0.5 时可能 NG
+      standard_double_side_max_mm: 1 # 标准厚度下双面 > C1 也可能 NG
+    source: {page: 1, pages: [1, 2], quote: "上下两面外形都有 > C0.5 倒角时可能 NG"}
+    hint: "外形建议不倒角，或减小双面倒角"
+
+  - id: edge.double_side_fillet
+    check: edge_double_side_fillet
+    layers: [lint, geometry]
+    severity: error
+    params: {}
+    source: {page: 2, quote: "锐边 R 角只支持单面"}
+    hint: "上下两面的 R 角只保留一面"
+
+  - id: twoside.back_notch_ratio
+    check: twoside_back_notch_ratio
+    layers: [geometry]
+    severity: warn
+    params: {max_ratio: 0.3}   # 反面缺口尺寸 ≤ 该面外形尺寸的 30%
+    source: {page: 2, quote: "反面缺口尺寸不能超过该面外形尺寸的 30%"}
+    hint: "反面缺口超过外形尺寸的 {limit}"
+
+  - id: twoside.nonstandard_back
+    check: twoside_nonstandard_back
+    layers: [geometry]
+    severity: warn
+    params: {}
+    source: {page: 2, quote: "非标准厚度时，反面只能有圆形沉头孔台阶"}
+    hint: "非标准厚度时，反面只能加工圆形沉头孔台阶"
+
+  - id: twoside.max_outline_top
+    check: twoside_max_outline_top
+    layers: [geometry]
+    severity: error
+    params: {}
+    source: {page: 3, quote: "至少一面的最大外形必须在零件 Z 最高处"}
+    hint: "最大外形需在零件 Z 最高处，双面凸台结构会 NG"
+
+  - id: surface.double_side_curved
+    check: surface_double_side_curved
+    layers: [geometry]
+    severity: error
+    params: {ball_min_diameter_mm: 4}   # 球刀最小 D4
+    source: {page: 10, quote: "曲面只允许在一个方向（上或下）出现"}
+    hint: "曲面只能在一侧出现，两面都有曲面不支持（球刀最小 D{limit}）"
+
+  - id: surface.multi_face
+    check: surface_multi_face
+    layers: [geometry]
+    severity: info
+    params: {}
+    source: {page: 4, quote: "多面特征（侧面特征）会有接刀痕"}
+    hint: "多面特征会留接刀痕，不作为客诉标准"
+
+  - id: ganging.forbidden
+    check: ganging_forbidden
+    layers: [geometry]
+    severity: error
+    params: {}
+    source: {page: 3, pages: [3, 5, 11], quote: "禁止拼板：多个零件用细小连接筋连成一体"}
+    hint: "多个零件用细筋连成一体违规（拼板会封号），请拆分为独立零件"
