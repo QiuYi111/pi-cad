@@ -678,6 +678,7 @@ class FakeApp(object):
         self.preferences = types.SimpleNamespace(generalPreferences=types.SimpleNamespace(defaultModelingOrientation="Y"))
         app = self
         self.documents = types.SimpleNamespace(add=lambda t: app._add(t))
+        self.activeViewport = types.SimpleNamespace(fit=lambda: app.log.append("viewport.fit"), refresh=lambda: None)
         FakeApp.current = self
 
     def _add(self, doctype):

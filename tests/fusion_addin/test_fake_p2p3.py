@@ -307,3 +307,11 @@ class LiveFusionFindings(Base):
         f["bodies"][0]["sketches"][0]["dimensions"].append({"name": "bad", "kind": "diameter", "refs": [[0, 0]], "value": {"value": 40.0}})
         self.assertFalse(self.run_job(f)[1]["ok"])
 
+    def test_the_view_is_fitted_before_the_file_is_written(self):
+        """A part keeps its place in the assembly; the camera must be on it, or the file opens on an empty canvas."""
+        app, res = self.run_job(_path.fixture("fusion_p2.features.json"))
+        self.assertTrue(res["ok"], res["error"])
+        self.assertIn("viewport.fit", app.log)
+        exports = [i for i, entry in enumerate(app.log) if entry.startswith("export")]
+        self.assertTrue(exports and app.log.index("viewport.fit") < exports[0], app.log)
+

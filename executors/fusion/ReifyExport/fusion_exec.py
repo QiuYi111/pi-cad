@@ -684,9 +684,21 @@ class FusionExecutor(object):
         return feat
 
     # ------------------------------------------------------------------ export
+    def _fit_view(self, log):
+        """Save the file with the camera on the part. A part keeps its place in the assembly (an aircraft tail is
+        800 mm from the origin), and the new document's camera looks at the origin with a 7 cm field of view, so
+        without this the file opens on an empty canvas."""
+        try:
+            viewport = self.app.activeViewport
+            viewport.fit()
+            viewport.refresh()
+        except Exception as e:  # noqa: BLE001 cosmetic: never fail an export over the camera
+            log("WARN view not fitted to the part: %s" % e)
+
     def _export(self, design, root, outbox, native, check_step, log):
         em = design.exportManager
         f3d = os.path.join(outbox, native)
+        self._fit_view(log)
         try:
             em.execute(em.createFusionArchiveExportOptions(f3d))
         except Exception as e:  # noqa: BLE001
