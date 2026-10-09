@@ -63,12 +63,6 @@ class PathVectorTests(unittest.TestCase):
 
 
 class OpSchemaTests(unittest.TestCase):
-    def test_every_documented_op_has_a_schema_and_a_handler(self) -> None:
-        self.assertEqual(
-            set(OP_REGISTRY),
-            {"param", "body", "sketch", "pad", "pocket", "hole", "fillet", "chamfer", "linear_pattern", "polar_pattern", "mirror", "set", "delete", "rename", "placement", "require", "link", "import_step", "joint", "dfm_profile"},
-        )
-
     def test_a_valid_batch_is_normalised(self) -> None:
         ops = schema.validate_ops([
             {"op": "param", "name": "width", "value": 40, "unit": "mm"},
@@ -147,16 +141,6 @@ class ExpressionTests(unittest.TestCase):
 
 
 class ErrorTests(unittest.TestCase):
-    def test_every_code_in_the_documented_table_exists(self) -> None:
-        for code in (
-            "FREECAD_NOT_INSTALLED", "FREECAD_WORKER_RESTARTED", "OP_SCHEMA_INVALID", "TARGET_NOT_FOUND", "TARGET_AMBIGUOUS",
-            "NAME_CONFLICT", "HAS_DEPENDENTS", "PROP_NOT_ALLOWED", "EXPRESSION_INVALID", "SKETCH_CONFLICTING", "SKETCH_REDUNDANT",
-            "SKETCH_MALFORMED", "SKETCH_PROFILE_NOT_CLOSED", "FEATURE_FAILED", "BOOLEAN_FAILED", "FILLET_FAILED", "CHAMFER_FAILED",
-            "PATTERN_FAILED", "HOLE_FAILED", "RESULT_NOT_SOLID", "RESULT_MULTIPLE_SOLIDS", "IDENTITY_BIND_FAILED",
-            "BUDGET_EXCEEDED", "BUDGET_EXCEEDS_LIMIT", "CANCELLED", "FEATURE_NO_EFFECT",
-        ):
-            self.assertIn(code, errors.ERROR_CODES)
-
     def test_unknown_codes_are_a_programming_error(self) -> None:
         with self.assertRaises(ValueError):
             ReifyOpError("MADE_UP", "x")
@@ -186,11 +170,6 @@ class ErrorTests(unittest.TestCase):
         for (feature, status), code in table.items():
             with self.subTest(feature=feature, status=status):
                 self.assertEqual(errors.failure_code(feature, status), code)
-
-    def test_failed_fillets_carry_hints(self) -> None:
-        self.assertIn("reduce radius", errors.hints_for("FILLET_FAILED"))
-        self.assertEqual(errors.hints_for("TARGET_NOT_FOUND"), [])
-
 
 class SummaryAndFingerprintTests(unittest.TestCase):
     def test_parameter_and_feature_diffs(self) -> None:

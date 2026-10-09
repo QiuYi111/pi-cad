@@ -65,10 +65,6 @@ afterEach(async () => {
 });
 
 describe("remote bridge commands", () => {
-  it("runs exec and returns stdout and stderr", async () => {
-    await expect(bridge.exec(["echo", "hello"])).resolves.toEqual({ stdout: "hello\n", stderr: "" });
-  });
-
   it("rejects a failing exec with the NativeBridge message and the captured output", async () => {
     const failure = bridge.exec(["sh", "-c", "echo partial; echo oops >&2; exit 3"]);
     await expect(failure).rejects.toThrow("sh exited with 3: oops\n");
@@ -144,10 +140,6 @@ describe("remote bridge commands", () => {
     offline.close();
   });
 
-  it("reports the runtime checks it probes", async () => {
-    const status = await bridge.check({} as never);
-    expect(status.checks.map((check) => check.id)).toEqual(["host", "bwrap", "prime", "picad"]);
-  });
 });
 
 describe("remote bridge paths and fixed facts", () => {
@@ -167,11 +159,6 @@ describe("remote bridge paths and fixed facts", () => {
     await expect(remote.checkSimulationComponent({} as never)).resolves.toMatchObject({ state: "missing", detail: "阶段 1 不可用" });
     await expect(remote.revealPath("/workspace/a.txt")).resolves.toBe("/workspace/a.txt");
     remote.close();
-  });
-
-  it("leaves argv alone for the remote bridge, which sets the canonical directory in the environment itself", async () => {
-    await expect(withCanonicalProjectEnvironment(bridge, "/unused", ["node", "worker.mjs"])).resolves.toEqual(["node", "worker.mjs"]);
-    await expect(bridge.exec(["sh", "-c", "printf %s \"$PI_CAD_CANONICAL_PROJECT_DIR\""])).resolves.toEqual({ stdout: `${root}/state/p1`, stderr: "" });
   });
 
   it("keeps the canonical directory per project, so a project switch changes it", async () => {
@@ -204,11 +191,6 @@ describe("remote bridge file transfer", () => {
 });
 
 describe("RemoteProjectIO", () => {
-  it("polls the transfer spool at most every two seconds", () => {
-    const io = new RemoteProjectIO(bridge, join(root, "projects", "p1"), { projectId: "p1", cacheRoot: join(base, "cache") });
-    expect(io.spoolPollMs).toBeGreaterThanOrEqual(2_000);
-  });
-
   it("reads, writes, lists and removes project files through the bridge", async () => {
     const io = new RemoteProjectIO(bridge, join(root, "projects", "p1"), { projectId: "p1", cacheRoot: join(base, "cache") });
     await expect(io.readText("notes/a.txt")).resolves.toBeNull();

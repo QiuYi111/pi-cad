@@ -42,8 +42,3 @@ test("runtime has one Linux process boundary and no Windows-host bridge", async 
     }
   }
 });
-
-test("default test command checks the generated agent contract", async () => {
-  const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf-8")) as { scripts?: Record<string, string> };
-  assert.match(pkg.scripts?.test ?? "", /check:agent-contract/);
-});

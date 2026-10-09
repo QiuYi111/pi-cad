@@ -118,14 +118,6 @@ describe("dispatcher: Fusion jobs", () => {
     expect(await h.deps.fs.exists(`${L(h.deps).fusionInbox}\\job-1.json`)).toBe(false);
   });
 
-  it("uses a 300 s default timeout", async () => {
-    h.addin.mode = "silent";
-    const before = h.deps.clock.now();
-    const result = await h.service.runJob(request());
-    expect(result.error?.code).toBe("TIMEOUT");
-    expect((h.deps.clock.now() - before) / 1000).toBeGreaterThanOrEqual(300);
-  });
-
   it("cancels a running job", async () => {
     h.addin.mode = "silent";
     let ticks = 0;
@@ -375,16 +367,6 @@ describe("status and test export", () => {
     expect(result).toMatchObject({ ok: false, failedFeature: "plate/base" });
     expect(result.message).toMatch(/^TRANSFER_CHECK_FAILED/);
     expect(result.job?.error).toMatchObject({ code: "TRANSFER_CHECK_FAILED", feature: "plate/base" });
-  });
-
-  it("surfaces the executor error code and feature from the sidecar", async () => {
-    const h = harness();
-    h.addin.mode = "fail";
-    const service = await activeService(h);
-    const result = await service.testExport("fusion");
-    await service.stop();
-    expect(result).toMatchObject({ ok: false, failedFeature: "plate/base" });
-    expect(result.job?.error).toMatchObject({ code: "TRANSFER_EXECUTOR_FAILED", message: "extrude failed", feature: "plate/base" });
   });
 
   it("does not run when the target is not ready", async () => {

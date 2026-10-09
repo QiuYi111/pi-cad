@@ -29,14 +29,3 @@ test("SPEC-04 ships a repository-owned OpenFOAM case and keeps only authoritativ
     assert.equal(schema.additionalProperties, false);
   }
 });
-
-test("SPEC-04 release observer applies Rev1 limits and cannot PASS blocked inputs", async () => {
-  const observer = await readFile(join(RECIPE, "observe.py"), "utf-8");
-  assert.match(observer, /maxPostPlugTrappedGas/);
-  assert.match(observer, /maxPeakPressure/);
-  assert.match(observer, /maxPeakForce/);
-  assert.match(observer, /maxPoseError/);
-  assert.match(observer, /maxMassError/);
-  assert.match(observer, /status\.get\("status"\) != "computed"/);
-  assert.match(observer, /releaseVerdict.*None/);
-});

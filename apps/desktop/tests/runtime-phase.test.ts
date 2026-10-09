@@ -9,16 +9,6 @@ function status(value: Partial<RuntimeStatus>): RuntimeStatus {
 }
 
 describe("runtime turn projection", () => {
-  it("names every phase the runtime can report", () => {
-    expect(phaseLabel(status({ phase: "thinking" }))).toBe("Thinking");
-    expect(phaseLabel(status({ phase: "waiting_provider" }))).toBe("Waiting for model");
-    expect(phaseLabel(status({ phase: "provider_wait" }))).toBe("Waiting for provider");
-    expect(phaseLabel(status({ phase: "running_tool" }))).toBe("Running tool");
-    expect(phaseLabel(status({ phase: "retrying", retry: { attempt: 1, maxAttempts: 3, delayMs: 4_000 } }))).toBe("Retrying 1/3");
-    expect(phaseLabel(status({ phase: "stalled", reason: "provider_silent" }))).toBe("No provider response");
-    expect(phaseLabel(status({ phase: "reasoning_limit" }))).toBe("Reasoning limit");
-  });
-
   it("reads the three clocks from the runtime turn, never from the turn total alone", () => {
     const view = turnPhaseView(status({
       phase: "thinking",

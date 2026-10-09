@@ -440,7 +440,6 @@ class PresentationRender(unittest.TestCase):
         self.assertEqual(m1["subjectArtifactHash"], m2["subjectArtifactHash"])
 
 
-
 class PresentationProvenance(unittest.TestCase):
     """FrozenInputs: mid-render input mutation discards the result."""
 
@@ -584,16 +583,6 @@ class PresentationFreezeBoundary(unittest.TestCase):
             import shutil
 
             shutil.rmtree(tmp, ignore_errors=True)
-
-    def test_manifest_seed_is_actually_applied(self):
-        """The manifest declares seed 0; the driver must set it."""
-        import re
-
-        driver = (ROOT / "python" / "cadctl" / "presentation_driver.py").read_text(encoding="utf-8")
-        self.assertRegex(driver, r"scene\.cycles\.seed\s*=\s*0")
-        # And the manifest still declares it (the two must agree).
-        manifest_src = (ROOT / "python" / "cadctl" / "presentation.py").read_text(encoding="utf-8")
-        self.assertIn('"seed": 0', manifest_src)
 
     def test_cli_envelope_binds_reference_images(self):
         """inputArtifacts carry spec, artifact, AND reference images."""

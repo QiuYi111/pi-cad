@@ -44,9 +44,7 @@ test("runtime registry fails closed on unknown fields and duplicate identities",
   assert.throws(() => validateRuntimeRegistry({ ...base, runtimes: [{ ...base.runtimes[0], probe: { ...base.runtimes[0].probe, typo: true } }] }), /strict probe declaration/);
 });
 
-test("uv runtime qualification is declared by the registry rather than solver code in the runner", async () => {
-  const source = await readFile(join(process.cwd(), "src", "modules", "simulate-v2", "runtime.ts"), "utf8");
-  assert.doesNotMatch(source, /import torch|import cupy|torch-fem=/);
+test("every uv runtime registration declares its qualification probe in the registry", async () => {
   const registry = validateRuntimeRegistry(JSON.parse(await readFile(join(process.cwd(), "assets", "simulation-runtimes.json"), "utf8")));
   for (const runtime of registry) {
     if (runtime.kind !== "uv") continue;

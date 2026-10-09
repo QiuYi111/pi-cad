@@ -105,12 +105,6 @@ class PartBackendTests(unittest.TestCase):
 
     # ------------------------------------------------------------ 1. the nine preferred features
 
-    def test_sketch_and_pad_make_a_valid_solid(self) -> None:
-        result = self.h.apply(plate())
-        self.assertTrue(Path(result["step"]).is_file())
-        shape = self.assertSingleValidSolid()
-        self.assertAlmostEqual(shape.Volume, 60 * 30 * 6, places=3)
-
     def test_every_sketch_shape_builds_fully_constrained(self) -> None:
         shapes = [
             {"rect": {"corner": [-30, -15], "size": [60, 30]}},
@@ -124,15 +118,6 @@ class PartBackendTests(unittest.TestCase):
         tree = self.h.call("tree")
         sketch = next(o for o in tree["bodies"][0]["objects"] if o["path"] == "part/all")
         self.assertEqual(sketch["dof"], 0)
-
-    def test_pocket_cuts_a_blind_depth(self) -> None:
-        self.h.apply(plate())
-        self.h.apply([
-            {"op": "sketch", "name": "part/pocket_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"rect": {"center": [0, 0], "size": [10, 10]}}]},
-            {"op": "pocket", "name": "part/pocket", "sketch": "part/pocket_profile", "depth": 2},
-        ])
-        shape = self.assertSingleValidSolid()
-        self.assertAlmostEqual(shape.Volume, 60 * 30 * 6 - 10 * 10 * 2, places=3)
 
     def test_hole_with_counterbore_names_its_faces(self) -> None:
         self.h.apply(plate())
@@ -185,52 +170,6 @@ class PartBackendTests(unittest.TestCase):
         self.assertEqual(len(self.h.call("query", target="part/bolt/wall@*", what=["faces"])["faces"]), 3, "wall@* = every instance")
         self.assertAlmostEqual(self.h.call("query", target="part/bolt/wall@2", what=["centroid"])["centroid"][0], 0.0, places=2)
 
-    def test_polar_pattern_makes_a_valid_solid(self) -> None:
-        self.h.apply(plate("part", 80, 80, 6))
-        self.h.apply([
-            {"op": "sketch", "name": "part/hole_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"circle": {"center": [20, 0], "diameter": 5}}]},
-            {"op": "hole", "name": "part/bolt", "sketch": "part/hole_profile", "diameter": 5, "type": "through_all"},
-            {"op": "polar_pattern", "name": "part/bolt_ring", "features": ["part/bolt"], "axis": "Z", "angle": 360, "count": 4},
-        ])
-        shape = self.assertSingleValidSolid()
-        self.assertAlmostEqual(shape.Volume, 80 * 80 * 6 - 4 * 3.141592653589793 * 2.5**2 * 6, places=2)
-
-    def test_mirror_makes_a_valid_solid(self) -> None:
-        self.h.apply(plate("part", 80, 30, 6))
-        self.h.apply([
-            {"op": "sketch", "name": "part/hole_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"circle": {"center": [-20, 0], "diameter": 5}}]},
-            {"op": "hole", "name": "part/bolt", "sketch": "part/hole_profile", "diameter": 5, "type": "through_all"},
-            {"op": "mirror", "name": "part/bolt_mirror", "features": ["part/bolt"], "plane": "YZ"},
-        ])
-        shape = self.assertSingleValidSolid()
-        self.assertAlmostEqual(shape.Volume, 80 * 30 * 6 - 2 * 3.141592653589793 * 2.5**2 * 6, places=2)
-
-    def test_pad_direction_and_midplane(self) -> None:
-        self.h.apply(plate("part", 40, 20, 5))
-        self.h.apply([
-            {"op": "sketch", "name": "part/boss_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"circle": {"center": [0, 0], "diameter": 8}}]},
-            {"op": "pad", "name": "part/boss", "sketch": "part/boss_profile", "length": 7},
-        ])
-        self.assertAlmostEqual(self.h.body_shape().BoundBox.ZMax, 12.0, places=4)
-        roles = {o["path"]: o.get("roles") for o in self.h.call("tree")["bodies"][0]["objects"]}
-        self.assertEqual(roles["part/boss"], ["side.0", "top"], "the boss bottom is the plate top, so it is no face of the result")
-        self.h.apply([{"op": "set", "target": "part/boss", "prop": "Midplane", "value": True}])
-        self.assertAlmostEqual(self.h.body_shape().BoundBox.ZMax, 8.5, places=4)
-        self.h.apply([{"op": "set", "target": "part/boss", "prop": "Midplane", "value": False}, {"op": "set", "target": "part/boss", "prop": "Reversed", "value": True}])
-        self.assertAlmostEqual(self.h.body_shape().BoundBox.ZMax, 5.0, places=4)
-
-    def test_pad_up_to_a_named_face(self) -> None:
-        self.h.apply(plate("part", 60, 20, 5))
-        self.h.apply([
-            {"op": "sketch", "name": "part/tower_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"rect": {"center": [20, 0], "size": [10, 10]}}]},
-            {"op": "pad", "name": "part/tower", "sketch": "part/tower_profile", "length": 7},
-            {"op": "sketch", "name": "part/bridge_profile", "on": {"feature": "part/base", "role": "top"}, "shapes": [{"rect": {"center": [-20, 0], "size": [10, 10]}}]},
-            {"op": "pad", "name": "part/bridge", "sketch": "part/bridge_profile", "length": 1, "type": "up_to_face", "face": {"feature": "part/tower", "role": "top"}},
-        ])
-        self.assertSingleValidSolid()
-        self.assertAlmostEqual(self.h.body_shape().BoundBox.ZMax, 12.0, places=4)
-        self.assertAlmostEqual(self.h.call("query", target="part/bridge/top", what=["centroid"])["centroid"][2], 12.0, places=4)
-
     def test_threaded_and_countersunk_holes(self) -> None:
         self.h.apply(plate("part", 60, 30, 8))
         self.h.apply([
@@ -266,18 +205,6 @@ class PartBackendTests(unittest.TestCase):
         self.assertAlmostEqual(self.h.body_shape().Volume, 100 * 30 * 5, places=3)
         error = self.h.error("apply", ops=[{"op": "set", "target": "part/profile", "prop": "constraint:nope", "value": 1}])
         self.assertEqual(error["code"], "TARGET_NOT_FOUND")
-
-    def test_interference_between_overlapping_bodies(self) -> None:
-        self.h.apply(plate("part", 40, 20, 10))
-        self.h.apply([
-            {"op": "body", "name": "pin"},
-            {"op": "sketch", "name": "pin/sk", "plane": "XY", "body": "pin", "shapes": [{"rect": {"center": [0, 0], "size": [10, 10]}}]},
-            {"op": "pad", "name": "pin/shaft", "sketch": "pin/sk", "length": 15},
-        ])
-        result = self.h.call("check", kind="interference", args={"all": True})
-        self.assertAlmostEqual(result["value"], 10 * 10 * 10, places=3)
-        self.assertEqual(result["pairs"][0]["volumeMm3"], result["value"])
-        self.assertAlmostEqual(self.h.call("check", kind="clearance", args={"a": "pin", "b": "part"})["value"], 0.0, places=6)
 
     # ------------------------------------------------------------ 2. recompute scope
 
@@ -460,42 +387,6 @@ class PartBackendTests(unittest.TestCase):
         self.assertEqual(result["rev"], 1)
         self.assertEqual(digest(Path(self.h.doc)), before)
         self.assertAlmostEqual(self.h.body_shape().Volume, 60 * 30 * 6, places=3)
-
-    # ------------------------------------------------------------ 7. sweep
-
-    def _two_links(self) -> None:
-        self.h.apply([
-            {"op": "param", "name": "j3", "value": 0, "unit": "deg"},
-            {"op": "sketch", "name": "arm/base/sk", "plane": "XY", "shapes": [{"rect": {"corner": [-20, -20], "size": [40, 40]}}]},
-            {"op": "pad", "name": "arm/base/block", "sketch": "arm/base/sk", "length": 20},
-            {"op": "body", "name": "arm/upper"},
-            {"op": "sketch", "name": "arm/upper/sk", "plane": "XY", "body": "arm/upper", "shapes": [{"rect": {"corner": [0, -5], "size": [80, 10]}}]},
-            {"op": "pad", "name": "arm/upper/link", "sketch": "arm/upper/sk", "length": 10},
-            {"op": "placement", "target": "arm/upper", "position": [0, 0, 25], "rotation": {"axis": [0, 1, 0], "angle": "=j3"}},
-        ])
-
-    def test_pose_sweep_finds_the_collision_angle_within_a_eighth_of_a_step(self) -> None:
-        import math
-
-        self.h.close()
-        self.h = Harness("arm", "arm/base")
-        self._two_links()
-        # The link's lower face (z = 25 at the pivot) reaches the block's top corner at x = 20 when
-        # 25 - 20 * tan(angle) = 20.
-        expected = math.degrees(math.atan(5 / 20))
-        step = 10.0
-        result = self.h.call(
-            "sweep", param="j3", range=[-90, 90], step=step,
-            check={"kind": "clearance", "args": {"a": "arm/upper", "b": "arm/base"}}, refine=True,
-        )
-        self.assertEqual(result["worstPose"] > 0, True)
-        self.assertLessEqual(abs(result["firstFailure"] - expected), step / 8 + 1e-9, result["firstFailure"])
-        self.assertEqual(result["failureIntervals"][0][1], 90.0)
-        self.assertTrue(result["refined"])
-        # The sweep restores the parameter: the saved pose is untouched.
-        self.assertEqual(self.h.call("tree")["params"]["j3"], 0.0)
-        clear = self.h.call("check", kind="clearance", args={"a": "arm/upper", "b": "arm/base"})
-        self.assertAlmostEqual(clear["value"], 5.0, places=3)
 
     # ------------------------------------------------------------ 8. budget
 

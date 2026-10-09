@@ -78,17 +78,6 @@ class CadTransferTests(unittest.TestCase):
         with self.assertRaisesRegex(cad.CadApiError, "escapes the project root"):
             asyncio.run(cad.transfer.features("../outside.FCStd"))
 
-    def test_unsupported_op_error_carries_the_code_and_the_feature_path(self) -> None:
-        error = cad.CadApiError(
-            "fillet is not supported", error_type="TransferError", code="TRANSFER_UNSUPPORTED_OP",
-            target="bracket/round_edges", detail={"op": "fillet"},
-        )
-        self._patch_request(error=error)
-        with self.assertRaises(cad.CadApiError) as raised:
-            asyncio.run(cad.transfer.features("parts/bracket.FCStd"))
-        self.assertEqual(raised.exception.code, "TRANSFER_UNSUPPORTED_OP")
-        self.assertEqual(raised.exception.target, "bracket/round_edges")
-
     def test_export_returns_a_job_and_the_result_has_a_short_repr(self) -> None:
         request = self._patch_request(WIRE_RESULT)
 

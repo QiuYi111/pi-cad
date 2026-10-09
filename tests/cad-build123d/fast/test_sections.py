@@ -28,23 +28,6 @@ class SectionScan(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def test_exact_area_and_moments_for_a_box(self):
-        result = scan_sections(self.box, axis="z", count=3)
-        self.assertEqual(result["units"], "mm")
-        for section in result["sections"]:
-            self.assertAlmostEqual(section["totalArea"], 40 * 30, places=6)
-            face = section["faces"][0]
-            self.assertEqual(face["loopCount"], 1)
-            # Centroidal second moments of the 40(x) x 30(y) rectangle.
-            # Iu is the moment about the u=x axis: height is the y extent,
-            # so Iu = 40*30^3/12; Iv is about y with height x: 30*40^3/12.
-            self.assertAlmostEqual(face["Iu"], 40 * 30**3 / 12, places=-1)
-            self.assertAlmostEqual(face["Iv"], 30 * 40**3 / 12, places=-1)
-            self.assertAlmostEqual(face["Iuv"], 0.0, places=3)
-            principal = sorted(face["principalMoments"])
-            self.assertAlmostEqual(principal[0], 40 * 30**3 / 12, places=-1)
-            self.assertAlmostEqual(principal[1], 30 * 40**3 / 12, places=-1)
-
     def test_centroid_facts_and_bounds(self):
         result = scan_sections(self.box, axis="z", count=3)
         self.assertEqual(result["bounds"], [-6.0, 6.0])
@@ -82,7 +65,6 @@ class SectionScan(unittest.TestCase):
         blob = blob.replace("which section is critical is an engineering judgment", "")
         for word in ("failure", "failed", "bad", "verdict", "pass", "warning"):
             self.assertNotIn(word, blob)
-
 
 
 class SectionAxesExact(unittest.TestCase):

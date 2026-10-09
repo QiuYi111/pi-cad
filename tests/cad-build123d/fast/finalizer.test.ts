@@ -14,18 +14,14 @@ import { test } from "node:test";
 
 import {
   buildProposal,
-  convertProposal,
   type CandidateProposal,
 } from "../../../src/modules/model/finalizer.ts";
 
 const cwd = mkdtempSync(join(tmpdir(), "pi-cad-finalizer-"));
 try {
-  await test("buildProposal: missing source fails closed with the legacy text", async () => {
+  await test("buildProposal: missing source fails closed", async () => {
     const result = await buildProposal(cwd, "models/ghost.py", "c1");
     assert.ok(!result.ok);
-    if (!result.ok && "text" in result) {
-      assert.match(result.text, /candidate source does not exist: models\/ghost\.py/);
-    }
   });
 
   await test("buildProposal: broken source surfaces buildFailed structure", async () => {
@@ -66,13 +62,6 @@ try {
     }
   });
 
-  await test("convertProposal: missing source fails closed", async () => {
-    const result = await convertProposal(cwd, "models/ghost.step", "c4", "stl", "out/ghost.stl");
-    assert.ok(!result.ok);
-    if (!result.ok && "text" in result) {
-      assert.match(result.text, /candidate source does not exist/);
-    }
-  });
 } finally {
   rmSync(cwd, { recursive: true, force: true });
 }

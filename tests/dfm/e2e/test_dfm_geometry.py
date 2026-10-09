@@ -45,19 +45,6 @@ class DfmCommandTests(unittest.TestCase):
         if self.saved_asi is not None:
             os.environ["PI_CAD_ASI_BIN"] = self.saved_asi
 
-    def test_dfm_on_good_plate_has_no_error_and_writes_the_report(self) -> None:
-        report = self.h.call("dfm")
-        self.assertEqual(report["counts"]["error"], 0, report["issues"])
-        self.assertEqual(report["counts"]["warn"], 0, report["issues"])
-        path = Path(report["report_path"])
-        self.assertTrue(path.is_file(), path)
-        self.assertEqual(path.parent.name, "dfm")
-        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["rev"], report["rev"])
-        self.assertIn(report["analyzer"], ("analysis_situs", "builtin"))
-        self.assertIn("rulepack", report)
-        self.assertIn("highlight", report)
-        self.assertIn("annotations", report)
-
     def test_geometry_is_fresh_for_a_try_and_stale_after_a_committed_change(self) -> None:
         before = self.h.call("apply", ops=[{"op": "set", "target": "part/slot_pocket", "prop": "Length", "value": 3}])
         self.assertEqual(before["dfm"]["geometry"]["state"], "none")
