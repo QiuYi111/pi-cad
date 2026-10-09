@@ -63,7 +63,7 @@ export function App() {
     <main className="page-host">
       {page === "workbench" && <Workbench settings={settings} prime={prime} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}
       {page === "workflow" && <WorkflowEditor />}
-      {page === "traces" && <Traces />}
+      {page === "traces" && <Traces cloudMode={settings.mode === "cloud"} />}
       {page === "settings" && <Settings value={settings} onChange={async (next) => {
         if (next.projectPath !== settings.projectPath) {
           await prime.stop();

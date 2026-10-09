@@ -15,7 +15,13 @@ const defaults = (): AppSettings => ({
   reviewer: { mode: "inherit" },
   remotePublish: { enabled: false, allowedRemotes: ["origin"] },
   onboardingComplete: false,
+  mode: "local",
 });
+
+/** Anything other than an explicit "cloud" (including absent in older files) is local. */
+export function normalizeMode(value: unknown): AppSettings["mode"] {
+  return value === "cloud" ? "cloud" : "local";
+}
 
 export class SettingsStore {
   readonly path: string;
@@ -28,7 +34,7 @@ export class SettingsStore {
   async get(): Promise<AppSettings> {
     try {
       const parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<AppSettings>;
-      return { ...defaults(), ...parsed, reviewer: { ...defaults().reviewer, ...parsed.reviewer }, remotePublish: { ...defaults().remotePublish, ...parsed.remotePublish } };
+      return { ...defaults(), ...parsed, mode: normalizeMode(parsed.mode), reviewer: { ...defaults().reviewer, ...parsed.reviewer }, remotePublish: { ...defaults().remotePublish, ...parsed.remotePublish } };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       return defaults();
@@ -41,6 +47,7 @@ export class SettingsStore {
       const next: AppSettings = {
         ...current,
         ...patch,
+        mode: patch.mode === undefined ? current.mode : normalizeMode(patch.mode),
         reviewer: patch.reviewer ? { ...current.reviewer, ...patch.reviewer } : current.reviewer,
         remotePublish: patch.remotePublish ? { ...current.remotePublish, ...patch.remotePublish } : current.remotePublish,
       };

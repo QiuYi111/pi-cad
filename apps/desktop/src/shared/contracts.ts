@@ -49,6 +49,8 @@ export interface AppSettings {
   reviewer: { mode: "inherit" | "fixed"; provider?: string; model?: string; thinking?: ThinkingLevel };
   remotePublish: { enabled: boolean; allowedRemotes: string[] };
   onboardingComplete: boolean;
+  /** Cloud mode disables experience adoption during the internal beta. */
+  mode: "local" | "cloud";
 }
 
 export interface DependencyCheck {

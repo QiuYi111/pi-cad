@@ -15,7 +15,7 @@ import type { RuntimeBridge } from "./runtime-bridge.js";
 import { PrimeRpc } from "./prime-rpc.js";
 import { WorkflowStore } from "./workflows.js";
 import { ViewerBackend } from "./viewer.js";
-import { TraceStore } from "./traces.js";
+import { TraceStore, assertCandidateAdoptionAllowed } from "./traces.js";
 import { DEMO_TRACE_ID, DEMO_TRACE_PATH, DemoRuntime } from "./demo-runtime.js";
 import { AuthController } from "./auth.js";
 import { PrimeConfigService } from "./prime-config.js";
@@ -619,7 +619,11 @@ function registerIpc() {
     return new TraceStore(await bridge()).distill(await settingsStore.get(), paths, evaluation, (status) => send(IPC.tracesDistillStatus, status));
   });
   ipcMain.handle(IPC.tracesValidateCandidate, async (_event, jobPath: string) => new TraceStore(await bridge()).candidateAction(await settingsStore.get(), jobPath, "validate"));
-  ipcMain.handle(IPC.tracesAdoptCandidate, async (_event, jobPath: string) => new TraceStore(await bridge()).candidateAction(await settingsStore.get(), jobPath, "adopt"));
+  ipcMain.handle(IPC.tracesAdoptCandidate, async (_event, jobPath: string) => {
+    const settings = await settingsStore.get();
+    assertCandidateAdoptionAllowed(settings);
+    return new TraceStore(await bridge()).candidateAction(settings, jobPath, "adopt");
+  });
   ipcMain.handle(IPC.cadTransferStatus, async (_event, refresh?: boolean) => {
     const service = await ensureTransfer();
     service.setProject(await transferProject());
