@@ -1,0 +1,5 @@
+{
+  "name": "reify-macos-e2e", "private": true, "type": "module",
+  "scripts": {"build": "bash scripts/build.sh", "test:e2e": "bash scripts/test-e2e.sh", "fixture": "node tests/fixture.mjs"},
+  "devDependencies": {"ws": "^8.18.0"}
+}
