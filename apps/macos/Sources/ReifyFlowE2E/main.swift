@@ -15,7 +15,10 @@ import ReifyCloud
         await app.login(email: "e2e@reify.test", password: "fixture-password", server: app.api.baseURL)
         precondition(app.user != nil && app.error == nil)
         guard let project = app.projects.first else { fatalError("Missing fixture project") }
+        let loadingSettings = Task { await app.loadCloudModels() }
+        try await Task.sleep(for: .milliseconds(50))
         await app.open(project)
+        await loadingSettings.value
         guard app.connected && app.catalog.providers.count == 3 && app.engineeringError == nil else { fatalError("Open failed: \(app.error ?? app.engineeringError ?? app.configError ?? app.status)") }
         let original = app.settingsDraft
         var changed = original; changed.provider = "zai"; changed.model = "glm-5.3-flash"; changed.thinking = "high"
@@ -105,9 +108,61 @@ import ReifyCloud
         app.draft = "拒绝请求验收"; await app.submitDraft()
         precondition(!app.generating && app.presentation.turn()?.terminal == true && app.presentation.turn()?.reason == "rpc_rejected", "rejected prompt stayed running")
         precondition(b != a)
+        app.draft = "断线前保留草稿"; app.saveConversationDraft()
+        let beforeDrop = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/stats")!)
+        let statsBefore = (try JSONSerialization.jsonObject(with: beforeDrop.0) as! [String: Any])["stats"] as! [String: Int]
+        let spawn = app.bridge.spawnID, conversation = app.sessionID
+        _ = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/drop")!)
+        try await wait({ app.reconnecting }, "automatic reconnect starts")
+        var whileReconnecting = app.settingsDraft; whileReconnecting.permission = "read-only"
+        let savingDisconnected = await app.applySettings(whileReconnecting)
+        precondition(!savingDisconnected && app.permission == "workspace", "changed permission while the old helper could still run")
+        try await wait({ app.connected && !app.reconnecting }, "automatic reconnect completes")
+        precondition(app.bridge.spawnID == spawn && app.sessionID == conversation && app.draft == "断线前保留草稿" && app.model == "glm-5.3-flash" && app.thinking == "high", "reconnect replaced process, session, draft or actual model")
+        let afterDrop = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/stats")!)
+        let statsAfter = (try JSONSerialization.jsonObject(with: afterDrop.0) as! [String: Any])["stats"] as! [String: Int]
+        precondition(statsBefore["spawn"] == statsAfter["spawn"] && statsBefore["prompt"] == statsAfter["prompt"] && statsBefore["start"] == statsAfter["start"], "reconnect duplicated a process, prompt or workspace start")
+        app.draft = "长任务-断线排队验收"; await app.submitDraft()
+        app.draft = "断线暂停的需求"; app.runningIntent = "queue"; await app.submitDraft()
+        _ = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/drop")!)
+        try await wait({ app.reconnecting }, "streaming reconnect starts")
+        try await wait({ app.connected && !app.reconnecting }, "streaming reconnect completes")
+        precondition(app.generating && app.queueSuspended && app.pending.count == 1 && app.bridge.spawnID == spawn, "running task or suspended queue was lost")
+        await app.abort()
+        try await wait({ !app.generating }, "reconnected live task abort")
+        try await Task.sleep(for: .milliseconds(700))
+        precondition(app.pending.count == 1 && app.queueSuspended, "queue was replayed after disconnect")
+        app.pending = []; app.queueSuspended = false; app.savePending()
+        _ = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/reclaim")!)
+        try await wait({ !app.connected && app.status == "云端已暂停" }, "idle pause state")
+        try await Task.sleep(for: .milliseconds(1200))
+        let pausedWorkspace = try await app.api.workspace()
+        precondition(!app.connected && !app.reconnecting && pausedWorkspace.state == "stopped", "idle-paused workspace automatically restarted")
+        func fixture(_ path: String, _ body: [String: String] = [:]) async throws {
+            var request = URLRequest(url: URL(string: app.api.baseURL + path)!)
+            request.httpMethod = "POST"; request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            _ = try await URLSession.shared.data(for: request)
+        }
+        try await fixture("/__test/start-mode", ["mode": "queue"])
+        let queuedOpen = Task { await app.open(project) }
+        try await wait({ app.status == "排队第 2 位" }, "workspace queue position")
+        await queuedOpen.value
+        precondition(app.connected && !app.busy)
+        try await fixture("/__test/start-mode", ["mode": "fail"])
+        await app.open(project)
+        precondition(!app.connected && !app.busy && app.error == "测试工作区磁盘不足", "lost workspace startup failure")
+        await app.open(project)
+        precondition(app.connected && app.error == nil, "failed workspace cannot retry")
+        try await fixture("/__test/expire")
+        await app.refreshProjects()
+        precondition(app.user == nil && app.api.session == nil && !app.connected && app.error == "登录已失效，请重新登录。" && app.messages.isEmpty && app.projects.isEmpty && app.catalog.providers.isEmpty, "expired session stayed signed in")
         await app.shutdown()
         try await app.api.logout()
-        print("PASS: compiled native AppModel over HTTP/WebSocket, actual GLM settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
+        print("PASS: compiled native AppModel over HTTP/WebSocket, native GLM model settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
+        print("PASS: settings load cannot close a newly selected project bridge, workspace queue position, startup failure and retry, expired login clears native account and connection")
+        print("PASS: disconnect during a live task resumes it, suspends queued input, allows abort, and never restarts an idle-paused workspace")
+        print("PASS: automatic native reconnect reattaches the same process/session, preserves drafts and never repeats prompts or starts the workspace")
         print("PASS: live and restored desktop tool cards, image deduplication, simulation metrics, sandbox artifact paths, stable note identity, retry/thinking phases and terminal failure")
         print("PASS: generated artifact selects its parameter manifest, native parameter preview/restore, failed apply restores original preview, successful apply refreshes model and values")
     }

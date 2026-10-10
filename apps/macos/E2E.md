@@ -15,9 +15,10 @@
 - 工程参数：范围校验、预览不修改保存的模型、应用使用当前对话的 model-build、失败保留模型、过期参数拒绝；原生 AppModel 验证预览/恢复、应用失败恢复原预览、成功后更新模型与参数。尺寸/截面与引用保留精确文件版本。此项使用模拟 CAD 结果，正式云端计算待验。
 - 消息：复用 desktop 消息处理和状态逻辑，实时工具进度、历史工具/图片恢复、图片去重、分析指标/详情、沙箱文件路径、笔记稳定身份、重试/思考/失败/拒绝状态均通过实际 AppModel 流程；同一 Markdown 解析器验证表格、代码、列表。
 - 通知：临时通知、持久状态不变成确认弹窗，工具执行不会覆盖。阅读跟随与图片窗口仍需窗口 E2E。新窗口脚本 `tests/message-ui-e2e.cua.js` 尚未运行。
-- 本地构建及 DMG 校验通过。提交 `91269b1`、`9d7a293` 的 GitHub macOS 构建/E2E 通过；新增消息界面等后续改动再做持续检查。
+- 连接：排队位置、启动失败/重试、设置加载与项目切换、登录失效清理；普通断线及任务中断线接回同进程/对话/模型，保留草稿、任务可停止；排队需求暂停且服务端确认未发送；闲置暂停不会自动启动。连接恢复前保存权限会被拒绝，避免新设置与旧进程不一致。
+- 本地构建及 DMG 校验通过。提交 `91269b1`、`9d7a293`、`df51144` 的 GitHub macOS 构建/E2E 通过；新增消息界面等后续改动再做持续检查。
 
-证据：`test-results/parity-tool-markdown-e2e.log`、`test-results/parity-native-flow-e2e.log`、`api-e2e.log`、`flow-e2e.log`、`api-stats.json`。以上使用本地服务，工作流校验实际执行共享编译器。新增页面、系统弹窗、三维操作仍需解锁 Mac 后做窗口 E2E；新增功能尚未在正式云端验收。
+证据：`test-results/parity-connection-verified-e2e.log`、`test-results/parity-tool-markdown-e2e.log`、`test-results/parity-native-flow-e2e.log`、`api-e2e.log`、`flow-e2e.log`、`api-stats.json`。以上使用本地服务，工作流校验实际执行共享编译器。新增页面、系统弹窗、三维操作仍需解锁 Mac 后做窗口 E2E；新增功能尚未在正式云端验收。
 
 2026-10-10，Apple Silicon，macOS 26，Swift 6.4，macOS 26 SDK。应用最低支持 macOS 14；本次仅在当前系统实测。
 

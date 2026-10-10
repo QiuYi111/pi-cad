@@ -30,6 +30,7 @@ struct TurnPhaseView: Decodable {
     }
     func reset(sessionID: String?, thinking: String) throws { _ = try call("reifyReset", [sessionID.map { $0 as Any } ?? NSNull(), thinking]) }
     func load(_ rows: [[String: Any]]) throws -> [ChatMessage] { try decode("reifyLoad", [rows]) }
+    func resume(generating: Bool) throws { _ = try call("reifyResume", [generating]) }
     func reduce(_ event: [String: Any]) throws -> [ChatMessage] { try decode("reifyReduce", [event]) }
     func begin() { _ = try? call("reifyBegin") }
     func stopping() { _ = try? call("reifyStopping") }

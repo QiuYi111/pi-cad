@@ -19,10 +19,11 @@ struct QueuedRequest: Identifiable, Codable, Equatable {
 
 extension AppModel {
     func restorePending() {
+        queueSuspended = AppPreferences.current.bool(forKey: "\(conversationKey).queue-suspended")
         pending = AppPreferences.current.data(forKey: "\(conversationKey).pending").flatMap { try? JSONDecoder().decode([QueuedRequest].self, from: $0) } ?? []
         attachments = attachmentsByConversation[conversationKey] ?? []
     }
-    func savePending() { AppPreferences.current.set(try? JSONEncoder().encode(pending), forKey: "\(conversationKey).pending") }
+    func savePending() { AppPreferences.current.set(try? JSONEncoder().encode(pending), forKey: "\(conversationKey).pending"); AppPreferences.current.set(queueSuspended, forKey: "\(conversationKey).queue-suspended") }
     func attachImages() async {
         guard connected else { return }
         if catalog.model(provider: provider, id: model)?.input?.contains("image") == false { error = "当前模型不支持图片，请先选择支持图片的模型"; return }
@@ -64,7 +65,7 @@ extension AppModel {
         if error != nil { draft = value; attachments = images; saveConversationDraft() }
     }
     func drainQueue() async {
-        guard !generating, !busy, !drainingQueue, connected, let request = pending.first else { return }
+        guard !queueSuspended, !generating, !busy, !drainingQueue, connected, let request = pending.first else { return }
         drainingQueue = true
         defer { drainingQueue = false }
         let current = generation
@@ -92,6 +93,7 @@ extension AppModel {
         catch { fail(error) }
     }
     func changePermission(_ value: String) async {
+        guard !reconnecting else { error = "正在重连，请连接恢复后修改权限"; return }
         guard !generating else { error = "请先停止当前任务"; return }
         permission = value; persistSettings()
         if let selected { await open(selected) }

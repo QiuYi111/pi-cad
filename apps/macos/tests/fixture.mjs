@@ -40,7 +40,8 @@ const sessions = new Map();
 const generatedSessions = new Set();
 const spawns = new Map();
 const user = {id: 'e2e-user', email: 'e2e@reify.test', displayName: '测试账户'};
-const view = () => ({name: 'ws-e2e', state, desired: state === 'stopped' ? 'stopped' : 'running', lastError: null, queuePosition: null, reclaimAt: null});
+let startupMode='normal', lastError=null;
+const view = () => ({name: 'ws-e2e', state, desired: state === 'stopped' ? 'stopped' : 'running', lastError, queuePosition: state==='queued'?2:null, reclaimAt: null});
 const token = (expiresIn = 900) => { const a = randomUUID(), r = randomUUID(); accesses.add(a); refreshes.add(r); return {accessToken: a, refreshToken: r, expiresIn, user}; };
 const respond = (res, code, body) => { res.writeHead(code, {'Content-Type':'application/json'}); res.end(body === undefined ? undefined : JSON.stringify(body)); };
 const events = new WebSocketServer({noServer: true}), bridge = new WebSocketServer({noServer: true});
@@ -53,7 +54,10 @@ const server = http.createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
   if (path === '/__test/stats') return respond(res,200,{stats,audit,state});
+  if (path === '/__test/start-mode') { startupMode=b.mode;return respond(res,200,{ok:true}); }
+  if (path === '/__test/expire') { accesses.clear();refreshes.clear();return respond(res,200,{ok:true}); }
   if (path === '/__test/drop') { for(const ws of bridge.clients) ws.close(1012,'fixture restart'); return respond(res,200,{ok:true}); }
+  if (path === '/__test/reclaim') {state='stopped';broadcast({type:'reclaimed'});for(const ws of bridge.clients)ws.close(1012,'idle pause');return respond(res,200,{ok:true});}
   if (path === '/__test/idle') { broadcast({type:'idle_warning',reclaimAt:new Date(Date.now()+60000).toISOString()}); return respond(res,200,{ok:true}); }
   if (path === '/v1/auth/login') {
     if(b.email !== user.email || b.password !== accountPassword) { stats.rejectedLogin++; return respond(res,401,{code:'invalid_credentials',message:'邮箱或密码错误'}); }
@@ -83,7 +87,10 @@ const server = http.createServer(async (req, res) => {
     return respond(res,204);
   }
   if (path === '/v1/workspace/start') {
-    stats.start++; state='starting'; setTimeout(()=>{state='running';broadcast({type:'workspace_state',state});},150); return respond(res,200,view());
+    stats.start++;lastError=null;
+    if(startupMode==='fail'){startupMode='normal';state='failed';lastError='测试工作区磁盘不足';broadcast({type:'workspace_state',state});return respond(res,200,view());}
+    if(startupMode==='queue'){startupMode='normal';state='queued';setTimeout(()=>{state='running';broadcast({type:'workspace_state',state});},750);return respond(res,409,{code:'capacity_full',message:'工作区已排队',position:2});}
+    state='starting'; setTimeout(()=>{state='running';broadcast({type:'workspace_state',state});},150); return respond(res,200,view());
   }
   if (path === '/v1/workspace/stop') { stats.stop++; state='stopped';broadcast({type:'workspace_state',state}); return respond(res,200,view()); }
   if (path === '/v1/workspace' || path === '/v1/workspace/keepalive') return respond(res,200,view());
@@ -100,6 +107,7 @@ bridge.on('connection',ws=>{
   const send = row => { if(ws.readyState===WebSocket.OPEN) ws.send(JSON.stringify(row)); };
   const frame = (ch,data) => { const h=Buffer.alloc(4);h.writeUInt32BE(ch); if(ws.readyState===WebSocket.OPEN) ws.send(Buffer.concat([h,Buffer.from(data)])); };
   const output = row => {
+    if(activeSpawn) { if(row.type==='agent_start')activeSpawn.streaming=true; if(row.type==='agent_end'){activeSpawn.streaming=false;activeSpawn.timer=null;} activeSpawn.sessionID=currentSession; activeSpawn.histories=histories; }
     const bytes=Buffer.from(JSON.stringify(row)+'\n');
     if(activeSpawn) {activeSpawn.replay.push(bytes);const target=activeSpawn.socket;const h=Buffer.alloc(4);h.writeUInt32BE(1);if(target.readyState===WebSocket.OPEN){const split=Math.max(1,bytes.indexOf(Buffer.from('支架'))+1);target.send(Buffer.concat([h,bytes.subarray(0,split)]));target.send(Buffer.concat([h,bytes.subarray(split)]));}}
     else frame(1,bytes);
@@ -107,7 +115,7 @@ bridge.on('connection',ws=>{
   const reply = (r,data={}) => output({type:'response',id:r.id,command:r.type,success:true,data});
   const authProcesses = new Map();
   let currentSession='fixture-session', selectedModel={provider:'openai-codex',id:'gpt-5.6-sol'}, thinkingLevel='minimal';
-  const histories = new Map([['fixture-session', {rows:[],title:'初始对话'}]]);
+  let histories = new Map([['fixture-session', {rows:[],title:'初始对话'}]]);
   let awaitingUI=null;
   ws.on('message',(data,binary)=>{
     if(binary) {
@@ -124,13 +132,13 @@ bridge.on('connection',ws=>{
       stdin=Buffer.concat([stdin,bytes]);
       for(let at; (at=stdin.indexOf(10))>=0;) {
         const r=JSON.parse(stdin.subarray(0,at).toString());stdin=stdin.subarray(at+1);
-        if(r.type==='get_state') reply(r,{sessionId:currentSession,thinkingLevel,model:selectedModel,isStreaming:!!timer});
+        if(r.type==='get_state') reply(r,{sessionId:currentSession,thinkingLevel,model:selectedModel,isStreaming:activeSpawn?.streaming??!!timer});
         else if(r.type==='get_messages') reply(r,{messages:rows});
-        else if(r.type==='new_session') { histories.set(currentSession,{rows,title:histories.get(currentSession)?.title??'历史对话'});currentSession=randomUUID();rows=[];histories.set(currentSession,{rows,title:'新对话'});sessions.set(project,rows);if(activeSpawn)activeSpawn.rows=rows;reply(r); }
+        else if(r.type==='new_session') { histories.set(currentSession,{rows,title:histories.get(currentSession)?.title??'历史对话'});currentSession=randomUUID();rows=[];histories.set(currentSession,{rows,title:'新对话'});sessions.set(project,rows);if(activeSpawn){activeSpawn.rows=rows;activeSpawn.sessionID=currentSession;activeSpawn.histories=histories}reply(r); }
         else if(r.type==='set_session_name') { histories.set(currentSession,{rows,title:r.name});reply(r); }
-        else if(r.type==='switch_session') { const id=r.sessionPath.split('/').at(-1).replace('.jsonl','');const saved=histories.get(id);if(!saved)return output({type:'response',id:r.id,success:false,error:'对话不存在'});currentSession=id;rows=saved.rows;sessions.set(project,rows);if(activeSpawn)activeSpawn.rows=rows;reply(r); }
-        else if(r.type==='set_model') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===r.provider&&m.id===r.modelId);if(!choice?.available)output({type:'response',id:r.id,success:false,error:'模型不可用'});else {selectedModel={provider:r.provider,id:r.modelId};reply(r,{model:selectedModel})} }
-        else if(r.type==='set_thinking_level') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===selectedModel.provider&&m.id===selectedModel.id);if(!choice?.thinkingLevels.includes(r.level))output({type:'response',id:r.id,success:false,error:'思考档位不支持'});else{thinkingLevel=r.level;reply(r)} }
+        else if(r.type==='switch_session') { const id=r.sessionPath.split('/').at(-1).replace('.jsonl','');const saved=histories.get(id);if(!saved)return output({type:'response',id:r.id,success:false,error:'对话不存在'});currentSession=id;rows=saved.rows;sessions.set(project,rows);if(activeSpawn){activeSpawn.rows=rows;activeSpawn.sessionID=currentSession;activeSpawn.histories=histories}reply(r); }
+        else if(r.type==='set_model') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===r.provider&&m.id===r.modelId);if(!choice?.available)output({type:'response',id:r.id,success:false,error:'模型不可用'});else {selectedModel={provider:r.provider,id:r.modelId};if(activeSpawn)activeSpawn.model=selectedModel;reply(r,{model:selectedModel})} }
+        else if(r.type==='set_thinking_level') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===selectedModel.provider&&m.id===selectedModel.id);if(!choice?.thinkingLevels.includes(r.level))output({type:'response',id:r.id,success:false,error:'思考档位不支持'});else{thinkingLevel=r.level;if(activeSpawn)activeSpawn.thinking=thinkingLevel;reply(r)} }
         else if(r.type==='prompt') {
           audit.push({type:'prompt',message:r.message,imageCount:r.images?.length??0,imageTypes:r.images?.map(i=>i.mimeType)??[]});
           if(r.images?.some(i=>!i.data||!i.mimeType?.startsWith('image/')))return output({type:'response',id:r.id,success:false,error:'Invalid image payload'});
@@ -156,7 +164,7 @@ bridge.on('connection',ws=>{
               rows.push(result);output({type:'tool_execution_end',toolCallId:buildCall.id,result});
               rows.push({role:'assistant',content:[simCall]});output({type:'tool_execution_start',toolCallId:simCall.id,toolName:simCall.name,args:simCall.arguments});
             },350);
-            timer=setTimeout(()=>{
+            timer=activeSpawn.timer=setTimeout(()=>{
               const result={role:'toolResult',toolCallId:simCall.id,toolName:simCall.name,content:[{type:'text',text:'分析完成'}],details:{outputs:[{name:'最大应力',type:'scalar',value:12,unit:'MPa'},{name:'结果场',type:'field',path:'stress.vtk'}]}};
               rows.push(result);output({type:'tool_execution_end',toolCallId:simCall.id,result});
               const message={role:'assistant',content:[{type:'text',text:'工具卡片测试完成。\n\n| 项目 | 结果 |\n| --- | --- |\n| 应力 | **12 MPa** |\n\n```python\nprint(12)\n```\n\n1. 检查尺寸\n2. [下载结果](bracket.step)\n\n- [x] 已检查'}]};
@@ -165,14 +173,14 @@ bridge.on('connection',ws=>{
           }
           if(r.message==='重试状态验收') {
             output({type:'auto_retry_start',attempt:1,maxAttempts:3,delayMs:2000,errorMessage:'Rate limit 429'});
-            timer=setTimeout(()=>{
+            timer=activeSpawn.timer=setTimeout(()=>{
               output({type:'auto_retry_end',success:true});output({type:'message_update',assistantMessageEvent:{type:'thinking_delta',delta:'重新检查'}});
-              timer=setTimeout(()=>{const message={role:'assistant',content:[{type:'text',text:'重试成功'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},300);
+              timer=activeSpawn.timer=setTimeout(()=>{const message={role:'assistant',content:[{type:'text',text:'重试成功'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},300);
             },650);continue;
           }
           output({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'正在创建支架…'}});
-          timer=setTimeout(()=>{modelWidth=80;files.set('bracket.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));parameterManifest();generatedSessions.add(project+'/'+currentSession);const message={role:'assistant',content:[{type:'text',text:'支架已完成。尺寸 80 × 40 × 30 mm，已生成 STL 和 STEP 文件。'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},r.message.includes('长任务') ? 30000 : 450);
-        } else if(r.type==='abort') {stats.abort++;clearTimeout(timer);timer=null;reply(r);output({type:'agent_end',messages:rows});}
+          timer=activeSpawn.timer=setTimeout(()=>{modelWidth=80;files.set('bracket.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));parameterManifest();generatedSessions.add(project+'/'+currentSession);const message={role:'assistant',content:[{type:'text',text:'支架已完成。尺寸 80 × 40 × 30 mm，已生成 STL 和 STEP 文件。'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},r.message.includes('长任务') ? 30000 : 450);
+        } else if(r.type==='abort') {stats.abort++;clearTimeout(timer);clearTimeout(activeSpawn?.timer);timer=null;reply(r);output({type:'agent_end',messages:rows});}
         else if(r.type==='extension_ui_response') {
           if(!awaitingUI||r.id!==awaitingUI.id)return;
           audit.push({type:'ui-answer',method:awaitingUI.method,value:r.value,cancelled:r.cancelled});
@@ -196,11 +204,11 @@ bridge.on('connection',ws=>{
       stats.spawn++; audit.push({type:'spawn',args:r.args,env:r.env});
       if(!r.args.includes('/opt/reify/pi-cad/scripts/prime-cad-sidecar.mjs') || (!r.args.includes('--reviewer-inherit-author')&&!r.args.includes('--reviewer-provider')) || r.env?.PI_CAD_CANONICAL_PROJECT_DIR?.startsWith('/workspace/state/')!==true) return send({type:'error',ch:r.ch,message:'wrong cloud runtime command'});
       selectedModel={provider:r.args[r.args.indexOf('--provider')+1],id:r.args[r.args.indexOf('--model')+1]};thinkingLevel=r.args[r.args.indexOf('--thinking')+1];
-      project=r.env.PI_CAD_CANONICAL_PROJECT_DIR;rows=sessions.get(project)??[];if(rows.length&&!r.args.includes('/workspace/.prime-sessions/fixture-session.jsonl'))return send({type:'error',ch:r.ch,message:'missing session resume'});sessions.set(project,rows);send({type:'spawned',ch:r.ch,spawnId:(activeSpawn={id:randomUUID(),project,rows,replay:[],socket:ws}).id,pid:123});
+      project=r.env.PI_CAD_CANONICAL_PROJECT_DIR;rows=sessions.get(project)??[];if(rows.length&&!r.args.includes('/workspace/.prime-sessions/fixture-session.jsonl'))return send({type:'error',ch:r.ch,message:'missing session resume'});sessions.set(project,rows);send({type:'spawned',ch:r.ch,spawnId:(activeSpawn={id:randomUUID(),project,rows,replay:[],socket:ws,sessionID:currentSession,histories,model:selectedModel,thinking:thinkingLevel}).id,pid:123});
           spawns.set(activeSpawn.id,activeSpawn);
     } else if(r.type==='attach') {
       const old=spawns.get(r.spawnId);if(!old)return send({type:'error',ch:r.ch,code:'no_such_spawn',message:'没有这个进程'});
-      stats.attaches++;activeSpawn=old;activeSpawn.socket=ws;project=old.project;rows=old.rows;
+      stats.attaches++;activeSpawn=old;activeSpawn.socket=ws;project=old.project;rows=old.rows;currentSession=old.sessionID??'fixture-session';histories=old.histories??histories;selectedModel=old.model??selectedModel;thinkingLevel=old.thinking??thinkingLevel;
       for(const bytes of old.replay)frame(r.ch,bytes);
     } else if(r.type==='exec') {
       const result=value=>send({type:'exec_result',ch:r.ch,code:0,stderr:'',stdout:typeof value==='string'?value:JSON.stringify(value)});
@@ -268,7 +276,7 @@ bridge.on('connection',ws=>{
       if(upload.size!==upload.data.length||upload.sha256!==sha(upload.data)) return send({type:'error',ch:r.ch,message:'checksum mismatch'});
       stats.uploads++;const name=upload.path.split('/').slice(4).join('/');files.set(name,upload.data);send({type:'file_put_done',ch:r.ch,path:upload.path,size:upload.data.length,sha256:sha(upload.data)});upload=null;
     } else if(r.type==='stdin_end') {clearTimeout(timer);if(activeSpawn)spawns.delete(activeSpawn.id);setTimeout(()=>send({type:'exit',ch:r.ch,code:0,signal:null}),200);}
-    else if(r.type==='kill') {if(authProcesses.has(r.ch)){authProcesses.delete(r.ch);return send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'})}stats.kills++;clearTimeout(timer);if(activeSpawn)spawns.delete(activeSpawn.id);send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'});}
+    else if(r.type==='kill') {if(authProcesses.has(r.ch)){authProcesses.delete(r.ch);return send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'})}stats.kills++;clearTimeout(timer);clearTimeout(activeSpawn?.timer);if(activeSpawn)spawns.delete(activeSpawn.id);send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'});}
     else if(r.type==='ping') send({type:'pong'});
   });
 

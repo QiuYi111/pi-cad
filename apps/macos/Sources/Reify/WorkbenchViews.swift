@@ -370,6 +370,7 @@ struct ComposerView: View {
                 }.frame(maxHeight: 78)
             }
             if !app.pending.isEmpty {
+                if app.queueSuspended { HStack { Text("断线后已暂停排队，请确认上一条是否发送。"); Button("继续排队") { app.queueSuspended = false; app.savePending(); Task { await app.drainQueue() } }.disabled(!app.connected).accessibilityIdentifier("chat.resume-queue") }.font(ReifyDesign.font(10)) }
                 VStack(alignment: .leading, spacing: 4) {
                     Text("当前任务结束后").foregroundStyle(ReifyDesign.muted)
                     ForEach($app.pending) { $request in

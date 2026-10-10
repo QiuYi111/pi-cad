@@ -21,10 +21,11 @@ globalThis.structuredClone = value => JSON.parse(JSON.stringify(value));
 const Activity = ${activity};
 const Runtime = ${runtime};
 const Phase = ${phase};
-let messages = [], runtime = new Runtime.PrimeRuntimeState({state:'ready',checks:[]});
+let messages = [], savedRows = [], runtime = new Runtime.PrimeRuntimeState({state:'ready',checks:[]});
 globalThis.reifyReset = (sessionId, thinking) => { messages=[]; runtime=new Runtime.PrimeRuntimeState({state:'ready',checks:[]}); runtime.sessionReady(sessionId,thinking); };
 globalThis.reifyReduce = event => { runtime.applyEvent(event); messages=Activity.reducePrimeEvent(messages,event); return JSON.stringify(messages); };
 globalThis.reifyLoad = rows => {
+  savedRows=rows;
   messages=[];
   for(let index=0; index<rows.length; index++) {
     const message=rows[index], id=message.id||'history-'+index;
@@ -39,6 +40,7 @@ globalThis.reifyLoad = rows => {
   return JSON.stringify(messages);
 };
 globalThis.reifyBegin = () => runtime.beginTurn('prompt');
+globalThis.reifyResume = generating => { if(generating&&!runtime.activeTurn())runtime.beginTurn('prompt'); else if(!generating)runtime.applyEvent({type:'agent_end',messages:savedRows}); };
 globalThis.reifyStopping = () => runtime.beginStopping();
 globalThis.reifyCommandFailed = (command,message,timeout) => command==='prompt' ? runtime.rpcFailure(timeout?'rpc_timeout':'rpc_rejected',message) : runtime.commandFailed(command,message);
 globalThis.reifyExited = () => runtime.processExited(null,'disconnected');

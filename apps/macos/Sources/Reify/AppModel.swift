@@ -16,6 +16,9 @@ import ReifyCloud
     @Published var busy = false
     @Published var generating = false
     @Published var connected = false
+    @Published var reconnecting = false
+    var reconnectTask: Task<Void, Never>?
+    var reconnectSequence = 0
     @Published var activity: String?
     @Published var extensionNotice: String?
     @Published var extensionStatuses: [String: String] = [:]
@@ -45,6 +48,7 @@ import ReifyCloud
     @Published var attachments: [ImageAttachment] = []
     var attachmentsByConversation: [String: [ImageAttachment]] = [:]
     @Published var pending: [QueuedRequest] = []
+    @Published var queueSuspended = false
     var drainingQueue = false
     @Published var runningIntent = "queue"
     @Published var notes: [String] = []
@@ -96,9 +100,10 @@ import ReifyCloud
         api = CloudAPI(baseURL: env["REIFY_CLOUD_URL"] ?? CloudAPI.defaultURL, scope: env["REIFY_SESSION_SCOPE"] ?? "production")
         bridge.onEvent = { [weak self] event in self?.handle(event) }
         bridge.onDisconnect = { [weak self] error in
-            self?.presentation.exited()
             self?.connected = false; self?.generating = false; self?.activity = nil
-            self?.status = "连接已断开"; self?.error = "云端连接已断开，请重连。"
+            self?.status = "连接已断开"; self?.error = "连接已断开，正在重连。"
+            if let self, !self.pending.isEmpty { self.queueSuspended = true; self.savePending() }
+            self?.scheduleReconnect()
         }
     }
     func boot() async {
@@ -112,8 +117,15 @@ import ReifyCloud
         if failure is CancellationError { return }
         error = failure is URLError ? "无法连接服务器，请检查网络。" : failure.localizedDescription
         if api.session == nil && user != nil {
+            cancelReconnect()
             generation += 1; user = nil; selected = nil; connected = false
             bridge.close(); eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
+            projects = []; messages = []; files = []; preview = nil; previewName = ""
+            conversations = []; sessionID = nil; draft = ""; attachments = []; pending = []; notes = []; queueSuspended = false
+            catalog = ModelCatalog(); modelsConfig = ""; settingsPresented = false; workflowsPresented = false; uiRequest = nil
+            busy = false; generating = false; reclaimAt = nil; extensionNotice = nil; extensionStatuses = [:]
+            clearEngineering()
+            error = "登录已失效，请重新登录。"; status = "登录失效"
         }
     }
     func login(email: String, password: String, server: String) async {
@@ -138,16 +150,17 @@ import ReifyCloud
             await open(project)
         } catch { busy = false; fail(error) }
     }
-    func open(_ project: Project) async {
+    func open(_ project: Project, reconnect: Bool = false) async {
         guard !busy else { return }
         guard !generating else { error = "请先停止当前任务，再切换项目。"; return }
+        if !reconnect { cancelReconnect() }
         saveLayout()
         let switchingProject = selected?.id != project.id
         let wasConnected = connected
         generation += 1; let current = generation
         clearEngineering()
         busy = true; connected = false; generating = false; error = nil
-        if selected?.id != project.id || wasConnected || bridge.spawnID == nil { await bridge.stop(api: api) }
+        if !reconnect && (selected?.id != project.id || wasConnected || bridge.spawnID == nil) { await bridge.stop(api: api) }
         guard current == generation else { return }
         selected = project; activity = nil; uiRequest = nil
         if switchingProject {
@@ -158,7 +171,7 @@ import ReifyCloud
         defer { if current == generation { busy = false } }
         do {
             var workspace: Workspace
-            do { workspace = try await api.workspace("start") }
+            do { workspace = try await api.workspace(reconnect ? nil : "start") }
             catch let error as CloudError where error.status == 409 && error.code == "capacity_full" {
                 workspace = try await api.workspace()
             }
@@ -166,6 +179,7 @@ import ReifyCloud
             while workspace.state != "running" {
                 guard current == generation else { return }
                 if workspace.state == "failed" { throw CloudError(workspace.lastError ?? "工作区启动失败") }
+                if reconnect && workspace.state == "stopped" { throw CloudError("云端已暂停") }
                 guard Date() < deadline else { throw CloudError("工作区启动超时") }
                 status = workspace.queuePosition.map { "排队第 \($0) 位" } ?? "启动云端工作区"
                 try await Task.sleep(for: .seconds(2))
@@ -179,10 +193,11 @@ import ReifyCloud
             generating = state["isStreaming"] as? Bool ?? false
             sessionID = state["sessionId"] as? String
             syncRuntimeModel(state)
-            try resetPresentation()
+            if !reconnect { try resetPresentation() }
             if AppPreferences.current.object(forKey: "\(conversationKey).draft") != nil { restoreConversationDraft() }
             restorePending()
             try await loadMessages()
+            if reconnect { try presentation.resume(generating: generating) }
             files = try await bridge.files()
             if switchingProject, !previewName.isEmpty, let file = files.first(where: { $0.name == previewName }) {
                 let restoredMode = canvasMode
@@ -208,6 +223,7 @@ import ReifyCloud
     func send(_ text: String, images: [ImageAttachment] = []) async {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, connected, !generating, selected?.role != "viewer" else { return }
+        let current = generation
         turnSequence += 1
         let automaticTitle = messages.contains(where: { $0.role == "user" }) ? nil : String(text.replacingOccurrences(of: "\n", with: " ").prefix(80))
         generating = true; error = nil
@@ -219,9 +235,10 @@ import ReifyCloud
             var payload: [String: Any] = ["message": outgoing]
             if !images.isEmpty { payload["images"] = images.map(\.promptImage) }
             _ = try await bridge.rpc("prompt", payload: payload)
+            guard current == generation else { return }
             if let automaticTitle { _ = try? await bridge.rpc("set_session_name", payload: ["name": automaticTitle]) }
         }
-        catch { presentation.failed("prompt", error.localizedDescription, timeout: (error as? CloudError)?.code == "rpc_timeout"); generating = presentation.turn()?.terminal == false; fail(error) }
+        catch { if current == generation && connected { presentation.failed("prompt", error.localizedDescription, timeout: (error as? CloudError)?.code == "rpc_timeout"); generating = connected && presentation.turn()?.terminal == false; fail(error) } }
     }
     func abort() async {
         let current = generation
@@ -332,6 +349,7 @@ import ReifyCloud
         }
     }
     func stopWorkspace() async {
+        cancelReconnect()
         generation += 1; busy = true
         defer { busy = false }
         do {
@@ -343,6 +361,7 @@ import ReifyCloud
         do { _ = try await api.workspace("keepalive"); reclaimAt = nil } catch { fail(error) }
     }
     func logout() async {
+        cancelReconnect()
         saveLayout()
         generation += 1
         await bridge.stop(api: api); eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
@@ -356,6 +375,7 @@ import ReifyCloud
         } catch { fail(error) }
     }
     func shutdown() async {
+        cancelReconnect()
         saveLayout()
         generation += 1
         eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
@@ -381,7 +401,7 @@ import ReifyCloud
                            let row = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] {
                             if row["type"] as? String == "idle_warning" { reclaimAt = row["reclaimAt"] as? String }
                             if row["type"] as? String == "reclaimed" || (row["type"] as? String == "workspace_state" && ["stopped", "failed"].contains(row["state"] as? String ?? "")) {
-                                bridge.close(); connected = false; generating = false; status = "云端已暂停"
+                                cancelReconnect(); bridge.close(); connected = false; generating = false; status = "云端已暂停"
                             }
                         }
                     }

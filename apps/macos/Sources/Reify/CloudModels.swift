@@ -18,32 +18,49 @@ extension AppModel {
     func prepareConfiguration() async throws {
         guard user != nil else { throw CloudError("请先登录云端") }
         if bridge.isOpen { return }
+        let current = generation, identity = user?.id
         var workspace = try await api.workspace("start")
         let deadline = Date().addingTimeInterval(600)
         while workspace.state != "running" {
+            guard current == generation, user?.id == identity else { throw CancellationError() }
             if workspace.state == "failed" { throw CloudError(workspace.lastError ?? "工作区启动失败") }
             if Date() > deadline { throw CloudError("工作区启动超时") }
             try await Task.sleep(for: .seconds(2)); workspace = try await api.workspace()
         }
+        guard current == generation, user?.id == identity else { throw CancellationError() }
+        if bridge.isOpen { return }
         try await bridge.openServices(api: api, projectID: selected?.id)
     }
     func loadCloudModels() async {
+        guard !configWorking else { return }
+        let current = generation, identity = user?.id
         configWorking = true; configError = nil
         defer { configWorking = false }
         do {
             try await prepareConfiguration()
-            catalog = try await configuration.catalog()
-            modelsConfig = try await configuration.readModels()
-        } catch { configError = error.localizedDescription }
+            let nextCatalog = try await configuration.catalog()
+            let nextModels = try await configuration.readModels()
+            guard current == generation, user?.id == identity else { return }
+            catalog = nextCatalog; modelsConfig = nextModels
+        } catch { if current == generation, !(error is CancellationError) { configError = error.localizedDescription } }
     }
     func configure(_ action: () async throws -> Void, notice: String) async {
         guard !configWorking else { return }
+        let current = generation, identity = user?.id
         configWorking = true; configError = nil; configNotice = ""
         defer { configWorking = false }
-        do { try await prepareConfiguration(); try await action(); catalog = try await configuration.catalog(); configNotice = notice }
-        catch { configError = error.localizedDescription }
+        do {
+            try await prepareConfiguration()
+            guard current == generation, user?.id == identity else { return }
+            try await action()
+            guard current == generation, user?.id == identity else { return }
+            let next = try await configuration.catalog()
+            guard current == generation, user?.id == identity else { return }
+            catalog = next; configNotice = notice
+        } catch { if current == generation, !(error is CancellationError) { configError = error.localizedDescription } }
     }
     func applySettings(_ draft: SettingsDraft) async -> Bool {
+        guard !reconnecting else { configError = "正在重连，请连接恢复后保存设置"; return false }
         guard !generating else { configError = "请先停止当前任务"; return false }
         configError = nil; configNotice = ""
         let old = settingsDraft

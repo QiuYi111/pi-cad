@@ -5,6 +5,7 @@ const prompts=audit.filter(x=>x.type==='prompt');
 assert.equal(prompts.filter(x=>x.message==='已编辑第一条').length,1);
 assert.equal(prompts.filter(x=>x.message==='排队第二条').length,1);
 assert.equal(prompts.filter(x=>x.message==='只保存在对话的笔记').length,0);
+assert.equal(prompts.filter(x=>x.message==='断线暂停的需求').length,0);
 const image=prompts.find(x=>x.message.startsWith('图片需求验收'));
 assert.equal(image.imageCount,1);
 assert.deepEqual(image.imageTypes,['image/png']);
