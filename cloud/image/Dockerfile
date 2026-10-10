@@ -148,6 +148,7 @@ RUN chmod 0755 /opt/reify/entrypoint.sh \
       -exec chmod go-w,a+rX {} +
 
 ENV HOME=/workspace/home \
+    UV_NO_SYNC=1 \
     PI_CAD_REPO=/opt/reify/pi-cad \
     PI_CAD_FREECAD_HOME=/opt/reify/freecad \
     PI_CAD_ASI_HOME=/opt/reify/asi \

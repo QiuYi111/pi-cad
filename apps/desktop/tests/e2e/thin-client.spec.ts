@@ -114,11 +114,11 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     });
     await page.evaluate(() => (window as any).piCad.runtime.start());
     await record("model-runtime-started");
-    const prompt = "这是真实端到端测试。请用 CAD 工作流创建并保存一个 40×20×4 mm 的矩形板，中心有一个直径 6 mm 的通孔，命名为 thin-e2e-plate。保存可编辑 FreeCAD 零件和 STEP 文件，启用 DFM 检查，运行几何检查并显示模型。请直接建模，不需要问我。完成后说明实际文件路径与尺寸。";
+    const prompt = "这是真实端到端测试。请用 CAD 工作流创建并保存一个 40×20×4 mm 的矩形板，中心有一个直径 6 mm 的通孔，命名为 thin-e2e-plate。保存可编辑 FreeCAD 零件和 STEP 文件，启用 DFM 检查，运行几何检查并显示模型。如已有同名零件，核对尺寸、文件和 DFM，显示已有模型；缺失时才创建。请直接做，不需要问我。完成后说明实际文件路径与尺寸。";
     const composer = page.getByPlaceholder("Ask anything about the design");
     await composer.fill(prompt); await composer.press("Enter");
-    await page.waitForFunction(() => ["completed", "failed", "aborted", "stalled"].includes((window as any).__e2eStatus?.phase), undefined, { timeout: 600_000 });
-    expect(await page.evaluate(() => (window as any).__e2eStatus?.phase)).toBe("completed");
+    await page.waitForFunction(() => Boolean((window as any).__e2eStatus?.terminalReason), undefined, { timeout: 600_000 });
+    expect(await page.evaluate(() => (window as any).__e2eStatus?.terminalReason)).toBe("completed");
     const result = await page.evaluate(async () => ({ restored: await (window as any).piCad.runtime.restore(), catalog: await (window as any).piCad.viewer.catalog(), settings: await (window as any).piCad.settings.get(), eventTypes: (window as any).__e2eEvents.map((e: any) => e.type) }));
     await writeFile(join(evidenceDir, "model-result.json"), JSON.stringify(result, null, 2), { mode: 0o600 });
     expect(result.eventTypes).toContain("tool_execution_start");
