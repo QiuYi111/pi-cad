@@ -212,13 +212,23 @@ EOF
 "${KUBECTL[@]}" -n "$NS_WS" delete pod "$HELPER_POD" --wait=true >/dev/null
 HELPER_POD=""
 
-# 4b. Files. local-path keeps the volume at <volumes>/<namespace>_<pvc>_<pv-uid>.
-live_dir="$(ls -1d "$VOLUMES_DIR"/"${NS_WS}_${PVC_NAME}"_* 2>/dev/null | head -1 || true)"
+# 4b. Read the bound PV's path; local-path directory naming varies by version.
+pv_name="$("${KUBECTL[@]}" -n "$NS_WS" get pvc "$PVC_NAME" -o jsonpath='{.spec.volumeName}')"
+live_dir="$("${KUBECTL[@]}" get pv "$pv_name" -o jsonpath='{.spec.hostPath.path}{.spec.local.path}')"
+case "$live_dir" in
+  "$VOLUMES_DIR"/*) ;;
+  *) die "PVC path is outside $VOLUMES_DIR: $live_dir" ;;
+esac
 [ -n "$live_dir" ] && [ -d "$live_dir" ] || die "cannot find the local-path directory for $PVC_NAME under $VOLUMES_DIR"
 stage="$(mktemp -d "/var/tmp/reify-restore-$TS.XXXX")"
 log "restic restore of volume files into $stage"
-restic restore "$SNAPSHOT" --target "$stage" --include "${VOLUMES_DIR}/${NS_WS}_${PVC_NAME}_*"
-src_dir="$(ls -1d "$stage"/"$VOLUMES_DIR"/"${NS_WS}_${PVC_NAME}"_* 2>/dev/null | head -1 || true)"
+restic restore "$SNAPSHOT" --verify --target "$stage" \
+  --include "${VOLUMES_DIR}/pvc-*_${NS_WS}_${PVC_NAME}" \
+  --include "${VOLUMES_DIR}/${NS_WS}_${PVC_NAME}_*"
+mapfile -t source_dirs < <(find "$stage$VOLUMES_DIR" -mindepth 1 -maxdepth 1 -type d \
+  \( -name "pvc-*_${NS_WS}_${PVC_NAME}" -o -name "${NS_WS}_${PVC_NAME}_*" \))
+[ "${#source_dirs[@]}" -eq 1 ] || die "snapshot must contain exactly one volume for $PVC_NAME"
+src_dir="${source_dirs[0]}"
 [ -n "$src_dir" ] && [ -d "$src_dir" ] || die "snapshot does not contain $PVC_NAME"
 cp -a "$src_dir/." "$live_dir/"
 rm -rf "$stage"
