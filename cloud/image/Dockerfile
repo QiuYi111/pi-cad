@@ -117,6 +117,8 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/reify/python \
 RUN uv python install 3.11 \
  && HOME=/tmp PRIME_AGENT_KERNEL_VENV=/opt/reify/kernel-template \
       node /opt/reify/prime-agent/packages/coding-agent/dist/core/kernel/bootstrap-cli.js \
+ && find /opt/reify/kernel-template /opt/reify/python -xdev ! -type l \
+      \( -perm /022 -o ! -perm -444 -o \( -type d ! -perm -111 \) \) -exec chmod go-w,a+rX {} + \
  && rm -rf /workspace/home/.cache /tmp/.prime
 COPY package.json package-lock.json /opt/reify/pi-cad/
 RUN cd /opt/reify/pi-cad && npm ci --omit=dev --ignore-scripts
