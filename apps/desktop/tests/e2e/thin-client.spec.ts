@@ -151,7 +151,10 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     expect((await page.evaluate(() => (window as any).piCad.settings.get())).cloud.projectId).toBe(result.settings.cloud.projectId);
     await record("encrypted-login-and-project-survive-restart");
     await page.getByTitle(`恢复对话：${savedSession.title}`, { exact: true }).first().click();
-    await expect.poll(() => page.evaluate(async () => (await (window as any).piCad.runtime.restore()).status.sessionId), { timeout: 90_000 }).toBe(savedSession.id);
+    await expect.poll(() => page.evaluate(async () => {
+      try { return (await (window as any).piCad.runtime.restore()).status.sessionId; }
+      catch { return null; }
+    }), { timeout: 90_000 }).toBe(savedSession.id);
     const reopened = await page.evaluate(() => (window as any).piCad.viewer.catalog());
     const reopenedArtifacts = [...reopened.projectHead.artifacts, ...(reopened.currentRun?.artifacts ?? []), ...reopened.commits.flatMap((commit: any) => commit.artifacts)];
     expect(reopenedArtifacts.some((artifact: any) => artifact.sha256 === step.sha256 && artifact.path === step.path)).toBe(true);
