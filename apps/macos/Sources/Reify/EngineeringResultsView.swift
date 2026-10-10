@@ -28,6 +28,7 @@ struct EngineeringResultsView: View {
             if app.releaseBusy { HStack { ProgressView("正在准备文件包"); Button("取消") { Task { await app.cancelRelease() } }.accessibilityIdentifier("release.cancel") } }
             if let error = app.releaseError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if let url = app.releaseURL { Button("在 Finder 查看文件包") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.accessibilityIdentifier("release.reveal") }
+            if app.savedRelease != nil && app.releaseURL != nil { PublishView() }
             if let error = app.evidenceError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if let error = app.engineeringError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if app.engineeringArtifacts.isEmpty { Text("没有此类结果").foregroundStyle(ReifyDesign.muted) }
@@ -79,6 +80,17 @@ struct EngineeringResultsView: View {
             if let commit {
                 Text("版本：\(commit.name)").font(ReifyDesign.font(13, .medium))
                 Text(commit.createdAt).foregroundStyle(ReifyDesign.muted)
+                Button(app.rebuildBusy ? "正在重建…" : "按保存源码重建") { Task { await app.rebuildVersion(commit) } }.disabled(app.rebuildBusy || app.generating || app.selected?.role == "viewer" || app.permission == "read-only" || app.rebuildManifest(for: commit) == nil || commit.sourceRevision == nil).accessibilityIdentifier("rebuild.start")
+                if let error = app.rebuildError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+                if let rebuilt = app.rebuildResult, rebuilt.commitId == commit.id {
+                    Text(rebuilt.byteMatch ? "文件字节相同" : "文件字节不同")
+                    Text(rebuilt.geometryMatch == nil ? "旧文件无法核验，未比较几何" : rebuilt.geometryMatch == true ? "外形尺寸与实体数量相同" : "外形尺寸或实体数量不同")
+                    Text("源码：\(rebuilt.sourceRevision)\n新文件：\(rebuilt.actualSha256)").font(ReifyDesign.font(10)).textSelection(.enabled)
+                    Text("\(rebuilt.environment.python) · \(rebuilt.environment.git)").font(ReifyDesign.font(10)).foregroundStyle(ReifyDesign.muted)
+                    ForEach(rebuilt.parameters.keys.sorted(), id: \.self) { key in Text("\(key)：\(String(describing: rebuilt.parameters[key]!.foundationValue))").font(ReifyDesign.font(10)) }
+                    Button("查看重建模型") { Task { await app.showRebuiltVersion() } }.accessibilityIdentifier("rebuild.show")
+                }
+
                 if let revision = commit.sourceRevision { Text("源码：\(revision.prefix(12))").textSelection(.enabled) }
                 Button("人工批准此版本") { app.approvalError = nil; app.approvalForm = commit }.disabled(app.approvalBusy || !app.connected || app.selected?.role == "viewer" || commit.acceptanceSummary?.requirements.contains { $0.category == "machine" && $0.status == "verified" } != true).accessibilityIdentifier("approval.open")
                 ForEach(app.approvals.filter { $0.commitId == commit.id }) { record in HumanApprovalRow(record: record) }

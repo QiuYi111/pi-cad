@@ -23,6 +23,7 @@ extension AppModel {
         engineeringError = nil; engineeringLoading = false
         guard !preserveViewer else { return }
         clearApprovals()
+        clearRebuild()
         workflowRun = nil; engineeringCatalog = nil
         selectedCommitID = nil; selectedArtifact = nil
         closeComparison(); newResult = nil; previewPinned = false; readingHistory = false
@@ -71,6 +72,7 @@ extension AppModel {
             .filter { $0.isModel && $0.revisionKey != selectedArtifact?.revisionKey && seen.insert($0.revisionKey).inserted }
     }
     func selectVersion(_ id: String?) {
+        clearRebuild()
         restoreParameterPreview(); previewSequence += 1; closeComparison()
         selectedCommitID = id; selectedArtifact = nil; preview = nil; previewName = ""; previewPinned = id != nil
     }
@@ -150,6 +152,24 @@ extension AppModel {
     }
     func exportArtifact(_ artifact: EngineeringArtifact) async {
         do { save(try Data(contentsOf: await cachedArtifact(artifact)), name: (artifact.path as NSString).lastPathComponent) } catch { fail(error) }
+    }
+    func currentModelExportData() async throws -> (data: Data, name: String) {
+        guard let displayed = preview else { throw CloudError("请先打开模型") }
+        let current = generation, scope = sessionID
+        let mesh = try MeshModel.read(displayed)
+        if let source = mesh.source, let expected = mesh.sha256 {
+            let path = try bridge.relativeProjectPath(source)
+            let bytes = try await bridge.download(path)
+            guard WorkspaceBridge.hash(bytes) == expected else { throw CloudError("所看模型的文件已变化，未导出新版本") }
+            guard generation == current && sessionID == scope && preview == displayed else { throw CancellationError() }
+            return (bytes, (path as NSString).lastPathComponent)
+        }
+        // STL is already the exact downloaded model shown by SceneKit.
+        guard (previewName as NSString).pathExtension.lowercased() == "stl" else { throw CloudError("当前预览缺少文件版本，无法导出") }
+        return (displayed, (previewName as NSString).lastPathComponent)
+    }
+    func exportCurrentModel() async {
+        do { let file = try await currentModelExportData(); save(file.data, name: file.name) } catch { fail(error) }
     }
     func importStep() async {
         guard connected, selected?.role != "viewer", permission != "read-only" else { return }

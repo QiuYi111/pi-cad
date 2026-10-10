@@ -345,8 +345,8 @@ struct CanvasView: View {
                 Button("导入概念图") { Task { await app.importConcepts() } }.accessibilityIdentifier("concept.import")
                 Button("导入 STEP") { Task { await app.importStep() } }.disabled(!app.connected || app.selected?.role == "viewer" || app.permission == "read-only").accessibilityIdentifier("model.import-step")
                 Button { app.filesOpen.toggle() } label: { Label("项目文件", systemImage: "folder") }.accessibilityIdentifier("file.toggle")
-                if let file = app.files.first(where: { $0.name == app.previewName }) {
-                    Button("导出") { Task { await app.export(file) } }.accessibilityIdentifier("model.export")
+                if app.preview != nil && app.canvasContent == "model" {
+                    Button("导出") { Task { await app.exportCurrentModel() } }.accessibilityIdentifier("model.export")
                 }
             }.buttonStyle(ReifyButtonStyle()).padding(.horizontal, 18).frame(height: 58).background(ReifyDesign.paper).overlay(alignment: .bottom) { Divider() }
             HStack(spacing: 0) {

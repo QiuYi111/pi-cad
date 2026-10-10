@@ -31,7 +31,7 @@ extension AppModel {
         if bridge.isOpen { return }
         try await bridge.openServices(api: api, projectID: selected?.id)
     }
-    func loadCloudModels() async {
+    func loadCloudModels(readModels: Bool = true) async {
         guard !configWorking else { return }
         let current = generation, identity = user?.id
         configWorking = true; configError = nil
@@ -39,10 +39,29 @@ extension AppModel {
         do {
             try await prepareConfiguration()
             let nextCatalog = try await configuration.catalog()
-            let nextModels = try await configuration.readModels()
+            let nextModels = readModels ? try await configuration.readModels() : nil
             guard current == generation, user?.id == identity else { return }
-            catalog = nextCatalog; modelsConfig = nextModels
+            catalog = nextCatalog
+            if let nextModels { modelsConfig = nextModels }
         } catch { if current == generation, !(error is CancellationError) { configError = error.localizedDescription } }
+    }
+    func saveCloudDefault(_ draft: SettingsDraft) async -> Bool {
+        guard !configWorking, !generating, !reconnecting else { configError = "请连接恢复并停止当前任务，再保存默认模型"; return false }
+        guard let choice = catalog.model(provider: draft.provider, id: draft.model), choice.available == true, choice.levels.contains(draft.thinking) else { configError = "请配置可用的模型和思考档位"; return false }
+        let current = generation, scope = sessionID
+        // Saving the author default must not save unrelated reviewer/permission drafts.
+        var next = settingsDraft
+        next.provider = draft.provider; next.model = draft.model; next.thinking = draft.thinking
+        await configure({
+            try await configuration.saveDefault(provider: next.provider, model: next.model, thinking: next.thinking)
+            guard generation == current && sessionID == scope else { throw CancellationError() }
+            guard await applySettings(next) else {
+                let message = configError ?? "请重试"
+                if let fresh = try? await configuration.catalog(), generation == current && sessionID == scope { catalog = fresh }
+                throw CloudError("云端默认已保存，当前模型切换失败：\(message)")
+            }
+        }, notice: "云端默认和当前模型已保存")
+        return generation == current && sessionID == scope && configError == nil && settingsDraft == next
     }
     func configure(_ action: () async throws -> Void, notice: String) async {
         guard !configWorking else { return }

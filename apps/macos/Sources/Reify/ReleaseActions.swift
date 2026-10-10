@@ -4,11 +4,12 @@ import ReifyCloud
 
 extension AppModel {
     func clearRelease() {
+        clearPublication()
         releaseSequence += 1; releaseBusy = false; releaseError = nil; releaseURL = nil
         let job = releaseJob; releaseJob = nil
         Task { await job?.cancel() }
     }
-    private func approvalValid(_ record: HumanApprovalRecord, generation expectedGeneration: Int, session expectedSession: String?) async -> Bool {
+    func approvalValid(_ record: HumanApprovalRecord, generation expectedGeneration: Int, session expectedSession: String?) async -> Bool {
         guard generation == expectedGeneration, sessionID == expectedSession, connected else { return false }
         do {
             let envelope = try await engineering.requestEnvelope("viewer-catalog")
@@ -27,6 +28,7 @@ extension AppModel {
         guard connected, !releaseBusy, !generating, selected?.role != "viewer" else { return }
         let current = generation, scope = sessionID
         releaseSequence += 1; let sequence = releaseSequence
+        clearPublication()
         let job = CloudReleaseJob(); releaseJob = job; releaseBusy = true; releaseError = nil; releaseURL = nil
         let staging = destination.appendingPathComponent(".reify-download-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: staging); if generation == current && sessionID == scope && releaseSequence == sequence { releaseBusy = false; releaseJob = nil } }
@@ -70,7 +72,7 @@ extension AppModel {
                 guard (try? Data(contentsOf: target.appendingPathComponent("release-manifest.json"))) == manifestBytes else { throw CloudError("此文件包目录已存在，未覆盖") }
                 for file in release.files { guard WorkspaceBridge.hash(try Data(contentsOf: target.appendingPathComponent(file.path))) == file.sha256 else { throw CloudError("已保存的文件包被修改，未覆盖") } }
             } else { try FileManager.default.moveItem(at: staging, to: target) }
-            releaseURL = target
+            releaseURL = target; savedRelease = release; savedReleaseApproval = record; refreshPublishPolicy()
         } catch { if generation == current && sessionID == scope && releaseSequence == sequence { releaseError = error.localizedDescription } }
     }
     func cancelRelease() async {

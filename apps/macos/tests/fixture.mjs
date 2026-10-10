@@ -1,5 +1,7 @@
 // A disposable cloud protocol server. No production credentials or model calls.
 import http from 'node:http';
+import {rebuildFixture} from './rebuild-fixture.mjs';
+import {publishFixture} from './publish-fixture.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync as requireExists } from 'node:fs';
@@ -38,13 +40,15 @@ triangles.forEach((t,i)=>t.flat().forEach((value,j)=>stl.writeFloatLE(value,84+i
 
 const files = new Map([['bracket.stl', stl], ['bracket.step', Buffer.from('ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;')], ['corrupt.stl', stl]]);
 files.set('bracket.py',Buffer.from('# disposable model source fixture\n'));
-let releaseMode="normal", releaseChecks=0;
+let releaseMode="normal", releaseChecks=0, settingsFailure='';
 let modelWidth=80, expandedCatalog=false, reviewVerified=false, approvalRevision=1, evidenceTampered=false;
 const evidenceDocument=session=>({schema:1,reviewId:'fixture-review-'+session,profileId:'fixture-independent',workflowHash:'hash-'+session,result:{verdict:'pass',summary:'Fixture independent check'}});
 const geometryDocument=session=>{const envelope={schema:1,ok:true,payload:{bbox:{x:80,y:40,z:30},volume:9600},artifacts:[]};return {schema:1,evidence:{path:'evidence/geometry/fixture.json',sha256:fixtureDigest(envelope),workflowHash:'hash-'+session},envelope}};
 const evidenceFor=(path,session)=>path.startsWith('evidence/geometry/')?geometryDocument(session):evidenceDocument(session);
 files.set('history/bracket-80.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));
 files.set('engineering-report.json',Buffer.from('{"checks":[]}'));
+const publications=publishFixture(fixtureHome,fixtureRepo,files);
+const rebuilds=rebuildFixture(fixtureHome,fixtureRepo,files,sha);
 function parameterManifest(){const manifest={schema:1,modelId:'bracket',source:{path:'bracket.py',sha256:sha(files.get('bracket.py')),entrypoint:'build'},output:{path:'bracket.step',sha256:sha(files.get('bracket.step'))},parameters:[{id:'width',type:'number',default:80,value:modelWidth,min:20,max:160,step:1,unit:'mm',label:'宽度'}]};const data=Buffer.from(JSON.stringify(manifest));files.set('bracket.parameters.json',data);return {path:'bracket.parameters.json',sha256:sha(data),manifest}}
 const sessions = new Map();
 const generatedSessions = new Set();
@@ -63,6 +67,9 @@ const server = http.createServer(async (req, res) => {
   let b = {}; try { b = text ? JSON.parse(text) : {}; } catch { return respond(res,400,{message:'请求格式错误'}); }
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
+  if (path === '/__test/publish-mode') { if(b.projectId)publications.prepare('/workspace/state/'+b.projectId);publications.mode=b.mode;return respond(res,200,{ok:true}); }
+  if (path === '/__test/rebuild-mode') { rebuilds.mode=b.mode;return respond(res,200,{ok:true}); }
+  if (path === '/__test/settings-failure') { settingsFailure=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/release-mode') { releaseMode=b.mode;releaseChecks=0;return respond(res,200,{ok:true}); }
   if (path === '/__test/release-checks') return respond(res,200,{checks:releaseChecks});
   if (path === '/__test/approval-version') { approvalRevision=Number(b.version);return respond(res,200,{ok:true}); }
@@ -156,7 +163,7 @@ bridge.on('connection',ws=>{
         else if(r.type==='new_session') { histories.set(currentSession,{rows,title:histories.get(currentSession)?.title??'历史对话'});currentSession=randomUUID();rows=[];histories.set(currentSession,{rows,title:'新对话'});sessions.set(project,rows);if(activeSpawn){activeSpawn.rows=rows;activeSpawn.sessionID=currentSession;activeSpawn.histories=histories}reply(r); }
         else if(r.type==='set_session_name') { histories.set(currentSession,{rows,title:r.name});reply(r); }
         else if(r.type==='switch_session') { const id=r.sessionPath.split('/').at(-1).replace('.jsonl','');const saved=histories.get(id);if(!saved)return output({type:'response',id:r.id,success:false,error:'对话不存在'});currentSession=id;rows=saved.rows;sessions.set(project,rows);if(activeSpawn){activeSpawn.rows=rows;activeSpawn.sessionID=currentSession;activeSpawn.histories=histories}reply(r); }
-        else if(r.type==='set_model') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===r.provider&&m.id===r.modelId);if(!choice?.available)output({type:'response',id:r.id,success:false,error:'模型不可用'});else {selectedModel={provider:r.provider,id:r.modelId};if(activeSpawn)activeSpawn.model=selectedModel;reply(r,{model:selectedModel})} }
+        else if(r.type==='set_model') { if(settingsFailure==='model-switch-error'){output({type:'response',id:r.id,success:false,error:'模拟当前模型切换失败'});continue;} const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===r.provider&&m.id===r.modelId);if(!choice?.available)output({type:'response',id:r.id,success:false,error:'模型不可用'});else {selectedModel={provider:r.provider,id:r.modelId};if(activeSpawn)activeSpawn.model=selectedModel;reply(r,{model:selectedModel})} }
         else if(r.type==='set_thinking_level') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===selectedModel.provider&&m.id===selectedModel.id);if(!choice?.thinkingLevels.includes(r.level))output({type:'response',id:r.id,success:false,error:'思考档位不支持'});else{thinkingLevel=r.level;if(activeSpawn)activeSpawn.thinking=thinkingLevel;reply(r)} }
         else if(r.type==='prompt') {
           audit.push({type:'prompt',message:r.message,imageCount:r.images?.length??0,imageTypes:r.images?.map(i=>i.mimeType)??[],imageHashes:r.images?.map(i=>sha(Buffer.from(i.data,'base64')))??[]});
@@ -236,7 +243,7 @@ bridge.on('connection',ws=>{
         for(const [path,bytes] of files){if(path.startsWith('.pi-cad/releases/'))continue;const target=join(root,path);mkdirSync(join(target,'..'),{recursive:true});writeFileSync(target,bytes);}
         if(releaseMode==='rewritten-manifest'){const out=join(root,'.pi-cad','releases');if(requireExists(out))for(const name of readdirSync(out)){const manifestPath=join(out,name,'release-manifest.json');if(name.startsWith('Reify-')&&requireExists(manifestPath)){const manifest=JSON.parse(readFileSync(manifestPath,'utf8')),changed=Buffer.from('changed package with rewritten descriptor');writeFileSync(join(out,name,'files','bracket.step'),changed);manifest.files.find(x=>x.path==='files/bracket.step').sha256=sha(changed);writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');}}}
         const artifact={id:'artifact-'+currentSession,path:'bracket.step',role:'model',sha256:sha(files.get('bracket.step'))};
-        const commit={id:'commit-'+currentSession,name:'Version '+currentSession,parent:null,phase:'work',createdAt:'2026-10-11T00:00:00Z',artifacts:[artifact],sourceRevision:String(approvalRevision+1).repeat(40),workflowHash:'hash-'+currentSession,acceptanceSummary:{requirements:[{id:'machine',category:'machine',status:reviewVerified?'verified':'unverified',method:'Independent reviewer',evidence:{path:'reviews/fixture-machine.json',sha256:fixtureDigest(evidenceDocument(currentSession))}}],assumptions:['Fixture only']}};
+        const commit={id:'commit-'+currentSession,name:'Version '+currentSession,parent:null,phase:'work',createdAt:'2026-10-11T00:00:00Z',artifacts:[artifact],sourceRevision:publications.revision(project)??String(approvalRevision+1).repeat(40),workflowHash:'hash-'+currentSession,acceptanceSummary:{requirements:[{id:'machine',category:'machine',status:reviewVerified?'verified':'unverified',method:'Independent reviewer',evidence:{path:'reviews/fixture-machine.json',sha256:fixtureDigest(evidenceDocument(currentSession))}}],assumptions:['Fixture only']}};
         const catalog={projectId:project,projectHead:{updatedAt:'',artifacts:[]},currentRun:null,commits:[commit],parameterManifests:[],simulationRuns:[]};
         const stub=`let text='';process.stdin.on('data',x=>text+=x);process.stdin.on('end',()=>{const q=JSON.parse(text);if(q.op!=='viewer-catalog'||q.sessionId!==${JSON.stringify(currentSession)}){console.log(JSON.stringify({schema:1,ok:false,error:{message:'Wrong release conversation'}}));process.exitCode=1}else console.log(JSON.stringify({schema:1,ok:true,result:${JSON.stringify(catalog)}}))});`;
         let native=r.args[r.args.indexOf('-e')+1].replaceAll('/opt/reify/pi-cad',fixtureRepo);
@@ -265,6 +272,8 @@ bridge.on('connection',ws=>{
       for(const bytes of old.replay)frame(r.ch,bytes);
     } else if(r.type==='exec') {
       const result=value=>send({type:'exec_result',ch:r.ch,code:0,stderr:'',stdout:typeof value==='string'?value:JSON.stringify(value)});
+      if(r.args.some(a=>a.includes('REIFY_DESKTOP_PUBLISH'))){const q=JSON.parse(r.input);if(!generatedSessions.has(project+'/'+q.sessionId))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'Conversation has no workflow'});const commit={id:'commit-'+currentSession,sourceRevision:publications.revision(project),workflowHash:'hash-'+currentSession};const catalog={projectId:project,commits:[commit],parameterManifests:[]};publications.execute(r.args,r.input,project,catalog,audit,value=>send({type:'exec_result',ch:r.ch,...value}));return;}
+      if(r.args.some(a=>a.includes('REIFY_DESKTOP_REBUILD'))){const q=JSON.parse(r.input);if(!generatedSessions.has(project+'/'+q.sessionId))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'Conversation has no workflow'});rebuilds.execute(r.args,r.input,project,audit,value=>send({type:'exec_result',ch:r.ch,...value}));return;}
       if(r.args.some(a=>a.includes('REIFY_EVIDENCE_READ'))) {
         // The native reader uses the original transaction verifier on real files.
         const q=JSON.parse(r.input),root=join(fixtureHome,'evidence-project');mkdirSync(root,{recursive:true});
@@ -307,7 +316,8 @@ bridge.on('connection',ws=>{
           const report={id:'engineering-report',path:'engineering-report.json',role:'evidence',sha256:sha(files.get('engineering-report.json'))};
           const commits=bound?[{id:'commit-'+q.sessionId,name:'Version '+q.sessionId,parent:null,phase:'work',createdAt:new Date().toISOString(),artifacts:[artifact]}]:[];
           const manifests=bound&&name==='bracket.step'?[parameterManifest()]:[];
-          if(advanced){commits[0].sourceRevision=String(approvalRevision+1).repeat(40);commits[0].workflowHash=run.workflowHash;commits[0].acceptanceSummary={requirements:[{id:'machine',category:'machine',status:reviewVerified?'verified':'unverified',method:'Independent reviewer',evidence:{path:'reviews/fixture-machine.json',sha256:fixtureDigest(evidenceDocument(q.sessionId))}}],assumptions:['Fixture only']};commits.push({id:'history-80',name:'Width 80',parent:null,phase:'work',createdAt:'2026-10-01T00:00:00Z',artifacts:[historical],sourceRevision:'1'.repeat(40),acceptanceSummary:{requirements:[{id:'bbox',category:'geometry',status:'pass',method:'bounding box'}],assumptions:['Fixture only']}});const manifest=JSON.parse(JSON.stringify(parameterManifest().manifest));manifest.output={path:historical.path,sha256:historical.sha256};manifest.parameters[0].value=80;manifests.push({path:'@commit/history-80/bracket.parameters.json',sha256:sha(Buffer.from(JSON.stringify(manifest))),manifest});}
+          if(advanced){commits[0].sourceRevision=publications.revision(project)??String(approvalRevision+1).repeat(40);commits[0].workflowHash=run.workflowHash;commits[0].acceptanceSummary={requirements:[{id:'machine',category:'machine',status:reviewVerified?'verified':'unverified',method:'Independent reviewer',evidence:{path:'reviews/fixture-machine.json',sha256:fixtureDigest(evidenceDocument(q.sessionId))}}],assumptions:['Fixture only']};commits.push({id:'history-80',name:'Width 80',parent:null,phase:'work',createdAt:'2026-10-01T00:00:00Z',artifacts:[historical],sourceRevision:'1'.repeat(40),acceptanceSummary:{requirements:[{id:'bbox',category:'geometry',status:'pass',method:'bounding box'}],assumptions:['Fixture only']}});const manifest=JSON.parse(JSON.stringify(parameterManifest().manifest));manifest.output={path:historical.path,sha256:historical.sha256};manifest.parameters[0].value=80;manifests.push({path:'@commit/history-80/bracket.parameters.json',sha256:sha(Buffer.from(JSON.stringify(manifest))),manifest});}
+          if(advanced&&rebuilds.mode!=='off'){const preserved=rebuilds.metadata(project,q.sessionId);commits[1]=preserved.commit;manifests[manifests.length-1]=preserved.stored;}
           return result({schema:1,ok:true,result:{projectId:project,projectHead:{updatedAt:'',artifacts:advanced?[report,artifact]:[]},currentRun:run?{id:run.runId,phase:run.phase,status:run.status,updatedAt:run.updatedAt,artifacts:[artifact]}:null,commits,simulationRuns:[],parameterManifests:manifests}});
         }
         if(q.op==='model-build'&&bound){const width=q.parameters?.width?.value;if(width===66)return result({schema:1,ok:true,result:{build:{ok:false,payload:{error:'模拟参数建模失败'}}}});if(typeof width!=='number'||width<20||width>160)return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Invalid width',code:'PARAMETER_INVALID'}}),stderr:''});modelWidth=width;files.set('bracket.step',Buffer.from(`ISO-10303-21;\nWIDTH=${width};\nEND-ISO-10303-21;`));parameterManifest();return result({schema:1,ok:true,result:{build:{ok:true}}})}
@@ -322,7 +332,7 @@ bridge.on('connection',ws=>{
           if(op==='set-api-key'){if(!input.key?.trim())throw Error('API key required');credentials.set(input.provider,true);return result(catalog().providers.find(p=>p.id===input.provider).auth)}
           if(op==='logout'){credentials.delete(input.provider);return result({provider:input.provider,configured:false,state:'signed-out'})}
           if(op==='save-favorites'){favorites=input.models;return result({favorites})}
-          if(op==='save-default'){const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===input.provider&&m.id===input.modelId);if(!choice?.available||!choice.thinkingLevels.includes(input.thinkingLevel))throw Error('Unsupported or unconfigured default');defaults=input;return result(input)}
+          if(op==='save-default'){if(settingsFailure==='save-default-error')throw Error('模拟云端默认保存失败');const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===input.provider&&m.id===input.modelId);if(!choice?.available||!choice.thinkingLevels.includes(input.thinkingLevel))throw Error('Unsupported or unconfigured default');defaults=input;return result(input)}
           throw Error('Unknown config command');
         } catch(error){return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:error.message})}
       }

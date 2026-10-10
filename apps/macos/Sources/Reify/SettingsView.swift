@@ -38,7 +38,7 @@ struct SettingsView: View {
                     }
                     Spacer()
                     if app.configWorking { ProgressView().controlSize(.small) }
-                    Button("刷新") { Task { await app.loadCloudModels(); custom = app.modelsConfig } }.accessibilityIdentifier("settings.refresh")
+                    Button("刷新") { Task { await app.loadCloudModels(readModels: false) } }.accessibilityIdentifier("settings.refresh")
                 }.padding(.horizontal, 24).padding(.bottom, 18)
                 if let error = app.configError { Text(error).foregroundStyle(.red).textSelection(.enabled).padding(12).accessibilityIdentifier("settings.error") }
                 if !app.configNotice.isEmpty { Text(app.configNotice).foregroundStyle(ReifyDesign.green).padding(8).accessibilityIdentifier("settings.notice") }
@@ -65,8 +65,8 @@ struct SettingsView: View {
                         HStack(alignment: .top, spacing: 18) {
                             card("生成模型", id: "author") {
                                 ModelSelectionFields(catalog: app.catalog, provider: $draft.provider, model: $draft.model, thinking: $draft.thinking, prefix: "model")
-                                Button("设为云端默认") { Task { await app.configure({ try await app.configuration.saveDefault(provider: draft.provider, model: draft.model, thinking: draft.thinking) }, notice: "云端默认模型已保存") } }
-                                    .disabled(app.configWorking || app.catalog.model(provider: draft.provider, id: draft.model)?.available != true).accessibilityIdentifier("model.default")
+                                Button("设为云端默认") { Task { _ = await app.saveCloudDefault(draft) } }
+                                    .disabled(app.configWorking || app.generating || app.reconnecting || app.catalog.model(provider: draft.provider, id: draft.model)?.available != true).accessibilityIdentifier("model.default")
                                 if let provider {
                                     Text("\(provider.auth.message ?? provider.auth.state)\(provider.auth.source.map { " · " + $0 } ?? "")").foregroundStyle(ReifyDesign.muted).accessibilityIdentifier("provider.status")
                                     HStack {
@@ -121,14 +121,15 @@ struct SettingsView: View {
                             Button("校验并保存") { Task { await app.configure({ custom = try await app.configuration.writeModels(custom); app.modelsConfig = custom }, notice: "自定义服务商已保存") } }.disabled(app.configWorking).accessibilityIdentifier("providers.save")
                         }
                         card("版本", id: "installation") {
-                            Text("Reify \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") · macOS 云端客户端")
+                            Text("Reify \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") · \(Bundle.main.infoDictionary?["ReifyInstallationChannel"] as? String == "dmg" ? "DMG 安装包" : "开发版")").accessibilityIdentifier("settings.installation")
                             Text("服务器：\(app.api.baseURL)").textSelection(.enabled)
+                            Text(app.publishPolicy.message).font(ReifyDesign.font(12)).foregroundStyle(ReifyDesign.muted)
                         }
                     }.padding(24)
                 }
             }.frame(maxWidth: 1100).frame(maxWidth: .infinity).background(ReifyDesign.canvas)
                 .textFieldStyle(.roundedBorder).buttonStyle(ReifyButtonStyle())
-                .task { draft = app.settingsDraft; await app.loadCloudModels(); custom = app.modelsConfig }
+                .task { app.refreshPublishPolicy(); draft = app.settingsDraft; await app.loadCloudModels(); custom = app.modelsConfig }
                 .onChange(of: draft.provider) { _, _ in secret = "" }
                 .onChange(of: draft.reviewer.mode) { _, mode in
                     if mode == "fixed" && draft.reviewer.provider.isEmpty { draft.reviewer.provider = draft.provider; draft.reviewer.model = draft.model; draft.reviewer.thinking = draft.thinking }

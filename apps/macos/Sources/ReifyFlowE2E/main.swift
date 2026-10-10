@@ -24,6 +24,9 @@ import ReifyCloud
         precondition(app.user != nil && app.error == nil)
         let approvalRootAtLogin = app.approvalRoot
         defer { try? FileManager.default.removeItem(at: approvalRootAtLogin) }
+        guard let testSettingsPath = ProcessInfo.processInfo.environment["REIFY_DESKTOP_SETTINGS_PATH"] else { fatalError("A disposable desktop policy path is required") }
+        let testPolicyURL = URL(fileURLWithPath: testSettingsPath)
+        defer { try? FileManager.default.removeItem(at: testPolicyURL) }
         guard let project = app.projects.first else { fatalError("Missing fixture project") }
         let loadingSettings = Task { await app.loadCloudModels() }
         try await Task.sleep(for: .milliseconds(50))
@@ -37,6 +40,34 @@ import ReifyCloud
         var invalid = changed; invalid.thinking = "max"
         let rejected = await app.applySettings(invalid)
         precondition(!rejected && app.settingsDraft == changed, "invalid settings changed actual model")
+        var authorDefault = changed
+        authorDefault.provider = "openai-codex"; authorDefault.model = "gpt-5.6-sol"; authorDefault.thinking = "max"
+        authorDefault.permission = "read-only"; authorDefault.reviewer = ReviewerSelection(mode: "fixed", provider: "custom", model: "custom-chat", thinking: "off")
+        let sessionBeforeDefault = app.sessionID
+        let defaultSaved = await app.saveCloudDefault(authorDefault)
+        let defaultState = try await app.bridge.rpc("get_state")
+        precondition(defaultSaved && app.provider == "openai-codex" && app.thinking == "max" && app.catalog.defaults.modelId == app.model && app.catalog.defaults.thinkingLevel == app.thinking, "saved cloud default did not update current selection")
+        precondition((defaultState["model"] as? [String: Any])?["id"] as? String == app.model && defaultState["thinkingLevel"] as? String == app.thinking && app.sessionID == sessionBeforeDefault, "cloud default lost current conversation or runtime model")
+        precondition(app.permission == changed.permission && app.reviewer == changed.reviewer && AppPreferences.current.string(forKey: "model") == app.model, "saving author default saved unrelated drafts or lost persisted model")
+        let loadedModels = app.modelsConfig
+        app.modelsConfig = "未保存的自定义配置"
+        await app.loadCloudModels(readModels: false)
+        precondition(app.modelsConfig == "未保存的自定义配置", "refreshing model catalog replaced custom configuration content")
+        app.modelsConfig = loadedModels
+        try await fixture("/__test/settings-failure", ["mode": "save-default-error"])
+        let oldDefault = app.catalog.defaults, oldSelection = app.settingsDraft
+        let cloudRejected = await app.saveCloudDefault(changed)
+        precondition(!cloudRejected && app.settingsDraft == oldSelection && app.catalog.defaults == oldDefault && app.configError != nil, "failed cloud save changed current model")
+        try await fixture("/__test/settings-failure", ["mode": "model-switch-error"])
+        let switchRejected = await app.saveCloudDefault(changed)
+        let failedSwitchState = try await app.bridge.rpc("get_state")
+        let savedDespiteSwitchFailure = try await app.configuration.catalog()
+        precondition(!switchRejected && app.settingsDraft == oldSelection && (failedSwitchState["model"] as? [String: Any])?["id"] as? String == oldSelection.model && savedDespiteSwitchFailure.defaults.modelId == changed.model && app.catalog.defaults == savedDespiteSwitchFailure.defaults && app.configError?.contains("云端默认已保存，当前模型切换失败") == true, "runtime failure silently diverged from saved cloud default")
+        try await fixture("/__test/settings-failure", ["mode": "normal"])
+        let glmDefaultSaved = await app.saveCloudDefault(changed)
+        precondition(glmDefaultSaved && app.settingsDraft == changed && app.catalog.defaults.modelId == changed.model)
+        let unsupportedDefault = await app.saveCloudDefault(invalid)
+        precondition(!unsupportedDefault && app.settingsDraft == changed && app.catalog.defaults.modelId == changed.model, "unsupported default changed cloud or local selection")
         app.configError = nil
         app.draft = "长任务-排队验收"; await app.submitDraft()
         precondition(app.generating)
@@ -189,6 +220,26 @@ import ReifyCloud
         precondition(app.parameterPreviewActive && app.comparisonPreview == nil, "temporary parameter preview kept historical comparison labels")
         app.restoreParameterPreview()
         await app.compareArtifact(oldModel)
+        let historicalBytes = try await app.bridge.download(oldModel.path)
+        try await app.bridge.upload(historicalBytes, name: "history/bracket.step")
+        await app.refreshFiles()
+        guard let duplicateName = app.files.first(where: { $0.path == "history/bracket.step" }) else { fatalError("Missing same-name historical STEP") }
+        await app.showFile(duplicateName)
+        precondition(app.files.first(where: { $0.name == app.previewName })?.path == "bracket.step", "same-name export regression not exercised")
+        let exactExport = try await app.currentModelExportData()
+        precondition(exactExport.data == historicalBytes && WorkspaceBridge.hash(exactExport.data) != currentModel.sha256, "canvas export selected current file by basename instead of displayed path")
+        let displayedOldModel = app.preview
+        try await app.bridge.upload(Data("replaced historical STEP".utf8), name: duplicateName.path)
+        do { _ = try await app.currentModelExportData(); fatalError("canvas exported replacement instead of refusing changed displayed revision") } catch { precondition(error.localizedDescription.contains("所看模型的文件已变化")) }
+        precondition(app.preview == displayedOldModel, "failed export changed visible historical model")
+        guard let stlFile = app.files.first(where: { $0.path == "bracket.stl" }) else { fatalError("Missing STL") }
+        await app.showFile(stlFile)
+        let displayedSTL = app.preview!
+        try await app.bridge.upload(Data("replaced STL".utf8), name: stlFile.path)
+        let stlExport = try await app.currentModelExportData()
+        precondition(stlExport.data == displayedSTL, "STL export lost the exact displayed bytes")
+        try await app.bridge.upload(displayedSTL, name: stlFile.path)
+        await app.showArtifact(currentModel); await app.compareArtifact(oldModel)
         let cached = try await app.cachedArtifact(currentModel)
         let cachedBytes = try Data(contentsOf: cached)
         precondition(WorkspaceBridge.hash(cachedBytes) == currentModel.sha256, "reveal cache did not match selected revision")
@@ -278,6 +329,41 @@ import ReifyCloud
         await app.switchConversation(conceptHistory)
         precondition(app.conceptImages.contains { $0.id == uploadedConcept.id } && app.conceptImages.contains { $0.id == generatedConcept.id } && !app.conceptImages.contains { $0.id == "other-concept-e2e" }, "concept images mixed after restoring conversation")
         precondition(app.conceptAnnotations[uploadedConcept.id]?.region == badRegion.region && app.conceptAnnotations[generatedConcept.id]?.note == "使用整张生成图", "saved concept annotation changed after conversation switch")
+        await app.refreshEngineering()
+        try await fixture("/__test/rebuild-mode", ["mode": "match"])
+        await app.refreshEngineering()
+        guard let historicalVersion = app.engineeringCatalog?.commits.first(where: { $0.id == "history-80" }), let historicalManifest = app.rebuildManifest(for: historicalVersion) else { fatalError("Missing preserved source fixture") }
+        app.selectVersion(historicalVersion.id); await app.showArtifact(historicalVersion.artifacts[0])
+        let canvasBeforeRebuild = app.preview, draftBeforeRebuild = app.draft
+        await app.rebuildVersion(historicalVersion)
+        guard let rebuilt = app.rebuildResult, app.rebuildError == nil else { fatalError("Source rebuild failed: \(app.rebuildError ?? "unknown")") }
+        precondition(rebuilt.sourceRevision == historicalVersion.sourceRevision && rebuilt.byteMatch && rebuilt.geometryMatch == true && rebuilt.parameters["width"] == .number(80), "historical rebuild lost saved source/parameters or compared another artifact")
+        precondition(app.preview == canvasBeforeRebuild && app.draft == draftBeforeRebuild, "rebuild changed live preview or unsent draft")
+        await app.showRebuiltVersion()
+        precondition(app.selectedArtifact?.sha256 == rebuilt.actualSha256 && app.error == nil, "verified rebuilt output did not open")
+        for scenario in ["byte-diff", "geometry-diff", "old-replaced"] {
+            try await fixture("/__test/rebuild-mode", ["mode": scenario])
+            await app.rebuildVersion(historicalVersion)
+            guard let result = app.rebuildResult, app.rebuildError == nil else { fatalError("Rebuild scenario failed: \(scenario) \(app.rebuildError ?? "unknown")") }
+            if scenario == "byte-diff" { precondition(!result.byteMatch && result.geometryMatch == true, "byte difference was called geometry difference") }
+            if scenario == "geometry-diff" { precondition(!result.byteMatch && result.geometryMatch == false, "different dimensions were reported equal") }
+            if scenario == "old-replaced" { precondition(result.byteMatch && result.geometryMatch == nil, "replaced historical file supported a geometry equivalence claim") }
+        }
+        for scenario in ["stale-manifest", "stale-version", "download-corrupt", "build-failure"] {
+            try await fixture("/__test/rebuild-mode", ["mode": scenario])
+            await app.rebuildVersion(historicalVersion)
+            precondition(app.rebuildResult == nil && app.rebuildError != nil, "rebuild accepted stale/corrupt/failed result: \(scenario)")
+        }
+        for scenario in ["source-mismatch", "missing-source"] {
+            try await fixture("/__test/rebuild-mode", ["mode": scenario]); await app.refreshEngineering()
+            let version = app.engineeringCatalog!.commits.first { $0.id == "history-80" }!
+            await app.rebuildVersion(version)
+            precondition(app.rebuildResult == nil && app.rebuildError != nil, "rebuild used missing or mismatched recorded Git source: \(scenario)")
+        }
+        do { _ = try await EngineeringService(bridge: app.bridge, sessionID: "unbound-rebuild-conversation").rebuild(historicalVersion, manifest: historicalManifest); fatalError("Unbound conversation rebuilt another conversation's version") } catch { precondition(error.localizedDescription.contains("Conversation has no workflow")) }
+        try await fixture("/__test/rebuild-mode", ["mode": "off"])
+        app.selectVersion(nil)
+        precondition(app.rebuildResult == nil && app.rebuildError == nil && !app.rebuildBusy, "switching versions retained another version's rebuild result")
         await app.refreshEngineering()
         guard let reviewModel = app.engineeringCatalog?.currentRun?.artifacts.first,
               let unreviewedVersion = app.engineeringCatalog?.commits.first else { fatalError("Missing review candidate") }
@@ -399,11 +485,75 @@ import ReifyCloud
         let repliesAfterRelease = app.messages.filter { $0.role == "assistant" }.count
         await app.send("发布检查后继续对话")
         try await wait({ !app.generating && app.messages.filter { $0.role == "assistant" }.count > repliesAfterRelease }, "conversation continues after cancelled and rejected release jobs")
+        // Publish only to a disposable bare Git repository. No external remote.
+        try await wait({ !app.engineeringLoading }, "last turn engineering refresh completes before changing the test source version")
+        try await fixture("/__test/release-mode", ["mode": "normal"])
+        try await fixture("/__test/publish-mode", ["mode": "normal", "projectId": project.id])
+        await app.refreshEngineering()
+        let gitCatalog = try await app.engineering.catalog()
+        guard let gitVersion = gitCatalog.commits.first,
+              let gitApproval = await app.approveVersion(gitVersion.id, scope: "Disposable E2E repository only", reason: "Verify tags; no manufacturing or real repository publication", expected: gitVersion) else { fatalError("Missing Git-backed test approval: \(app.approvalError ?? "unknown")") }
+        let gitPackageFolder = FileManager.default.temporaryDirectory.appendingPathComponent("reify-git-package-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: gitPackageFolder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: gitPackageFolder) }
+        await app.releaseVersion(gitApproval, to: gitPackageFolder)
+        guard let gitPackage = app.releaseURL, let gitRelease = app.savedRelease, app.releaseError == nil else { fatalError("Git test package failed: \(app.releaseError ?? "unknown")") }
+        func policy(enabled: Bool, server: String? = nil, remotes: [String] = ["origin"]) throws {
+            let value: [String: Any] = ["mode": "cloud", "cloud": ["baseUrl": server ?? app.api.baseURL], "remotePublish": ["enabled": enabled, "allowedRemotes": remotes]]
+            try JSONSerialization.data(withJSONObject: value).write(to: testPolicyURL, options: .atomic)
+        }
+        try policy(enabled: false)
+        await app.publishRelease(remote: "origin", tag: "reify/disabled")
+        precondition(app.publishedTag == nil && app.publishError == "管理员未启用 Git 标签发布" && app.releaseURL == gitPackage)
+        try policy(enabled: true, server: "https://another.reify.test")
+        await app.publishRelease(remote: "origin", tag: "reify/wrong-server")
+        precondition(app.publishError == "发布配置属于另一台服务器" && app.releaseURL == gitPackage)
+        try policy(enabled: true)
+        await app.publishRelease(remote: "not-allowed", tag: "reify/wrong-remote")
+        precondition(app.publishError == "管理员未允许此远程仓库" && app.releaseURL == gitPackage)
+        for tag in ["bad tag", "../wrong", "-wrong", "reify/"] {
+            await app.publishRelease(remote: "origin", tag: tag)
+            precondition(app.publishedTag == nil && app.publishError != nil && app.releaseURL == gitPackage, "invalid tag published or removed complete local package")
+        }
+        await app.publishRelease(remote: "origin", tag: "reify/e2e")
+        guard let published = app.publishedTag, app.publishError == nil else { fatalError("Real Git tag publish failed: \(app.publishError ?? "unknown")") }
+        precondition(published.sourceRevision == gitVersion.sourceRevision && !published.reused && !published.packageUploaded && app.releaseURL == gitPackage)
+        await app.publishRelease(remote: "origin", tag: "reify/e2e")
+        precondition(app.publishedTag?.reused == true && app.publishError == nil && app.releaseURL == gitPackage, "same exact remote tag was not reused")
+        for tag in ["reify/remote-conflict", "reify/local-conflict"] {
+            await app.publishRelease(remote: "origin", tag: tag)
+            precondition(app.publishedTag == nil && app.publishError?.contains("already exists") == true && app.releaseURL == gitPackage, "conflicting Git tag overwritten or package lost")
+        }
+        try await fixture("/__test/publish-mode", ["mode": "manifest-changed"])
+        await app.publishRelease(remote: "origin", tag: "reify/changed-manifest")
+        precondition(app.publishedTag == nil && app.publishError?.contains("云端文件包清单已变化") == true && app.releaseURL == gitPackage)
+        try await fixture("/__test/publish-mode", ["mode": "push-failure"])
+        await app.publishRelease(remote: "origin", tag: "reify/push-failed")
+        precondition(app.publishedTag == nil && app.publishError != nil && app.releaseURL == gitPackage, "failed Git push lost complete local package")
+        try await fixture("/__test/publish-mode", ["mode": "normal"])
+        await app.publishRelease(remote: "origin", tag: "reify/push-failed")
+        precondition(app.publishedTag != nil && app.publishError == nil && app.releaseURL == gitPackage, "retry after rejected push did not use saved source version")
+        let packageStepURL = gitPackage.appendingPathComponent("files/bracket.step"), packageStep = try Data(contentsOf: gitPackage.appendingPathComponent("files/bracket.step"))
+        try Data("changed local package".utf8).write(to: packageStepURL)
+        await app.publishRelease(remote: "origin", tag: "reify/corrupt-local")
+        precondition(app.publishedTag == nil && app.publishError == "本机文件包已变化，未发布标签" && app.releaseURL == gitPackage)
+        try packageStep.write(to: packageStepURL)
+        app.permission = "read-only"; app.publishError = nil
+        await app.publishRelease(remote: "origin", tag: "reify/read-only")
+        precondition(app.publishedTag == nil && !app.publishBusy && app.publishError == nil && app.releaseURL == gitPackage)
+        app.permission = "workspace"
+        do { _ = try await EngineeringService(bridge: app.bridge, sessionID: "unbound-tag-conversation").publishTag(gitRelease, remote: "origin", tag: "reify/unbound", policy: JSONEncoder().encode(app.publishPolicy), manifestSHA: WorkspaceBridge.hash(try Data(contentsOf: gitPackage.appendingPathComponent("release-manifest.json"))), sourceRevision: gitApproval.sourceRevision); fatalError("Unbound conversation published another version") } catch { precondition(error.localizedDescription.contains("Conversation has no workflow")) }
+        await app.revokeApproval(gitApproval.id, reason: "Revoke disposable Git publication approval")
+        await app.publishRelease(remote: "origin", tag: "reify/revoked")
+        precondition(app.publishedTag == nil && app.publishError?.contains("批准已撤销") == true && app.releaseURL == gitPackage)
         try await fixture("/__test/expire")
         await app.refreshProjects()
         precondition(app.user == nil && app.api.session == nil && !app.connected && app.error == "登录已失效，请重新登录。" && app.messages.isEmpty && app.projects.isEmpty && app.catalog.providers.isEmpty, "expired session stayed signed in")
         await app.shutdown()
         try await app.api.logout()
+        print("PASS: native cloud defaults synchronize catalog/current/persisted/runtime model without saving unrelated drafts; configuration refresh preserves content; cloud and runtime failures are explicit; canvas exports exact same-name historical STEP and refuses replaced revisions, STL retains displayed bytes")
+        print("PASS: original desktop Git tag publisher over native HTTP/WebSocket, real disposable Git/bare remote, saved source revision, default-disabled/server-bound/allowed-remote policy, invalid tags, reuse, local/remote conflicts, manifest/package tamper refusal, push failure/retry, read-only/unbound/revoked approval refusal and complete local package preservation")
+        print("PASS: original desktop historical rebuild over native HTTP/WebSocket, real isolated Git worktrees and recorded source hashes/parameters, byte and bounding-box/solid comparisons, replaced-original refusal, stale manifests/versions, missing/mismatched source, failed build, corrupt download and unbound conversation refusal")
         print("PASS: original desktop cloud release backend with live native approval callbacks, exact manifest/file downloads, same-package reuse, local/cloud corruption refusal, read-only refusal, cancellation and revoke during preparation")
         print("PASS: exact-candidate independent review prompt, original desktop approval store in native JavaScriptCore, machine prerequisite, scope/reason, OS identity, private atomic persistence, reload, stale-version invalidation, reasoned revoke and other-user refusal, immutable transaction evidence verification/tamper/pinned-workflow/unbound refusal; generated/uploaded concept board state, exact-image and region/note/full-image prompt payload, outdated/invalid-region refusal, preserved draft and conversation isolation; native desktop STEP importer reuse/conflict, filtered current/shared/history catalog, exact-revision comparison and parameter differences, verified Finder cache, new model notification and completed-turn auto preview; compiled native AppModel over HTTP/WebSocket, native GLM model settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
         print("PASS: settings load cannot close a newly selected project bridge, workspace queue position, startup failure and retry, expired login clears native account and connection")

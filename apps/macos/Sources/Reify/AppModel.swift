@@ -49,6 +49,17 @@ import ReifyCloud
     @Published var releaseURL: URL?
     var releaseJob: CloudReleaseJob?
     var releaseSequence = 0
+    @Published var savedRelease: CloudReleaseResult?
+    var savedReleaseApproval: HumanApprovalRecord?
+    @Published var publishPolicy = DesktopPublishPolicy.disabled
+    @Published var publishBusy = false
+    @Published var publishError: String?
+    @Published var publishedTag: RemotePublishResult?
+    var publishSequence = 0
+    @Published var rebuildBusy = false
+    @Published var rebuildError: String?
+    @Published var rebuildResult: SourceRebuildResult?
+    var rebuildSequence = 0
     @Published var selectedCommitID: String?
     @Published var selectedArtifact: EngineeringArtifact?
     @Published var artifactFilter = "全部"

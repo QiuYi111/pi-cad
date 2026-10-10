@@ -28,7 +28,7 @@ public struct ModelParameter: Codable, Identifiable {
 }
 public struct StoredParameterManifest: Codable {
     public struct Manifest: Codable {
-        public struct File: Codable { public let path: String; public let sha256: String }
+        public struct File: Codable { public let path: String; public let sha256: String; public let entrypoint: String? }
         public let schema: Int
         public let modelId: String
         public let source: File
