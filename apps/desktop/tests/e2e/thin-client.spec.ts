@@ -114,9 +114,13 @@ test("installed thin client: first login, model setup, CAD save and restart", as
       w.piCad.runtime.onEvent((event: any) => w.__e2eEvents.push(event));
       w.piCad.runtime.onStatus((status: any) => { w.__e2eStatus = status; });
     });
-    await page.evaluate(() => (window as any).piCad.runtime.start());
+    const resumeSession = process.env.REIFY_E2E_RESUME_SESSION;
+    if (resumeSession) await page.evaluate((path) => (window as any).piCad.runtime.switchSession(path), resumeSession);
+    else await page.evaluate(() => (window as any).piCad.runtime.start());
     await record("model-runtime-started");
-    const prompt = "这是真实端到端测试。请用 CAD 工作流创建并保存一个 40×20×4 mm 的矩形板，中心有一个直径 6 mm 的通孔，命名为 thin-e2e-plate。保存可编辑 FreeCAD 零件和 STEP 文件，启用 DFM 检查，运行几何检查并显示模型。如已有同名零件，核对尺寸、文件和 DFM，显示已有模型；缺失时才创建。请直接做，不需要问我。完成后说明实际文件路径与尺寸。";
+    const prompt = resumeSession
+      ? "恢复端到端测试的已完成建模对话。只用一次 ipython 调用 import cad; print(await cad.workflow.current())，然后简短报告当前工作流状态。已有零件不要修改，不需要读取文档。"
+      : "这是真实端到端测试。请用 CAD 工作流创建并保存一个 40×20×4 mm 的矩形板，中心有一个直径 6 mm 的通孔，命名为 thin-e2e-plate。保存可编辑 FreeCAD 零件和 STEP 文件，启用 DFM 检查，运行几何检查并显示模型。如已有同名零件，核对尺寸、文件和 DFM，显示已有模型；缺失时才创建。请直接做，不需要问我。完成后说明实际文件路径与尺寸。";
     const composer = page.getByPlaceholder("Ask anything about the design");
     await composer.fill(prompt); await composer.press("Enter");
     await page.waitForFunction(() => Boolean((window as any).__e2eStatus?.terminalReason), undefined, { timeout: 600_000 });
@@ -139,11 +143,15 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     await record("six-mm-through-hole-passed", section);
     await page.screenshot({ path: join(evidenceDir, "workbench.png") });
     await record("real-model-turn-finished", { eventCount: result.eventTypes.length, catalog: result.catalog });
+    const savedSession = await page.evaluate(async (id) => (await (window as any).piCad.traces.list()).find((s: any) => s.id === id), result.restored.status.sessionId);
+    expect(savedSession).toBeTruthy();
     await close();
     page = await launch();
     await expect.poll(() => page.evaluate(async () => (await (window as any).piCad.cloud.status()).signedIn), { timeout: 60_000 }).toBe(true);
     expect((await page.evaluate(() => (window as any).piCad.settings.get())).cloud.projectId).toBe(result.settings.cloud.projectId);
     await record("encrypted-login-and-project-survive-restart");
+    await page.getByTitle(`恢复对话：${savedSession.title}`, { exact: true }).first().click();
+    await expect.poll(() => page.evaluate(async () => (await (window as any).piCad.runtime.restore()).status.sessionId), { timeout: 90_000 }).toBe(savedSession.id);
     const reopened = await page.evaluate(() => (window as any).piCad.viewer.catalog());
     const reopenedArtifacts = [...reopened.projectHead.artifacts, ...(reopened.currentRun?.artifacts ?? []), ...reopened.commits.flatMap((commit: any) => commit.artifacts)];
     expect(reopenedArtifacts.some((artifact: any) => artifact.sha256 === step.sha256 && artifact.path === step.path)).toBe(true);
