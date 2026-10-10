@@ -145,7 +145,7 @@ bridge.on('connection',ws=>{
         else if(r.type==='set_model') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===r.provider&&m.id===r.modelId);if(!choice?.available)output({type:'response',id:r.id,success:false,error:'模型不可用'});else {selectedModel={provider:r.provider,id:r.modelId};if(activeSpawn)activeSpawn.model=selectedModel;reply(r,{model:selectedModel})} }
         else if(r.type==='set_thinking_level') { const choice=catalog().providers.flatMap(p=>p.models).find(m=>m.provider===selectedModel.provider&&m.id===selectedModel.id);if(!choice?.thinkingLevels.includes(r.level))output({type:'response',id:r.id,success:false,error:'思考档位不支持'});else{thinkingLevel=r.level;if(activeSpawn)activeSpawn.thinking=thinkingLevel;reply(r)} }
         else if(r.type==='prompt') {
-          audit.push({type:'prompt',message:r.message,imageCount:r.images?.length??0,imageTypes:r.images?.map(i=>i.mimeType)??[]});
+          audit.push({type:'prompt',message:r.message,imageCount:r.images?.length??0,imageTypes:r.images?.map(i=>i.mimeType)??[],imageHashes:r.images?.map(i=>sha(Buffer.from(i.data,'base64')))??[]});
           if(r.images?.some(i=>!i.data||!i.mimeType?.startsWith('image/')))return output({type:'response',id:r.id,success:false,error:'Invalid image payload'});
           if(r.message==='拒绝请求验收') { output({type:'response',id:r.id,success:false,error:'请求被拒绝'});continue; }
           stats.prompt++;rows.push({role:'user',content:r.message});reply(r);output({type:'agent_start'});
@@ -154,6 +154,15 @@ bridge.on('connection',ws=>{
           if(r.message==='模拟模型错误') {
             const message={role:'assistant',content:[],stopReason:'error',errorMessage:'测试模型服务不可用'};
             rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});continue;
+          }
+          if(['概念图验收','概念图自动展示验收'].includes(r.message)) {
+            const call={type:'toolCall',id:r.message==='概念图验收'?'flow-concept':'flow-concept-auto',name:'python',arguments:{code:'codex_generate_image(prompt="fixture concept")'}};
+            rows.push({role:'assistant',content:[call]});output({type:'tool_execution_start',toolCallId:call.id,toolName:call.name,args:call.arguments});
+            timer=activeSpawn.timer=setTimeout(()=>{
+              const result={role:'toolResult',toolCallId:call.id,toolName:call.name,content:[{type:'image',data:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=',mimeType:'image/png'}],details:{attachments:[]}};
+              rows.push(result);output({type:'tool_execution_end',toolCallId:call.id,result});
+              const message={role:'assistant',content:[{type:'text',text:'概念图已生成'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;
+            },350);continue;
           }
           if(r.message==='工具卡片验收') {
             const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=';

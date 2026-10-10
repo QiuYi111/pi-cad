@@ -54,6 +54,12 @@ import ReifyCloud
     var parameterOriginal: (Data?, String, EngineeringArtifact?)?
     @Published var newProjectPresented = false
     @Published var canvasMode = false
+    @Published var canvasContent = "model"
+    @Published var conceptsByConversation: [String: [ConceptDirection]] = [:]
+    @Published var conceptAnnotations: [String: ConceptAnnotation] = [:]
+    @Published var selectedConceptID = ""
+    @Published var conceptBusy = false
+    @Published var newConceptID: String?
     @Published var sidebarOpen = true
     @Published var filesOpen = false
     @Published var draft = ""
@@ -206,6 +212,7 @@ import ReifyCloud
             sessionID = state["sessionId"] as? String
             syncRuntimeModel(state)
             if !reconnect { try resetPresentation() }
+            restoreConceptAnnotations()
             if AppPreferences.current.object(forKey: "\(conversationKey).draft") != nil { restoreConversationDraft() }
             restorePending()
             try await loadMessages()
@@ -282,12 +289,13 @@ import ReifyCloud
         } catch { fail(error) }
     }
     private func handle(_ event: [String: Any]) {
+        let previousConcepts = event["type"] as? String == "tool_execution_end" ? Set(conceptImages.map(\.id)) : []
         do { messages = try presentation.reduce(event) + noteMessages }
         catch { fail(error) }
         switch event["type"] as? String {
         case "agent_start": generating = true
         case "tool_execution_start": activity = event["toolName"] as? String == nil ? "正在处理" : "正在制作模型"
-        case "tool_execution_end": activity = nil
+        case "tool_execution_end": activity = nil; offerGeneratedConcept(previous: previousConcepts)
         case "agent_end":
             generating = false; activity = nil
             let current = generation
@@ -337,7 +345,7 @@ import ReifyCloud
                 if ext == "stl" { closeComparison(); previewPinned = true; preview = data; previewName = file.name; selectedArtifact = nil; parameterPreviewActive = false; parameterOriginal = nil }
                 else { save(data, name: file.name) }
             }
-            if ["step", "stp", "stl"].contains(ext) { canvasMode = true; filesOpen = false; saveLayout() }
+            if ["step", "stp", "stl"].contains(ext) { canvasContent = "model"; canvasMode = true; filesOpen = false; saveLayout() }
         } catch { if current == generation { fail(error) } }
     }
     func export(_ file: CloudFile) async {

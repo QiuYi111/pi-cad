@@ -58,6 +58,10 @@ struct EngineeringResultsView: View {
                 Text(primary.sha256 == other.sha256 ? "文件内容相同" : "文件内容不同").foregroundStyle(ReifyDesign.muted)
             }
             if let manifest = app.selectedParameters { Divider(); ParameterPanel(manifest: manifest) }
+            Divider()
+            Text("\(app.successfulChecks) 次检查已完成").font(ReifyDesign.font(12, .medium))
+            Text(app.machineReviewSummary).foregroundStyle(ReifyDesign.muted)
+            if let issue = app.latestEngineeringIssue { Text("最近问题：\(issue.summary ?? issue.title)").foregroundStyle(.red).textSelection(.enabled) }
             if let run = app.workflowRun {
                 Divider()
                 Text("工作流：\(run.workflowId) @ \(run.workflowVersion)").textSelection(.enabled)

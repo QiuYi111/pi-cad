@@ -11,6 +11,12 @@ struct RootView: View {
                 AppHeader(projectsPage: $projectsPage)
                 if let error = app.error { NoticeView(text: error, error: true) { app.error = nil } }
                 if let notice = app.extensionNotice { NoticeView(text: notice) { app.extensionNotice = nil }.accessibilityIdentifier("extension.notice") }
+                if let id = app.newConceptID {
+                    HStack { Label("有新概念图", systemImage: "photo"); Spacer()
+                        Button("查看概念图") { app.showConcept(id) }.accessibilityIdentifier("concept.show-new")
+                        Button("稍后") { app.newConceptID = nil }.accessibilityIdentifier("concept.dismiss-new")
+                    }.padding(12).background(ReifyDesign.panel).accessibilityIdentifier("concept.new-result")
+                }
                 if let next = app.newResult {
                     HStack { Label("有新模型：\((next.path as NSString).lastPathComponent)", systemImage: "cube"); Spacer()
                         Button("查看新结果") { app.selectVersion(nil); Task { await app.showArtifact(next) } }.accessibilityIdentifier("model.show-new")
@@ -331,6 +337,10 @@ struct CanvasView: View {
                 Divider().frame(height: 26).padding(.horizontal, 10)
                 Label(app.previewName.isEmpty ? "当前模型" : app.previewName, systemImage: "cube").accessibilityIdentifier("model.name")
                 Spacer()
+                if !app.conceptImages.isEmpty {
+                    Picker("画布内容", selection: $app.canvasContent) { Text("模型").tag("model"); Text("概念图").tag("concept") }.pickerStyle(.segmented).frame(width: 150).accessibilityIdentifier("canvas.content")
+                }
+                Button("导入概念图") { Task { await app.importConcepts() } }.accessibilityIdentifier("concept.import")
                 Button("导入 STEP") { Task { await app.importStep() } }.disabled(!app.connected || app.selected?.role == "viewer" || app.permission == "read-only").accessibilityIdentifier("model.import-step")
                 Button { app.filesOpen.toggle() } label: { Label("项目文件", systemImage: "folder") }.accessibilityIdentifier("file.toggle")
                 if let file = app.files.first(where: { $0.name == app.previewName }) {
@@ -341,7 +351,8 @@ struct CanvasView: View {
                 ScrollView { EngineeringResultsView() }
                 Divider()
                 Group {
-                if let data = app.preview {
+                if app.canvasContent == "concept" { ConceptBoardView() }
+                else if let data = app.preview {
                     if let other = app.comparisonPreview, let primary = app.selectedArtifact, let comparison = app.comparisonArtifact {
                         ComparisonView(primary: primary, primaryData: data, secondary: comparison, secondaryData: other)
                     } else { ModelPreview(data: data).accessibilityIdentifier("model.preview") }

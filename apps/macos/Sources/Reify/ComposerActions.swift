@@ -40,7 +40,10 @@ extension AppModel {
                 let name = "attachments/\(UUID().uuidString)-\(url.lastPathComponent)"
                 try await bridge.upload(data, name: name)
                 guard current == generation else { return }
-                attachments.append(ImageAttachment(id: UUID().uuidString, name: url.lastPathComponent, data: data, mimeType: mime, remotePath: name))
+                let id = UUID().uuidString
+                attachments.append(ImageAttachment(id: id, name: url.lastPathComponent, data: data, mimeType: mime, remotePath: name))
+                try addConcept(data, name: url.lastPathComponent, mimeType: mime, id: id)
+                canvasMode = false
             }
             files = try await bridge.files()
         } catch { if current == generation { fail(error) } }

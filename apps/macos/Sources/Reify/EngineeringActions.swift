@@ -25,7 +25,7 @@ extension AppModel {
         workflowRun = nil; engineeringCatalog = nil
         selectedCommitID = nil; selectedArtifact = nil
         closeComparison(); newResult = nil; previewPinned = false; readingHistory = false
-        artifactFilter = "全部"; includesHistoricalArtifacts = false
+        artifactFilter = "全部"; includesHistoricalArtifacts = false; canvasContent = "model"; newConceptID = nil
     }
     func refreshEngineering(offerNewResult: Bool = false) async {
         guard connected else { return }
@@ -44,7 +44,7 @@ extension AppModel {
             if let selectedCommitID, !snapshot.1.commits.contains(where: { $0.id == selectedCommitID }) { self.selectedCommitID = nil; selectedArtifact = nil }
             if offerNewResult, let next = snapshot.1.currentRun?.artifacts.first(where: { $0.isModel && !previous.contains($0.revisionKey) }) {
                 newResult = next
-                if draft.isEmpty && attachments.isEmpty && !readingHistory && !previewPinned && selectedCommitID == nil && comparisonArtifact == nil && !parameterBusy && !parameterPreviewActive {
+                if (canvasContent != "concept" || !canvasMode) && draft.isEmpty && attachments.isEmpty && !readingHistory && !hasSelectedText && !previewPinned && selectedCommitID == nil && comparisonArtifact == nil && !parameterBusy && !parameterPreviewActive {
                     await showArtifact(next, pin: false)
                 }
             }
@@ -92,7 +92,7 @@ extension AppModel {
             preview = mesh; previewName = (artifact.path as NSString).lastPathComponent; selectedArtifact = artifact
             parameterPreviewActive = false; parameterOriginal = nil
             if newResult?.revisionKey == artifact.revisionKey { newResult = nil }
-            canvasMode = true; filesOpen = false; saveLayout()
+            canvasContent = "model"; canvasMode = true; filesOpen = false; saveLayout()
         } catch { if current == generation && scope == sessionID && sequence == previewSequence { fail(error) } }
     }
     func closeComparison() {
@@ -172,7 +172,7 @@ extension AppModel {
             guard current == generation && scope == sessionID && sequence == previewSequence else { return }
             closeComparison(); preview = mesh; previewName = result.name; selectedArtifact = nil
             parameterPreviewActive = false; parameterOriginal = nil; files = nextFiles
-            canvasMode = true; filesOpen = false; saveLayout()
+            canvasContent = "model"; canvasMode = true; filesOpen = false; saveLayout()
         } catch { if current == generation && scope == sessionID && sequence == previewSequence { fail(error) } }
     }
 }

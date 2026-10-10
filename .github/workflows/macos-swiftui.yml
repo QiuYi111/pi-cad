@@ -2,10 +2,10 @@ name: macOS SwiftUI client
 
 on:
   pull_request:
-    paths: ["apps/macos/**", "apps/desktop/electron/main/runtime-state.ts", "apps/desktop/src/renderer/src/lib/activity.ts", "apps/desktop/src/renderer/src/lib/runtime-phase.ts", ".github/workflows/macos-swiftui.yml"]
+    paths: ["apps/macos/**", "apps/desktop/electron/main/step-import.ts", "apps/desktop/electron/main/cloud-uploads.ts", "apps/desktop/electron/main/runtime-state.ts", "apps/desktop/src/renderer/src/lib/activity.ts", "apps/desktop/src/renderer/src/lib/runtime-phase.ts", ".github/workflows/macos-swiftui.yml"]
   push:
     branches: [master, codex/macos-native-cloud-client]
-    paths: ["apps/macos/**", "apps/desktop/electron/main/runtime-state.ts", "apps/desktop/src/renderer/src/lib/activity.ts", "apps/desktop/src/renderer/src/lib/runtime-phase.ts", ".github/workflows/macos-swiftui.yml"]
+    paths: ["apps/macos/**", "apps/desktop/electron/main/step-import.ts", "apps/desktop/electron/main/cloud-uploads.ts", "apps/desktop/electron/main/runtime-state.ts", "apps/desktop/src/renderer/src/lib/activity.ts", "apps/desktop/src/renderer/src/lib/runtime-phase.ts", ".github/workflows/macos-swiftui.yml"]
   workflow_dispatch:
 
 jobs:

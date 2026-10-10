@@ -8,6 +8,7 @@ extension AppModel {
         attachmentsByConversation[conversationKey] = attachments
     }
     func restoreConversationDraft() {
+        restoreConceptAnnotations(); selectedConceptID = ""; conceptBusy = false
         draft = AppPreferences.current.string(forKey: "\(conversationKey).draft") ?? ""
         notes = AppPreferences.current.stringArray(forKey: "\(conversationKey).notes") ?? []
         attachments = attachmentsByConversation[conversationKey] ?? []

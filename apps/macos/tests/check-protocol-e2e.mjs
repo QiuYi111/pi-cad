@@ -17,3 +17,10 @@ assert.deepEqual(answers.map(x=>x.method),['confirm','editor','input','select'])
 assert.equal(answers[0].value,true);
 assert(audit.some(x=>x.type==='spawn'&&x.args.includes('--reviewer-provider')&&x.args.includes('PI_CAD_DESKTOP_PERMISSION=read-only')));
 console.log('PASS: server received queue prompts exactly once, no local note, image payload, explicit conversation scope, dialog answers and independent read-only reviewer');
+
+const conceptPrompts=prompts.filter(x=>x.message.startsWith('Continue the design from concept V'));
+assert.equal(conceptPrompts.length,2, 'outdated or invalid region produced a prompt');
+assert(conceptPrompts.every(x=>x.imageCount===1 && x.imageTypes[0]==='image/png' && x.message.includes('imageSHA256='+x.imageHashes[0])));
+assert(conceptPrompts.some(x=>x.message.includes('x=0.100, y=0.200, width=0.300, height=0.400') && x.message.includes('只修改右上角')));
+assert(conceptPrompts.some(x=>x.message.includes('Use the full image.')));
+console.log('PASS: server receives original image bytes matching the concept hash, exact normalized region and note; invalid/outdated concepts are never sent');

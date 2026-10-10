@@ -35,9 +35,12 @@ struct ToolCardView: View {
             if let media = activity.media, !media.isEmpty {
                 ScrollView(.horizontal) {
                     HStack { ForEach(media) { item in
-                        Button { if let bytes = inlineImage(item) { image = bytes } else if let path = item.path { Task { image = try? await app.bridge.download(app.bridge.relativeProjectPath(path)) } } } label: {
-                            VStack { if let bytes = inlineImage(item), let image = NSImage(data: bytes) { Image(nsImage: image).resizable().scaledToFit().frame(width: 170, height: 110) }; Text(item.label ?? item.role).font(ReifyDesign.font(10)) }
+                        VStack {
+                        Button { if let bytes = item.inlineImage { image = bytes } else if let path = item.path { Task { image = try? await app.bridge.download(app.bridge.relativeProjectPath(path)) } } } label: {
+                            VStack { if let bytes = item.inlineImage, let image = NSImage(data: bytes) { Image(nsImage: image).resizable().scaledToFit().frame(width: 170, height: 110) }; Text(item.label ?? item.role).font(ReifyDesign.font(10)) }
                         }.buttonStyle(.plain).accessibilityIdentifier("tool.media.\(item.id)")
+                        if !running, !failed, item.mimeType.hasPrefix("image/") { Button("到画板引用") { Task { await app.openToolImage(activity, media: item) } }.accessibilityIdentifier("tool.concept.\(item.id)") }
+                        }
                     } }
                 }
             }
@@ -48,10 +51,6 @@ struct ToolCardView: View {
             .sheet(isPresented: Binding(get: { image != nil }, set: { if !$0 { image = nil } })) {
                 VStack { HStack { Text("工具图片"); Spacer(); Button("关闭") { image = nil } }; if let image, let value = NSImage(data: image) { Image(nsImage: value).resizable().scaledToFit() } }.padding(20).frame(minWidth: 600, minHeight: 450)
             }
-    }
-    private func inlineImage(_ media: ChatMedia) -> Data? {
-        guard media.mimeType.hasPrefix("image/"), let url = media.dataUrl, url.hasPrefix("data:image/"), let comma = url.firstIndex(of: ","), url[..<comma].hasSuffix(";base64"), url.count <= 16 * 1024 * 1024 else { return nil }
-        return Data(base64Encoded: String(url[url.index(after: comma)...]))
     }
     private func pretty(_ value: JSONValue) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: value.foundationValue, options: [.prettyPrinted, .sortedKeys, .fragmentsAllowed]) else { return "" }
