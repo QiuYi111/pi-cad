@@ -1,4 +1,5 @@
 import YAML from "yaml";
+import { selectedProjectKey } from "../../src/shared/contracts.js";
 import { userInfo } from "node:os";
 import type { AppSettings, WorkflowAdoptionPolicy, WorkflowCurrent, WorkflowDocument, WorkflowPhase } from "../../src/shared/contracts.js";
 import type { RuntimeBridge } from "./runtime-bridge.js";
@@ -75,7 +76,7 @@ export class WorkflowStore {
    * is unbound like a named conversation the authority never bound.
    */
   async current(settings: AppSettings, sessionId?: string | null): Promise<WorkflowCurrent> {
-    if (!settings.projectPath || !sessionId) return unboundWorkflow();
+    if (!selectedProjectKey(settings) || !sessionId) return unboundWorkflow();
     // A failed read is reported as unavailable rather than as an unbound
     // conversation: "no run" and "no answer" must not look the same.
     const client = new AgentApiClient(this.bridge);

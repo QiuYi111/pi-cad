@@ -3,6 +3,16 @@ import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { defaultCanonicalProjectDirectory, resolveCanonicalProjectDirectory } from "../src/authority/storage.ts";
+
+test("cloud authority keeps the same private project directory as the desktop", async () => {
+  const project = await mkdtemp(join(tmpdir(), "pi-cad-canonical-"));
+  try {
+    assert.equal(resolveCanonicalProjectDirectory(project, "/workspace/state/cloud-project"), "/workspace/state/cloud-project");
+    assert.equal(resolveCanonicalProjectDirectory(project, ""), defaultCanonicalProjectDirectory(project));
+    assert.throws(() => resolveCanonicalProjectDirectory(project, "state/cloud-project"), /must be absolute/);
+  } finally { await rm(project, { recursive: true, force: true }); }
+});
 
 import { buildPrimeBwrapArgs, buildReviewerBwrapArgs, resolvePrimeRepository, resolveReviewerLaunchOptions, resolveVenvPythonRoot, reviewerModelArgs, withHeadlessEventContinuation, type LaunchPaths } from "../src/authority/launcher.ts";
 import { completionGate, dispatchSidecarRequest, SIDECAR_REQUEST_TIMEOUT_MS, startAuthoritySidecar } from "../src/authority/sidecar.ts";

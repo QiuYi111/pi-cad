@@ -54,4 +54,12 @@ describe("settings mode", () => {
     expect(() => assertCandidateAdoptionAllowed({ mode: "cloud" })).toThrow("内测期云端模式不支持采纳经验");
     expect(() => assertCandidateAdoptionAllowed({ mode: "local" })).not.toThrow();
   });
+
+  it("migrates old settings to cloud in a thin install and refuses switching back", async () => {
+    const { path } = await storeWith(JSON.stringify({ mode: "local", provider: "zai", projectPath: "C:/designs", cloudOnly: false }));
+    const store = new SettingsStore(path, true);
+    expect(await store.get()).toMatchObject({ mode: "cloud", cloudOnly: true, provider: "zai", projectPath: "C:/designs" });
+    await store.update({ mode: "local", cloudOnly: false });
+    expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({ mode: "cloud", cloudOnly: true });
+  });
 });

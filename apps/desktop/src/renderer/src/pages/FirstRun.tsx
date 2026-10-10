@@ -175,10 +175,10 @@ export function FirstRun({ settings, onSettings, onComplete }: { settings: AppSe
     <section className="setup-stage">
       <div className={`setup-progress ${runtime.state === "installing" && runtime.progress === undefined ? "indeterminate" : ""}`} aria-label={`Setup ${progress} of 3`}><i style={{ width: `${Math.min(100, ((progress + (runtimeReady ? 0 : runtime.progress || 0)) / 3) * 100)}%` }} /></div>
       <div className="setup-hero"><span>MAKE IDEAS REAL</span><h1>把想法变成<br />可检查的工程成果。</h1><p>{cloudMode ? "登录云端账号，选择项目，然后连接模型服务。" : "依次准备工程环境、连接 ChatGPT，并选择项目位置。中断后会从当前步骤继续。"}</p></div>
-      <div className="mode-choice" role="group" aria-label="使用方式">
+      {!settings.cloudOnly && <div className="mode-choice" role="group" aria-label="使用方式">
         <button className={cloudMode ? "active" : ""} aria-pressed={cloudMode} onClick={() => void chooseMode("cloud")}>使用 Reify 云端（推荐）</button>
         <button className={cloudMode ? "" : "active"} aria-pressed={!cloudMode} onClick={() => void chooseMode("local")}>在本机运行（开发者）</button>
-      </div>
+      </div>}
       {cloudMode ? <div className="setup-grid cloud">{cloudCards}</div> : <div className="setup-grid">
         <SetupCard index="01" title="工程环境" ready={runtimeReady} active={!runtimeReady} icon={<Wrench size={17} />}>
           <p>{runtime.message || (runtimeReady ? "WSL 和内置 CAD 环境已就绪。" : "正在检查 WSL 和内置组件。")}</p>

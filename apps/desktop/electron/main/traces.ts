@@ -31,7 +31,35 @@ export class TraceStore {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) return [];
     const sessionRoot = `${projectPath}/.prime-sessions`;
-    const script = `const fs=require('fs'),p=require('path'),root=process.argv[1];function walk(d,r=[]){if(!fs.existsSync(d))return r;for(const e of fs.readdirSync(d,{withFileTypes:true})){const q=p.join(d,e.name);if(e.isDirectory())walk(q,r);else if(e.name.endsWith('.jsonl'))r.push(q)}return r}for(const q of walk(root)){const raw=fs.readFileSync(q,'utf8').trim().split(/\\r?\\n/).filter(Boolean);let model='',tools=0,tokens=0,title=p.basename(q,'.jsonl');for(const l of raw){try{const x=JSON.parse(l),m=x.message;if((x.type==='session_info'||x.type==='session')&&x.name)title=x.name;if(m?.role==='toolResult')tools++;if(m?.role==='assistant'){model||=m.provider&&m.model?m.provider+'/'+m.model:'';tokens+=(m.usage?.input||0)+(m.usage?.output||0)}}catch{}}const s=fs.statSync(q);console.log(JSON.stringify({id:p.basename(q,'.jsonl'),path:q,title,updatedAt:s.mtimeMs,model,turns:raw.length,toolCalls:tools,tokens}))}`;
+    const script = String.raw`
+      const fs = require('node:fs'), p = require('node:path'), root = process.argv[1];
+      function walk(dir, files = []) {
+        if (!fs.existsSync(dir)) return files;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const path = p.join(dir, entry.name);
+          if (entry.isDirectory()) walk(path, files);
+          else if (entry.name.endsWith('.jsonl')) files.push(path);
+        }
+        return files;
+      }
+      for (const path of walk(root)) {
+        const rows = fs.readFileSync(path, 'utf8').trim().split(/\r?\n/).filter(Boolean);
+        let id = p.basename(path, '.jsonl'), title = id, model = '', tools = 0, tokens = 0;
+        for (const row of rows) {
+          try {
+            const entry = JSON.parse(row), message = entry.message;
+            if (entry.type === 'session' && typeof entry.id === 'string') id = entry.id;
+            if ((entry.type === 'session_info' || entry.type === 'session') && entry.name) title = entry.name;
+            if (message?.role === 'toolResult') tools++;
+            if (message?.role === 'assistant') {
+              model ||= message.provider && message.model ? message.provider + '/' + message.model : '';
+              tokens += (message.usage?.input || 0) + (message.usage?.output || 0);
+            }
+          } catch {}
+        }
+        console.log(JSON.stringify({ id, path, title, updatedAt: fs.statSync(path).mtimeMs, model, turns: rows.length, toolCalls: tools, tokens }));
+      }`;
+
     const { stdout } = await this.bridge.exec([await this.bridge.commandPath("node"), "-e", script, sessionRoot], { timeout: 60_000 });
     const traces = stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as TraceSummary);
     const home = await this.bridge.homeDirectory();

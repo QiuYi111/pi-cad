@@ -23,6 +23,12 @@ export function defaultCanonicalProjectDirectory(cwd: string): string {
   return join(dataHome, "pi-cad", canonicalProjectKey(cwd));
 }
 
+export function resolveCanonicalProjectDirectory(cwd: string, configured = process.env[CANONICAL_DIRECTORY_ENV]): string {
+  if (!configured) return defaultCanonicalProjectDirectory(cwd);
+  if (!isAbsolute(configured)) throw new Error(`${CANONICAL_DIRECTORY_ENV} must be absolute`);
+  return resolve(configured);
+}
+
 /** Direct library tests retain prototype storage unless a sidecar supplies its private root. */
 export function harnessStorageRoot(cwd: string): string {
   const configured = process.env[CANONICAL_DIRECTORY_ENV];

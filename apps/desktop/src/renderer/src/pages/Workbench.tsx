@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Check, ChevronDown, FolderOpen, Play, Plus, Search, ShieldCheck } from "../components/icons";
-import { runtimeStarted, runtimeTurnActive, type AppSettings, type MeshDocument, type TraceSummary } from "@shared/contracts";
+import { selectedProjectKey, runtimeStarted, runtimeTurnActive, type AppSettings, type MeshDocument, type TraceSummary } from "@shared/contracts";
 import type { PrimeRuntimeController } from "../hooks/usePrimeRuntime";
 import { Conversation } from "../components/Conversation";
 import { Composer } from "../components/Composer";
@@ -11,7 +11,9 @@ import { StatusBar } from "../components/StatusBar";
 import { ConceptBoard, type ConceptImage, type ConceptSelection } from "../components/ConceptBoard";
 import { automaticConversationTitle } from "../lib/conversation-title";
 
-export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChange, onOpenSettings }: { settings: AppSettings; prime: PrimeRuntimeController; /** Cloud mode: the conversation list needs the workspace, so it is read again once the workspace is running. */ cloudWorkspaceState?: string; onSettingsChange: (settings: AppSettings) => void; onOpenSettings: () => void }) {
+export function Workbench({ settings, prime, cloudWorkspaceState, cloudProjectName, onSettingsChange, onOpenSettings }: { settings: AppSettings; prime: PrimeRuntimeController; /** Cloud mode: the conversation list needs the workspace, so it is read again once the workspace is running. */ cloudWorkspaceState?: string; cloudProjectName?: string; onSettingsChange: (settings: AppSettings) => void; onOpenSettings: () => void }) {
+  const cloudMode = settings.mode === "cloud";
+  const projectKey = selectedProjectKey(settings);
   const [projectMenu, setProjectMenu] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("reify.sidebar-open.v1") !== "0");
   const [newProject, setNewProject] = useState(false);
@@ -29,7 +31,7 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
       return Array.isArray(saved) ? saved.filter((path): path is string => typeof path === "string").slice(0, 6) : [];
     } catch { return []; }
   });
-  const [conversationStorageKey, setConversationStorageKey] = useState(() => localStorage.getItem(`reify.active-conversation-key.${settings.projectPath || "unconfigured"}`) || crypto.randomUUID());
+  const [conversationStorageKey, setConversationStorageKey] = useState(() => localStorage.getItem(`reify.active-conversation-key.${projectKey || "unconfigured"}`) || crypto.randomUUID());
   const [ratingOpen, setRatingOpen] = useState(false);
   const [ratingQuality, setRatingQuality] = useState(4);
   const [ratingDifficulty, setRatingDifficulty] = useState(3);
@@ -64,6 +66,7 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
   const [canvasContent, setCanvasContent] = useState<"concept" | "artifact">("artifact");
   const canvasContentRef = useRef(canvasContent);
   const [uploadedConcepts, setUploadedConcepts] = useState<ConceptImage[]>([]);
+  const [artifactRestoreRevision, setArtifactRestoreRevision] = useState(0);
   const [openedMesh, setOpenedMesh] = useState<MeshDocument | null>(null);
   const openedMeshRef = useRef<MeshDocument | null>(null);
   const [openStepState, setOpenStepState] = useState<"idle" | "loading">("idle");
@@ -71,10 +74,10 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
   const restoringWorkspace = useRef(false);
   const lastPresentedArtifact = useRef("");
   const workflowState = useRef<{ initialized: boolean; terminal: boolean; runId?: string }>({ initialized: false, terminal: false });
-  const project = settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || "Untitled project";
-  const workspaceStateKey = `reify.workspace.${settings.projectPath || "unconfigured"}`;
-  const artifactStateKey = `reify.artifact.${settings.projectPath || "unconfigured"}`;
-  const conversationKeyStateKey = `reify.active-conversation-key.${settings.projectPath || "unconfigured"}`;
+  const project = cloudMode ? (cloudProjectName || "云项目") : settings.projectPath.split(/[\\/]/).filter(Boolean).at(-1) || "Untitled project";
+  const workspaceStateKey = `reify.workspace.${projectKey || "unconfigured"}`;
+  const artifactStateKey = `reify.artifact.${projectKey || "unconfigured"}`;
+  const conversationKeyStateKey = `reify.active-conversation-key.${projectKey || "unconfigured"}`;
   useEffect(() => {
     setConversationStorageKey(localStorage.getItem(conversationKeyStateKey) || crypto.randomUUID());
   }, [conversationKeyStateKey]);
@@ -107,7 +110,7 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
   const modelName = currentArtifact?.split(/[\\/]/).at(-1) || "No model yet";
   const missingProject = prime.status.message?.startsWith("Project folder no longer exists") ?? false;
   const start = async () => {
-    if (!settings.projectPath) { onOpenSettings(); throw new Error("Choose a project folder before starting Prime."); }
+    if (!projectKey) { onOpenSettings(); throw new Error("Choose a project folder before starting Prime."); }
     await prime.start();
   };
   const send = async (text: string, images?: Array<{ data: string; mimeType: string }>) => {
@@ -177,11 +180,15 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
     let alive = true;
     void window.piCad.viewer.loadStep(saved).then((mesh) => {
       if (alive) setOpenedMesh(mesh);
-    }).catch(() => localStorage.removeItem(artifactStateKey));
+    }).catch(() => {
+      if (!alive) return;
+      localStorage.removeItem(artifactStateKey);
+      setArtifactRestoreRevision((value) => value + 1);
+    });
     return () => { alive = false; };
-  }, [artifactStateKey]);
+  }, [artifactStateKey, cloudWorkspaceState]);
   useEffect(() => {
-    if (currentArtifact || !settings.projectPath || localStorage.getItem(artifactStateKey)) return;
+    if (currentArtifact || !projectKey || localStorage.getItem(artifactStateKey)) return;
     let alive = true;
     void window.piCad.viewer.catalog().then(async (catalog) => {
       const artifacts = [...(catalog.currentRun?.artifacts || []), ...catalog.projectHead.artifacts];
@@ -196,7 +203,7 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
       if (savedMode !== "conversation") setMode("canvas");
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [artifactStateKey, currentArtifact, settings.projectPath]);
+  }, [artifactStateKey, currentArtifact, projectKey, cloudWorkspaceState, prime.status.sessionId, artifactRestoreRevision]);
   const switchProject = async () => {
     const path = await window.piCad.settings.chooseProject();
     if (path) await activateProject(path);
@@ -238,13 +245,13 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
     }
   };
   useEffect(() => {
-    if (sessionsProject.current !== settings.projectPath) {
-      sessionsProject.current = settings.projectPath;
+    if (sessionsProject.current !== projectKey) {
+      sessionsProject.current = projectKey;
       setSessions([]);
     }
     void refreshSessions();
     return () => { sessionRequest.current += 1; };
-  }, [settings.projectPath, prime.status.sessionId, cloudWorkspaceState === "running"]);
+  }, [projectKey, prime.status.sessionId, cloudWorkspaceState === "running"]);
   const newSession = async () => {
     if (runtimeTurnActive(prime.status) || prime.status.state === "starting") throw new Error("Stop the current response before starting another conversation.");
     setConversationStorageKey(crypto.randomUUID());
@@ -308,7 +315,7 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
       void refresh();
     });
     return () => { alive = false; unsubscribe(); unsubscribeConversation(); };
-  }, [settings.projectPath, prime.status.sessionId]);
+  }, [projectKey, prime.status.sessionId]);
   useEffect(() => {
     const presentationKey = builtArtifact ? `${builtArtifact}:${buildRevision}` : "";
     if (!builtArtifact || presentationKey === lastPresentedArtifact.current) return;
@@ -410,10 +417,10 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
     <section className={`chat-pane ${sidebarOpen ? "sidebar-open" : "sidebar-closed"}`}>
       <aside className="conversation-sidebar" aria-label="Projects and conversations">
         <div className="sidebar-top"><button className="new-chat" onClick={() => void newSession()}><Plus size={16} />新对话</button><button className="sidebar-collapse" aria-label="收起侧栏" onClick={() => { setSidebarOpen(false); localStorage.setItem("reify.sidebar-open.v1", "0"); }}>‹</button></div>
-        <div className="sidebar-group project-group"><span>项目</span><button className="sidebar-project" onClick={() => setProjectMenu((open) => !open)}><FolderOpen size={15} /><strong>{project}</strong><ChevronDown size={13} /></button>
-          <div className="project-quick-actions"><button onClick={() => void switchProject()}>打开项目</button><button onClick={() => { setProjectMenu(true); setNewProject(true); }}>新建项目</button></div>
-          {projectMenu && <div className="sidebar-project-menu">{projectError && <small role="alert">{projectError}</small>}{!newProject ? <><button onClick={() => void switchProject()}>打开项目</button><button onClick={() => setNewProject(true)}>新建项目</button><button onClick={onOpenSettings}>项目设置</button></> : <form onSubmit={(event) => { event.preventDefault(); void createProject(); }}><label>项目名称<input autoFocus value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="新设计" /></label><div><button type="button" onClick={() => setNewProject(false)}>返回</button><button className="primary" disabled={!projectName.trim()} type="submit">选择位置</button></div></form>}</div>}
-          {!!otherProjects.length && <div className="recent-projects">{otherProjects.map((path) => <div key={path}><button title={path} onClick={() => void activateProject(path)}>{path.split(/[\\/]/).filter(Boolean).at(-1)}</button><button aria-label={`Remove ${path} from recent projects`} onClick={() => setRecentProjects((current) => { const next = current.filter((item) => item !== path); localStorage.setItem("reify.recent-projects.v1", JSON.stringify(next)); return next; })}>×</button></div>)}</div>}
+        <div className="sidebar-group project-group"><span>项目</span><button className="sidebar-project" onClick={() => cloudMode ? onOpenSettings() : setProjectMenu((open) => !open)}><FolderOpen size={15} /><strong>{project}</strong><ChevronDown size={13} /></button>
+          {!cloudMode && <div className="project-quick-actions"><button onClick={() => void switchProject()}>打开项目</button><button onClick={() => { setProjectMenu(true); setNewProject(true); }}>新建项目</button></div>}
+          {!cloudMode && projectMenu && <div className="sidebar-project-menu">{projectError && <small role="alert">{projectError}</small>}{!newProject ? <><button onClick={() => void switchProject()}>打开项目</button><button onClick={() => setNewProject(true)}>新建项目</button><button onClick={onOpenSettings}>项目设置</button></> : <form onSubmit={(event) => { event.preventDefault(); void createProject(); }}><label>项目名称<input autoFocus value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="新设计" /></label><div><button type="button" onClick={() => setNewProject(false)}>返回</button><button className="primary" disabled={!projectName.trim()} type="submit">选择位置</button></div></form>}</div>}
+          {!cloudMode && !!otherProjects.length && <div className="recent-projects">{otherProjects.map((path) => <div key={path}><button title={path} onClick={() => void activateProject(path)}>{path.split(/[\\/]/).filter(Boolean).at(-1)}</button><button aria-label={`Remove ${path} from recent projects`} onClick={() => setRecentProjects((current) => { const next = current.filter((item) => item !== path); localStorage.setItem("reify.recent-projects.v1", JSON.stringify(next)); return next; })}>×</button></div>)}</div>}
         </div>
         <div className="sidebar-group chat-history"><span>对话</span><label className="sidebar-search"><Search size={13} /><input aria-label="搜索当前项目的对话" value={sessionQuery} onChange={(event) => setSessionQuery(event.target.value)} placeholder="搜索对话" />{sessionQuery && <button aria-label="清除搜索" onClick={() => setSessionQuery("")}>×</button>}</label><div className="sidebar-session-list">{sessionsState === "loading" ? <p>正在读取对话…</p> : sessionsState === "error" ? <p role="alert">无法读取对话。请重试或检查项目。</p> : visibleSessions.length ? visibleSessions.map((session) => <div className={`sidebar-session ${session.id === prime.status.sessionId ? "active" : ""} ${restoringSession === session.path ? "loading" : ""}`} key={session.path}><button title={`恢复对话：${session.title}`} disabled={Boolean(restoringSession)} onClick={() => void switchSession(session.path)}><strong>{session.title}</strong><small>{restoringSession === session.path ? "恢复中…" : new Date(session.updatedAt).toLocaleDateString()}</small></button></div>) : <p>{sessionQuery ? "没有匹配的对话。" : "完成第一条需求后，对话会出现在这里。"}</p>}</div></div>
         <button className="sidebar-settings" onClick={onOpenSettings}>设置</button>
@@ -449,12 +456,12 @@ export function Workbench({ settings, prime, cloudWorkspaceState, onSettingsChan
         <div className={latestFailure ? "attention" : ""}><span>Attention</span><strong>{latestFailure ? "Action needed" : "No blocker"}</strong><small>{latestFailure?.activity?.title || "Ready to continue"}</small></div>
         <div><span>Review authority</span><strong>{reviewPassed ? "Machine review passed" : currentArtifact ? "Candidate ready" : "Not ready"}</strong><small>{reviewPassed ? <><ShieldCheck size={11} /> Bound to this candidate</> : currentArtifact ? <><ShieldCheck size={11} /> Machine review pending</> : <><Check size={11} /> Build first</>}</small></div>
       </section>}
-      <div className={`canvas-layer artifact-layer ${canvasContent === "artifact" ? "active" : ""}`}><EngineeringViewer key={`${settings.projectPath}:${prime.status.sessionId || "none"}:${openedMesh?.source || "catalog"}`} projectPath={settings.projectPath} latestArtifact={currentArtifact} openedMesh={openedMesh} mediaArtifacts={toolMedia} revision={viewerRevision} agentRunning={runtimeTurnActive(prime.status) || prime.status.state === "starting"} cloudMode={settings.mode === "cloud"} onStopAgent={() => void prime.abort()} onAskAgent={(request) => { setMode("conversation"); void send(request); }} /></div>
+      <div className={`canvas-layer artifact-layer ${canvasContent === "artifact" ? "active" : ""}`}><EngineeringViewer key={`${projectKey}:${prime.status.sessionId || "none"}:${openedMesh?.source || "catalog"}`} projectPath={projectKey} latestArtifact={currentArtifact} openedMesh={openedMesh} mediaArtifacts={toolMedia} revision={viewerRevision} agentRunning={runtimeTurnActive(prime.status) || prime.status.state === "starting"} cloudMode={settings.mode === "cloud"} onStopAgent={() => void prime.abort()} onAskAgent={(request) => { setMode("conversation"); void send(request); }} /></div>
       {!!conceptImages.length && <div className={`canvas-layer concept-layer ${canvasContent === "concept" ? "active" : ""}`}><ConceptBoard images={conceptImages} onContinue={continueFromConcept} /></div>}
     </section>
     <div className="floating-composer" ref={composerRef}>
       <button className="composer-handle" aria-label={mode === "conversation" ? "切换到画布；拖动可移动输入框" : "展开对话；拖动可移动输入框"} aria-keyshortcuts="Control+Backslash Meta+Backslash" title="点击切换 · 拖动调整位置 · 双击复位" onPointerDown={beginComposerDrag} onPointerMove={moveComposer} onPointerUp={endComposerDrag} onPointerCancel={() => { dragRef.current = null; }} onLostPointerCapture={() => { dragRef.current = null; }} onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); if (composerClickTimer.current) clearTimeout(composerClickTimer.current); composerClickTimer.current = null; resetComposerPosition(); }}><span /></button>
-      <Composer settings={settings} status={prime.status} queueKey={`${settings.projectPath}:${conversationStorageKey}`} draftRequest={editDraft} onSettingsChange={updateSettings} onSend={send} onNote={prime.note} onAbort={prime.abort} onDraftChange={setHasDraft} onImagesAdded={addUploadedConcepts} />
+      <Composer settings={settings} status={prime.status} queueKey={`${projectKey}:${conversationStorageKey}`} draftRequest={editDraft} onSettingsChange={updateSettings} onSend={send} onNote={prime.note} onAbort={prime.abort} onDraftChange={setHasDraft} onImagesAdded={addUploadedConcepts} />
       <button className="composer-reset" onClick={resetComposerPosition}>复位输入框</button>
     </div>
     <StatusBar settings={settings} status={prime.status} />

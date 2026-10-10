@@ -112,6 +112,14 @@ RUN apt-get update \
 ENV UV_PYTHON_INSTALL_DIR=/opt/reify/python \
     UV_CACHE_DIR=/workspace/home/.cache/uv \
     PYTHONDONTWRITEBYTECODE=1
+# Prime uses Python 3.11. Bootstrap during the image build, while /opt is writable.
+# Each workspace gets its own copy so updates and locks remain private to that user.
+RUN uv python install 3.11 \
+ && HOME=/tmp PRIME_AGENT_KERNEL_VENV=/opt/reify/kernel-template \
+      node /opt/reify/prime-agent/packages/coding-agent/dist/core/kernel/bootstrap-cli.js \
+ && find /opt/reify/kernel-template /opt/reify/python -xdev ! -type l \
+      \( -perm /022 -o ! -perm -444 -o \( -type d ! -perm -111 \) \) -exec chmod go-w,a+rX {} + \
+ && rm -rf /workspace/home/.cache /tmp/.prime
 COPY package.json package-lock.json /opt/reify/pi-cad/
 RUN cd /opt/reify/pi-cad && npm ci --omit=dev --ignore-scripts
 COPY . /opt/reify/pi-cad/
@@ -140,6 +148,7 @@ RUN chmod 0755 /opt/reify/entrypoint.sh \
       -exec chmod go-w,a+rX {} +
 
 ENV HOME=/workspace/home \
+    UV_NO_SYNC=1 \
     PI_CAD_REPO=/opt/reify/pi-cad \
     PI_CAD_FREECAD_HOME=/opt/reify/freecad \
     PI_CAD_ASI_HOME=/opt/reify/asi \

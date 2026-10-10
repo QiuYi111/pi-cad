@@ -1,11 +1,38 @@
 import { describe, expect, it } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { desktopDistillationEnvironment, desktopDistillationPath, TraceStore } from "../electron/main/traces";
 import { distillationTitle } from "../src/renderer/src/lib/distillation";
 import { shouldOpenWorkflowRating } from "../src/renderer/src/pages/Workbench";
 
 describe("trajectory confinement", () => {
+  it("reads CRLF transcripts and uses the session header ID when it differs from the filename", async () => {
+    const root = await mkdtemp(join(tmpdir(), "reify-traces-"));
+    try {
+      const directory = join(root, ".prime-sessions");
+      await mkdir(directory);
+      await writeFile(join(directory, "file-id.jsonl"), [
+        { type: "session", id: "runtime-session-id" },
+        { type: "session_info", name: "Plate" },
+        { type: "message", message: { role: "assistant", provider: "zai", model: "glm-5.3-flash", usage: { input: 8, output: 4 } } },
+        { type: "message", message: { role: "toolResult" } },
+      ].map(row => JSON.stringify(row)).join("\r\n"));
+      const bridge = {
+        resolveRuntimePaths: async () => ({ projectPath: root }),
+        commandPath: async () => process.execPath,
+        homeDirectory: async () => root,
+        exec: async (args: string[]) => args[0] === "cat" ? { stdout: "", stderr: "" } : promisify(execFile)(args[0], args.slice(1)),
+      };
+      await expect(new TraceStore(bridge as never).list({ mode: "cloud", projectPath: "" } as never)).resolves.toMatchObject([
+        { id: "runtime-session-id", title: "Plate", model: "zai/glm-5.3-flash", turns: 4, toolCalls: 1, tokens: 12 },
+      ]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   it("rejects a trajectory outside the selected project", async () => {
     const bridge = { resolveRuntimePaths: async () => ({ projectPath: "/projects/a" }) };
     await expect(new TraceStore(bridge as never).read({} as never, "/projects/b/.prime-sessions/run.jsonl")).rejects.toThrow(/escapes/);

@@ -1,4 +1,5 @@
 import WebSocket from "ws";
+import { cloudFetch } from "./cloud-fetch.js";
 import type { CloudEvent, CloudProject, CloudStatus, CloudUser, CloudWorkspaceInfo, CloudWorkspaceState } from "../../src/shared/contracts.js";
 
 /** Refresh the access token this long before it expires (plan §9.2). */
@@ -143,7 +144,7 @@ export class CloudSession {
   constructor(private readonly options: CloudSessionOptions) {
     this.base = options.baseUrl.replace(/\/+$/, "");
     this.now = options.now ?? (() => Date.now());
-    this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
+    this.fetchImpl = options.fetch ?? cloudFetch;
     this.openSocketImpl = options.openSocket ?? ((url, headers) => new WebSocket(url, { headers }));
     this.eventsBackoffMs = options.reconnectInitialMs ?? RECONNECT_INITIAL_MS;
   }

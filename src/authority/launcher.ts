@@ -8,7 +8,7 @@ import { createConnection, createServer } from "node:net";
 import { assertUnixRuntime } from "../shared/platform.ts";
 import { completionGate, completionGateForConversation, startAuthoritySidecar } from "./sidecar.ts";
 import { HarnessProjectStoreV7 } from "../harness/run-store.ts";
-import { canonicalProjectKey, defaultCanonicalProjectDirectory } from "./storage.ts";
+import { canonicalProjectKey, resolveCanonicalProjectDirectory } from "./storage.ts";
 import { experienceRoot, finalizeExperience } from "../experience/store.ts";
 
 export const WORKFLOW_INCOMPLETE_EXIT_CODE = 42;
@@ -860,7 +860,7 @@ export async function main(primeArgs = process.argv.slice(2)): Promise<number> {
   await preparePerRunAgentDir(ephemeralAgentDir);
   await preparePerRunAgentDir(reviewerAgentDir);
   await mkdir(reviewerWorkspace, { recursive: true, mode: 0o700 });
-  process.env.PI_CAD_CANONICAL_PROJECT_DIR = defaultCanonicalProjectDirectory(project);
+  process.env.PI_CAD_CANONICAL_PROJECT_DIR = resolveCanonicalProjectDirectory(project);
   await mkdir(process.env.PI_CAD_CANONICAL_PROJECT_DIR, { recursive: true, mode: 0o700 });
   let reviewerSocketDirectory = "";
   let launchPaths!: LaunchPaths;

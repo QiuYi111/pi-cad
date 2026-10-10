@@ -13,6 +13,13 @@ export HOME
 
 mkdir -p /workspace/projects /workspace/state "$HOME"
 
+kernel_dir="${PRIME_AGENT_KERNEL_VENV:-$HOME/.prime/agent/kernel-venv}"
+if [ ! -f "$kernel_dir/.bootstrap-version" ] && [ -d /opt/reify/kernel-template ]; then
+  mkdir -p "$kernel_dir"
+  cp -R /opt/reify/kernel-template/. "$kernel_dir/"
+  chmod -R u+w "$kernel_dir"
+fi
+
 # One directory per project. Ids must be plain tokens, so they cannot escape the volume.
 for id in $(printf '%s' "${REIFY_PROJECT_IDS:-}" | tr ',' ' '); do
   case "$id" in

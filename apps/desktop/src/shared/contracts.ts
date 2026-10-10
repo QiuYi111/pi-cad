@@ -54,8 +54,17 @@ export interface AppSettings {
   onboardingComplete: boolean;
   /** Cloud mode disables experience adoption during the internal beta. */
   mode: "local" | "cloud";
+  /** A thin installer runs CAD in the hosted workspace only. */
+  cloudOnly?: boolean;
   /** Hosted service connection. `projectId` is the cloud project selected in this app. */
   cloud?: { baseUrl: string; userEmail?: string; projectId?: string };
+}
+
+/** Identity for selected local or hosted project; never treat a local path as a cloud selection. */
+export function selectedProjectKey(settings: Pick<AppSettings, "mode" | "projectPath" | "cloud">): string {
+  if (settings.mode !== "cloud") return settings.projectPath;
+  const cloud = settings.cloud;
+  return cloud?.projectId ? `cloud:${cloud.baseUrl}:${cloud.userEmail || ""}:${cloud.projectId}` : "";
 }
 
 export interface CloudUser { id: string; email: string; displayName: string | null }
