@@ -33,6 +33,8 @@ benchmarks/results/*
 .runtime/
 apps/desktop/out/
 apps/desktop/release/
+apps/desktop/release-thin/
+apps/desktop/thin-package-build.log
 apps/desktop/resources/runtime/
 apps/desktop/test-results/
 apps/desktop/playwright-report/
