@@ -17,9 +17,16 @@ import CryptoKit
     private var projectID = ""
     private var spawnKey: String?
     private var stopping = false
+    private var processes: [Int: RemoteProcess] = [:]
     public private(set) var spawnID: String?
+    public var isOpen: Bool { socket != nil }
+    public var projectRoot: String? { projectID.isEmpty ? nil : "/workspace/projects/\(projectID)" }
     public init() {}
-    public func connect(api: CloudAPI, project: Project, provider: String, model: String, thinking: String) async throws {
+    public func openServices(api: CloudAPI, projectID: String? = nil) async throws {
+        close(); self.projectID = projectID ?? ""
+        let ws = try await api.socket("/v1/workspace/bridge"); socket = ws; read(ws)
+    }
+    public func connect(api: CloudAPI, project: Project, provider: String, model: String, thinking: String, reviewer: ReviewerSelection = ReviewerSelection(), permission: String = "workspace", sessionPath: String? = nil) async throws {
         let key = "reify.native.spawn.\(api.baseURL).\(api.session?.user.id ?? "").\(project.id)"
         let previousSpawn = (projectID == project.id ? spawnID : nil) ?? UserDefaults.standard.string(forKey: key)
         close()
@@ -32,9 +39,12 @@ import CryptoKit
         let node = "/opt/reify/node/bin/node"
         var args = ["env", "PI_CAD_REPO=/opt/reify/pi-cad", "PI_CAD_PROJECT_CWD=\(root)",
                     "PRIME_AGENT_REPO=/opt/reify/prime-agent", "PRIME_AGENT_CODING_AGENT_DIR=/workspace/home/.prime/agent",
-                    "PI_CAD_NODE_WRAPPER=\(node)", "PI_CAD_DESKTOP_PERMISSION=\(project.role == "viewer" ? "read-only" : "workspace")",
+                    "PI_CAD_NODE_WRAPPER=\(node)", "PI_CAD_DESKTOP_PERMISSION=\(project.role == "viewer" ? "read-only" : permission)",
                     node, "/opt/reify/pi-cad/scripts/prime-cad-sidecar.mjs", "--mode", "rpc",
-                    "--provider", provider, "--model", model, "--thinking", thinking, "--reviewer-inherit-author"]
+                    "--provider", provider, "--model", model, "--thinking", thinking]
+        args += reviewer.mode == "fixed"
+            ? ["--reviewer-provider", reviewer.provider, "--reviewer-model", reviewer.model, "--reviewer-thinking", reviewer.thinking]
+            : ["--reviewer-inherit-author"]
         do {
             if let previousSpawn {
                 do {
@@ -51,6 +61,11 @@ import CryptoKit
             if spawnID == nil {
                 let script = "const fs=require('fs'),p=require('path'),root=process.argv[1],found=[];function walk(d,n=0){if(n>6||!fs.existsSync(d))return;for(const e of fs.readdirSync(d,{withFileTypes:true})){const f=p.join(d,e.name);if(e.isDirectory())walk(f,n+1);else if(e.isFile()&&e.name.endsWith('.jsonl'))found.push({name:e.name,time:fs.statSync(f).mtimeMs});}}walk(root);found.sort((a,b)=>b.time-a.time);console.log(JSON.stringify(found[0]?.name??null)); // REIFY_LATEST_SESSION"
                 let latest = try await exec([node, "-e", script, "\(root)/.prime-sessions"])
+                if let sessionPath {
+                    let name = (sessionPath as NSString).lastPathComponent
+                    guard sessionPath.hasPrefix("\(root)/.prime-sessions/"), !sessionPath.contains(".."), name.hasSuffix(".jsonl") else { throw CloudError("对话路径无效") }
+                    args += ["--resume", "/workspace/.prime-sessions/\(name)"]
+                } else
                 if let name = (try? JSONSerialization.jsonObject(with: Data(latest.utf8), options: .fragmentsAllowed)) as? String,
                    name == (name as NSString).lastPathComponent, name.hasSuffix(".jsonl") {
                     args += ["--resume", "/workspace/.prime-sessions/\(name)"]
@@ -91,6 +106,8 @@ import CryptoKit
         }
     }
     public func close(error: Error = CloudError("连接已关闭"), preserveSpawn: Bool = false) {
+        for process in processes.values { process.end(-1) }
+        processes.removeAll()
         reader?.cancel(); reader = nil
         heartbeat?.cancel(); heartbeat = nil
         socket?.cancel(with: .goingAway, reason: nil); socket = nil
@@ -100,6 +117,7 @@ import CryptoKit
     }
     // Explicitly terminate our sidecar when switching projects or signing out. The workspace stays intact.
     public func stop(api: CloudAPI? = nil) async {
+        for ch in Array(processes.keys) { await stopProcess(ch) }
         stopping = true
         defer { stopping = false }
         if socket == nil, let spawnID, let api {
@@ -174,9 +192,17 @@ import CryptoKit
         let type = message["type"] as? String ?? ""
         let ch = message["ch"] as? Int ?? -1
         let key = "ch-\(ch)"
+        if let process = processes[ch] {
+            process.control(message)
+            if type == "exit" { processes.removeValue(forKey: ch); finish("process-stop-\(ch)", result: message); return }
+        }
         if type == "pong", replaying { replaying = false; stdout.removeAll(); finish("attach"); return }
         if type == "error" {
             let error = CloudError(message["message"] as? String ?? "云端错误", code: message["code"] as? String)
+            if let process = processes[ch] {
+                process.onEvent?(["type": "auth_error", "message": error.message]); process.end(-1)
+                processes.removeValue(forKey: ch); finish("process-stop-\(ch)", error: error)
+            }
             if ch == 1 {
                 if replaying { replaying = false; finish("attach", error: error) }
                 else if stopping { finish("stop", error: error) }
@@ -215,18 +241,42 @@ import CryptoKit
         } else if buffers[ch] != nil {
             guard buffers[ch]!.count + payload.count <= 64 * 1024 * 1024 else { throw CloudError("文件超过 64 MB") }
             buffers[ch]!.append(payload)
-        }
+        } else if let process = processes[ch] { process.receive(Data(payload)) }
+        else if let process = processes[ch - 1] { process.control(["type": "stderr", "data": String(decoding: payload, as: UTF8.self)]) }
     }
     private func allocate() -> Int { defer { channel += 2 }; return channel }
+    public func startProcess(_ args: [String], onEvent: @escaping ([String: Any]) -> Void, onExit: @escaping (Int) -> Void) async throws -> RemoteProcess {
+        let ch = allocate(); let process = RemoteProcess(channel: ch, bridge: self)
+        process.onEvent = onEvent; process.onExit = onExit; processes[ch] = process
+        do {
+            let result = try await exchange(key: "ch-\(ch)", message: ["type": "spawn", "ch": ch, "args": args])
+            process.spawned(result["spawnId"] as? String); return process
+        } catch {
+            // The server may have spawned the process even if its acknowledgement was lost.
+            await stopProcess(ch); process.end(-1); throw error
+        }
+    }
+    func writeProcess(_ ch: Int, value: String) async throws {
+        guard processes[ch]?.finished == false else { throw CloudError("云端登录已结束") }
+        try await frame(ch, JSONSerialization.data(withJSONObject: ["value": value]) + Data([10]))
+    }
+    func stopProcess(_ ch: Int) async {
+        guard processes[ch] != nil else { return }
+        _ = try? await exchange(key: "process-stop-\(ch)", message: ["type": "kill", "ch": ch, "signal": "SIGTERM"], timeout: .seconds(5))
+        processes[ch]?.end(-1); processes.removeValue(forKey: ch)
+    }
     public static func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
     public func exec(_ args: [String], input: String? = nil, timeoutMs: Int = 45000) async throws -> String {
-        let ch = allocate()
-        var message: [String: Any] = ["type": "exec", "ch": ch, "args": args,
-            "env": ["PI_CAD_CANONICAL_PROJECT_DIR": "/workspace/state/\(projectID)"], "timeoutMs": timeoutMs]
-        if let input { message["input"] = input }
-        let response = try await exchange(key: "ch-\(ch)", message: message, timeout: .milliseconds(timeoutMs + 2000))
+        let response = try await execResult(args, input: input, timeoutMs: timeoutMs)
         guard response["code"] as? Int == 0 else { throw CloudError(response["stderr"] as? String ?? "云端操作失败") }
         return response["stdout"] as? String ?? ""
+    }
+    public func execResult(_ args: [String], input: String? = nil, timeoutMs: Int = 45000) async throws -> [String: Any] {
+        let ch = allocate()
+        var message: [String: Any] = ["type": "exec", "ch": ch, "args": args, "timeoutMs": timeoutMs]
+        if !projectID.isEmpty { message["env"] = ["PI_CAD_CANONICAL_PROJECT_DIR": "/workspace/state/\(projectID)"] }
+        if let input { message["input"] = input }
+        return try await exchange(key: "ch-\(ch)", message: message, timeout: .milliseconds(timeoutMs + 2000))
     }
     private func absolute(_ path: String) throws -> String {
         guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\0"), !path.split(separator: "/").contains("..") else { throw CloudError("文件路径无效") }
@@ -241,9 +291,29 @@ import CryptoKit
         let text = try await exec(["/opt/reify/node/bin/node", "-e", script, "/workspace/projects/\(projectID)"])
         return try JSONDecoder().decode([CloudFile].self, from: Data(text.utf8)).sorted { $0.path < $1.path }
     }
-    public func previewStep(_ path: String) async throws -> Data {
+    public func relativeProjectPath(_ path: String) throws -> String {
+        let relative: String
+        if path.hasPrefix("/") {
+            guard let root = projectRoot, path.hasPrefix(root + "/") else { throw CloudError("文件不属于当前项目") }
+            relative = String(path.dropFirst(root.count + 1))
+        } else { relative = path }
+        _ = try absolute(relative)
+        return relative
+    }
+    public func previewStep(_ path: String, expectedSHA: String? = nil) async throws -> Data {
         let remote = try absolute(path)
-        let text = try await exec(["/opt/reify/pi-cad/python/.venv/bin/python", "/opt/reify/pi-cad/scripts/desktop-export-mesh.py", remote], timeoutMs: 120000)
+        let text: String
+        if let expectedSHA {
+            let script = #"""
+            // REIFY_BOUND_STEP
+            const fs=require('fs'),p=require('path'),c=require('crypto'),cp=require('child_process'),[root,file,expected,python,mesh]=process.argv.slice(1);
+            const real=fs.realpathSync(file);if(!real.startsWith(fs.realpathSync(root)+p.sep))throw Error('文件不属于当前项目');
+            const hash=()=>c.createHash('sha256').update(fs.readFileSync(real)).digest('hex');if(hash()!==expected)throw Error('文件已变化，请重新读取工程结果');
+            const result=cp.spawnSync(python,[mesh,real],{encoding:'utf8',timeout:120000,maxBuffer:64*1024*1024});if(result.error||result.status!==0)throw Error(result.stderr||result.error?.message||'模型预览失败');
+            if(hash()!==expected)throw Error('预览时文件已变化，请重新读取工程结果');process.stdout.write(result.stdout);
+            """#
+            text = try await exec(["/opt/reify/node/bin/node", "-e", script, projectRoot ?? "", remote, expectedSHA, "/opt/reify/pi-cad/python/.venv/bin/python", "/opt/reify/pi-cad/scripts/desktop-export-mesh.py"], timeoutMs: 125000)
+        } else { text = try await exec(["/opt/reify/pi-cad/python/.venv/bin/python", "/opt/reify/pi-cad/scripts/desktop-export-mesh.py", remote], timeoutMs: 120000) }
         let data = Data(text.utf8)
         guard let document = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], document["parts"] is [[String: Any]] else {
             throw CloudError("云端模型预览数据无效")

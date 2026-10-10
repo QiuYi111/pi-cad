@@ -101,6 +101,14 @@ import Foundation
     public func createProject(_ name: String) async throws -> Project {
         try JSONDecoder().decode(Project.self, from: await request("POST", "/v1/projects", body: ["name": name]))
     }
+    public func renameProject(_ id: String, name: String) async throws -> Project {
+        try JSONDecoder().decode(Project.self, from: await request("PATCH", "/v1/projects/\(id)", body: ["name": name]))
+    }
+    public func deleteProject(_ id: String) async throws { _ = try await request("DELETE", "/v1/projects/\(id)") }
+    public func changePassword(old: String, new: String) async throws {
+        guard new.count >= 10 else { throw CloudError("新密码至少 10 个字符") }
+        _ = try await request("POST", "/v1/auth/password", body: ["oldPassword": old, "newPassword": new, "refreshToken": session?.refreshToken ?? ""])
+    }
     public func workspace(_ action: String? = nil) async throws -> Workspace {
         try JSONDecoder().decode(Workspace.self, from: await request(action == nil ? "GET" : "POST", "/v1/workspace" + (action.map { "/\($0)" } ?? "")))
     }

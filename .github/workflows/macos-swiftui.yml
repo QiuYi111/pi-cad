@@ -1,0 +1,40 @@
+name: macOS SwiftUI client
+
+on:
+  pull_request:
+    paths: ["apps/macos/**", ".github/workflows/macos-swiftui.yml"]
+  push:
+    branches: [master, codex/macos-native-cloud-client]
+    paths: ["apps/macos/**", ".github/workflows/macos-swiftui.yml"]
+  workflow_dispatch:
+
+jobs:
+  build-and-e2e:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/macos/package-lock.json
+      - name: Install test service
+        run: npm ci --prefix apps/macos
+      - name: Install desktop workflow validator
+        run: npm ci --ignore-scripts
+      - name: Build native client, package DMG and run cloud protocol E2E
+        run: npm run macos:test:e2e
+      - name: Keep E2E logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiftui-e2e
+          path: apps/macos/test-results/
+      - name: Keep native packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: swiftui-macos
+          path: |
+            apps/macos/dist/Reify-macOS-*.dmg
+            apps/macos/dist/Reify-macOS-*.zip

@@ -1,0 +1,18 @@
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+const {audit}=JSON.parse(readFileSync(process.argv[2],'utf8'));
+const prompts=audit.filter(x=>x.type==='prompt');
+assert.equal(prompts.filter(x=>x.message==='已编辑第一条').length,1);
+assert.equal(prompts.filter(x=>x.message==='排队第二条').length,1);
+assert.equal(prompts.filter(x=>x.message==='只保存在对话的笔记').length,0);
+const image=prompts.find(x=>x.message.startsWith('图片需求验收'));
+assert.equal(image.imageCount,1);
+assert.deepEqual(image.imageTypes,['image/png']);
+const requests=audit.filter(x=>x.type==='engineering').map(x=>x.request);
+assert(requests.every(x=>Object.hasOwn(x,'sessionId')));
+assert(requests.some(x=>x.sessionId===null));
+const answers=audit.filter(x=>x.type==='ui-answer');
+assert.deepEqual(answers.map(x=>x.method),['confirm','editor','input','select']);
+assert.equal(answers[0].value,true);
+assert(audit.some(x=>x.type==='spawn'&&x.args.includes('--reviewer-provider')&&x.args.includes('PI_CAD_DESKTOP_PERMISSION=read-only')));
+console.log('PASS: server received queue prompts exactly once, no local note, image payload, explicit conversation scope, dialog answers and independent read-only reviewer');

@@ -14,7 +14,9 @@ struct RootView: View {
                     HStack { Label("云端即将因闲置暂停", systemImage: "clock"); Spacer(); Button("继续使用") { Task { await app.keepalive() } } }
                         .padding(12).background(ReifyDesign.panel)
                 }
-                if projectsPage || app.selected == nil { ProjectsView(onOpen: { projectsPage = false }) }
+                if app.settingsPresented { SettingsView() }
+                else if app.workflowsPresented { WorkflowLibraryView() }
+                else if projectsPage || app.selected == nil { ProjectsView(onOpen: { projectsPage = false }) }
                 else { WorkbenchView() }
             }
         }
@@ -23,7 +25,6 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .reifyShowProjects)) { _ in projectsPage = true }
         .onChange(of: app.connected) { _, connected in if connected { projectsPage = false } }
         .sheet(isPresented: $app.newProjectPresented) { NewProjectView() }
-        .sheet(isPresented: $app.settingsPresented) { SettingsView() }
         .sheet(isPresented: Binding(get: { app.uiRequest != nil }, set: { if !$0 { Task { await app.answer(["cancelled": true]) } } })) { ApprovalView() }
     }
 }
@@ -35,9 +36,10 @@ struct AppHeader: View {
         HStack {
             ReifyWordmark().frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 4) {
-                nav("工作台", active: !projectsPage && app.selected != nil, id: "nav.workbench") { projectsPage = false }
-                nav("项目", active: projectsPage || app.selected == nil, id: "nav.projects") { projectsPage = true }
-                nav("设置", active: false, id: "nav.settings") { app.settingsPresented = true }
+                nav("工作台", active: !app.settingsPresented && !app.workflowsPresented && !projectsPage && app.selected != nil, id: "nav.workbench") { app.settingsPresented = false; app.workflowsPresented = false; projectsPage = false }
+                nav("项目", active: !app.settingsPresented && !app.workflowsPresented && (projectsPage || app.selected == nil), id: "nav.projects") { app.settingsPresented = false; app.workflowsPresented = false; projectsPage = true }
+                nav("工作流", active: app.workflowsPresented && !app.settingsPresented, id: "nav.workflows") { app.settingsPresented = false; app.workflowsPresented = true }
+                nav("设置", active: app.settingsPresented, id: "nav.settings") { app.workflowsPresented = false; app.settingsPresented = true }
             }
             HStack {
                 Spacer()
@@ -110,6 +112,9 @@ struct LoginView: View {
 struct ProjectsView: View {
     @EnvironmentObject var app: AppModel
     let onOpen: () -> Void
+    @State private var renaming: Project?
+    @State private var rename = ""
+    @State private var deleting: Project?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -133,12 +138,27 @@ struct ProjectsView: View {
                         Button(app.selected?.id == project.id && app.connected ? "继续" : "打开") {
                             Task { await app.open(project); if app.connected { onOpen() } }
                         }.buttonStyle(ReifyButtonStyle()).disabled(app.busy || app.generating).accessibilityIdentifier("project.\(project.id)")
+                        if project.role != "viewer" {
+                            Button("重命名") { rename = project.name; renaming = project }.disabled(app.busy).accessibilityIdentifier("project.rename.\(project.id)")
+                        }
+                        if project.role == "maintainer" {
+                            Button("删除") { deleting = project }.disabled(app.busy || app.generating).accessibilityIdentifier("project.delete.\(project.id)")
+                        }
                     }.padding(16).background(ReifyDesign.paper, in: RoundedRectangle(cornerRadius: 10))
                         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(ReifyDesign.line))
                 }
                 if app.busy { HStack { ProgressView().controlSize(.small); Text(app.status) } }
             }.frame(maxWidth: 760).padding(32).frame(maxWidth: .infinity)
         }.background(ReifyDesign.canvas)
+            .alert("重命名项目", isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })) {
+                TextField("项目名称", text: $rename)
+                Button("保存") { if let project = renaming { Task { await app.renameProject(project, name: rename) } } }.disabled(rename.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("取消", role: .cancel) { renaming = nil }
+            }
+            .alert("删除项目？", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+                Button("删除", role: .destructive) { if let project = deleting { Task { await app.deleteProject(project) } } }
+                Button("取消", role: .cancel) { deleting = nil }
+            } message: { Text("将删除项目“\(deleting?.name ?? "")”及其文件。") }
     }
 }
 
@@ -146,6 +166,7 @@ struct WorkbenchView: View {
     @EnvironmentObject var app: AppModel
     var body: some View {
         VStack(spacing: 0) {
+            WorkflowRailView()
             GeometryReader { geometry in
                 ZStack {
                     CanvasView().opacity(app.canvasMode ? 1 : 0).allowsHitTesting(app.canvasMode).accessibilityHidden(!app.canvasMode)
@@ -174,6 +195,9 @@ struct ConversationSidebar: View {
     @EnvironmentObject var app: AppModel
     @State private var query = ""
     private var title: String { app.messages.first(where: { $0.role == "user" })?.text ?? "新对话" }
+    private var visibleSessions: [ConversationSummary] {
+        app.conversations.filter { query.isEmpty || "\($0.title) \($0.model)".localizedCaseInsensitiveContains(query) }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack {
@@ -197,15 +221,24 @@ struct ConversationSidebar: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("对话").foregroundStyle(ReifyDesign.muted)
                 TextField("搜索对话", text: $query).textFieldStyle(.roundedBorder).accessibilityIdentifier("chat.search")
-                if query.isEmpty || title.localizedCaseInsensitiveContains(query) {
-                    Button { app.canvasMode = false } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(title).lineLimit(2)
-                            Text("当前对话").font(ReifyDesign.font(10)).foregroundStyle(ReifyDesign.muted)
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
-                            .background(ReifyDesign.line.opacity(0.4), in: RoundedRectangle(cornerRadius: 9))
-                    }.buttonStyle(.plain)
-                } else { Text("没有匹配的对话。").foregroundStyle(ReifyDesign.muted) }
+                if app.historyLoading { ProgressView().controlSize(.small) }
+                if let error = app.historyError { Text(error).foregroundStyle(.red); Button("重试") { Task { await app.refreshConversations() } } }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(visibleSessions) { conversation in
+                            Button { Task { await app.switchConversation(conversation) } } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(conversation.title).lineLimit(2)
+                                    Text(Date(timeIntervalSince1970: conversation.updatedAt / 1000), style: .date).font(ReifyDesign.font(10)).foregroundStyle(ReifyDesign.muted)
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(10)
+                                    .background(conversation.id == app.sessionID ? ReifyDesign.line.opacity(0.4) : .clear, in: RoundedRectangle(cornerRadius: 9))
+                            }.buttonStyle(.plain).disabled(app.busy || app.generating).accessibilityIdentifier("conversation.\(conversation.id)")
+                        }
+                        if visibleSessions.isEmpty && !app.historyLoading {
+                            Text(query.isEmpty ? "发送需求后，对话会保存在这里。" : "没有匹配的对话。").foregroundStyle(ReifyDesign.muted)
+                        }
+                    }
+                }
             }
             Spacer()
             Button("设置") { app.settingsPresented = true }.buttonStyle(.plain).foregroundStyle(ReifyDesign.muted)
@@ -255,13 +288,21 @@ struct ConversationView: View {
 }
 
 private struct MessageView: View {
+    @EnvironmentObject var app: AppModel
     let message: ChatMessage
+    @State private var copied = false
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             if message.role != "user" { ReifyMark(size: 18).padding(.top, 3) }
             VStack(alignment: .leading, spacing: 8) {
-                Text(message.role == "user" ? "你" : "Reify").font(ReifyDesign.font(10, .medium)).foregroundStyle(ReifyDesign.muted)
+                Text(message.role == "user" ? "你" : message.role == "note" ? "笔记" : "Reify").font(ReifyDesign.font(10, .medium)).foregroundStyle(ReifyDesign.muted)
                 Text(LocalizedStringKey(message.text)).font(ReifyDesign.font(14)).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                if message.role == "user" {
+                    HStack {
+                        Button(copied ? "已复制" : "复制") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.text, forType: .string); copied = true }
+                        Button("编辑") { app.draft = message.text; app.canvasMode = false; app.saveConversationDraft() }
+                    }.buttonStyle(.plain).font(ReifyDesign.font(10)).foregroundStyle(ReifyDesign.muted)
+                }
             }.padding(message.role == "user" ? 14 : 0)
                 .background(message.role == "user" ? ReifyDesign.panel : .clear, in: RoundedRectangle(cornerRadius: 12))
                 .frame(maxWidth: .infinity, alignment: message.role == "user" ? .trailing : .leading)
@@ -283,7 +324,10 @@ struct CanvasView: View {
                     Button("导出") { Task { await app.export(file) } }.accessibilityIdentifier("model.export")
                 }
             }.buttonStyle(ReifyButtonStyle()).padding(.horizontal, 18).frame(height: 58).background(ReifyDesign.paper).overlay(alignment: .bottom) { Divider() }
-            Group {
+            HStack(spacing: 0) {
+                ScrollView { EngineeringResultsView() }
+                Divider()
+                Group {
                 if let data = app.preview { ModelPreview(data: data).accessibilityIdentifier("model.preview") }
                 else {
                     VStack(spacing: 14) {
@@ -293,6 +337,7 @@ struct CanvasView: View {
                         Button("打开项目文件") { app.filesOpen = true }.buttonStyle(ReifyButtonStyle())
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.background(ReifyDesign.canvas)
     }
@@ -309,17 +354,51 @@ struct ComposerView: View {
     }
     var body: some View {
         VStack(spacing: 0) {
+            if !app.attachments.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack { ForEach(app.attachments) { image in
+                        Button { app.attachments.removeAll { $0.id == image.id } } label: {
+                            VStack { if let value = NSImage(data: image.data) { Image(nsImage: value).resizable().scaledToFit().frame(width: 60, height: 48) }; Text(image.name).lineLimit(1) }
+                        }.help("移除图片")
+                    } }.padding(10)
+                }.frame(maxHeight: 78)
+            }
+            if !app.pending.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("当前任务结束后").foregroundStyle(ReifyDesign.muted)
+                    ForEach($app.pending) { $request in
+                        HStack { TextField("排队需求", text: $request.text); Button("取消") { app.pending.removeAll { $0.id == request.id }; app.savePending() } }
+                    }
+                    if !app.generating { Button("发送下一条") { Task { await app.drainQueue() } } }
+                }.padding(10).accessibilityIdentifier("chat.queue")
+            }
             TextField("描述你的设计…", text: $app.draft, axis: .vertical).lineLimit(2...3).textFieldStyle(.plain)
                 .font(ReifyDesign.font(13)).padding(.horizontal, 17).padding(.top, 16).padding(.bottom, 6)
                 .onSubmit(send).accessibilityIdentifier("chat.draft")
             HStack(spacing: 8) {
-                Button { Task { await app.upload() } } label: { Image(systemName: "plus") }
-                    .disabled(!app.connected || app.selected?.role == "viewer").accessibilityIdentifier("file.upload").help("上传文件")
-                Label(app.selected?.role == "viewer" ? "只读" : "工作区", systemImage: "checkmark.shield")
-                Button { app.settingsPresented = true } label: { Label(app.model, systemImage: "cube") }
-                Button { app.settingsPresented = true } label: { Label(app.thinking, systemImage: "sparkles") }
+                Menu {
+                    Button("添加图片") { Task { await app.attachImages() } }.accessibilityIdentifier("chat.attach-image")
+                    Button("上传文件") { Task { await app.upload() } }.accessibilityIdentifier("file.upload")
+                } label: { Image(systemName: "plus") }.disabled(!app.connected || app.selected?.role == "viewer").help("添加附件").accessibilityIdentifier("chat.attachments")
+                if app.generating {
+                    Picker("发送方式", selection: $app.runningIntent) { Text("排队").tag("queue"); Text("停止后修改").tag("replace"); Text("只存笔记").tag("note") }.labelsHidden().frame(maxWidth: 100).accessibilityIdentifier("chat.running-intent")
+                }
+                Menu {
+                    Button("工作区") { Task { await app.changePermission("workspace") } }
+                    Button("只读") { Task { await app.changePermission("read-only") } }
+                } label: { Label(app.selected?.role == "viewer" || app.permission == "read-only" ? "只读" : "工作区", systemImage: "checkmark.shield") }.disabled(app.generating || app.selected?.role == "viewer").accessibilityIdentifier("chat.permission")
+                Menu {
+                    ForEach(app.quickModels, id: \.key) { choice in Button("\(choice.name) · \(choice.provider)") { Task { await app.quickModel(choice) } } }
+                    Button("模型设置…") { app.settingsPresented = true }
+                } label: { Label(app.model, systemImage: "cube") }.accessibilityIdentifier("chat.model")
+                Menu {
+                    ForEach(app.catalog.model(provider: app.provider, id: app.model)?.levels ?? [app.thinking], id: \.self) { level in Button(level) { Task { await app.quickThinking(level) } } }
+                } label: { Label(app.thinking, systemImage: "sparkles") }.accessibilityIdentifier("chat.thinking")
                 Spacer(minLength: 0)
                 if app.generating {
+                    if !app.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button(action: send) { Image(systemName: "arrow.up") }.accessibilityIdentifier("chat.queue-send").help("提交需求")
+                    }
                     Button { Task { await app.abort() } } label: { Image(systemName: "stop.fill").frame(width: 17, height: 17) }
                         .accessibilityIdentifier("chat.stop").help("停止")
                 } else {
@@ -334,6 +413,8 @@ struct ComposerView: View {
             .overlay(alignment: .top) { handle.offset(y: -12) }
             .position(center)
             .onChange(of: size) { _, _ in clampAndSave() }
+            .onChange(of: app.pending) { _, _ in app.savePending() }
+            .onChange(of: app.attachments) { _, _ in app.saveConversationDraft() }
             .onAppear { clampAndSave() }
     }
     private var handle: some View {
@@ -359,8 +440,8 @@ struct ComposerView: View {
         app.composerX = center.x / size.width; app.composerY = center.y / size.height; app.saveLayout()
     }
     private func send() {
-        guard app.connected, !app.generating, app.selected?.role != "viewer", !app.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let text = app.draft; app.draft = ""; Task { await app.send(text) }
+        guard app.connected, app.selected?.role != "viewer", !app.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        Task { await app.submitDraft() }
     }
 }
 

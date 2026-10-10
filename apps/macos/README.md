@@ -2,7 +2,7 @@
 
 SwiftUI 云端客户端，macOS 14+。不在本地安装建模或模型运行环境。
 
-当前只实现基础流程，未补齐 desktop。设置、历史对话、工作流、记录、工程查看器和 Fusion 等仍有大量缺失。完整对比与补齐顺序见 [功能对比](DESKTOP-PARITY.zh-CN.md)。下方 E2E 通过仅代表列出的流程通过。
+仍未补齐 desktop。完整对比见 [初版记录](DESKTOP-PARITY.zh-CN.md)，后续改动见 [87 项进度](PARITY-PROGRESS.zh-CN.md)。新增设置、历史、队列、工作流和装配代码已通过本地流程测试；窗口与正式云端验收待完成。记录、工程参数、批准/发布和 Fusion 等仍缺失。
 
 - 沿用 desktop 的标志、字标、应用图标、Geist 字体和暖白深绿配色。
 - 大画布常驻；对话展开；同一个悬浮输入框，点击细线切换、拖动移动、双击复位。Cmd + \\ 切换，草稿和模型视角不丢失。
@@ -11,7 +11,9 @@ SwiftUI 云端客户端，macOS 14+。不在本地安装建模或模型运行环
 - 原生 SceneKit STEP / STL 预览（STEP 在云端转成网格）；其他文件保存到本地。
 - 上传、下载，大小与 SHA-256 校验；上传不覆盖列表中已有的文件。每次传输最多 64 MB。
 - 登录与续期存在钥匙串，不保存密码。只允许 HTTPS；本地测试可用 HTTP。
-- 默认沿用 Electron 客户端的云端地址、服务商和模型。设置中读取现有云端可用模型，可选 GLM；模型账户需已在云端配置。重新打开项目会恢复最近的云端对话。
+- 设置使用既有云端脚本：完整模型目录、思考档位、密钥、服务商登录、默认模型、收藏、自定义配置、独立审查模型。模型与权限先在草稿修改，保存后生效。
+- 历史对话搜索与切换、各自草稿、图片输入、排队需求和笔记；工程结果按当前对话读取。
+- 工作流库、源码编辑与原校验器；工程结果版本、装配对象、隐藏与引用保留对应文件身份。
 
 ## 构建
 
@@ -31,11 +33,12 @@ open apps/macos/dist/Reify.app
 ## E2E
 
 ```sh
+npm ci --ignore-scripts
 npm ci --prefix apps/macos
 npm run macos:test:e2e
 ```
 
-该命令启动独立本地 HTTP/WebSocket 服务，运行实际 Swift 网络、钥匙串、云端文件与聊天代码，结束时关闭测试服务。无需正式账户。结果在 `test-results/`。
+该命令启动独立本地 HTTP/WebSocket 服务，运行实际 Swift 网络、钥匙串和 AppModel 对话代码；工作流直接调用 desktop 校验器。测试数据与偏好独立，结束时关闭服务。无需正式账户。结果在 `test-results/`。窗口测试是另一步。
 
 真实窗口测试用 Codex 的 `cua_repl` 跑 `tests/ui-e2e.cua.js`，通过系统辅助功能操作 SwiftUI。先运行 `npm --prefix apps/macos run fixture`，再在 `cua_repl` 用 `await import('file:///绝对路径/tests/ui-e2e.cua.js')` 载入并调用导出的 `runReifyUIE2E(cua, {appPath, baseURL})`。使用绝对应用路径，测试服务器地址为 `http://127.0.0.1:18765`。应用需处于退出登录状态。脚本不会修改正式账户。
 

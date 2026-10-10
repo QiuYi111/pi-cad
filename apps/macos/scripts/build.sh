@@ -23,6 +23,12 @@ codesign --force --sign - dist/Reify.app/Contents/Frameworks/libReifyCloud.dylib
 codesign --force --sign - dist/Reify.app
 swiftc -sdk "$sdk" -target "$(uname -m)-apple-macosx14.0" -parse-as-library -swift-version 5 -I .build/manual -L .build/manual -lReifyCloud \
   Sources/ReifyE2E/*.swift -o .build/manual/ReifyE2E -Xlinker -rpath -Xlinker @executable_path
+flow_sources=()
+for source in Sources/Reify/*.swift; do
+  [[ "$source" == Sources/Reify/ReifyApp.swift ]] || flow_sources+=("$source")
+done
+swiftc -sdk "$sdk" -target "$(uname -m)-apple-macosx14.0" -parse-as-library -swift-version 5 -I .build/manual -L .build/manual -lReifyCloud \
+  "${flow_sources[@]}" Sources/ReifyFlowE2E/*.swift -o .build/manual/ReifyFlowE2E -Xlinker -rpath -Xlinker @executable_path
 ditto -c -k --sequesterRsrc --keepParent dist/Reify.app "dist/Reify-macOS-$(uname -m).zip"
 bash scripts/package-dmg.sh
 printf 'Built %s/dist/Reify.app\n' "$PWD"
