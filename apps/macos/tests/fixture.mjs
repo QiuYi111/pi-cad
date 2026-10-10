@@ -12,6 +12,7 @@ const sha = data => createHash('sha256').update(data).digest('hex');
 const port = Number(process.env.REIFY_FIXTURE_PORT ?? 18765);
 const projects = [{id: '11111111-1111-4111-8111-111111111111', name: '桌面支架', role: 'maintainer', createdAt: new Date().toISOString()}];
 let state = 'stopped', accesses = new Set(), refreshes = new Set();
+let accountPassword = 'fixture-password';
 const stats = {login: 0, rejectedLogin: 0, refresh: 0, projects: 0, start: 0, stop: 0, spawn: 0, prompt: 0, abort: 0, uploads: 0, downloads: 0, kills: 0, attaches: 0};
 const audit = [];
 let customModels = '{"providers":{}}', favorites = [], defaults = {}, credentials = new Map([['openai-codex',true],['zai',true]]);
@@ -32,7 +33,11 @@ const stl=Buffer.alloc(84+triangles.length*50);stl.writeUInt32LE(triangles.lengt
 triangles.forEach((t,i)=>t.flat().forEach((value,j)=>stl.writeFloatLE(value,84+i*50+12+j*4)));
 
 const files = new Map([['bracket.stl', stl], ['bracket.step', Buffer.from('ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;')], ['corrupt.stl', stl]]);
+files.set('bracket.py',Buffer.from('# disposable model source fixture\n'));
+let modelWidth=80;
+function parameterManifest(){const manifest={schema:1,modelId:'bracket',source:{path:'bracket.py',sha256:sha(files.get('bracket.py')),entrypoint:'build'},output:{path:'bracket.step',sha256:sha(files.get('bracket.step'))},parameters:[{id:'width',type:'number',default:80,value:modelWidth,min:20,max:160,step:1,unit:'mm',label:'宽度'}]};const data=Buffer.from(JSON.stringify(manifest));files.set('bracket.parameters.json',data);return {path:'bracket.parameters.json',sha256:sha(data),manifest}}
 const sessions = new Map();
+const generatedSessions = new Set();
 const spawns = new Map();
 const user = {id: 'e2e-user', email: 'e2e@reify.test', displayName: '测试账户'};
 const view = () => ({name: 'ws-e2e', state, desired: state === 'stopped' ? 'stopped' : 'running', lastError: null, queuePosition: null, reclaimAt: null});
@@ -51,7 +56,7 @@ const server = http.createServer(async (req, res) => {
   if (path === '/__test/drop') { for(const ws of bridge.clients) ws.close(1012,'fixture restart'); return respond(res,200,{ok:true}); }
   if (path === '/__test/idle') { broadcast({type:'idle_warning',reclaimAt:new Date(Date.now()+60000).toISOString()}); return respond(res,200,{ok:true}); }
   if (path === '/v1/auth/login') {
-    if(b.email !== user.email || b.password !== 'fixture-password') { stats.rejectedLogin++; return respond(res,401,{code:'invalid_credentials',message:'邮箱或密码错误'}); }
+    if(b.email !== user.email || b.password !== accountPassword) { stats.rejectedLogin++; return respond(res,401,{code:'invalid_credentials',message:'邮箱或密码错误'}); }
     stats.login++; return respond(res,200,token(1)); // exercise refresh immediately
   }
   if (path === '/v1/auth/refresh') {
@@ -72,8 +77,9 @@ const server = http.createServer(async (req, res) => {
     projects[at]={...projects[at],name:b.name.trim()};return respond(res,200,projects[at]);
   }
   if(path==='/v1/auth/password') {
-    if(b.oldPassword!=='fixture-password')return respond(res,401,{message:'原密码错误'});
+    if(b.oldPassword!==accountPassword)return respond(res,401,{message:'原密码错误'});
     if(b.newPassword?.length<10)return respond(res,400,{message:'新密码至少 10 个字符'});
+    accountPassword=b.newPassword;
     return respond(res,204);
   }
   if (path === '/v1/workspace/start') {
@@ -136,7 +142,7 @@ bridge.on('connection',ws=>{
             rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});continue;
           }
           output({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'正在创建支架…'}});
-          timer=setTimeout(()=>{const message={role:'assistant',content:[{type:'text',text:'支架已完成。尺寸 80 × 40 × 30 mm，已生成 STL 和 STEP 文件。'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},r.message.includes('长任务') ? 30000 : 450);
+          timer=setTimeout(()=>{modelWidth=80;files.set('bracket.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));parameterManifest();generatedSessions.add(project+'/'+currentSession);const message={role:'assistant',content:[{type:'text',text:'支架已完成。尺寸 80 × 40 × 30 mm，已生成 STL 和 STEP 文件。'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},r.message.includes('长任务') ? 30000 : 450);
         } else if(r.type==='abort') {stats.abort++;clearTimeout(timer);timer=null;reply(r);output({type:'agent_end',messages:rows});}
         else if(r.type==='extension_ui_response') {
           if(!awaitingUI||r.id!==awaitingUI.id)return;
@@ -182,11 +188,12 @@ bridge.on('connection',ws=>{
         const q=JSON.parse(r.input??'{}');audit.push({type:'engineering',request:q});
         if(q.schema!==1||!Object.hasOwn(q,'sessionId'))return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Missing conversation scope',code:'SCOPE_REQUIRED'}}),stderr:'node warning'});
         if(q.sessionId==='authority-error')return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Finish the current phase',code:'PHASE_DENIED',target:'cad_build_step',hints:['Open the current workflow']}}),stderr:'node warning'});
-        const bound=['engineering-a','engineering-b'].includes(q.sessionId),name=q.sessionId==='engineering-b'?'sample.step':'bracket.step';
+        const bound=['engineering-a','engineering-b'].includes(q.sessionId)||generatedSessions.has(project+'/'+q.sessionId),name=q.sessionId==='engineering-b'?'sample.step':'bracket.step';
         const artifact={id:`artifact-${q.sessionId}`,path:name,role:'model',sha256:sha(files.get(name)??Buffer.from(''))};
-        const run=bound?{runId:`run-${q.sessionId}`,workflowId:'mechanical.naked',workflowVersion:'1.0.0',workflowHash:'hash-'+q.sessionId,phase:'work',status:'active',updatedAt:new Date().toISOString(),phaseHistory:['work'],phases:[{id:'work',title:'Work',purpose:'Build',status:'active',transitions:[],capabilities:['cad_build_step'],obligations:[]}]}:null;
+        const run=bound?{runId:`run-${q.sessionId}`,workflowId:'mechanical.naked',workflowVersion:'1.0.0',workflowHash:'hash-'+q.sessionId,phase:'work',status:'active',operations:[{capability:'cad_build_step'}],updatedAt:new Date().toISOString(),phaseHistory:['work'],phases:[{id:'work',title:'Work',purpose:'Build',status:'active',transitions:[],capabilities:['cad_build_step'],obligations:[]}]}:null;
         if(q.op==='workflow-current')return result({schema:1,ok:true,result:run});
-        if(q.op==='viewer-catalog')return result({schema:1,ok:true,result:{projectId:project,projectHead:{updatedAt:'',artifacts:[]},currentRun:run?{id:run.runId,phase:run.phase,status:run.status,updatedAt:run.updatedAt,artifacts:[artifact]}:null,commits:bound?[{id:'commit-'+q.sessionId,name:'Version '+q.sessionId,parent:null,phase:'work',createdAt:new Date().toISOString(),artifacts:[artifact]}]:[],simulationRuns:[],parameterManifests:[]}});
+        if(q.op==='viewer-catalog')return result({schema:1,ok:true,result:{projectId:project,projectHead:{updatedAt:'',artifacts:[]},currentRun:run?{id:run.runId,phase:run.phase,status:run.status,updatedAt:run.updatedAt,artifacts:[artifact]}:null,commits:bound?[{id:'commit-'+q.sessionId,name:'Version '+q.sessionId,parent:null,phase:'work',createdAt:new Date().toISOString(),artifacts:[artifact]}]:[],simulationRuns:[],parameterManifests:bound&&name==='bracket.step'?[parameterManifest()]:[]}});
+        if(q.op==='model-build'&&bound){const width=q.parameters?.width?.value;if(width===66)return result({schema:1,ok:true,result:{build:{ok:false,payload:{error:'模拟参数建模失败'}}}});if(typeof width!=='number'||width<20||width>160)return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Invalid width',code:'PARAMETER_INVALID'}}),stderr:''});modelWidth=width;files.set('bracket.step',Buffer.from(`ISO-10303-21;\nWIDTH=${width};\nEND-ISO-10303-21;`));parameterManifest();return result({schema:1,ok:true,result:{build:{ok:true}}})}
         return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Unsupported fixture engineering operation',code:'INVALID_OPERATION'}}),stderr:''});
       }
       if(r.args.includes('/opt/reify/pi-cad/scripts/desktop-prime-config.mjs')) {
@@ -202,12 +209,21 @@ bridge.on('connection',ws=>{
           throw Error('Unknown config command');
         } catch(error){return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:error.message})}
       }
+      if(r.args.some(a=>a.includes('REIFY_GEOMETRY_INSPECTION'))) {
+        const [root,path,expected,axis]=r.args.slice(-4),bytes=files.get(path);
+        if(!bytes||sha(bytes)!==expected)return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'文件已变化，请重新读取工程结果'});
+        return result(axis?{source:path,sha256:expected,units:'mm',axis,position:15,totalArea:320,faceCount:1}:{source:path,sha256:expected,units:'mm',bbox:{x:80,y:40,z:30},solidCount:2});
+      }
+      if(r.args.some(a=>a.includes('REIFY_PARAMETER_PREVIEW'))) {
+        const q=JSON.parse(r.input),width=q.values.width;if(sha(files.get(q.source))!==q.sourceSHA)return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'源码已变化'});
+        return result({source:'/tmp/reify-native-preview/preview.step',sha256:'b'.repeat(64),identityBound:false,identitySource:'anonymous',parts:[{name:'参数预览',positions:triangles.flat(2).map((x,i)=>i%3===0?x*width/80:x),indices:Array.from({length:triangles.length*3},(_,i)=>i)}]});
+      }
       if(r.args.some(a=>a.includes('REIFY_CONVERSATIONS')))return result([...histories].filter(([,s])=>s.rows.length).map(([id,s])=>({id,path:`/workspace/projects/${project.split('/').at(-1)}/.prime-sessions/${id}.jsonl`,title:s.title,updatedAt:Date.now(),model:`${selectedModel.provider}/${selectedModel.id}`,turns:s.rows.length,toolCalls:0,tokens:10})));
       if(r.args.some(a=>a.includes('REIFY_SESSION_PATH')))return result(r.args.at(-1).split('/').at(-1));
       if(r.args.includes('/opt/reify/pi-cad/scripts/desktop-export-mesh.py')) {
         const bound=r.args.some(a=>a.includes('REIFY_BOUND_STEP')),path=bound?r.args.at(-4):r.args.at(-1),name=path.split('/').at(-1),bytes=files.get(name);
         if(bound&&sha(bytes??Buffer.from(''))!==r.args.at(-3))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'文件已变化，请重新读取工程结果'});
-        const part=(group,name,color,ts)=>({id:'solid-'+group,partId:'part-'+group,occurrenceId:'occ-'+group,solidId:'solid-'+group,semanticId:'semantic-'+group,name,color,features:[{id:'feature-'+group}],datums:[{id:'datum-'+group}],positions:ts.flat(2),indices:Array.from({length:ts.length*3},(_,i)=>i)});
+        const part=(group,name,color,ts)=>({id:'solid-'+group,partId:'part-'+group,occurrenceId:'occ-'+group,solidId:'solid-'+group,semanticId:'semantic-'+group,name,color,features:[{id:'feature-'+group}],datums:[{id:'datum-'+group}],positions:ts.flat(2).map((x,i)=>i%3===0?x*modelWidth/80:x),indices:Array.from({length:ts.length*3},(_,i)=>i)});
         return result({source:path,sha256:sha(bytes??Buffer.from('')),identityBound:true,identitySource:'identity',identityManifestSha256:'a'.repeat(64),parts:[part('base','底板','#9fa69b',triangles.slice(0,12)),part('support','支撑','#789982',triangles.slice(12))],bounds:{min:[0,0,0],max:[80,40,30]}});
       }
       if(r.args.some(a=>a.includes('REIFY_LATEST_SESSION')))return result(JSON.stringify((sessions.get('/workspace/state/'+r.args.at(-1).split('/')[3])?.length??0)>0?'fixture-session.jsonl':null));

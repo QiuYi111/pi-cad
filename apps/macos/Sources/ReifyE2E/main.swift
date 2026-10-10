@@ -25,6 +25,10 @@ import ReifyCloud
         do { try await api.changePassword(old: "wrong-password", new: "fixture-new-password"); fatalError("wrong old password accepted") }
         catch let error as CloudError { precondition(error.status == 401) }
         try await api.changePassword(old: "fixture-password", new: "fixture-new-password")
+        do { try await api.login(email: "e2e@reify.test", password: "fixture-password", server: api.baseURL); fatalError("old password still accepted") }
+        catch let error as CloudError { precondition(error.status == 401) }
+        try await api.login(email: "e2e@reify.test", password: "fixture-new-password", server: api.baseURL)
+        try await api.changePassword(old: "fixture-new-password", new: "fixture-password")
         var workspace = try await api.workspace("start")
         for _ in 0..<20 where workspace.state != "running" {
             try await Task.sleep(for: .milliseconds(100))
@@ -133,6 +137,11 @@ import ReifyCloud
         let boundModel = try MeshModel.read(boundMesh)
         precondition(boundModel.sha256 == assembly.sha256)
         do { _ = try await bridge.previewStep("bracket.step", expectedSHA: String(repeating: "0", count: 64)); fatalError("changed source preview accepted") } catch {}
+        let dimensions = try await bridge.inspectGeometry("bracket.step", expectedSHA: assembly.sha256!)
+        precondition(dimensions.bbox?.x == 80 && dimensions.solidCount == 2 && dimensions.reference.contains("stepSha256=" + assembly.sha256!))
+        let section = try await bridge.inspectGeometry("bracket.step", expectedSHA: assembly.sha256!, axis: "z")
+        precondition(section.totalArea == 320 && section.position == 15 && section.axis == "z")
+        do { _ = try await bridge.inspectGeometry("bracket.step", expectedSHA: String(repeating: "0", count: 64)); fatalError("inspection accepted different revision") } catch {}
         let stl = try await bridge.download("bracket.stl")
         let anonymous = try MeshModel.read(stl)
         precondition(anonymous.identityBound == false && anonymous.parts.count == 1 && anonymous.assembly[0].solidIDs.isEmpty)
@@ -149,6 +158,21 @@ import ReifyCloud
         let catalogA = try await engineeringA.catalog(), catalogB = try await engineeringB.catalog()
         precondition(catalogA.commits.first?.id == "commit-engineering-a" && catalogB.commits.first?.id == "commit-engineering-b")
         precondition(catalogA.currentRun?.artifacts.first?.path == "bracket.step" && catalogB.currentRun?.artifacts.first?.path == "sample.step")
+        let parameters = catalogA.parameterManifests.first!
+        let originalModel = try await bridge.download("bracket.step")
+        let parameterPreview = try await engineeringA.previewParameters(parameters, updates: ["width": .number(120)])
+        let previewed = try MeshModel.read(parameterPreview)
+        precondition(previewed.parts.first?.positions.max() == 120)
+        let unchangedAfterPreview = try await bridge.download("bracket.step")
+        precondition(unchangedAfterPreview == originalModel, "parameter preview mutated model")
+        do { try await engineeringA.applyParameters(parameters, updates: ["width": .number(999)]); fatalError("out of range parameter accepted") } catch {}
+        do { try await engineeringA.applyParameters(parameters, updates: ["width": .number(66)]); fatalError("failed model build accepted") } catch {}
+        let unchangedAfterFailure = try await bridge.download("bracket.step")
+        precondition(unchangedAfterFailure == originalModel, "failed parameter apply changed model")
+        try await engineeringA.applyParameters(parameters, updates: ["width": .number(120)])
+        let updatedCatalog = try await engineeringA.catalog()
+        precondition(updatedCatalog.parameterManifests.first?.manifest.parameters.first?.value == .number(120))
+        do { _ = try await engineeringA.previewParameters(parameters, updates: ["width": .number(100)]); fatalError("stale parameter manifest accepted") } catch {}
         let unbound = EngineeringService(bridge: bridge, sessionID: nil)
         let unboundRun = try await unbound.workflow(), unboundCatalog = try await unbound.catalog()
         precondition(unboundRun == nil && unboundCatalog.currentRun == nil && unboundCatalog.commits.isEmpty, "new conversation inherited another run")
@@ -222,5 +246,7 @@ import ReifyCloud
         print("PASS: project rename/delete, password validation, complete catalog and dynamic thinking, API key/remove credential, cloud defaults/favorites, custom providers validation preserves prior config, streamed OAuth/manual input, history list/switch, runtime model/thinking, confirm/editor/input/select answer protocol, independent reviewer and read-only startup")
         print("PASS: real desktop workflow compiler, library save/edit/adopt/delete, invalid transition preserves source, duplicate/stale edit rejection, builtin write boundary, conversation-scoped workflow and artifact catalogs, explicit null remains unbound, structured authority errors survive nonzero exit")
         print("PASS: cloud assembly parts, occurrence/solid identity, feature/datum preservation, revision-bound object reference, changed source preview rejection, anonymous STL retains anonymous identity")
+        print("PASS: revision-bound dimensions and section protocol, finite geometry facts, exact-revision check references, changed source inspection rejection")
+        print("PASS: parameter preview preserves saved model, apply uses conversation-bound model-build, range validation, failed build preserves original, stale manifest refusal")
     }
 }

@@ -30,6 +30,10 @@ import ReifyCloud
     @Published var engineeringError: String?
     @Published var selectedCommitID: String?
     @Published var selectedArtifact: EngineeringArtifact?
+    @Published var parameterBusy = false
+    @Published var parameterPreviewActive = false
+    @Published var parameterError: String?
+    var parameterOriginal: (Data?, String, EngineeringArtifact?)?
     @Published var newProjectPresented = false
     @Published var canvasMode = false
     @Published var sidebarOpen = true
@@ -286,10 +290,11 @@ import ReifyCloud
                 let next = try await bridge.previewStep(file.path)
                 guard current == generation else { return }
                 preview = next; previewName = file.name; selectedArtifact = nil
+                parameterPreviewActive = false; parameterOriginal = nil
             } else {
                 let data = try await bridge.download(file.path)
                 guard current == generation else { return }
-                if ext == "stl" { preview = data; previewName = file.name; selectedArtifact = nil }
+                if ext == "stl" { preview = data; previewName = file.name; selectedArtifact = nil; parameterPreviewActive = false; parameterOriginal = nil }
                 else { save(data, name: file.name) }
             }
             if ["step", "stp", "stl"].contains(ext) { canvasMode = true; filesOpen = false; saveLayout() }

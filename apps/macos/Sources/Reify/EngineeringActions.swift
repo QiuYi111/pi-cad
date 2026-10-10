@@ -4,6 +4,8 @@ import ReifyCloud
 extension AppModel {
     var engineering: EngineeringService { EngineeringService(bridge: bridge, sessionID: sessionID) }
     func clearEngineering() {
+        restoreParameterPreview()
+        parameterBusy = false; parameterError = nil
         engineeringSequence += 1
         workflowRun = nil; engineeringCatalog = nil; engineeringError = nil; engineeringLoading = false
         selectedCommitID = nil; selectedArtifact = nil
@@ -41,6 +43,7 @@ extension AppModel {
             guard current == generation && scope == sessionID else { return }
             guard ["step", "stp", "stl"].contains(ext) else { throw CloudError("此结果不是可预览的模型，请下载查看") }
             preview = mesh; previewName = (path as NSString).lastPathComponent; selectedArtifact = artifact
+            parameterPreviewActive = false; parameterOriginal = nil
             canvasMode = true; filesOpen = false; saveLayout()
         } catch { if current == generation && scope == sessionID { fail(error) } }
     }

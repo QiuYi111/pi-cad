@@ -57,9 +57,29 @@ import ReifyCloud
         app.draft = "图片需求验收"; await app.submitDraft()
         try await wait({ !app.generating }, "image turn completed")
         precondition(app.attachments.isEmpty && app.draft.isEmpty)
+        await app.refreshEngineering()
+        guard let artifact = app.engineeringArtifacts.first else { fatalError("Missing generated artifact") }
+        await app.showArtifact(artifact)
+        guard let manifest = app.selectedParameters else { fatalError("Missing selected model parameters") }
+        let savedPreview = app.preview
+        await app.previewParameters(manifest, values: ["width": .number(120)])
+        precondition(app.parameterPreviewActive && app.parameterError == nil && app.preview != savedPreview)
+        app.restoreParameterPreview()
+        precondition(!app.parameterPreviewActive && app.preview == savedPreview)
+        await app.previewParameters(manifest, values: ["width": .number(110)])
+        guard let savedFile = app.files.first(where: { $0.path == "bracket.step" }) else { fatalError("Missing saved model file") }
+        await app.showFile(savedFile)
+        precondition(!app.parameterPreviewActive && app.parameterOriginal == nil && app.selectedArtifact == nil, "manual file retained stale preview state")
+        await app.showArtifact(artifact)
+        await app.previewParameters(manifest, values: ["width": .number(110)])
+        await app.applyParameters(manifest, values: ["width": .number(66)])
+        precondition(!app.parameterPreviewActive && app.parameterError != nil && app.preview == savedPreview, "failed apply did not restore saved preview")
+        await app.applyParameters(manifest, values: ["width": .number(120)])
+        precondition(app.parameterError == nil && !app.parameterPreviewActive && app.selectedParameters?.manifest.parameters.first?.value == .number(120), "parameter apply did not refresh selected result")
         precondition(b != a)
         await app.shutdown()
         try await app.api.logout()
         print("PASS: compiled native AppModel over HTTP/WebSocket, actual GLM settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
+        print("PASS: generated artifact selects its parameter manifest, native parameter preview/restore, failed apply restores original preview, successful apply refreshes model and values")
     }
 }

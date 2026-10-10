@@ -13,14 +13,38 @@ struct ModelPreview: View {
     @State private var isolated = ""
     @State private var camera = "透视"
     @State private var reset = 0
+    @State private var inspection: GeometryInspection?
+    @State private var inspecting = false
+    @State private var inspectionError: String?
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 Button("复位") { camera = "透视"; reset += 1 }.accessibilityIdentifier("model.reset")
                 Picker("视角", selection: $camera) { ForEach(["透视", "正面", "侧面", "顶面"], id: \.self) { Text($0) } }.frame(width: 125).accessibilityIdentifier("model.camera")
                 Spacer()
+                if let model, model.sha256 != nil, model.source != nil, !app.parameterPreviewActive {
+                    Button(inspecting ? "检查中…" : "测量尺寸") { Task { await inspect(model) } }.disabled(inspecting).accessibilityIdentifier("model.measure")
+                    Menu("截面") {
+                        ForEach(["x", "y", "z"], id: \.self) { axis in
+                            Button(axis.uppercased()) { Task { await inspect(model, axis: axis) } }
+                        }
+                    }.disabled(inspecting).accessibilityIdentifier("model.section")
+                }
                 Text("拖动旋转 · 滚动缩放").foregroundStyle(ReifyDesign.muted)
             }.font(ReifyDesign.font(10)).buttonStyle(ReifyButtonStyle()).padding(12).background(ReifyDesign.paper)
+            if let inspection {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if let bbox = inspection.bbox { Text("X \(format(bbox.x)) · Y \(format(bbox.y)) · Z \(format(bbox.z)) mm · \(inspection.solidCount ?? 0) 个实体") }
+                        else { Text("\((inspection.axis ?? "").uppercased()) 截面 · 位置 \(format(inspection.position ?? 0)) mm · 面积 \(format(inspection.totalArea ?? 0)) mm²") }
+                        Text("\(inspection.source) · \(inspection.sha256.prefix(12))").font(ReifyDesign.font(9)).foregroundStyle(ReifyDesign.muted)
+                    }
+                    Spacer()
+                    Button("引用检查") { app.draft += (app.draft.isEmpty ? "" : "\n") + inspection.reference; app.canvasMode = false; app.saveConversationDraft() }.accessibilityIdentifier("model.reference-check")
+                    Button("只读检查") { app.draft = "请只读检查，不修改模型。\n" + inspection.reference; app.canvasMode = false; app.saveConversationDraft() }.accessibilityIdentifier("model.ask-check")
+                }.font(ReifyDesign.font(10)).buttonStyle(ReifyButtonStyle()).padding(12).background(ReifyDesign.paper)
+            }
+            if let inspectionError { Text(inspectionError).foregroundStyle(.red).padding(10) }
             if let scene, let model {
                 HStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 10) {
@@ -43,7 +67,7 @@ struct ModelPreview: View {
                         }
                         if let item = model.assembly.first(where: { $0.id == selected }) {
                             Text("已选：\(item.name)").font(ReifyDesign.font(10))
-                            Button("让 Agent 修改") { app.draft += (app.draft.isEmpty ? "" : "\n") + model.reference(item); app.canvasMode = false; app.saveConversationDraft() }.buttonStyle(ReifyButtonStyle()).accessibilityIdentifier("assembly.reference")
+                            Button("让 Agent 修改") { app.draft += (app.draft.isEmpty ? "" : "\n") + model.reference(item); app.canvasMode = false; app.saveConversationDraft() }.buttonStyle(ReifyButtonStyle()).disabled(app.parameterPreviewActive).accessibilityIdentifier("assembly.reference")
                             Text(model.identityBound == true ? "身份已绑定" : "身份未绑定").font(ReifyDesign.font(9)).foregroundStyle(ReifyDesign.muted)
                         }
                     }.padding(12).frame(width: 210).background(ReifyDesign.paper)
@@ -57,8 +81,20 @@ struct ModelPreview: View {
                 let mesh = try MeshModel.read(data)
                 let next = try ModelScene.make(mesh)
                 model = mesh; scene = next; error = nil; selected = ""; hidden = []; isolated = ""; camera = "透视"; reset += 1
+                inspection = nil; inspectionError = nil; inspecting = false
             } catch { model = nil; scene = nil; self.error = error.localizedDescription }
         }
+    }
+    private func format(_ value: Double) -> String { String(format: "%.3f", value) }
+    private func inspect(_ mesh: MeshModel, axis: String? = nil) async {
+        guard let source = app.selectedArtifact?.path ?? mesh.source, let sha = mesh.sha256, !inspecting else { return }
+        let revision = data, generation = app.generation
+        inspecting = true; inspectionError = nil
+        do {
+            let result = try await app.bridge.inspectGeometry(source, expectedSHA: sha, axis: axis)
+            guard generation == app.generation, app.preview == revision else { return }
+            inspection = result; inspecting = false
+        } catch { if generation == app.generation && app.preview == revision { inspectionError = error.localizedDescription; inspecting = false } }
     }
 }
 

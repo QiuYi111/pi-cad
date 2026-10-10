@@ -294,7 +294,8 @@ import CryptoKit
     public func relativeProjectPath(_ path: String) throws -> String {
         let relative: String
         if path.hasPrefix("/") {
-            guard let root = projectRoot, path.hasPrefix(root + "/") else { throw CloudError("文件不属于当前项目") }
+            let roots = [projectRoot, projectID.isEmpty ? nil : "/workspace/state/\(projectID)"].compactMap { $0 }
+            guard let root = roots.first(where: { path.hasPrefix($0 + "/") }) else { throw CloudError("文件不属于当前项目") }
             relative = String(path.dropFirst(root.count + 1))
         } else { relative = path }
         _ = try absolute(relative)

@@ -98,7 +98,7 @@ public struct EngineeringCatalog: Codable {
     public let currentRun: Run?
     public let commits: [EngineeringCommit]
     public let simulationRuns: [JSONValue]
-    public let parameterManifests: [JSONValue]
+    public let parameterManifests: [StoredParameterManifest]
 }
 
 public enum JSONValue: Codable, Equatable {
@@ -121,6 +121,20 @@ public enum JSONValue: Codable, Equatable {
         case .string(let item): try value.encode(item)
         case .array(let item): try value.encode(item)
         case .object(let item): try value.encode(item)
+        }
+    }
+    public subscript(_ key: String) -> JSONValue? { if case .object(let object) = self { return object[key] }; return nil }
+    public var boolValue: Bool? { if case .bool(let value) = self { return value }; return nil }
+    public var arrayValue: [JSONValue]? { if case .array(let value) = self { return value }; return nil }
+    public var stringValue: String? { if case .string(let value) = self { return value }; return nil }
+    public var foundationValue: Any {
+        switch self {
+        case .null: return NSNull()
+        case .bool(let value): return value
+        case .number(let value): return value
+        case .string(let value): return value
+        case .array(let value): return value.map(\.foundationValue)
+        case .object(let value): return value.mapValues(\.foundationValue)
         }
     }
 }
