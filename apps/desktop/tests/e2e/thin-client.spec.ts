@@ -23,10 +23,8 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     await writeFile(join(evidenceDir, "result.json"), JSON.stringify({ steps }, null, 2));
   };
   const env = { ...process.env } as Record<string, string>;
-  for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) delete env[key];
-  env.NO_PROXY = "*";
   if (!credentials.registered) {
-    const web = await chromium.launch({ channel: "msedge", headless: true, args: ["--no-proxy-server"] });
+    const web = await chromium.launch({ channel: "msedge", headless: true });
     try {
       const page = await web.newPage();
       await page.goto(`${credentials.baseUrl}/invite/${credentials.inviteToken}`);
@@ -44,7 +42,7 @@ test("installed thin client: first login, model setup, CAD save and restart", as
   let output = "";
   const launch = async () => {
     output = "";
-    child = spawn(executable!, [`--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-proxy-server"], { env, stdio: ["ignore", "pipe", "pipe"] });
+    child = spawn(executable!, [`--user-data-dir=${profile}`, "--remote-debugging-port=0"], { env, stdio: ["ignore", "pipe", "pipe"] });
     const collect = (data: Buffer) => { output = (output + data.toString()).slice(-20_000); };
     child.stdout?.on("data", collect); child.stderr?.on("data", collect);
     await expect.poll(() => /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//.exec(output)?.[1], { timeout: 60_000 }).toBeTruthy();
