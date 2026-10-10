@@ -66,6 +66,7 @@ export function Workbench({ settings, prime, cloudWorkspaceState, cloudProjectNa
   const [canvasContent, setCanvasContent] = useState<"concept" | "artifact">("artifact");
   const canvasContentRef = useRef(canvasContent);
   const [uploadedConcepts, setUploadedConcepts] = useState<ConceptImage[]>([]);
+  const [artifactRestoreRevision, setArtifactRestoreRevision] = useState(0);
   const [openedMesh, setOpenedMesh] = useState<MeshDocument | null>(null);
   const openedMeshRef = useRef<MeshDocument | null>(null);
   const [openStepState, setOpenStepState] = useState<"idle" | "loading">("idle");
@@ -179,9 +180,13 @@ export function Workbench({ settings, prime, cloudWorkspaceState, cloudProjectNa
     let alive = true;
     void window.piCad.viewer.loadStep(saved).then((mesh) => {
       if (alive) setOpenedMesh(mesh);
-    }).catch(() => localStorage.removeItem(artifactStateKey));
+    }).catch(() => {
+      if (!alive) return;
+      localStorage.removeItem(artifactStateKey);
+      setArtifactRestoreRevision((value) => value + 1);
+    });
     return () => { alive = false; };
-  }, [artifactStateKey]);
+  }, [artifactStateKey, cloudWorkspaceState]);
   useEffect(() => {
     if (currentArtifact || !projectKey || localStorage.getItem(artifactStateKey)) return;
     let alive = true;
@@ -198,7 +203,7 @@ export function Workbench({ settings, prime, cloudWorkspaceState, cloudProjectNa
       if (savedMode !== "conversation") setMode("canvas");
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [artifactStateKey, currentArtifact, projectKey, cloudWorkspaceState, prime.status.sessionId]);
+  }, [artifactStateKey, currentArtifact, projectKey, cloudWorkspaceState, prime.status.sessionId, artifactRestoreRevision]);
   const switchProject = async () => {
     const path = await window.piCad.settings.chooseProject();
     if (path) await activateProject(path);

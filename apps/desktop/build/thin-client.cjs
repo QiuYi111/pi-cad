@@ -5,7 +5,7 @@ module.exports = {
   ...base,
   directories: { ...base.directories, output: "release-thin" },
   extraMetadata: {
-    version: "0.1.3",
+    version: "0.1.4",
     reifyClientFlavor: "thin",
     reifySourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   },

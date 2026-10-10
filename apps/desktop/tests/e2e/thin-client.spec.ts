@@ -156,6 +156,10 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     await expect.poll(() => page.evaluate(async () => (await (window as any).piCad.cloud.status()).signedIn), { timeout: 60_000 }).toBe(true);
     expect((await page.evaluate(() => (window as any).piCad.settings.get())).cloud.projectId).toBe(result.settings.cloud.projectId);
     await record("encrypted-login-and-project-survive-restart");
+    await expect(page.locator(".current-version strong")).toHaveText("thin-e2e-plate.step", { timeout: 60_000 });
+    await expect(page.locator(".viewer-file-identity").first()).toContainText("thin-e2e-plate.step", { timeout: 60_000 });
+    if (await page.locator(".workbench-page").evaluate(el => el.classList.contains("mode-canvas"))) await page.keyboard.press("Control+Backslash");
+    await expect(page.locator(".workbench-page")).toHaveClass(/mode-conversation/);
     await page.getByTitle(`恢复对话：${savedSession.title}`, { exact: true }).first().click();
     await expect.poll(() => page.evaluate(async () => {
       try { return (await (window as any).piCad.runtime.restore()).status.sessionId; }
@@ -167,7 +171,7 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     await record("saved-model-survives-restart");
     await page.evaluate(() => (window as any).piCad.runtime.stop());
     await page.evaluate(() => { const w = window as any; w.__e2eStatus = null; w.piCad.runtime.onStatus((status: any) => { w.__e2eStatus = status; }); });
-    if (await page.getByLabel("展开对话；拖动可移动输入框", { exact: true }).isVisible()) await page.getByLabel("展开对话；拖动可移动输入框", { exact: true }).click();
+    if (await page.locator(".workbench-page").evaluate(el => el.classList.contains("mode-canvas"))) await page.keyboard.press("Control+Backslash");
     const restartedComposer = page.getByPlaceholder("Ask anything about the design");
     await restartedComposer.fill("只用一次 ipython 调用 import cad; print(await cad.workflow.current())。不要修改文件，简短报告状态。");
     await restartedComposer.press("Enter");
