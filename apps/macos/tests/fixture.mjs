@@ -1,5 +1,6 @@
 // A disposable cloud protocol server. No production credentials or model calls.
 import http from 'node:http';
+import {tracesFixture} from './traces-fixture.mjs';
 import {rebuildFixture} from './rebuild-fixture.mjs';
 import {publishFixture} from './publish-fixture.mjs';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -49,6 +50,7 @@ files.set('history/bracket-80.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-I
 files.set('engineering-report.json',Buffer.from('{"checks":[]}'));
 const publications=publishFixture(fixtureHome,fixtureRepo,files);
 const rebuilds=rebuildFixture(fixtureHome,fixtureRepo,files,sha);
+const traces=tracesFixture(fixtureHome,fixtureRepo);
 function parameterManifest(){const manifest={schema:1,modelId:'bracket',source:{path:'bracket.py',sha256:sha(files.get('bracket.py')),entrypoint:'build'},output:{path:'bracket.step',sha256:sha(files.get('bracket.step'))},parameters:[{id:'width',type:'number',default:80,value:modelWidth,min:20,max:160,step:1,unit:'mm',label:'宽度'}]};const data=Buffer.from(JSON.stringify(manifest));files.set('bracket.parameters.json',data);return {path:'bracket.parameters.json',sha256:sha(data),manifest}}
 const sessions = new Map();
 const generatedSessions = new Set();
@@ -67,6 +69,7 @@ const server = http.createServer(async (req, res) => {
   let b = {}; try { b = text ? JSON.parse(text) : {}; } catch { return respond(res,400,{message:'请求格式错误'}); }
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
+  if (path === '/__test/trace-mode') { traces.mode=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/publish-mode') { if(b.projectId)publications.prepare('/workspace/state/'+b.projectId);publications.mode=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/rebuild-mode') { rebuilds.mode=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/settings-failure') { settingsFailure=b.mode;return respond(res,200,{ok:true}); }
@@ -238,6 +241,10 @@ bridge.on('connection',ws=>{
     }
     const r=JSON.parse(data.toString());
     if(r.type==='spawn') {
+      if(r.args.some(a=>a.includes('REIFY_DESKTOP_TRACES'))) {
+        const child=traces.execute(r.args,null,project,histories,audit,{event:line=>frame(r.ch,line),stderr:bytes=>frame(r.ch+1,bytes),exit:code=>{releaseProcesses.delete(r.ch);send({type:'exit',ch:r.ch,code})}});
+        releaseProcesses.set(r.ch,child);send({type:'spawned',ch:r.ch,spawnId:randomUUID(),pid:child.pid});return;
+      }
       if(r.args.some(a=>a.includes('REIFY_DESKTOP_RELEASE'))) {
         const root=join(fixtureHome,'release-projects',project.split('/').at(-1));mkdirSync(root,{recursive:true});
         for(const [path,bytes] of files){if(path.startsWith('.pi-cad/releases/'))continue;const target=join(root,path);mkdirSync(join(target,'..'),{recursive:true});writeFileSync(target,bytes);}
@@ -271,6 +278,7 @@ bridge.on('connection',ws=>{
       stats.attaches++;activeSpawn=old;activeSpawn.socket=ws;project=old.project;rows=old.rows;currentSession=old.sessionID??'fixture-session';histories=old.histories??histories;selectedModel=old.model??selectedModel;thinkingLevel=old.thinking??thinkingLevel;
       for(const bytes of old.replay)frame(r.ch,bytes);
     } else if(r.type==='exec') {
+      if(r.args.some(a=>a.includes('REIFY_DESKTOP_TRACES'))) { traces.execute(r.args,r.input,project,histories,audit,{exit:(code,stdout,stderr)=>send({type:'exec_result',ch:r.ch,code,stdout,stderr})});return; }
       const result=value=>send({type:'exec_result',ch:r.ch,code:0,stderr:'',stdout:typeof value==='string'?value:JSON.stringify(value)});
       if(r.args.some(a=>a.includes('REIFY_DESKTOP_PUBLISH'))){const q=JSON.parse(r.input);if(!generatedSessions.has(project+'/'+q.sessionId))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'Conversation has no workflow'});const commit={id:'commit-'+currentSession,sourceRevision:publications.revision(project),workflowHash:'hash-'+currentSession};const catalog={projectId:project,commits:[commit],parameterManifests:[]};publications.execute(r.args,r.input,project,catalog,audit,value=>send({type:'exec_result',ch:r.ch,...value}));return;}
       if(r.args.some(a=>a.includes('REIFY_DESKTOP_REBUILD'))){const q=JSON.parse(r.input);if(!generatedSessions.has(project+'/'+q.sessionId))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'Conversation has no workflow'});rebuilds.execute(r.args,r.input,project,audit,value=>send({type:'exec_result',ch:r.ch,...value}));return;}

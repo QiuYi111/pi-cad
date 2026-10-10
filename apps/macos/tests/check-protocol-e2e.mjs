@@ -55,3 +55,19 @@ assert(publications.some(x=>x.mode==='normal'&&x.tag==='reify/push-failed'&&x.co
 assert(publications.some(x=>x.mode==='manifest-changed'&&x.code!==0&&!x.remoteRefs.includes('refs/tags/reify/changed-manifest')));
 assert(!publications.some(x=>['reify/disabled','reify/wrong-server','reify/wrong-remote','reify/corrupt-local','reify/read-only','reify/unbound','reify/revoked'].includes(x.tag)));
 console.log('PASS: real Git remote receives only permitted version-bound tags; conflicts are untouched; failed push is retryable; source/HEAD/index/untracked file and local package survive all publication outcomes');
+
+const traces=audit.filter(x=>x.type==='trace');
+const ratings=traces.filter(x=>x.op==='rate');
+assert.equal(ratings.length,2,'invalid/read-only/missing-current rating reached the original writer');
+assert.equal(ratings[0].paths.length,2);assert.equal(ratings[1].paths.length,1);
+assert(ratings.every(x=>x.code===0&&x.paths.every(p=>p.startsWith('/workspace/projects/')&&p.includes('/.prime-sessions/'))));
+assert(ratings[0].ratings.every(x=>x.quality===2&&x.difficulty===5&&x.feedback==='评分原文保留'));
+assert(ratings[1].ratings.some(x=>x.feedback==='只评分当前对话'&&x.quality===4&&x.difficulty===3));
+assert.equal(traces.filter(x=>x.op==='read'&&x.code!==0).length,2,'symlink/cross-project readers did not refuse');
+assert(traces.some(x=>x.op==='distill'&&x.mode==='normal'&&x.code===0));
+assert.equal(traces.filter(x=>x.op==='validate'&&x.mode==='normal'&&x.code===0).length,2);
+assert(traces.some(x=>x.op==='validate'&&x.mode==='replay-failure'&&x.code!==0));
+const prime=traces.flatMap(x=>x.prime);
+assert(prime.length>0&&prime.every(x=>x.provider==='zai'&&x.model==='glm-5.3-flash'&&x.thinking==='high'),'experience jobs lost the selected GLM settings');
+assert(traces.every(x=>['list','read','rate','distill','validate'].includes(x.op)),'cloud adopted candidate rules');
+console.log('PASS: independent server record confirms exact multi/current ratings, refused readers, original distillation and replay failure/retry, selected zai/GLM/high environment and no cloud adoption (Prime replies remain synthetic)');

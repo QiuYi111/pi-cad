@@ -17,6 +17,7 @@ struct ParameterDifference: Identifiable {
 extension AppModel {
     var engineering: EngineeringService { EngineeringService(bridge: bridge, sessionID: sessionID) }
     func clearEngineering(preserveViewer: Bool = false) {
+        clearTraces()
         restoreParameterPreview()
         parameterBusy = false; parameterError = nil
         engineeringSequence += 1; previewSequence += 1

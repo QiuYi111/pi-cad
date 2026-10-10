@@ -28,6 +28,7 @@ struct RootView: View {
                         .padding(12).background(ReifyDesign.panel)
                 }
                 if app.settingsPresented { SettingsView() }
+                else if app.tracesPresented { TracesView() }
                 else if app.workflowsPresented { WorkflowLibraryView() }
                 else if projectsPage || app.selected == nil { ProjectsView(onOpen: { projectsPage = false }) }
                 else { WorkbenchView() }
@@ -37,6 +38,7 @@ struct RootView: View {
         .background(ReifyDesign.paper).preferredColorScheme(.light)
         .onReceive(NotificationCenter.default.publisher(for: .reifyShowProjects)) { _ in projectsPage = true }
         .onChange(of: app.connected) { _, connected in if connected { projectsPage = false } }
+        .sheet(isPresented: $app.currentRatingPresented) { CurrentTraceRatingView() }
         .sheet(item: $app.approvalForm) { commit in HumanApprovalForm(commit: commit) }
         .sheet(isPresented: Binding(get: { app.evidence != nil }, set: { if !$0 { app.evidence = nil } })) { EvidenceView() }
         .sheet(isPresented: $app.newProjectPresented) { NewProjectView() }
@@ -51,10 +53,11 @@ struct AppHeader: View {
         HStack {
             ReifyWordmark().frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 4) {
-                nav("工作台", active: !app.settingsPresented && !app.workflowsPresented && !projectsPage && app.selected != nil, id: "nav.workbench") { app.settingsPresented = false; app.workflowsPresented = false; projectsPage = false }
-                nav("项目", active: !app.settingsPresented && !app.workflowsPresented && (projectsPage || app.selected == nil), id: "nav.projects") { app.settingsPresented = false; app.workflowsPresented = false; projectsPage = true }
-                nav("工作流", active: app.workflowsPresented && !app.settingsPresented, id: "nav.workflows") { app.settingsPresented = false; app.workflowsPresented = true }
-                nav("设置", active: app.settingsPresented, id: "nav.settings") { app.workflowsPresented = false; app.settingsPresented = true }
+                nav("工作台", active: !app.settingsPresented && !app.workflowsPresented && !app.tracesPresented && !projectsPage && app.selected != nil, id: "nav.workbench") { app.settingsPresented = false; app.workflowsPresented = false; app.tracesPresented = false; projectsPage = false }
+                nav("项目", active: !app.settingsPresented && !app.workflowsPresented && !app.tracesPresented && (projectsPage || app.selected == nil), id: "nav.projects") { app.settingsPresented = false; app.workflowsPresented = false; app.tracesPresented = false; projectsPage = true }
+                nav("工作流", active: app.workflowsPresented && !app.settingsPresented && !app.tracesPresented, id: "nav.workflows") { app.settingsPresented = false; app.tracesPresented = false; app.workflowsPresented = true }
+                nav("记录", active: app.tracesPresented && !app.settingsPresented, id: "nav.traces") { app.settingsPresented = false; app.workflowsPresented = false; app.tracesPresented = true }
+                nav("设置", active: app.settingsPresented, id: "nav.settings") { app.workflowsPresented = false; app.tracesPresented = false; app.settingsPresented = true }
             }
             HStack {
                 Spacer()
@@ -182,6 +185,7 @@ struct WorkbenchView: View {
     var body: some View {
         VStack(spacing: 0) {
             WorkflowRailView()
+            HStack { Spacer(); Button("给当前对话评分") { app.traceJobError = nil; app.traceRating = nil; app.currentRatingPresented = true }.buttonStyle(.plain).disabled(!app.traceWriteAllowed || app.traceWorking != nil).accessibilityIdentifier("chat.rate") }.padding(.horizontal, 18).padding(.vertical, 6)
             GeometryReader { geometry in
                 ZStack {
                     CanvasView().opacity(app.canvasMode ? 1 : 0).allowsHitTesting(app.canvasMode).accessibilityHidden(!app.canvasMode)

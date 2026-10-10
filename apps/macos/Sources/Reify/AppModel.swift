@@ -28,6 +28,26 @@ import ReifyCloud
     @Published var previewName = ""
     @Published var uiRequest: [String: Any]?
     @Published var settingsPresented = false
+    @Published var tracesPresented = false
+    @Published var currentRatingPresented = false
+    @Published var traceItems: [TraceSummary] = []
+    @Published var traceSelection: Set<String> = []
+    @Published var activeTrace: TraceSummary?
+    @Published var traceEntries: [TraceEntry] = []
+    @Published var traceQuery = ""
+    @Published var traceLoading = false
+    @Published var traceReading = false
+    @Published var traceError: String?
+    @Published var traceJobError: String?
+    @Published var traceWorking: String?
+    @Published var traceRating: TraceRating?
+    @Published var traceDistillation: TraceDistillation?
+    @Published var traceValidation: JSONValue?
+    var traceProcess: RemoteProcess?
+    var traceTimeout: Task<Void, Never>?
+    var traceListSequence = 0
+    var traceReadSequence = 0
+    var traceJobSequence = 0
     @Published var workflowsPresented = false
     @Published var workflowRun: WorkflowRun?
     @Published var engineeringCatalog: EngineeringCatalog?
@@ -166,7 +186,7 @@ import ReifyCloud
             bridge.close(); eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
             projects = []; messages = []; files = []; preview = nil; previewName = ""
             conversations = []; sessionID = nil; draft = ""; attachments = []; pending = []; notes = []; queueSuspended = false
-            catalog = ModelCatalog(); modelsConfig = ""; settingsPresented = false; workflowsPresented = false; uiRequest = nil
+            catalog = ModelCatalog(); modelsConfig = ""; settingsPresented = false; workflowsPresented = false; tracesPresented = false; uiRequest = nil
             busy = false; generating = false; reclaimAt = nil; extensionNotice = nil; extensionStatuses = [:]
             clearEngineering()
             error = "登录已失效，请重新登录。"; status = "登录失效"
@@ -401,7 +421,7 @@ import ReifyCloud
     }
     func stopWorkspace() async {
         cancelReconnect()
-        generation += 1; busy = true
+        generation += 1; clearTraces(); busy = true
         defer { busy = false }
         do {
             _ = try await api.workspace("stop"); await bridge.stop(api: api)
@@ -415,6 +435,7 @@ import ReifyCloud
         cancelReconnect()
         saveLayout()
         generation += 1
+        clearTraces()
         await bridge.stop(api: api); eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
         do {
             try await api.logout(); user = nil; selected = nil; projects = []; messages = []; files = []
@@ -422,13 +443,14 @@ import ReifyCloud
             conversations = []; sessionID = nil; catalog = ModelCatalog(); modelsConfig = ""; settingsPresented = false
             oauthProvider = nil; oauthProcess = nil; oauthInput = nil; oauthURL = nil; oauthMessage = ""
             attachments = []; attachmentsByConversation = [:]; pending = []; notes = []
-            clearEngineering(); workflowsPresented = false
+            clearEngineering(); workflowsPresented = false; tracesPresented = false
         } catch { fail(error) }
     }
     func shutdown() async {
         cancelReconnect()
         saveLayout()
         generation += 1
+        clearTraces()
         eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
         await bridge.stop(api: api)
     }

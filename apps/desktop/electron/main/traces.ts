@@ -31,9 +31,9 @@ export class TraceStore {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
     if (!projectPath) return [];
     const sessionRoot = `${projectPath}/.prime-sessions`;
-    const script = `const fs=require('fs'),p=require('path'),root=process.argv[1];function walk(d,r=[]){if(!fs.existsSync(d))return r;for(const e of fs.readdirSync(d,{withFileTypes:true})){const q=p.join(d,e.name);if(e.isDirectory())walk(q,r);else if(e.name.endsWith('.jsonl'))r.push(q)}return r}for(const q of walk(root)){const raw=fs.readFileSync(q,'utf8').trim().split(/\\r?\\n/).filter(Boolean);let model='',tools=0,tokens=0,title=p.basename(q,'.jsonl');for(const l of raw){try{const x=JSON.parse(l),m=x.message;if((x.type==='session_info'||x.type==='session')&&x.name)title=x.name;if(m?.role==='toolResult')tools++;if(m?.role==='assistant'){model||=m.provider&&m.model?m.provider+'/'+m.model:'';tokens+=(m.usage?.input||0)+(m.usage?.output||0)}}catch{}}const s=fs.statSync(q);console.log(JSON.stringify({id:p.basename(q,'.jsonl'),path:q,title,updatedAt:s.mtimeMs,model,turns:raw.length,toolCalls:tools,tokens}))}`;
+    const script = `const fs=require('fs'),p=require('path'),root=process.argv[1];function walk(d,r=[],depth=0){if(depth>8||!fs.existsSync(d))return r;for(const e of fs.readdirSync(d,{withFileTypes:true})){const q=p.join(d,e.name);if(e.isSymbolicLink())continue;if(e.isDirectory())walk(q,r,depth+1);else if(e.isFile()&&e.name.endsWith('.jsonl'))r.push(q)}return r}for(const q of walk(root)){const raw=fs.readFileSync(q,'utf8').trim().split(/\\r?\\n/).filter(Boolean);let model='',tools=0,tokens=0,title=p.basename(q,'.jsonl');for(const l of raw){try{const x=JSON.parse(l),m=x.message;if((x.type==='session_info'||x.type==='session')&&x.name)title=x.name;if(m?.role==='toolResult')tools++;if(m?.role==='assistant'){model||=m.provider&&m.model?m.provider+'/'+m.model:'';tokens+=(m.usage?.input||0)+(m.usage?.output||0)}}catch{}}const s=fs.statSync(q);console.log(JSON.stringify({id:p.basename(q,'.jsonl'),path:q,canonicalPath:fs.realpathSync(q),title,updatedAt:s.mtimeMs,model,turns:raw.length,toolCalls:tools,tokens}))}`;
     const { stdout } = await this.bridge.exec([await this.bridge.commandPath("node"), "-e", script, sessionRoot], { timeout: 60_000 });
-    const traces = stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as TraceSummary);
+    const traces = stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line) as TraceSummary & { canonicalPath?: string });
     const home = await this.bridge.homeDirectory();
     const experienceRoot = process.env.PI_CAD_EXPERIENCE_ROOT || `${home}/.cad/transcripts`;
     let evaluations: Array<{ session_path: string; quality: number | null; difficulty: number | null; feedback?: string | null }> = [];
@@ -43,8 +43,9 @@ export class TraceStore {
     } catch {}
     const bySession = new Map(evaluations.filter((item) => item.quality !== null && item.difficulty !== null).map((item) => [item.session_path, item]));
     return traces.map((trace) => {
-      const rating = bySession.get(trace.path);
-      return rating ? { ...trace, evaluation: { quality: rating.quality!, difficulty: rating.difficulty!, feedback: rating.feedback } } : trace;
+      const rating = bySession.get(trace.canonicalPath || trace.path) || bySession.get(trace.path);
+      const { canonicalPath: _canonicalPath, ...summary } = trace;
+      return rating ? { ...summary, evaluation: { quality: rating.quality!, difficulty: rating.difficulty!, feedback: rating.feedback } } : summary;
     }).sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
