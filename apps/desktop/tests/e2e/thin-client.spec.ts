@@ -94,7 +94,9 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     const provider = catalog.providers.find((p: any) => p.id === "zai");
     expect(provider).toBeTruthy();
     const model = provider.models.find((m: any) => m.id === "glm-5.3-flash") ?? provider.models.find((m: any) => /flash/.test(m.id)) ?? provider.models[0];
-    const auth = JSON.parse(await readFile("//wsl.localhost/Ubuntu/home/jingyi/.prime/agent/auth.json", "utf8"));
+    const modelAuthPath = process.env.REIFY_E2E_MODEL_AUTH ?? credentials.modelAuthPath;
+    expect(modelAuthPath, "Set REIFY_E2E_MODEL_AUTH or credentials.modelAuthPath").toBeTruthy();
+    const auth = JSON.parse(await readFile(modelAuthPath, "utf8"));
     if (await page.getByRole("button", { name: "进入 Reify" }).isVisible()) {
       await page.getByLabel("提供商").selectOption("zai");
       await page.getByPlaceholder("API key").fill(auth.zai.key);
