@@ -85,6 +85,8 @@ test("installed thin client: first login, model setup, CAD save and restart", as
         await page.getByRole("button", { name: "新建", exact: true }).click();
       }
       await page.locator("li").filter({ hasText: projectName }).getByRole("button", { name: "打开", exact: true }).click();
+    } else if ((await page.evaluate(() => (window as any).piCad.cloud.status())).workspace.state === "stopped") {
+      await page.evaluate(() => (window as any).piCad.cloud.workspaceStart());
     }
     await expect.poll(() => page.evaluate(async () => (await (window as any).piCad.cloud.status()).workspace.state), { timeout: 300_000, intervals: [2000] }).toBe("running");
     await record("cloud-workspace-running");
@@ -102,7 +104,8 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     } else {
       await page.evaluate(({ key }) => (window as any).piCad.auth.setApiKey("zai", key), { key: auth.zai.key });
     }
-    await page.evaluate(({ model }) => (window as any).piCad.settings.update({ provider: "zai", model, thinking: "off" }), { model: model.id });
+    await page.getByLabel("Model", { exact: true }).selectOption(model.id);
+    await page.getByLabel("Effort", { exact: true }).selectOption("low");
     await record("model-credentials-configured", { provider: "zai", model: model.id });
     await page.evaluate(() => {
       const w = window as any; w.__e2eEvents = []; w.__e2eStatus = null;
@@ -114,7 +117,8 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     const prompt = "这是真实端到端测试。请用 CAD 工作流创建并保存一个 40×20×4 mm 的矩形板，中心有一个直径 6 mm 的通孔，命名为 thin-e2e-plate。保存可编辑 FreeCAD 零件和 STEP 文件，启用 DFM 检查，运行几何检查并显示模型。请直接建模，不需要问我。完成后说明实际文件路径与尺寸。";
     const composer = page.getByPlaceholder("Ask anything about the design");
     await composer.fill(prompt); await composer.press("Enter");
-    await expect.poll(() => page.evaluate(() => (window as any).__e2eEvents.some((e: any) => e.type === "agent_end")), { timeout: 600_000, intervals: [3000] }).toBe(true);
+    await page.waitForFunction(() => ["completed", "failed", "aborted", "stalled"].includes((window as any).__e2eStatus?.phase), undefined, { timeout: 600_000 });
+    expect(await page.evaluate(() => (window as any).__e2eStatus?.phase)).toBe("completed");
     const result = await page.evaluate(async () => ({ restored: await (window as any).piCad.runtime.restore(), catalog: await (window as any).piCad.viewer.catalog(), settings: await (window as any).piCad.settings.get(), eventTypes: (window as any).__e2eEvents.map((e: any) => e.type) }));
     await writeFile(join(evidenceDir, "model-result.json"), JSON.stringify(result, null, 2), { mode: 0o600 });
     expect(result.eventTypes).toContain("tool_execution_start");
@@ -151,6 +155,7 @@ test("installed thin client: first login, model setup, CAD save and restart", as
       const alerts = await page.locator('[role="alert"], .cloud-error').allInnerTexts().catch(() => []);
       const runtime = await page.evaluate(() => ({ events: (window as any).__e2eEvents, status: (window as any).__e2eStatus })).catch(() => null);
       await record("failed", { message: String(error).split(credentials.password).join("***"), alerts, runtime });
+      await page.evaluate(() => (window as any).piCad.runtime.stop()).catch(() => {});
     }
     throw error;
   } finally { await close(); }
