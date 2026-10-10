@@ -34,7 +34,7 @@ export class SettingsStore {
   readonly path: string;
   private mutation: Promise<void> = Promise.resolve();
 
-  constructor(path = join(app.getPath("userData"), "settings.json")) {
+  constructor(path = join(app.getPath("userData"), "settings.json"), private readonly cloudOnly = false) {
     this.path = path;
   }
 
@@ -44,13 +44,14 @@ export class SettingsStore {
       parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<AppSettings>;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      return { ...defaults(), mode: newInstallMode() };
+      return { ...defaults(), mode: this.cloudOnly ? "cloud" : newInstallMode(), ...(this.cloudOnly ? { cloudOnly: true } : {}) };
     }
     // A file without a mode was written before cloud mode existed: that install stays local.
     return {
       ...defaults(),
       ...parsed,
-      mode: normalizeMode(parsed.mode),
+      mode: this.cloudOnly ? "cloud" : normalizeMode(parsed.mode),
+      cloudOnly: this.cloudOnly || undefined,
       reviewer: { ...defaults().reviewer, ...parsed.reviewer },
       remotePublish: { ...defaults().remotePublish, ...parsed.remotePublish },
       cloud: { ...defaults().cloud!, ...parsed.cloud },
@@ -63,7 +64,8 @@ export class SettingsStore {
       const next: AppSettings = {
         ...current,
         ...patch,
-        mode: patch.mode === undefined ? current.mode : normalizeMode(patch.mode),
+        mode: this.cloudOnly ? "cloud" : patch.mode === undefined ? current.mode : normalizeMode(patch.mode),
+        cloudOnly: this.cloudOnly || undefined,
         reviewer: patch.reviewer ? { ...current.reviewer, ...patch.reviewer } : current.reviewer,
         remotePublish: patch.remotePublish ? { ...current.remotePublish, ...patch.remotePublish } : current.remotePublish,
         cloud: patch.cloud ? { ...current.cloud!, ...patch.cloud } : current.cloud,

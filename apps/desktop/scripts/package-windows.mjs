@@ -4,6 +4,8 @@ import { signExecutors } from "./sign-executors.mjs";
 import { forwardWslInteropEnvironment } from "./wsl-interop-environment.mjs";
 
 const builder = "./node_modules/electron-builder/out/cli/cli.js";
+const thin = process.argv.includes("--thin");
+const buildArgs = [builder, "--win", "nsis", "portable", ...(thin ? ["--config", "build/thin-client.cjs"] : [])];
 
 // Build the SolidWorks executor first (needs the .NET SDK; fails with a clear message when it is missing).
 try { buildSolidworksExecutor(); } catch (error) { console.error(error.message); process.exit(1); }
@@ -14,7 +16,7 @@ try { buildSolidworksExecutor(); } catch (error) { console.error(error.message);
 signExecutors();
 
 if (process.platform === "win32") {
-  const result = spawnSync(process.execPath, [builder, "--win", "nsis", "portable"], { stdio: "inherit" });
+  const result = spawnSync(process.execPath, buildArgs, { stdio: "inherit" });
   process.exit(result.status ?? 1);
 }
 
@@ -25,7 +27,7 @@ if (process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP) {
   const command = [
     `$directory = '${directory}'`,
     "Push-Location -LiteralPath $directory",
-    "try { node.exe '.\\node_modules\\electron-builder\\out\\cli\\cli.js' --win nsis portable; exit $LASTEXITCODE } finally { Pop-Location }",
+    `try { node.exe '.\\node_modules\\electron-builder\\out\\cli\\cli.js' --win nsis portable${thin ? " --config build/thin-client.cjs" : ""}; exit $LASTEXITCODE } finally { Pop-Location }`,
   ].join("; ");
   const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command], {
     stdio: "inherit",

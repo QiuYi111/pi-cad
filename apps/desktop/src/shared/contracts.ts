@@ -54,6 +54,8 @@ export interface AppSettings {
   onboardingComplete: boolean;
   /** Cloud mode disables experience adoption during the internal beta. */
   mode: "local" | "cloud";
+  /** A thin installer runs CAD in the hosted workspace only. */
+  cloudOnly?: boolean;
   /** Hosted service connection. `projectId` is the cloud project selected in this app. */
   cloud?: { baseUrl: string; userEmail?: string; projectId?: string };
 }

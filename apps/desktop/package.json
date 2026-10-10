@@ -20,6 +20,7 @@
     "build:executor:solidworks": "node scripts/build-solidworks-executor.mjs",
     "stage:runtime": "node scripts/stage-runtime.mjs",
     "package:win": "npm run stage:runtime && npm run build && node scripts/package-windows.mjs",
+    "package:win:thin": "npm run build && node scripts/package-windows.mjs --thin",
     "package:linux": "npm run stage:runtime && npm run build && electron-builder --linux AppImage deb",
     "package:mac": "node scripts/check-mac-release.mjs && npm run stage:runtime && npm run build && electron-builder --mac dmg zip",
     "package:mac:unsigned": "npm run stage:runtime && npm run build && electron-builder --mac dmg zip -c.mac.identity=null -c.mac.notarize=false",

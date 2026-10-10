@@ -49,7 +49,7 @@ const hasExplicitUserData = process.argv.some((argument) => argument === "--user
 if (app.isPackaged && !hasExplicitUserData) app.setPath("userData", join(app.getPath("appData"), "Pi-CAD"));
 
 let mainWindow: BrowserWindow | null = null;
-const settingsStore = new SettingsStore();
+const settingsStore = new SettingsStore(undefined, app.isPackaged && existsSync(join(process.resourcesPath, "thin-client.json")));
 const approvalStore = new HumanApprovalStore(join(app.getPath("userData"), "human-approvals"));
 let runtime: PrimeRpc | DemoRuntime | null = null;
 /**
