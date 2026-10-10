@@ -153,4 +153,17 @@
 
 Prime 可执行程序回复、分析程序及工程检查结果由测试环境提供；没有实际云端 GLM 整理、工程重放或窗口验收。Mac 仍锁屏。窗口脚本 `tests/traces-ui-e2e.cua.js` 已写但未执行，不能记为通过。现有云端只禁止采纳候选规则，本批也不提供采纳操作，不修改生产规则。
 
-上一批 `c487c2c` 的 GitHub macOS 构建、DMG 和完整 E2E 两次均通过：[push](https://github.com/QiuYi111/pi-cad/actions/runs/38079480341)、[PR](https://github.com/QiuYi111/pi-cad/actions/runs/38079483218)。本批新增代码需单独完成 GitHub 检查。
+上一批 `c487c2c` 的 GitHub macOS 构建、DMG 和完整 E2E 两次均通过：[push](https://github.com/QiuYi111/pi-cad/actions/runs/38079480341)、[PR](https://github.com/QiuYi111/pi-cad/actions/runs/38079483218)。3615c41 记录与经验两项检查也已通过：[push](https://github.com/QiuYi111/pi-cad/actions/runs/38081097173)、[PR](https://github.com/QiuYi111/pi-cad/actions/runs/38081100462)。后续 Fusion 代码另验。
+
+
+## Fusion 补齐（本地服务）
+
+2026-10-11。专项 `bash scripts/test-fusion-e2e.sh` 退出 0，证据 `test-results/parity-fusion-isolated-e2e.log`。使用刚编译的原生 AppModel，经 HTTP/WebSocket 调用原 `CadTransferService`、插件安装器、云端 `transfer-export` 和等价检查；传递目录、任务、原生文件、STEP、日志与上传后的本机缓存都是实际文件。最终完整 `npm run macos:test:e2e` 退出 0，包含之前全部流程与独立服务端记录检查；应用和 DMG 重新生成、校验通过。证据 `test-results/parity-fusion-verified-e2e.log`、`api-stats.json`。
+
+- 检测：应用位置、心跳新旧、版本和更新；安装复制完整原插件，移除旧文件，保留其他插件；Mac 不显示 SolidWorks。
+- 原测试板、零件、装配的导出；保留实例及位置，明确关节未导出。上传后下载核对哈希，再提供本机结果目录与日志。
+- 原等价检查失败、同名文档与所看模型不同、文件被替换、未支持的特征、超时、正在执行/排队时取消；失败不能报告检查通过。
+- 当前对话的直接请求通过；其他对话及旧云端未绑定的直接请求拒绝。旧云端仍可从当前画布发起已记录编号的导出。并发切换只执行一次，旧任务不回到新对话。
+- 修正原桌面派发流程：本机结束后，等待云端最终错误/日志；取消在任务读取与创建间仍有效。保留错误特征与步骤。
+
+FreeCAD 建模/形状读取和 Fusion 可执行程序结果由测试环境提供；未执行真实 Fusion 重建，没有正式云端导出验收。Mac 锁屏，`tests/fusion-ui-e2e.cua.js` 仅完成语法检查；Finder、日志窗口和全部新增界面仍待窗口测试。插件安装测试只写独立目录，未更改正式 Fusion 插件。

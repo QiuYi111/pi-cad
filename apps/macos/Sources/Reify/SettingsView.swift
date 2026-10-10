@@ -33,7 +33,7 @@ struct SettingsView: View {
                         .buttonStyle(ReifyButtonStyle(primary: true)).disabled(saving || app.configWorking || app.generating).accessibilityIdentifier("model.save")
                 }.padding(24)
                 HStack(spacing: 16) {
-                    ForEach([("project", "项目"), ("account", "账户与模型"), ("favorites", "收藏"), ("advanced", "自定义服务商"), ("installation", "版本")], id: \.0) { id, title in
+                    ForEach([("project", "项目"), ("account", "账户与模型"), ("favorites", "收藏"), ("advanced", "自定义服务商"), ("cad-exports", "CAD 导出"), ("installation", "版本")], id: \.0) { id, title in
                         Button(title) { withAnimation { scroll.scrollTo(id, anchor: .top) } }.buttonStyle(.plain).foregroundStyle(ReifyDesign.muted)
                     }
                     Spacer()
@@ -120,6 +120,7 @@ struct SettingsView: View {
                             TextEditor(text: $custom).font(.system(size: 12, design: .monospaced)).frame(minHeight: 200).border(ReifyDesign.line).accessibilityIdentifier("providers.config")
                             Button("校验并保存") { Task { await app.configure({ custom = try await app.configuration.writeModels(custom); app.modelsConfig = custom }, notice: "自定义服务商已保存") } }.disabled(app.configWorking).accessibilityIdentifier("providers.save")
                         }
+                        card("CAD 导出", id: "cad-exports") { FusionSettingsView() }
                         card("版本", id: "installation") {
                             Text("Reify \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "开发版") · \(Bundle.main.infoDictionary?["ReifyInstallationChannel"] as? String == "dmg" ? "DMG 安装包" : "开发版")").accessibilityIdentifier("settings.installation")
                             Text("服务器：\(app.api.baseURL)").textSelection(.enabled)

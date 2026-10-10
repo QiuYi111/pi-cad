@@ -20,6 +20,14 @@ swiftc -sdk "$sdk" scripts/make-icon.swift -o .build/manual/make-icon
 iconutil -c icns .build/manual/AppIcon.iconset -o dist/Reify.app/Contents/Resources/AppIcon.icns
 cp Sources/Reify/Resources/* dist/Reify.app/Contents/Resources/
 node scripts/build-desktop-presentation.mjs .build/manual/DesktopPresentation.js
+node scripts/build-desktop-transfer.mjs .build/manual/DesktopTransfer.js
+cp .build/manual/DesktopTransfer.js dist/Reify.app/Contents/Resources/
+mkdir -p dist/Reify.app/Contents/Resources/executors/fusion
+rm -rf dist/Reify.app/Contents/Resources/executors/fusion/ReifyExport
+cp -R ../../executors/fusion/ReifyExport dist/Reify.app/Contents/Resources/executors/fusion/
+rm -rf .build/manual/ReifyExport
+cp -R ../../executors/fusion/ReifyExport .build/manual/ReifyExport
+find dist/Reify.app/Contents/Resources/executors/fusion/ReifyExport .build/manual/ReifyExport -name __pycache__ -type d -prune -exec rm -rf {} +
 cp .build/manual/DesktopPresentation.js dist/Reify.app/Contents/Resources/
 cp .build/manual/DesktopApprovals.js dist/Reify.app/Contents/Resources/
 cp .build/manual/DesktopThirdParty.txt dist/Reify.app/Contents/Resources/

@@ -18,6 +18,6 @@ done
 [[ -n "${fixture_url:-}" ]] || { cat test-results/fixture.log; exit 1; }
 export REIFY_CLOUD_URL="$fixture_url"
 .build/manual/ReifyE2E | tee test-results/api-e2e.log
-REIFY_DESKTOP_SETTINGS_PATH="$PWD/test-results/desktop-settings-$$.json" REIFY_APPROVAL_ROOT="$PWD/test-results/approval-store" REIFY_SESSION_SCOPE=e2e-flow REIFY_PREFERENCES_SCOPE=app.reify.e2e.flow .build/manual/ReifyFlowE2E | tee test-results/flow-e2e.log
+REIFY_TRANSFER_HOME="$PWD/test-results/fusion-home-$$" REIFY_DESKTOP_SETTINGS_PATH="$PWD/test-results/desktop-settings-$$.json" REIFY_APPROVAL_ROOT="$PWD/test-results/approval-store" REIFY_SESSION_SCOPE=e2e-flow REIFY_PREFERENCES_SCOPE=app.reify.e2e.flow .build/manual/ReifyFlowE2E | tee test-results/flow-e2e.log
 curl --silent --fail "$REIFY_CLOUD_URL/__test/stats" > test-results/api-stats.json
 node tests/check-protocol-e2e.mjs test-results/api-stats.json

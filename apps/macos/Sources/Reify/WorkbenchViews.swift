@@ -353,6 +353,7 @@ struct CanvasView: View {
                     Button("导出") { Task { await app.exportCurrentModel() } }.accessibilityIdentifier("model.export")
                 }
             }.buttonStyle(ReifyButtonStyle()).padding(.horizontal, 18).frame(height: 58).background(ReifyDesign.paper).overlay(alignment: .bottom) { Divider() }
+            if app.preview != nil && app.canvasContent == "model" { FusionCanvasView() }
             HStack(spacing: 0) {
                 ScrollView { EngineeringResultsView() }
                 Divider()

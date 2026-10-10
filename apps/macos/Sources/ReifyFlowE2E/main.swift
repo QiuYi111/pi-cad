@@ -33,6 +33,13 @@ import ReifyCloud
         await app.open(project)
         await loadingSettings.value
         guard app.connected && app.catalog.providers.count == 3 && app.engineeringError == nil else { fatalError("Open failed: \(app.error ?? app.engineeringError ?? app.configError ?? app.status)") }
+        if ProcessInfo.processInfo.environment["REIFY_E2E_ONLY"] == "fusion" {
+            var choice = app.settingsDraft; choice.provider = "zai"; choice.model = "glm-5.3-flash"; choice.thinking = "high"
+            guard await app.applySettings(choice) else { fatalError("Could not select fixture GLM") }
+            try await fusionE2E(app)
+            await app.shutdown(); try await app.api.logout()
+            return
+        }
         let original = app.settingsDraft
         var changed = original; changed.provider = "zai"; changed.model = "glm-5.3-flash"; changed.thinking = "high"
         let applied = await app.applySettings(changed)
@@ -547,6 +554,7 @@ import ReifyCloud
         await app.publishRelease(remote: "origin", tag: "reify/revoked")
         precondition(app.publishedTag == nil && app.publishError?.contains("批准已撤销") == true && app.releaseURL == gitPackage)
         try await tracesE2E(app)
+        try await fusionE2E(app)
         try await fixture("/__test/expire")
         await app.refreshProjects()
         precondition(app.user == nil && app.api.session == nil && !app.connected && app.error == "登录已失效，请重新登录。" && app.messages.isEmpty && app.projects.isEmpty && app.catalog.providers.isEmpty, "expired session stayed signed in")

@@ -292,6 +292,7 @@ async function exportOperation(cwd: string, request: Extract<TransferRequest, { 
   await mkdir(dirname(resolve(cwd, outputRel)), { recursive: true });
   await writeJsonAtomic(resolve(cwd, TRANSFER_DIR, "requests", `${jobId}.json`), {
     schema: "reify.transfer.request/1", jobId, target, doc: paths.docRel, kind,
+    ...(request.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
     ...(kind === "assembly" ? { assembly: featuresRel } : { features: featuresRel }),
     native: outputRel, checkStep: checkStepRel, check, timeoutS: DEFAULT_TIMEOUT_S,
   });

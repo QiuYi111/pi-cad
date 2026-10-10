@@ -148,7 +148,10 @@ Target `<state>`: `ready`, `not_installed`, `addin_missing`, `addin_not_running`
 
 The dispatcher is alive when `dispatcher.json` `updatedAt` is not older than 15 s.
 
-Request (schema `reify.transfer.request/1`): `{ jobId, target, features: <path of features.json, project-relative>, native: "exports/bracket.f3d", checkStep: "build/transfer/<jobId>/check.step", check: true, timeoutS }`.
+Request (schema `reify.transfer.request/1`): `{ jobId, target, sessionId?: <conversation id or null>, features: <path of features.json, project-relative>, native: "exports/bracket.f3d", checkStep: "build/transfer/<jobId>/check.step", check: true, timeoutS }`.
+
+原生 Mac 按当前对话过滤请求。新侧车保留请求中的 `sessionId`；旧云端没有此字段时，只接收由当前画布发起、已记录任务编号的导出，其他未绑定请求拒绝。切换对话前取消旧任务并写入停止状态。
+
 
 Result (schema `reify.transfer.spool-result/1`): the executor `result.json` plus `files` as project-relative paths after the dispatcher copied them into the project. Error codes from the dispatcher: `TARGET_NOT_READY`, `EXECUTOR_FAILED`, `TIMEOUT`, `CANCELLED`.
 

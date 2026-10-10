@@ -71,3 +71,20 @@ const prime=traces.flatMap(x=>x.prime);
 assert(prime.length>0&&prime.every(x=>x.provider==='zai'&&x.model==='glm-5.3-flash'&&x.thinking==='high'),'experience jobs lost the selected GLM settings');
 assert(traces.every(x=>['list','read','rate','distill','validate'].includes(x.op)),'cloud adopted candidate rules');
 console.log('PASS: independent server record confirms exact multi/current ratings, refused readers, original distillation and replay failure/retry, selected zai/GLM/high environment and no cloud adoption (Prime replies remain synthetic)');
+
+const fusion=audit.filter(x=>x.type==='fusion-agent');
+const exports=fusion.filter(x=>x.request.op==='transfer-export');
+assert(exports.length>=8&&exports.every(x=>x.request.check===true&&x.request.target==='fusion'&&typeof x.request.sessionId==='string'));
+assert(fusion.some(x=>x.request.op==='part-apply'&&x.request.ops.length===6&&x.request.ops.filter(y=>y.op==='hole').length===1&&x.request.ops.filter(y=>y.op==='pocket').length===1));
+assert(exports.some(x=>x.response?.result?.file==='exports/arm.f3d'&&x.response.result.check==='passed'&&x.response.result.notes.length>0));
+assert(exports.some(x=>x.mode==='shape-fail'&&x.response?.error?.code==='TRANSFER_CHECK_FAILED'&&x.response.error.detail.report.passed===false&&x.response.error.detail.report.volume.ok===false));
+assert(exports.some(x=>x.response?.error?.code==='TRANSFER_UNSUPPORTED_OP'&&x.response.error.target==='plate/holes'&&x.response.error.detail.log));
+assert(exports.some(x=>x.response?.error?.code==='TRANSFER_EXECUTOR_FAILED'&&x.response.error.message.includes('cancelled')));
+assert(exports.some(x=>x.response?.error?.code==='TRANSFER_TIMEOUT'));
+assert(audit.some(x=>x.type==='fusion-io'&&x.op==='write'&&x.path.startsWith('.pi-cad/transfer/cancel/')));
+assert(audit.some(x=>x.type==='fusion-io'&&x.op==='metadata'&&x.path==='parts/bracket.FCStd'));
+console.log('PASS: original cloud transfer-export receives explicit conversation/check scope, full reference operations, assembly joint notice, true equivalence failure report, feature/log errors, cancellation and timeout; native dispatcher uses real project spool files (CAD/executor geometry remains synthetic)');
+
+assert(audit.some(x=>x.type==='fusion-display-check'&&x.mode==='displayed-mismatch'&&x.report.passed===false));
+assert(audit.some(x=>x.type==='fusion-display-check'&&x.mode==='normal'&&x.report.passed===true));
+console.log('PASS: the original equivalence checker additionally rejects a same-name FreeCAD document whose shape differs from the displayed STEP');

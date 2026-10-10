@@ -23,10 +23,13 @@ extension AppModel {
     }
     func switchConversation(_ conversation: ConversationSummary) async {
         guard !generating, !busy, connected else { return }
+        busy = true; let openingGeneration = generation
+        defer { busy = false }
+        await stopFusion()
+        guard generation == openingGeneration else { return }
         generation += 1
         clearEngineering()
         saveConversationDraft(); busy = true; error = nil
-        defer { busy = false }
         do {
             try await bridge.switchConversation(conversation.path)
             let state = try await bridge.rpc("get_state"); sessionID = state["sessionId"] as? String
@@ -34,6 +37,7 @@ extension AppModel {
             syncRuntimeModel(state); try await loadMessages(); restoreConversationDraft(); restorePending()
             preview = nil; previewName = ""; canvasMode = false
             if let selected { AppPreferences.current.set(conversation.path, forKey: "reify.native.active-session.\(api.baseURL).\(user?.id ?? "").\(selected.id)") }
+            await connectFusion()
             await refreshEngineering()
         } catch { fail(error) }
     }

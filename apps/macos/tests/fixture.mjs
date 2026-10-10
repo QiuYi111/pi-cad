@@ -1,5 +1,6 @@
 // A disposable cloud protocol server. No production credentials or model calls.
 import http from 'node:http';
+import {fusionFixture} from './fusion-fixture.mjs';
 import {tracesFixture} from './traces-fixture.mjs';
 import {rebuildFixture} from './rebuild-fixture.mjs';
 import {publishFixture} from './publish-fixture.mjs';
@@ -51,6 +52,7 @@ files.set('engineering-report.json',Buffer.from('{"checks":[]}'));
 const publications=publishFixture(fixtureHome,fixtureRepo,files);
 const rebuilds=rebuildFixture(fixtureHome,fixtureRepo,files,sha);
 const traces=tracesFixture(fixtureHome,fixtureRepo);
+const fusion=fusionFixture(fixtureHome,fixtureRepo,files,audit);
 function parameterManifest(){const manifest={schema:1,modelId:'bracket',source:{path:'bracket.py',sha256:sha(files.get('bracket.py')),entrypoint:'build'},output:{path:'bracket.step',sha256:sha(files.get('bracket.step'))},parameters:[{id:'width',type:'number',default:80,value:modelWidth,min:20,max:160,step:1,unit:'mm',label:'宽度'}]};const data=Buffer.from(JSON.stringify(manifest));files.set('bracket.parameters.json',data);return {path:'bracket.parameters.json',sha256:sha(data),manifest}}
 const sessions = new Map();
 const generatedSessions = new Set();
@@ -69,6 +71,8 @@ const server = http.createServer(async (req, res) => {
   let b = {}; try { b = text ? JSON.parse(text) : {}; } catch { return respond(res,400,{message:'请求格式错误'}); }
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
+  if (path === '/__test/fusion-scope') { fusion.scopeRequests('/workspace/state/'+b.projectId,b.sessionId,b.enabled);return respond(res,200,{ok:true}); }
+  if (path === '/__test/fusion-mode') { fusion.mode=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/trace-mode') { traces.mode=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/publish-mode') { if(b.projectId)publications.prepare('/workspace/state/'+b.projectId);publications.mode=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/rebuild-mode') { rebuilds.mode=b.mode;return respond(res,200,{ok:true}); }
@@ -279,6 +283,7 @@ bridge.on('connection',ws=>{
       for(const bytes of old.replay)frame(r.ch,bytes);
     } else if(r.type==='exec') {
       if(r.args.some(a=>a.includes('REIFY_DESKTOP_TRACES'))) { traces.execute(r.args,r.input,project,histories,audit,{exit:(code,stdout,stderr)=>send({type:'exec_result',ch:r.ch,code,stdout,stderr})});return; }
+      if(r.args.some(a=>a.includes('REIFY_TRANSFER_IO')||a.includes('REIFY_TRANSFER_VIEW'))) { fusion.execute(r,project,value=>send({type:'exec_result',ch:r.ch,...value}));return; }
       const result=value=>send({type:'exec_result',ch:r.ch,code:0,stderr:'',stdout:typeof value==='string'?value:JSON.stringify(value)});
       if(r.args.some(a=>a.includes('REIFY_DESKTOP_PUBLISH'))){const q=JSON.parse(r.input);if(!generatedSessions.has(project+'/'+q.sessionId))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'Conversation has no workflow'});const commit={id:'commit-'+currentSession,sourceRevision:publications.revision(project),workflowHash:'hash-'+currentSession};const catalog={projectId:project,commits:[commit],parameterManifests:[]};publications.execute(r.args,r.input,project,catalog,audit,value=>send({type:'exec_result',ch:r.ch,...value}));return;}
       if(r.args.some(a=>a.includes('REIFY_DESKTOP_REBUILD'))){const q=JSON.parse(r.input);if(!generatedSessions.has(project+'/'+q.sessionId))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'Conversation has no workflow'});rebuilds.execute(r.args,r.input,project,audit,value=>send({type:'exec_result',ch:r.ch,...value}));return;}
@@ -313,6 +318,7 @@ bridge.on('connection',ws=>{
         const q=JSON.parse(r.input??'{}');audit.push({type:'engineering',request:q});
         if(q.schema!==1||!Object.hasOwn(q,'sessionId'))return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Missing conversation scope',code:'SCOPE_REQUIRED'}}),stderr:'node warning'});
         if(q.sessionId==='authority-error')return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Finish the current phase',code:'PHASE_DENIED',target:'cad_build_step',hints:['Open the current workflow']}}),stderr:'node warning'});
+        if(['part-open','part-apply','transfer-export'].includes(q.op)){ if(q.sessionId!==currentSession)return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Wrong Fusion conversation',code:'SCOPE_REQUIRED'}}),stderr:''});fusion.agent(q,project,value=>send({type:'exec_result',ch:r.ch,...value}));return; }
         const bound=['engineering-a','engineering-b'].includes(q.sessionId)||generatedSessions.has(project+'/'+q.sessionId),name=q.sessionId==='engineering-b'?'sample.step':'bracket.step';
         const artifact={id:`artifact-${q.sessionId}`,path:name,role:'model',sha256:sha(files.get(name)??Buffer.from(''))};
         const run=bound?{runId:`run-${q.sessionId}`,workflowId:'mechanical.naked',workflowVersion:'1.0.0',workflowHash:'hash-'+q.sessionId,phase:'work',status:'active',operations:[{capability:'cad_build_step'}],updatedAt:new Date().toISOString(),phaseHistory:['work'],phases:[{id:'work',title:'Work',purpose:'Build',status:'active',transitions:[],capabilities:['cad_build_step'],obligations:[]}]}:null;
@@ -366,14 +372,14 @@ bridge.on('connection',ws=>{
       result([...files].map(([path,bytes])=>({path,size:bytes.length})));
     }
     else if(r.type==='file_get') {
-      stats.downloads++;const name=r.path.split('/').slice(4).join('/'),bytes=files.get(name);
+      stats.downloads++;const name=r.path.split('/').slice(4).join('/'),bytes=files.get(name)??fusion.get(project,name);
       if(!bytes) return send({type:'error',ch:r.ch,message:'文件不存在'});
       frame(r.ch,bytes);send({type:'file_end',ch:r.ch,size:bytes.length,sha256:name==='corrupt.stl'?'0'.repeat(64):sha(bytes)});
     } else if(r.type==='file_put_begin') {upload={...r,data:Buffer.alloc(0)};}
     else if(r.type==='file_put_end') {
       if(!upload||upload.ch!==r.ch) return send({type:'error',ch:r.ch,message:'no upload'});
       if(upload.size!==upload.data.length||upload.sha256!==sha(upload.data)) return send({type:'error',ch:r.ch,message:'checksum mismatch'});
-      stats.uploads++;const name=upload.path.split('/').slice(4).join('/');files.set(name,upload.data);send({type:'file_put_done',ch:r.ch,path:upload.path,size:upload.data.length,sha256:sha(upload.data)});upload=null;
+      stats.uploads++;const name=upload.path.split('/').slice(4).join('/');files.set(name,upload.data);fusion.put(project,name,upload.data);send({type:'file_put_done',ch:r.ch,path:upload.path,size:upload.data.length,sha256:sha(upload.data)});upload=null;
     } else if(r.type==='stdin_end') {clearTimeout(timer);if(activeSpawn)spawns.delete(activeSpawn.id);setTimeout(()=>send({type:'exit',ch:r.ch,code:0,signal:null}),200);}
     else if(r.type==='kill') {if(releaseProcesses.has(r.ch)){releaseProcesses.get(r.ch).kill('SIGTERM');return;}if(authProcesses.has(r.ch)){authProcesses.delete(r.ch);return send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'})}if(r.ch!==1)return send({type:'error',ch:r.ch,code:'no_such_spawn',message:'Process already exited'});stats.kills++;clearTimeout(timer);clearTimeout(activeSpawn?.timer);if(activeSpawn)spawns.delete(activeSpawn.id);send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'});}
     else if(r.type==='ping') send({type:'pong'});

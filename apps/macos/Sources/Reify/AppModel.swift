@@ -48,6 +48,15 @@ import ReifyCloud
     var traceListSequence = 0
     var traceReadSequence = 0
     var traceJobSequence = 0
+    @Published var fusionStatus: FusionStatus?
+    @Published var fusionJobs: [FusionJob] = []
+    @Published var fusionTest: FusionTest?
+    @Published var fusionError: String?
+    @Published var fusionBusy = false
+    @Published var fusionTesting = false
+    var fusion: NativeFusion?
+    var fusionAttached = false
+    var fusionSequence = 0
     @Published var workflowsPresented = false
     @Published var workflowRun: WorkflowRun?
     @Published var engineeringCatalog: EngineeringCatalog?
@@ -164,7 +173,7 @@ import ReifyCloud
         api = CloudAPI(baseURL: env["REIFY_CLOUD_URL"] ?? CloudAPI.defaultURL, scope: env["REIFY_SESSION_SCOPE"] ?? "production")
         bridge.onEvent = { [weak self] event in self?.handle(event) }
         bridge.onDisconnect = { [weak self] error in
-            self?.connected = false; self?.generating = false; self?.activity = nil
+            self?.clearFusion(); self?.connected = false; self?.generating = false; self?.activity = nil
             self?.status = "连接已断开"; self?.error = "连接已断开，正在重连。"
             if let self, !self.pending.isEmpty { self.queueSuspended = true; self.savePending() }
             self?.scheduleReconnect()
@@ -221,6 +230,9 @@ import ReifyCloud
         saveLayout()
         let switchingProject = selected?.id != project.id
         let wasConnected = connected
+        busy = true; let openingGeneration = generation
+        await stopFusion()
+        guard generation == openingGeneration else { return }
         generation += 1; let current = generation
         clearEngineering(preserveViewer: reconnect && !switchingProject)
         busy = true; connected = false; generating = false; error = nil
@@ -270,6 +282,7 @@ import ReifyCloud
                 canvasMode = restoredMode
             }
             connected = true; status = "云端已连接"
+            await connectFusion()
             await refreshEngineering()
             await refreshConversations()
             do { catalog = try await configuration.catalog() } catch { configError = error.localizedDescription }
@@ -320,7 +333,11 @@ import ReifyCloud
         } catch { generating = false; fail(error) }
     }
     func newConversation() async {
-        guard connected, !generating else { return }
+        guard connected, !generating, !busy else { return }
+        busy = true; let openingGeneration = generation
+        defer { busy = false }
+        await stopFusion()
+        guard generation == openingGeneration else { return }
         generation += 1
         saveConversationDraft()
         clearEngineering()
@@ -330,6 +347,7 @@ import ReifyCloud
             try resetPresentation()
             try await loadMessages(); draft = ""; restoreConversationDraft(); restorePending(); canvasMode = false; preview = nil; previewName = ""
             if let selected { AppPreferences.current.removeObject(forKey: "reify.native.active-session.\(api.baseURL).\(user?.id ?? "").\(selected.id)") }
+            await connectFusion()
             await refreshConversations(); saveLayout()
             await refreshEngineering()
         } catch { fail(error) }
@@ -422,6 +440,7 @@ import ReifyCloud
     func stopWorkspace() async {
         cancelReconnect()
         generation += 1; clearTraces(); busy = true
+        await stopFusion()
         defer { busy = false }
         do {
             _ = try await api.workspace("stop"); await bridge.stop(api: api)
@@ -436,6 +455,7 @@ import ReifyCloud
         saveLayout()
         generation += 1
         clearTraces()
+        await stopFusion()
         await bridge.stop(api: api); eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
         do {
             try await api.logout(); user = nil; selected = nil; projects = []; messages = []; files = []
@@ -451,6 +471,7 @@ import ReifyCloud
         saveLayout()
         generation += 1
         clearTraces()
+        await stopFusion()
         eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
         await bridge.stop(api: api)
     }

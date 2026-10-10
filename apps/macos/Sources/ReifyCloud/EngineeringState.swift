@@ -5,6 +5,7 @@ public struct AuthorityError: Error, LocalizedError {
     public let code: String?
     public let target: String?
     public let hints: [String]
+    public let detail: JSONValue?
     public var errorDescription: String? { ([message] + hints).joined(separator: "\n") }
 }
 
@@ -32,7 +33,7 @@ public struct AuthorityError: Error, LocalizedError {
         }
         guard envelope["ok"] as? Bool == true else {
             let error = envelope["error"] as? [String: Any] ?? [:]
-            throw AuthorityError(message: error["message"] as? String ?? "工程操作失败", code: error["code"] as? String, target: error["target"] as? String, hints: error["hints"] as? [String] ?? [])
+            throw AuthorityError(message: error["message"] as? String ?? "工程操作失败", code: error["code"] as? String, target: error["target"] as? String, hints: error["hints"] as? [String] ?? [], detail: (try? JSONSerialization.data(withJSONObject: error["detail"] ?? NSNull(), options: .fragmentsAllowed)).flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) })
         }
         guard execution["code"] as? Int == 0 else { throw CloudError("工程服务返回了异常结果") }
         return output

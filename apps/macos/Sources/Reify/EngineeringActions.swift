@@ -18,6 +18,7 @@ extension AppModel {
     var engineering: EngineeringService { EngineeringService(bridge: bridge, sessionID: sessionID) }
     func clearEngineering(preserveViewer: Bool = false) {
         clearTraces()
+        clearFusion()
         restoreParameterPreview()
         parameterBusy = false; parameterError = nil
         engineeringSequence += 1; previewSequence += 1
