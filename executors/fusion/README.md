@@ -26,7 +26,7 @@ Job root: Windows `%LOCALAPPDATA%\Reify\transfer`, macOS `~/Library/Application 
 
 ## Code layout
 
-Pure Python, no `adsk` import, unit tested with `python3 -m unittest discover -s tests/fusion_addin -v`:
+Pure Python, no `adsk` import, unit tested with `python3 -m unittest discover -s tests/transfer/fast/fusion_addin -v`:
 `jobroot.py`, `jobs.py` (claim, validate, result, error mapping), `plan.py`, `profiles.py` (even-odd), `geom.py`, `workers.py` (watcher and heartbeat threads).
 Thin Fusion layer: `fusion_exec.py` (all `adsk` calls), `ReifyExport.py` (run/stop, custom events).
 
@@ -122,5 +122,5 @@ How it was run: the "Fusion MCP Addin" `execute_api_script` tool, loading the ad
 
 ## Tests
 
-`python3 -m unittest discover -s tests/fusion_addin -v` (plain `unittest`, no Fusion).
-`tests/fusion_addin/fake_adsk.py` is a stub of the used `adsk.core` / `adsk.fusion` surface. It catches typos, call order, unit conversion and sign handling. It cannot prove that the real API has these members or behaves the same (see its docstring).
+`python3 -m unittest discover -s tests/transfer/fast/fusion_addin -v` (plain `unittest`, no Fusion).
+`tests/transfer/fast/fusion_addin/fake_adsk.py` is a stub of the used `adsk.core` / `adsk.fusion` surface. It catches typos, call order, unit conversion and sign handling. It cannot prove that the real API has these members or behaves the same (see its docstring).

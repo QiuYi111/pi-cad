@@ -2,8 +2,8 @@ import { resolve } from "node:path";
 
 import { assertLinuxRuntime } from "../shared/platform.ts";
 import { handleAgentApi } from "./handlers.ts";
-import { agentApiErrorBody } from "./errors.ts";
-import type { AgentApiRequest, AgentApiResponse } from "./protocol.ts";
+import { agentApiErrorBody } from "../authority/errors.ts";
+import type { AgentApiRequest, AgentApiResponse } from "../authority/protocol.ts";
 
 async function stdin(): Promise<string> {
   const chunks: Buffer[] = [];

@@ -1,11 +1,12 @@
-import { allPhaseContracts, contractTools, phaseContract } from "../control/phase-contract.ts";
+import { allPhaseContracts, contractTools, phaseContract } from "../domains/mechanical/phase-contract.ts";
+import { PHASE_PURPOSES, TOOL_PURPOSES } from "../domains/mechanical/purposes.ts";
 import {
   ACTIVE_PUBLIC_TOOLS,
   ACTIVE_PUBLIC_TOOL_NAMES,
   type ActivePublicTool,
   type PublicToolGroup,
 } from "../shared/public-tools.ts";
-import { CAD_PHASES, type CadPhase, type CadRunState } from "../shared/protocol.ts";
+import { CAD_PHASES, type CadPhase } from "../shared/protocol.ts";
 import {
   MATURITIES,
   obligationsOf,
@@ -15,7 +16,6 @@ import {
   type RouteStructure,
 } from "../shared/route.ts";
 import { compiledSpec } from "../workflows/index.ts";
-import { toolsForState } from "./policies.ts";
 
 export interface ToolContract {
   name: ActivePublicTool;
@@ -68,65 +68,6 @@ export interface AgentContract {
   events: TransitionEventContract[];
   obligations: ObligationContract[];
 }
-
-export const TOOL_PURPOSES: Record<ActivePublicTool, string> = {
-  cad_start: "Start a generic v7 run from the project-selected immutable workflow.",
-  cad_route: "Select the route that compiles the workflow and obligations.",
-  cad_reroute: "Change route without bypassing obligations; downgrades require authority.",
-  cad_commit_requirements: "Commit the first complete mission and acceptance contract.",
-  cad_revise_requirements: "Replace requirements after authoritative information changes.",
-  cad_commit_frame_context: "Record the interpretation of an imported coordinate frame.",
-  cad_commit_plan: "Commit the implementation or investigation plan owed by this phase.",
-  cad_commit_assembly_design: "Commit modules, datums, ownership, and assembly sequence.",
-  cad_commit_interface_contracts: "Commit locating, DOF, fit, fastening, and access contracts.",
-  cad_commit_candidate: "Build and propose source-authored CAD with automatic observations.",
-  cad_submit_for_review: "Submit the immutable candidate for independent final verification.",
-  cad_transition: "Apply one legal decision event from the compiled workflow.",
-  cad_wait_for_user: "Pause an interactive workflow for a user-owned decision.",
-  cad_defer_clarification: "Record a bounded headless assumption and continue.",
-  cad_declare_blocker: "Stop honestly on missing authority or indispensable external input.",
-  cad_finish: "Close a ready workflow after deterministic checks.",
-  cad_commit_simulation: "Bind one immutable run/observation to a simulation case obligation.",
-  cad_probe: "Inspect an artifact through a strict typed or programmable read-only probe.",
-  cad_recall_observation: "Recover an observation summary, visuals, or paged detail collection.",
-  cad_build_step: "Execute deterministic build123d source without accepting Project Head.",
-  cad_derive_analysis_model: "Create a provenance-bound solver derivation.",
-  cad_simulate: "Run a solver-native Recipe in a managed runtime; creates no Evidence.",
-  cad_sim_observe: "Re-run only the observer over a frozen SimulationRun.",
-  cad_optimize: "Produce a managed torch-fem optimization artifact.",
-  cad_export: "Create geometry sidecars without changing Project Head.",
-  cad_generate_drawing: "Generate a structured drawing from declared intent.",
-  cad_render_scene: "Create presentation assets from an explicit scene specification.",
-};
-
-export const PHASE_PURPOSES: Record<CadPhase, string> = {
-  intake: "Choose the route before engineering work.",
-  requirements: "Commit the authoritative mission and acceptance contract.",
-  baseline: "Understand the existing design and its frame.",
-  source_baseline: "Understand the source before conversion.",
-  plan: "Plan modifications to a legacy part.",
-  transform_plan: "Plan deterministic conversion.",
-  concept: "Select a coherent hybrid-part concept.",
-  system_concept: "Select the assembly architecture.",
-  domain_analysis: "Resolve a bounded domain question before concept selection.",
-  part_design: "Commit the part implementation plan.",
-  assembly_design: "Commit module ownership, datums, and install sequence.",
-  interface_design: "Commit explicit module interface contracts.",
-  build: "Author and propose greenfield or hybrid CAD.",
-  modify: "Author and propose legacy CAD changes.",
-  convert: "Produce and propose the converted artifact.",
-  review: "Interpret current part evidence and decide acceptance or regression.",
-  compare: "Compare converted output to its source.",
-  integration_review: "Verify the complete assembly, interfaces, interference, and simulations.",
-  investigate: "Probe an artifact until the relevant cause is understood.",
-  explain: "Deliver evidence-bound analysis findings.",
-  audit: "Audit release workstreams and identify gaps.",
-  gap_closure: "Author engineering changes that close release gaps.",
-  package: "Create closure deliverables without inventing engineering intent.",
-  final_review: "Verify release evidence and deliverables.",
-  ready: "Perform deterministic closure checks and finish.",
-  done: "Terminal completed workflow.",
-};
 
 type EventDefinition = { meaning: string; useWhen: string; doNotUseWhen: string };
 
@@ -289,90 +230,5 @@ export function buildAgentContract(inputSchemas: Partial<Record<ActivePublicTool
         "The current action card is authoritative for tools, writes, obligations, and events.",
       ],
     }, tools, phases, events, obligations,
-  };
-}
-
-function writeScope(state: CadRunState): string {
-  const grants = new Set(phaseContract(state.phase).grants);
-  if (state.mutationPolicy === "allowed") return "project files allowed by policy; .pi-cad is harness-owned";
-  if (state.mutationPolicy === "source_only") return "Python model sources, models/**, and simulation/**";
-  if (grants.has("file_edit_recipe")) return "simulation/** only; design CAD is read-only";
-  return "read-only";
-}
-
-function recommendation(state: CadRunState, missing: string[], available: string[], events: string[]): string {
-  if (state.routeRequiresReassessment) return "Resolve requirements reassessment with cad_revise_requirements/cad_reroute.";
-  if (state.phase === "intake") return "Call cad_route.";
-  if (state.phase === "requirements" && !state.requirementsVersion) return "Call cad_commit_requirements with the complete contract.";
-  if (missing.length) {
-    if (missing[0].startsWith("simulation:")) return "Author or inspect the case Recipe, run simulate/observe as needed, then commit the exact valid observation to this case.";
-    const tool = missing[0] === "frame_context" ? "cad_commit_frame_context" : missing[0] === "assembly_design" ? "cad_commit_assembly_design" : missing[0] === "interface_contracts" ? "cad_commit_interface_contracts" : "the dedicated cad_commit_* tool";
-    return `Commit missing ${missing[0]} through ${tool}.`;
-  }
-  if (["build", "modify", "convert", "gap_closure"].includes(state.phase) && available.includes("cad_commit_candidate")) return "Author source/sidecar work, then call cad_commit_candidate.";
-  if (state.phase === "ready") return "Call cad_finish after checking closure artifacts.";
-  if (available.includes("cad_submit_for_review")) return "Call cad_submit_for_review when every obligation is current.";
-  if (events.includes("accepted")) return "Interpret current evidence; accept only when every current-version obligation is satisfied.";
-  return "Use the first unmet obligation or a legal event shown here; never invent a transition name.";
-}
-
-function unmetEvidenceObligations(state: CadRunState): string[] {
-  const simulation = state.evidenceObligations?.simulation;
-  if (!simulation || simulation.disposition !== "required") return [];
-  const subjectHash = state.route?.objective === "analyze" ? state.baselineArtifactHash : state.currentArtifactHash;
-  const cases = simulation.cases ?? [];
-  if (!cases.length) return state.evidence.some((item) => item.kind === "simulation" && item.artifactHash === subjectHash) ? [] : ["simulation:any-current-case"];
-  return cases.filter((caseItem) => !state.evidence.some((item) => item.kind === "simulation" && item.tool === caseItem.tool && item.caseId === caseItem.id && item.artifactHash === subjectHash)).map((item) => `simulation:${item.id} via ${item.tool}`);
-}
-
-export function renderCurrentActionCard(state: CadRunState, simulationCapabilities = ""): string {
-  const spec = state.route ? compiledSpec(state.route) : null;
-  const available = toolsForState(state).filter((name) => name.startsWith("cad_"));
-  const records = spec?.phaseRecords[state.phase] ?? [];
-  const committed = new Set(state.phaseRecords ?? []);
-  const missing = records.filter((record) => !committed.has(record));
-  const unmetEvidence = unmetEvidenceObligations(state);
-  const allMissing = [...missing, ...unmetEvidence];
-  const transitions = spec?.transitions[state.phase] ?? {};
-  const legal = Object.keys(transitions).filter((event) => !event.endsWith("_committed"));
-  const commitOnly = Object.keys(transitions).filter((event) => event.endsWith("_committed"));
-  const lines = [
-    "## Pi-CAD Current Action Card (authoritative)", "",
-    `Route / phase / status: ${state.route ? routeKey(state.route) : "unset"} / ${state.phase} / ${state.status}`,
-    `Phase purpose: ${PHASE_PURPOSES[state.phase]}`,
-    `Allowed writes: ${writeScope(state)}`, "", "Available Pi-CAD tools:",
-    ...(available.length ? available.map((name) => `- ${name}: ${TOOL_PURPOSES[name as ActivePublicTool] ?? "Use its registered schema."}`) : ["- none"]), "",
-    `Required records here: ${records.join(", ") || "none"}`,
-    `Unmet records here: ${missing.join(", ") || "none"}`,
-    `Unmet Evidence obligations: ${unmetEvidence.join(", ") || "none"}`,
-    `Current evidence bindings: ${state.evidence.map((item) => `${item.kind}${item.caseId ? `:${item.caseId}` : ""}@${item.artifactHash.slice(0, 12)}`).join(", ") || "none"}`,
-    `Current artifact: ${state.currentArtifactPath ?? "none"}${state.currentArtifactHash ? ` @ ${state.currentArtifactHash.slice(0, 12)}` : ""}`, "",
-    "Legal cad_transition events:",
-    ...(legal.length ? legal.map((event) => `- ${event} → ${transitions[event]}: ${eventDefinition(event).meaning}`) : ["- none"]),
-    ...(commitOnly.length ? ["", `Commit-only events (never pass to cad_transition): ${commitOnly.join(", ")}`] : []), "",
-    `Blocked guards: ${state.blocker ? `${state.blocker.type}: ${state.blocker.reason}; needed=${state.blocker.needed}` : state.routeRequiresReassessment ? "route reassessment required" : state.status === "waiting_user" ? "waiting for user" : "none"}`,
-    `Recommended next action: ${recommendation(state, allMissing, available, legal)}`,
-  ];
-  if (simulationCapabilities.trim()) lines.push("", simulationCapabilities.trim());
-  return lines.join("\n");
-}
-
-export function transitionFailureDetails(state: CadRunState, attemptedEvent: string) {
-  const spec = state.route ? compiledSpec(state.route) : null;
-  const row = spec?.transitions[state.phase] ?? {};
-  const committed = new Set(state.phaseRecords ?? []);
-  const unmetObligations = [...(spec?.phaseRecords[state.phase] ?? []).filter((record) => !committed.has(record)), ...unmetEvidenceObligations(state)];
-  const allowedEvents = Object.entries(row).filter(([event]) => !event.endsWith("_committed")).map(([event, target]) => ({ event, meaning: eventDefinition(event).meaning, target }));
-  const allowedCommitTools = [
-    ...Object.keys(row).filter((event) => event.endsWith("_committed")).map((event) => event === "plan_committed" ? "cad_commit_plan" : event === "assembly_design_committed" ? "cad_commit_assembly_design" : event === "interface_contracts_committed" ? "cad_commit_interface_contracts" : "dedicated cad_commit_* tool"),
-    ...(unmetObligations.some((item) => item.startsWith("simulation:")) && toolsForState(state).includes("cad_commit_simulation") ? ["cad_commit_simulation"] : []),
-  ];
-  return {
-    phase: state.phase,
-    attemptedEvent,
-    allowedEvents,
-    unmetObligations,
-    allowedCommitTools,
-    suggestedActions: [recommendation(state, unmetObligations, toolsForState(state), allowedEvents.map((item) => item.event))],
   };
 }

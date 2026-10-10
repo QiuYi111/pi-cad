@@ -3,8 +3,8 @@ import WebSocket from 'ws';
 import { SignJWT } from 'jose';
 import type { KeyLike } from '../deps.js';
 import type { ExecResult, WorkspaceFs, WorkspaceGateway } from './ports.js';
+import { GATEWAY_TOKEN_HEADER, type ClientMessage, type GatewayMessage } from '../../../protocol/src/index.js';
 
-export const GATEWAY_TOKEN_HEADER = 'x-reify-gateway-token';
 export const GATEWAY_TOKEN_TTL_SEC = 60;
 
 export interface GatewayOptions {
@@ -59,7 +59,7 @@ export function createGatewayClient(opts: GatewayOptions): WorkspaceGateway {
 
     async shutdown(userId: string, name: string): Promise<void> {
       const ws = await connect(userId, name);
-      ws.send(JSON.stringify({ type: 'shutdown' }));
+      ws.send(JSON.stringify({ type: 'shutdown' } satisfies ClientMessage));
       ws.close(); // the gateway acts on the message before it sees the close frame
     },
 
@@ -70,7 +70,7 @@ export function createGatewayClient(opts: GatewayOptions): WorkspaceGateway {
           const timer = setTimeout(() => reject(new Error('gateway exec timed out')), 30_000);
           ws.on('message', (data, isBinary) => {
             if (isBinary) return;
-            const msg = JSON.parse(data.toString()) as { type: string; ch?: number; stdout?: string; stderr?: string; code?: number | null; message?: string };
+            const msg = JSON.parse(data.toString()) as GatewayMessage;
             if (msg.type === 'exec_result' && msg.ch === 1) {
               clearTimeout(timer);
               resolve({ stdout: msg.stdout ?? '', stderr: msg.stderr ?? '', code: msg.code ?? null });
@@ -83,7 +83,7 @@ export function createGatewayClient(opts: GatewayOptions): WorkspaceGateway {
             clearTimeout(timer);
             reject(new Error('gateway closed before answering'));
           });
-          ws.send(JSON.stringify({ type: 'exec', ch: 1, args }));
+          ws.send(JSON.stringify({ type: 'exec', ch: 1, args } satisfies ClientMessage));
         });
       } finally {
         ws.close();

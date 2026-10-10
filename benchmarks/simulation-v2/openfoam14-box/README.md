@@ -13,6 +13,8 @@ The checked-in `qualification-baseline/` was produced by
 `openfoam14@20260724` with runtime identity
 `93f30dfb9419db47b74c31eeecb28999c3427784daa9f37d7532ee28e4c951b3`.
 
-With the runtime installed, run the complete temporary-project lifecycle gate
-with `npm run test:openfoam14`. The gate also checks that host mounts, inherited
-secrets, and DNS/network access are unavailable inside bubblewrap.
+The qualification script (`npm run test:openfoam14`) was removed with the v6
+kernel. The checks it ran (host mounts, inherited secrets, and DNS/network access
+unavailable inside bubblewrap, plus the temporary-project lifecycle) are no longer
+run by a repository script; re-establish them against the v7 simulation runtime
+before relying on this baseline.

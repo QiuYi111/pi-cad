@@ -1,12 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
 import type { Command } from "../model/commands.ts";
 import type { HttpLogEntry } from "../sut/http.ts";
 import type { BugName } from "../sut/server.ts";
 import type { TimelineEntry } from "../types.ts";
-
-export const ARTIFACTS_DIR = fileURLToPath(new URL("../artifacts/", import.meta.url));
+import { writeArtifactJson } from "../support/artifacts.ts";
 
 export interface FailureArtifact {
   schema: 1;
@@ -36,12 +33,7 @@ export interface FailureArtifact {
 }
 
 export function saveArtifact(artifact: FailureArtifact): string {
-  mkdirSync(ARTIFACTS_DIR, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const slug = artifact.invariant.replace(/[^a-zA-Z0-9._-]+/g, "-").slice(0, 60);
-  const file = path.join(ARTIFACTS_DIR, `${stamp}-${slug}.json`);
-  writeFileSync(file, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
-  return file;
+  return writeArtifactJson("", artifact.invariant, artifact);
 }
 
 export function loadArtifact(file: string): FailureArtifact {

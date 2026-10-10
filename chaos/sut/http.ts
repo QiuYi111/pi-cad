@@ -1,3 +1,5 @@
+import { sleep } from "../support/process.ts";
+
 import http from "node:http";
 
 export interface HttpResult {
@@ -97,8 +99,6 @@ export const get = <T = any>(url: string, timeoutMs?: number) => api<T>("GET", u
 export const post = <T = any>(url: string, body?: unknown, timeoutMs?: number) =>
   api<T>("POST", url, body ?? {}, timeoutMs);
 export const del = <T = any>(url: string, timeoutMs?: number) => api<T>("DELETE", url, undefined, timeoutMs);
-
-export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export async function waitFor(
   predicate: () => Promise<boolean> | boolean,

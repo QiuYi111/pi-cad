@@ -7,7 +7,7 @@
  * the conversation:
  *
  *   - Canonical state (route/phase/artifacts/evidence) stays in
- *     `state.json` and is re-projected by `composeSystemPrompt()` every turn.
+ *     the v7 run store and is re-projected by the v7 `before_agent_start` hook.
  *   - Working context (the current "brain": understanding / intent /
  *     attempts / open questions) lives in `context/working.md` and is
  *     re-injected on every `before_agent_start`. When a refresh fails or
@@ -25,9 +25,9 @@
  * settles, trigger `ctx.compact()`. The `session_before_compact` handler
  * archives the raw trajectory, refreshes `working.md` with one fresh LLM
  * call over a budgeted copy, and returns a minimal compaction summary.
- * `onComplete`/`onError` then resume `maybeAutoContinue()` with reloaded
- * canonical state (`ctx.compact()` is fire-and-forget, so without this the
- * run would stall after a rebuild).
+ * `onComplete`/`onError` then send a follow-up that resumes the run from
+ * reloaded canonical state (`ctx.compact()` is fire-and-forget, so without
+ * this the run would stall after a rebuild).
  *
  * The handler serves every compaction path (manual /compact, Pi's own
  * threshold trigger, overflow recovery), not just self-triggered ones.
@@ -39,18 +39,14 @@ import { join } from "node:path";
 
 import { convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
 
-import { renderObservationIndex } from "./observation-index.ts";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import type { CadRequirements, CadRunState } from "../shared/protocol.ts";
-import { CadProjectStore, CadRunStore, nowIso } from "../shared/store.ts";
+import { nowIso } from "../shared/hash.ts";
 import type { LoadedHarnessRunV7 } from "../harness/run-store.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
-import { selectKernelEngine } from "../harness/engine-router.ts";
 import type { WorkflowPhaseDefinition } from "../harness/workflow/types.ts";
-import { readJsonLinesTail, readTextPrefix } from "../shared/bounded-files.ts";
-import { maybeAutoContinue } from "./continuation.ts";
+import { readJsonLinesTail } from "../shared/bounded-files.ts";
 
 /** Rebuild threshold in Pi's percent scale (0-100). Experimental initial value. */
 const DEFAULT_THRESHOLD_PERCENT = 55;
@@ -93,11 +89,18 @@ export interface ContextRef {
   summary: string;
 }
 
-function contextDirOf(run: CadRunStore): string {
+/** The run surface context memory needs: its directory, id and a journal sink. */
+interface ContextRun {
+  readonly runDir: string;
+  readonly runId: string;
+  appendEvent(type: string, data?: unknown): Promise<void>;
+}
+
+function contextDirOf(run: ContextRun): string {
   return join(run.runDir, "context");
 }
 
-function workingPath(run: CadRunStore): string {
+function workingPath(run: ContextRun): string {
   return join(contextDirOf(run), "working.md");
 }
 
@@ -107,18 +110,18 @@ interface WorkingMeta {
   reason?: string;
 }
 
-function workingMetaPath(run: CadRunStore): string {
+function workingMetaPath(run: ContextRun): string {
   return join(contextDirOf(run), "working.meta.json");
 }
 
 /** Missing/unreadable meta means active: runs predating the marker inject fine. */
-async function readWorkingMeta(run: CadRunStore): Promise<WorkingMeta> {
+async function readWorkingMeta(run: ContextRun): Promise<WorkingMeta> {
   const meta = await readJson<WorkingMeta>(workingMetaPath(run));
   return meta?.status === "stale" ? meta : { status: "active", updatedAt: "" };
 }
 
 /** Meta bookkeeping must never fail a refresh that already succeeded. */
-async function tryWriteWorkingMeta(run: CadRunStore, meta: WorkingMeta): Promise<void> {
+async function tryWriteWorkingMeta(run: ContextRun, meta: WorkingMeta): Promise<void> {
   try {
     await mkdir(contextDirOf(run), { recursive: true });
     await writeFile(workingMetaPath(run), `${JSON.stringify(meta, null, 2)}\n`, "utf-8");
@@ -143,7 +146,7 @@ async function readJson<T>(path: string): Promise<T | null> {
   }
 }
 
-async function readRefs(run: CadRunStore): Promise<ContextRef[]> {
+async function readRefs(run: ContextRun): Promise<ContextRef[]> {
   const raw = await readText(join(contextDirOf(run), "refs.jsonl"));
   const refs: ContextRef[] = [];
   for (const line of raw.split("\n")) {
@@ -158,7 +161,7 @@ async function readRefs(run: CadRunStore): Promise<ContextRef[]> {
   return refs;
 }
 
-async function readRecentRefs(run: CadRunStore): Promise<{ refs: ContextRef[]; truncated: boolean }> {
+async function readRecentRefs(run: ContextRun): Promise<{ refs: ContextRef[]; truncated: boolean }> {
   const result = await readJsonLinesTail<ContextRef>(
     join(contextDirOf(run), "refs.jsonl"),
     256 * 1024,
@@ -195,7 +198,7 @@ function budgetClip(text: string): string {
  * archive readable while every image stays byte-exact on disk.
  */
 async function extractImageAssets(
-  run: CadRunStore,
+  run: ContextRun,
   id: string,
   messages: unknown[],
 ): Promise<{ messages: unknown[]; assets: Array<{ path: string; sha256: string; bytes: number }> }> {
@@ -289,7 +292,7 @@ function indexSummary(messages: unknown[]): string {
  * refs.jsonl. Counting refs alone regresses (and would overwrite an
  * existing checkpoint) whenever a torn final JSONL line drops an entry.
  */
-async function nextArchiveId(run: CadRunStore): Promise<string> {
+async function nextArchiveId(run: ContextRun): Promise<string> {
   let max = 0;
   try {
     for (const name of await readdir(join(contextDirOf(run), "archive"))) {
@@ -311,7 +314,7 @@ interface ArchivedTrajectory {
 }
 
 async function archiveTrajectory(
-  run: CadRunStore,
+  run: ContextRun,
   messages: unknown[],
   meta: { reason: string; tokensBefore: number; firstKeptEntryId: string },
 ): Promise<ArchivedTrajectory> {
@@ -349,7 +352,7 @@ async function archiveTrajectory(
  * successful rebuild) and journal the failure for experiment telemetry.
  */
 async function noteUpdateFailure(
-  run: CadRunStore,
+  run: ContextRun,
   info: { stopReason?: string; checkpointId?: string },
 ): Promise<void> {
   try {
@@ -442,7 +445,7 @@ export interface WorkingContextUpdate {
  */
 async function updateWorkingContext(
   ctx: ExtensionContext,
-  run: CadRunStore,
+  run: ContextRun,
   messages: unknown[],
   signal: AbortSignal,
 ): Promise<WorkingContextUpdate> {
@@ -523,145 +526,10 @@ async function updateWorkingContext(
  * "constraint" over a long run — the mission must keep saying which claims
  * were never user-verified. Empty sections are omitted.
  */
-function renderMission(requirements: CadRequirements): string {
-  const sections: Array<[string, string[]]> = [
-    ["Must:", requirements.must],
-    ["Deliverables:", requirements.deliverables],
-    ["Preferences (soft — trade away only with a stated reason):", requirements.preferences],
-    ["Assumptions (provisional — NOT user-verified constraints):", requirements.assumptions],
-    ["Open Unknowns (unresolved questions):", requirements.openUnknowns],
-  ];
-  const lines = ["## Mission", "", `Goal: ${requirements.goal}`];
-  for (const [label, items] of sections) {
-    if (!items?.length) continue;
-    lines.push("", label, ...items.map((item) => `- ${item}`));
-  }
-  if (requirements.assertions?.length) {
-    lines.push(
-      "",
-      "Pre-registered Acceptance Assertions:",
-      ...requirements.assertions.map((assertion) =>
-        `- ${assertion.id} (${assertion.mustRef}): ${assertion.statement}`,
-      ),
-    );
-  }
-  if (requirements.deferredClarifications?.length) {
-    lines.push(
-      "",
-      "Headless Clarification Debt (fallbacks are provisional, not user answers):",
-      ...requirements.deferredClarifications.map((item) =>
-        `- ${item.question} | fallback: ${item.fallback} | impact: ${item.impact}`,
-      ),
-    );
-  }
-  lines.push(
-    "",
-    "Treat Must as hard constraints and Assumptions as revisable; do not silently promote an assumption into a constraint.",
-  );
-  return lines.join("\n");
-}
-
-/**
- * Render the per-run task context appended to the system prompt:
- * Mission (from the immutable record selected by requirementsVersion) + Working Context (working.md) +
- * a short index of archived checkpoints. Canonical state is NOT summarized
- * here — `composeSystemPrompt()` already re-projects it every turn.
- * Returns "" when nothing exists yet (fresh run).
- */
-export async function renderTaskContext(cwd: string, state: CadRunState): Promise<string> {
-  const run = new CadRunStore(cwd, state.runId);
-  const sections: string[] = [];
-
-  const requirements = state.requirementsVersion
-    ? await run.readRequirementsVersion<CadRequirements>(state.requirementsVersion).catch(() => null)
-    : await readJson<CadRequirements>(join(run.recordsDir, "requirements.json"));
-  if (requirements?.goal) sections.push(renderMission(requirements));
-
-  const lateClarifications = (state.deferredClarifications ?? []).filter(
-    (item) => item.phase !== "requirements",
-  );
-  if (lateClarifications.length) {
-    sections.push([
-      "## Run-wide Headless Clarification Debt",
-      "",
-      "These fallbacks are provisional engineering decisions, not user answers:",
-      ...lateClarifications.map((item) =>
-        `- [${item.phase}] ${item.question} | fallback: ${item.fallback} | impact: ${item.impact}`,
-      ),
-    ].join("\n"));
-  }
-
-  // A stale working.md (refresh failed mid-compaction) is deliberately NOT
-  // injected: its "Current intent" would outrank the fresher default
-  // compaction summary now carrying the run in the conversation.
-  const meta = await readWorkingMeta(run);
-  const workingRead = meta.status === "stale"
-    ? { text: "", truncated: false }
-    : await readTextPrefix(workingPath(run), WORKING_CONTEXT_MAX_CHARS);
-  const working = workingRead.text.trim();
-  if (working) {
-    const note = workingRead.truncated
-      ? `\n\n[... working context clipped at ${WORKING_CONTEXT_MAX_CHARS} bytes; full file at context/working.md ...]`
-      : "";
-    sections.push(`## Working Context\n\n${working}${note}`);
-  }
-
-  const review = state.finalReview;
-  if (
-    review &&
-    review.verdict !== "pass" &&
-    review.artifactHash === state.currentArtifactHash &&
-    review.requirementsHash === state.requirementsVersion &&
-    review.assertionsHash === state.assertionsVersion
-  ) {
-    const report = await readJson<{
-      result?: { summary?: string; assertionChecks?: Array<{ assertionId: string; verdict: string; finding: string }> };
-    }>(join(cwd, review.path));
-    const checks = report?.result?.assertionChecks ?? [];
-    sections.push([
-      "## Latest independent review",
-      "",
-      `status: ${review.verdict.toUpperCase()}`,
-      `report: ${review.path}`,
-      report?.result?.summary ? `summary: ${report.result.summary}` : "",
-      ...checks.filter((check) => check.verdict !== "pass").map((check) =>
-        `- ${check.assertionId} ${check.verdict.toUpperCase()}: ${check.finding}`,
-      ),
-    ].filter(Boolean).join("\n"));
-  }
-
-  const { refs, truncated: refsTruncated } = await readRecentRefs(run);
-  if (refs.length) {
-    const index = refs
-      .slice(-ARCHIVE_INDEX_LIMIT)
-      .reverse()
-      .map((ref) => `- ${ref.id} — ${ref.summary}`);
-    const archiveNote = refsTruncated
-      ? `.pi-cad/runs/${state.runId}/context/archive/ (older checkpoints also available)`
-      : `.pi-cad/runs/${state.runId}/context/archive/`;
-    sections.push(
-      [
-        "## Available References",
-        "",
-        ...index,
-        "",
-        `Full records are archived under ${archiveNote}. Read them only when investigating past attempts.`,
-      ].join("\n"),
-    );
-  }
-
-  // Phase 8: bounded observation index — the agent's post-compaction map
-  // of what it saw (headline facts + where the visuals live).
-  const observationIndex = await renderObservationIndex(cwd, state.runId);
-  if (observationIndex) sections.push(observationIndex);
-
-  return sections.join("\n\n");
-}
-
 /** Re-inject the compact working memory written beside a v7 transaction store. */
 export async function renderV7WorkingContext(cwd: string, runId: string): Promise<string> {
   const v7 = new HarnessRunStoreV7(cwd, runId);
-  const run = { runDir: v7.runDirectory } as CadRunStore;
+  const run: ContextRun = { runDir: v7.runDirectory, runId, appendEvent: async () => {} };
   const meta = await readWorkingMeta(run);
   if (meta.status === "stale") return "";
   const working = (await readText(workingPath(run))).trim();
@@ -728,60 +596,6 @@ export function maybeRebuildContextV7(
 }
 
 /**
- * Decide whether to rebuild context now. Pi's `ctx.compact()` is
- * fire-and-forget, so continuation is resumed from onComplete/onError with
- * freshly loaded canonical state. Returns true when a compaction was
- * requested (the caller must then skip its own auto-continue for this
- * settle). `percent`/`tokens` are null right after a compaction and before
- * the next LLM response — that reads as "do not trigger", which also
- * prevents rebuild loops.
- */
-export function maybeRebuildContext(
-  pi: ExtensionAPI,
-  store: CadProjectStore,
-  state: CadRunState,
-  ctx: ExtensionContext,
-): boolean {
-  const usage = ctx.getContextUsage();
-  if (!usage || usage.percent == null || usage.tokens == null) return false;
-  if (usage.percent < thresholdPercent()) return false;
-  const key = `${store.cwd}:${state.runId}`;
-  if (pendingCompactions.has(key)) return false;
-  pendingCompactions.add(key);
-
-  const resume = () => {
-    pendingCompactions.delete(key);
-    void (async () => {
-      // Reload: canonical state is authoritative, and compaction must never
-      // resume from a stale pre-compaction snapshot.
-      const latest = await store.load();
-      if (!latest) return;
-      // force: the rebuild typically fires on the second+ autonomous
-      // continuation of the same phase+artifact version, whose nudge key
-      // maybeAutoContinue already consumed — without force this resume is
-      // deduped away and the run stalls.
-      try {
-        await maybeAutoContinue(pi, store, latest, ctx, { force: true });
-      } catch (error) {
-        // A reload/session replacement can invalidate the extension instance
-        // while compact() is still finishing. Never let that expected race
-        // become an unhandled rejection that kills the host process. The new
-        // runtime's agent_settled hook owns any subsequent continuation.
-        await store.appendEvent("ContextContinuationDeferred", {
-          phase: latest.phase,
-          reason: error instanceof Error ? error.message : String(error),
-        });
-      }
-    })().catch(() => {
-      // Canonical workflow state is already on disk. Compaction continuation
-      // is best-effort and must not crash Pi even if diagnostic I/O also fails.
-    });
-  };
-  ctx.compact({ onComplete: resume, onError: resume });
-  return true;
-}
-
-/**
  * Register the context-memory compaction hook. Serves every compaction
  * path: manual /compact, Pi's threshold trigger, and overflow recovery
  * (where Pi retries the aborted turn itself — this handler only preserves
@@ -790,82 +604,28 @@ export function maybeRebuildContext(
 export function registerContextCompaction(pi: ExtensionAPI): void {
   pi.on("session_before_compact", async (event, ctx) => {
     if (event.signal.aborted) return undefined;
-    if (await selectKernelEngine(ctx.cwd) === "v7") {
-      const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
-      if (!loaded || ["done", "aborted"].includes(loaded.state.status)) return undefined;
-      const messages = [...event.preparation.messagesToSummarize, ...event.preparation.turnPrefixMessages];
-      if (!messages.length) return undefined;
-      const v7 = new HarnessRunStoreV7(ctx.cwd, loaded.state.runId);
-      const run = { runDir: v7.runDirectory, runId: v7.runId, appendEvent: async () => {} } as CadRunStore;
-      let archived: ArchivedTrajectory | null = null;
-      try {
-        archived = await archiveTrajectory(run, messages, { reason: event.reason, tokensBefore: event.preparation.tokensBefore, firstKeptEntryId: event.preparation.firstKeptEntryId });
-      } catch {}
-      const { updated, usage, stopReason } = await updateWorkingContext(ctx, run, messages, event.signal);
-      if (!updated) {
-        await noteUpdateFailure(run, { stopReason, checkpointId: archived?.ref.id });
-        return undefined;
-      }
-      return {
-        compaction: {
-          summary: `Pi-CAD rebuilt working context for v7 run ${loaded.state.runId}. Canonical workflow state will be injected on the next turn; working memory is in context/working.md.`,
-          firstKeptEntryId: event.preparation.firstKeptEntryId,
-          tokensBefore: event.preparation.tokensBefore,
-          usage,
-          details: { reason: event.reason, runId: loaded.state.runId, checkpointId: archived?.ref.id },
-        },
-      };
-    }
-    const store = new CadProjectStore(ctx.cwd);
-    const state = await store.load();
-    if (!state || state.status === "done" || state.status === "aborted") return undefined;
-
+    const loaded = await new HarnessProjectStoreV7(ctx.cwd).currentRun(mechanicalRegistries);
+    if (!loaded || ["done", "aborted"].includes(loaded.state.status)) return undefined;
     const messages = [...event.preparation.messagesToSummarize, ...event.preparation.turnPrefixMessages];
     if (!messages.length) return undefined;
-    const run = new CadRunStore(ctx.cwd, state.runId);
-
-    // 1. Archive the trajectory first: pure file I/O, independent of the
-    //    LLM below, so a failed update never loses history. Fail-open: a
-    //    broken archive must not break compaction itself — falling back to
-    //    Pi's default summary would discard the trajectory just the same,
-    //    while a stale working.md is still the better continuation.
+    const v7 = new HarnessRunStoreV7(ctx.cwd, loaded.state.runId);
+    const run: ContextRun = { runDir: v7.runDirectory, runId: v7.runId, appendEvent: async () => {} };
     let archived: ArchivedTrajectory | null = null;
     try {
-      archived = await archiveTrajectory(run, messages, {
-        reason: event.reason,
-        tokensBefore: event.preparation.tokensBefore,
-        firstKeptEntryId: event.preparation.firstKeptEntryId,
-      });
-    } catch {
-      archived = null;
-    }
-
-    // 2. Fresh LLM refresh of working.md over a budgeted copy.
+      archived = await archiveTrajectory(run, messages, { reason: event.reason, tokensBefore: event.preparation.tokensBefore, firstKeptEntryId: event.preparation.firstKeptEntryId });
+    } catch {}
     const { updated, usage, stopReason } = await updateWorkingContext(ctx, run, messages, event.signal);
     if (!updated) {
-      // Fall back to Pi's default compaction summary; archive + refs above
-      // are already durable when they could be written.
       await noteUpdateFailure(run, { stopReason, checkpointId: archived?.ref.id });
       return undefined;
     }
-
-    // 3. Minimal compaction entry: mission, canonical state, and working
-    //    context are re-injected by before_agent_start on the next run.
     return {
       compaction: {
-        summary: [
-          `Pi-CAD context rebuild${archived ? ` (${archived.ref.id})` : ""}.`,
-          archived
-            ? `Full trajectory archived at ${archived.ref.path}; working context updated at context/working.md.`
-            : "WARNING: trajectory archive could not be written; working context updated at context/working.md.",
-          "Mission, canonical state, and working context are re-injected in the system prompt — do not re-derive them from this history.",
-        ].join(" "),
+        summary: `Pi-CAD rebuilt working context for v7 run ${loaded.state.runId}. Canonical workflow state will be injected on the next turn; working memory is in context/working.md.`,
         firstKeptEntryId: event.preparation.firstKeptEntryId,
         tokensBefore: event.preparation.tokensBefore,
-        ...(usage ? { usage } : {}),
-        // Preserve Pi's cumulative file tracking so later compactions and
-        // session tooling keep a coherent read/modified file history.
-        details: event.preparation.fileOps,
+        usage,
+        details: { reason: event.reason, runId: loaded.state.runId, checkpointId: archived?.ref.id },
       },
     };
   });

@@ -1,9 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-import { TOOL_PURPOSES } from "../../core/agent-contract.ts";
+import { TOOL_PURPOSES } from "./purposes.ts";
 import { ACTIVE_PUBLIC_TOOLS, type ActivePublicTool, type PublicToolGroup } from "../../shared/public-tools.ts";
 import { mechanicalRegistries } from "./registries.ts";
 import { canonicalJson } from "../../harness/canonical.ts";
+import { MECHANICAL_ACTION_PARAMETERS } from "./action-schemas.ts";
 
 export { mechanicalRegistries } from "./registries.ts";
 
@@ -48,6 +49,13 @@ export function captureMechanicalAction(tool: ToolDefinition): void {
       } as never,
     },
   });
+}
+
+/** Pin every Mechanical action contract from the schema table, without loading any Pi extension. */
+export function pinMechanicalActionContracts(): void {
+  for (const [name, parameters] of Object.entries(MECHANICAL_ACTION_PARAMETERS)) {
+    captureMechanicalAction({ name, parameters } as ToolDefinition);
+  }
 }
 
 /** Register the live Pi tool and pin its actual input schema in the Action Registry. */

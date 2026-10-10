@@ -917,10 +917,8 @@ def role_matches(key: str, wanted: str) -> bool:
 
 
 def known_role_paths(ctx: Any) -> list[str]:
-    from .assembly import units
-
     paths: list[str] = []
-    for unit in units(ctx.session):
+    for unit in ctx.units():
         roles = unit.roles(ctx.session)
         if roles is not None:
             paths.extend(roles.faces)
@@ -929,9 +927,7 @@ def known_role_paths(ctx: Any) -> list[str]:
 
 
 def _body_for_feature(ctx: Any, feature_path: str) -> Any:
-    from .assembly import units
-
-    for unit in units(ctx.session):
+    for unit in ctx.units():
         if unit.kind != "body" and (feature_path == unit.path or feature_path.startswith(unit.path + "/")):
             raise ReifyOpError(
                 "OP_SCHEMA_INVALID",

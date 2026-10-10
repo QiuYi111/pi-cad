@@ -15,7 +15,7 @@ import { clusterFailures, failureSignature, normalizeText } from "../chaos/campa
 import { assessClusterStability, classifyFailureVerdict, triageCluster } from "../chaos/campaign/triage.ts";
 import type { CampaignReport, CampaignRound, FailureCluster } from "../chaos/campaign/types.ts";
 import type { ReifyReplayResult, ReifyRunResult } from "../chaos/reify/runner.ts";
-import { FAULT_BOUNDARIES } from "../chaos/reify/faults.ts";
+import { FAULT_BOUNDARIES } from "../chaos/reify/faults/index.ts";
 import { reifyActionDefinitions } from "../chaos/reify/actions.ts";
 import type { ReifyFailureArtifact } from "../chaos/reify/artifacts.ts";
 import { REIFY_MULTI_CONVERSATION_SETUP, REIFY_SETUP, REIFY_WARM_KERNEL_SETUP, buildReifySequenceArbitrary, type Command } from "../chaos/reify/model.ts";

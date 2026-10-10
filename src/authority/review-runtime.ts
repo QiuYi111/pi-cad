@@ -4,11 +4,11 @@ import { loadWorkspaceCommit } from "../harness/commit.ts";
 import { HarnessRunStoreV7 } from "../harness/run-store.ts";
 import { resolveActiveRun } from "../harness/run-scope.ts";
 import { loadCommittedImages, loadMandatoryImages, type PhaseCardImage } from "../harness/card.ts";
-import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
+import type { AuthorityDomain } from "./domain.ts";
 import { transitionRun } from "../harness/reducer.ts";
 import type { WorkflowSnapshotV1 } from "../harness/workflow/types.ts";
 import type { HarnessRunStateV7 } from "../harness/state.ts";
-import { executeWorkflowGitActions, phaseGitActions } from "./workflow-git.ts";
+import { executeWorkflowGitActions, phaseGitActions } from "../harness/workflow-git.ts";
 
 export type AuthoritativeReviewVerdictV1 = "pass" | "fail" | "clarification_required";
 export interface ReviewHandleV1 { reviewId: string; subjectCommit: string; status: "running" | AuthoritativeReviewVerdictV1 | "unresolved"; }
@@ -85,18 +85,22 @@ export class ReviewRuntime {
   /** reviewId → owning run, so the reviewer socket can name its own run. */
   private readonly reviewRuns = new Map<string, string>();
   private closed = false;
-  constructor(private readonly cwd: string, private readonly executor: ReviewerExecutor) {}
+  constructor(private readonly domain: AuthorityDomain, private readonly cwd: string, private readonly executor: ReviewerExecutor) {}
+
+  private get registries() {
+    return this.domain.registries;
+  }
 
   reviewRunId(reviewId: string): string | null {
     return this.reviewRuns.get(reviewId) ?? null;
   }
 
   async submit(subjectCommit: string): Promise<ReviewHandleV1> {
-    const active = await resolveActiveRun(this.cwd, mechanicalRegistries);
+    const active = await resolveActiveRun(this.cwd, this.registries);
     if (!active) throw new Error("review.submit requires an active workflow");
     const profileId = active.workflow.phases[active.state.phase]?.reviewProfile;
     if (!profileId) throw new Error(`review.submit is unavailable in phase ${active.state.phase}`);
-    const { manifest } = await loadWorkspaceCommit(this.cwd, mechanicalRegistries, subjectCommit);
+    const { manifest } = await loadWorkspaceCommit(this.cwd, this.registries, subjectCommit);
     if (manifest.workflowHash !== active.workflow.hash) throw new Error("review subject commit belongs to another workflow snapshot");
     if (!manifest.artifacts.length) throw new Error("review subject commit has no immutable artifacts");
     const canonicalCandidate = active.state.artifacts["candidate:authoritative"];
@@ -130,11 +134,11 @@ export class ReviewRuntime {
     const now = new Date().toISOString();
     const stored: StoredReview = { reviewId, subjectCommit, status: "running", key, artifactHash, workflowHash: active.workflow.hash, contractHash, profileId, createdAt: now, updatedAt: now };
     this.reviewRuns.set(reviewId, active.state.runId);
-    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
+    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(this.registries, ({ state }) => ({
       state: { ...state, domainMetadata: { ...(state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(state), [reviewId]: stored }) }, updatedAt: now },
       event: { type: "ReviewSubmitted", data: { reviewId, subjectCommit, key, artifactHash } },
     }));
-    const requirementsReview = profileId === "mechanical.requirements-review";
+    const requirementsReview = profileId === this.domain.requirementsReviewProfile;
     const prompt = requirementsReview ? [
       "You are a fresh, rigorous, independent requirements reviewer running as an ordinary Prime template.",
       "Do not read skills, implementation source, author transcripts, or benchmark ground truth. Do not design or build the requested object.",
@@ -180,7 +184,7 @@ export class ReviewRuntime {
   }
 
   async current(reviewId?: string): Promise<ReviewStatusV1 | null> {
-    const active = await resolveActiveRun(this.cwd, mechanicalRegistries);
+    const active = await resolveActiveRun(this.cwd, this.registries);
     if (!active) return null;
     const values = Object.values(requests(active.state));
     const item = reviewId ? values.find((value) => value.reviewId === reviewId) : values.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
@@ -194,11 +198,11 @@ export class ReviewRuntime {
 
   async evidence(reviewId: string): Promise<ReviewEvidenceV1> {
     const subjectCommit = await this.reviewerSubject(reviewId);
-    const active = await resolveActiveRun(this.cwd, mechanicalRegistries);
+    const active = await resolveActiveRun(this.cwd, this.registries);
     if (!active) throw new Error("review run no longer exists");
     const stored = requests(active.state)[reviewId];
     if (!stored || stored.subjectCommit !== subjectCommit) throw new Error("review evidence authority is stale");
-    const { manifest: subjectManifest } = await loadWorkspaceCommit(this.cwd, mechanicalRegistries, subjectCommit);
+    const { manifest: subjectManifest } = await loadWorkspaceCommit(this.cwd, this.registries, subjectCommit);
     const frame = await new HarnessRunStoreV7(this.cwd, active.state.runId).transactions.readJson<{ mission?: unknown }>("context/frame.json");
     const originalRequest = typeof frame?.mission === "string" ? frame.mission.trim() : "";
     if (!originalRequest) throw new Error("canonical original user request is unavailable");
@@ -212,7 +216,7 @@ export class ReviewRuntime {
     for (const [obligationRef, record] of Object.entries(active.state.records)) {
       const match = /workspace\/commits\/(commit-[a-f0-9]{32})\.json$/.exec(record.path);
       if (!match) continue;
-      const { manifest, variables } = await loadWorkspaceCommit(this.cwd, mechanicalRegistries, match[1]!);
+      const { manifest, variables } = await loadWorkspaceCommit(this.cwd, this.registries, match[1]!);
       records.push({
         obligationRef,
         phase: manifest.phase,
@@ -235,7 +239,7 @@ export class ReviewRuntime {
       source: "candidate-view" as const,
     }));
     const images = [...conceptImages, ...candidateImages];
-    if (stored.profileId !== "mechanical.requirements-review" && !images.length) throw new Error("canonical review images are unavailable");
+    if (stored.profileId !== this.domain.requirementsReviewProfile && !images.length) throw new Error("canonical review images are unavailable");
     return {
       reviewId,
       subjectCommit,
@@ -251,7 +255,7 @@ export class ReviewRuntime {
 
   async complete(reviewId: string, result: ReviewCompletionV1): Promise<ReviewStatusV1> {
     validateResult(result);
-    const active = await resolveActiveRun(this.cwd, mechanicalRegistries);
+    const active = await resolveActiveRun(this.cwd, this.registries);
     if (!active) throw new Error("review run no longer exists");
     const existing = requests(active.state)[reviewId];
     if (!existing) throw new Error(`unknown review: ${reviewId}`);
@@ -263,7 +267,7 @@ export class ReviewRuntime {
     };
     const currentContractHash = reviewContractHash(active);
     if (existing.workflowHash !== active.workflow.hash || existing.contractHash !== currentContractHash) throw new Error("review subject is stale");
-    const { manifest } = await loadWorkspaceCommit(this.cwd, mechanicalRegistries, existing.subjectCommit);
+    const { manifest } = await loadWorkspaceCommit(this.cwd, this.registries, existing.subjectCommit);
     const canonicalCandidate = active.state.artifacts["candidate:authoritative"];
     const artifactHash = (canonicalCandidate
       ?? manifest.artifacts.find((item) => /candidate/i.test(item.role))
@@ -285,12 +289,12 @@ export class ReviewRuntime {
     const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
     const exitActions = phaseGitActions(active.workflow, active.state.phase, "onExit");
     const enterActions = phaseGitActions(active.workflow, choice.target, "onEnter");
-    if (exitActions.length || enterActions.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
+    if (exitActions.length || enterActions.length) await store.mutate(this.registries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
     const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, exitActions, `complete ${active.state.phase}`);
-    if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
+    if (exitGit.length) await store.mutate(this.registries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
     const enterGit = await executeWorkflowGitActions(this.cwd, active.workflow, enterActions, `enter ${choice.target}`);
-    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
-    await store.mutate(mechanicalRegistries, (loaded) => {
+    if (enterGit.length) await store.mutate(this.registries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
+    await store.mutate(this.registries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         domainMetadata: { ...(loaded.state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(loaded.state), [reviewId]: updated }) },
@@ -312,7 +316,7 @@ export class ReviewRuntime {
 
   private async reapplyCompletedDisposition(existing: StoredReview): Promise<void> {
     if (!existing.result || existing.result.verdict === "unresolved") return;
-    const active = await resolveActiveRun(this.cwd, mechanicalRegistries);
+    const active = await resolveActiveRun(this.cwd, this.registries);
     if (!active || !active.workflow.phases[active.state.phase]?.reviewProfile) return;
     const choice = dispositionChoices(active.state, active.workflow)
       .find((item) => item.verdict === existing.result!.verdict && item.target === existing.result!.target);
@@ -327,12 +331,12 @@ export class ReviewRuntime {
     const store = new HarnessRunStoreV7(this.cwd, active.state.runId);
     const exitActions = phaseGitActions(active.workflow, active.state.phase, "onExit");
     const enterActions = phaseGitActions(active.workflow, choice.target, "onEnter");
-    if (exitActions.length || enterActions.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
+    if (exitActions.length || enterActions.length) await store.mutate(this.registries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsPending", data: jsonValue({ from: active.state.phase, to: choice.target, exitActions, enterActions }) } }));
     const exitGit = await executeWorkflowGitActions(this.cwd, active.workflow, exitActions, `complete ${active.state.phase}`);
-    if (exitGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
+    if (exitGit.length) await store.mutate(this.registries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `exit:${state.phase}`, results: exitGit }) } }));
     const enterGit = await executeWorkflowGitActions(this.cwd, active.workflow, enterActions, `enter ${choice.target}`);
-    if (enterGit.length) await store.mutate(mechanicalRegistries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
-    await store.mutate(mechanicalRegistries, (loaded) => {
+    if (enterGit.length) await store.mutate(this.registries, ({ state }) => ({ state, event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment: `enter:${choice.target}`, results: enterGit }) } }));
+    await store.mutate(this.registries, (loaded) => {
       const reviewedState = {
         ...loaded.state,
         latestReview: { id: existing.reviewId, verdict: existing.result!.verdict, path, profileId: existing.profileId, subjectHash: canonicalDigest(reviewSubject(loaded)), workflowHash: loaded.workflow.hash, registryContractHash: loaded.registryContract.hash, subjectCommit: existing.subjectCommit, artifactHash: existing.artifactHash },
@@ -346,7 +350,7 @@ export class ReviewRuntime {
   }
 
   private async failRuntime(reviewId: string, summary: string, findingId: string): Promise<ReviewStatusV1> {
-    const active = await resolveActiveRun(this.cwd, mechanicalRegistries);
+    const active = await resolveActiveRun(this.cwd, this.registries);
     if (!active) throw new Error("review run no longer exists");
     const existing = requests(active.state)[reviewId];
     if (!existing) throw new Error(`unknown review: ${reviewId}`);
@@ -354,7 +358,7 @@ export class ReviewRuntime {
     const result: ReviewRuntimeFailureV1 = { verdict: "unresolved", summary, findings: [{ id: findingId, severity: "error", finding: summary, evidenceRefs: [] }] };
     const updated: StoredReview = { ...existing, status: "unresolved", result, updatedAt: new Date().toISOString() };
     const path = `reviews/${reviewId}.json`;
-    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(mechanicalRegistries, ({ state }) => ({
+    await new HarnessRunStoreV7(this.cwd, active.state.runId).mutate(this.registries, ({ state }) => ({
       state: { ...state, domainMetadata: { ...(state.domainMetadata ?? {}), reviewRequests: jsonValue({ ...requests(state), [reviewId]: updated }) }, updatedAt: updated.updatedAt },
       event: { type: "ReviewRuntimeFailed", data: { reviewId, subjectCommit: existing.subjectCommit, summary } },
       payloads: { [path]: jsonValue({ schema: 1, ...updated }) },
@@ -366,7 +370,7 @@ export class ReviewRuntime {
   }
 
   async reviewerSubject(reviewId: string): Promise<string> {
-    const active = await resolveActiveRun(this.cwd, mechanicalRegistries);
+    const active = await resolveActiveRun(this.cwd, this.registries);
     const item = active ? requests(active.state)[reviewId] : undefined;
     if (!item || item.status !== "running") throw new Error("reviewer request is unknown or no longer running");
     return item.subjectCommit;

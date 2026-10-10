@@ -8,5 +8,5 @@
     "skipLibCheck": true,
     "types": ["node", "electron-vite/node"]
   },
-  "include": ["electron.vite.config.ts", "electron/**/*.ts", "src/shared/**/*.ts", "scripts/**/*.mjs"]
+  "include": ["electron.vite.config.ts", "electron/**/*.ts", "src/shared/**/*.ts", "scripts/**/*.mjs", "../../cloud/protocol/src/**/*.ts"]
 }

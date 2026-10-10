@@ -1,4 +1,4 @@
-import { FAULT_BOUNDARIES } from "../reify/faults.ts";
+import { FAULT_BOUNDARIES } from "../reify/faults/index.ts";
 import type { ReifyFailureArtifact } from "../reify/artifacts.ts";
 import type { Command } from "../reify/model.ts";
 import type { FailureCluster, FailureNature, FaultBoundary } from "./types.ts";

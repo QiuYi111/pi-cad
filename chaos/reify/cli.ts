@@ -6,8 +6,9 @@ import { CAMPAIGN_PROFILES, resolveProfiles } from "../campaign/profiles.ts";
 import { renderCampaignReport, renderCampaignSummary } from "../campaign/report.ts";
 import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact } from "./artifacts.ts";
+import { boolFlag, parseArgs, type ParsedArgs } from "../support/args.ts";
 import { inspectReifyComponents, runtimeObservation, type ReifyComponents } from "./components.ts";
-import { FAULT_BOUNDARIES, reifyFaultDefinitions } from "./faults.ts";
+import { FAULT_BOUNDARIES, reifyFaultDefinitions } from "./faults/index.ts";
 import { ReifyPrimeRuntime } from "./prime.ts";
 import { ReifyRuntime } from "./runtime.ts";
 import { checkInvariantsOn, reifyInvariantDefinitions } from "./invariants.ts";
@@ -41,29 +42,7 @@ const USAGE = `真 Reify chaos slice
   chaos reify invariants
 `;
 
-interface ParsedArgs {
-  positionals: string[];
-  flags: Record<string, string | boolean>;
-}
 
-function parseArgs(argv: string[]): ParsedArgs {
-  const positionals: string[] = [];
-  const flags: Record<string, string | boolean> = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index]!;
-    if (token.startsWith("--")) {
-      const [key, inline] = token.slice(2).split("=");
-      if (inline !== undefined) flags[key!] = inline;
-      else if (argv[index + 1] && !argv[index + 1]!.startsWith("--")) flags[key!] = argv[++index]!;
-      else flags[key!] = true;
-    } else {
-      positionals.push(token);
-    }
-  }
-  return { positionals, flags };
-}
-
-const boolFlag = (flags: ParsedArgs["flags"], key: string): boolean => flags[key] === true || flags[key] === "true";
 
 function stateLine(snapshot: Awaited<ReturnType<ReifySession["snapshot"]>>): string {
   const runs = snapshot.runs.map((run) => `${run.id} ${run.phase}/${run.status} artifacts=${run.artifacts.length}`).join(" | ");

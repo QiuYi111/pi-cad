@@ -1,0 +1,93 @@
+name: cloud
+
+on:
+  workflow_call:
+  push:
+    branches: [master]
+    paths:
+      - "cloud/**"
+      - "apps/desktop/electron/main/remote-bridge*"
+      - "apps/desktop/electron/main/runtime-bridge.ts"
+      - "apps/desktop/electron/main/cloud-*"
+      - "apps/desktop/src/shared/contracts.ts"
+      - ".github/workflows/cloud.yml"
+  pull_request:
+    paths:
+      - "cloud/**"
+      - "apps/desktop/electron/main/remote-bridge*"
+      - "apps/desktop/electron/main/runtime-bridge.ts"
+      - "apps/desktop/electron/main/cloud-*"
+      - "apps/desktop/src/shared/contracts.ts"
+      - ".github/workflows/cloud.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  cloud:
+    name: "Cloud packages: typecheck + tests (protocol, workspace-gateway, platform-api)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # platform-api's test global setup uses TEST_DATABASE_URL when it is set, so CI
+    # uses this service container and does not need the postgresql-16 binaries.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            cloud/protocol/package-lock.json
+            cloud/workspace-gateway/package-lock.json
+            cloud/platform-api/package-lock.json
+            apps/desktop/package-lock.json
+
+      # The cloud packages are not npm workspaces. workspace-gateway depends on
+      # protocol through "file:../protocol", so each package installs on its own.
+      - name: Install cloud packages
+        run: |
+          npm ci --prefix cloud/protocol
+          npm ci --prefix cloud/workspace-gateway
+          npm ci --prefix cloud/platform-api
+
+      # cloud/platform-api/test/cloud-contract.test.ts drives the desktop
+      # RemoteBridge and CloudSession, which import "ws" from apps/desktop.
+      # Dev deps are needed too: platform-api typecheck reads those files and
+      # needs @types/ws. --ignore-scripts skips the Electron binary download.
+      - name: Install desktop deps (cloud-contract test and typecheck)
+        run: npm ci --prefix apps/desktop --ignore-scripts
+
+      - name: Typecheck
+        run: |
+          npm run typecheck --prefix cloud/protocol
+          npm run typecheck --prefix cloud/workspace-gateway
+          npm run typecheck --prefix cloud/platform-api
+
+      - name: Test protocol
+        run: npm test --prefix cloud/protocol
+
+      - name: Test workspace-gateway
+        run: npm test --prefix cloud/workspace-gateway
+
+      # Includes cloud-contract, auth and controller tests.
+      - name: Test platform-api
+        run: npm test --prefix cloud/platform-api
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres

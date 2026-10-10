@@ -1,0 +1,648 @@
+"""Release presentation interpreter tests (0.8 M4b).
+
+Blender-gated: every render test skips when blender/ffmpeg are missing —
+the same fail-soft contract the tool itself honors. Schema validation and
+the unavailable-path are always tested.
+"""
+
+from __future__ import annotations
+
+import json
+import hashlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from system_requirements import skip_unless_system, system_skip_reason  # noqa: E402
+from pathlib import Path
+
+from cadctl.presentation import blender_binary, run_presentation, validate_spec
+from cadctl.presentation_driver import configure_cycles_device
+
+ROOT = Path(__file__).resolve().parents[3]
+HAS_BLENDER = shutil.which("blender") is not None
+HAS_FFMPEG = shutil.which("ffmpeg") is not None
+
+TWO_BOXES_SOURCE = '''
+import build123d as bd
+
+with bd.BuildPart() as p:
+    bd.Box(40, 30, 12)
+    a = p.part
+with bd.BuildPart() as p:
+    bd.Box(20, 20, 35)
+    b = p.part
+result = bd.Compound([a, b.moved(bd.Location((0, 0, 23.5)))])
+'''
+
+
+def _reference_image(path: Path) -> Path:
+    from PIL import Image
+
+    Image.new("RGB", (32, 32), (120, 120, 130)).save(path)
+    return path
+
+
+class PresentationSchema(unittest.TestCase):
+    def test_agent_blender_command_uses_managed_binary(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from cadctl.cli import main
+
+        completed = SimpleNamespace(returncode=7)
+        with patch("cadctl.presentation.blender_binary", return_value=("/managed/blender", "5.1.2/linux-x64")), patch(
+            "cadctl.cli.subprocess.run", return_value=completed
+        ) as run:
+            self.assertEqual(main(["blender", "--", "--background", "--python", "scene.py"]), 7)
+        self.assertEqual(run.call_args.args[0], ["/managed/blender", "--background", "--python", "scene.py"])
+
+    def test_agent_blender_command_rejects_path_fallback(self):
+        from unittest.mock import patch
+
+        from cadctl.cli import main
+
+        with patch("cadctl.presentation.blender_binary", return_value=("/usr/bin/blender", "path-fallback")), patch(
+            "cadctl.cli.subprocess.run"
+        ) as run:
+            self.assertEqual(main(["blender", "--", "--version"]), 2)
+        run.assert_not_called()
+
+    def test_managed_blender_wins_over_path_blender(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            managed = Path(tmp) / "5.1.2" / "linux-x64" / "blender"
+            managed.parent.mkdir(parents=True)
+            managed.write_text("binary")
+            managed.chmod(0o755)
+            with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": tmp}, clear=False), patch(
+                "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
+            ):
+                self.assertEqual(blender_binary(), (str(managed.resolve()), "5.1.2/linux-x64"))
+
+    def test_managed_blender_uses_exact_manifest_version_and_platform(self):
+        import os
+        from unittest.mock import patch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pinned = root / "runtime" / "5.1.2" / "linux-x64" / "blender"
+            newer = root / "runtime" / "4.6.0" / "linux-x64" / "blender"
+            foreign = root / "runtime" / "9.0.0" / "win32-x64" / "blender"
+            for binary in (pinned, newer, foreign):
+                binary.parent.mkdir(parents=True)
+                binary.write_text("binary")
+                binary.chmod(0o755)
+            manifest = root / "blender-manifest.json"
+            manifest.write_text(json.dumps({
+                "version": "5.1.2",
+                "platforms": {"linux-x64": {"binary": "distribution/blender", "sha256": "pinned"}},
+            }))
+            with patch.dict(os.environ, {"PI_CAD_BLENDER_RUNTIME": str(root / "runtime")}, clear=False), patch(
+                "cadctl.presentation._blender_manifest_path", return_value=manifest
+            ), patch("cadctl.presentation._blender_platform_key", return_value="linux-x64"), patch(
+                "cadctl.presentation.shutil.which", return_value="/usr/bin/blender"
+            ):
+                self.assertEqual(blender_binary(), (str(pinned.resolve()), "5.1.2/linux-x64"))
+
+    def test_cycles_prefers_available_gpu_and_falls_back_to_cpu(self):
+        class Device:
+            def __init__(self, name, kind):
+                self.name, self.type, self.use = name, kind, False
+
+        class Preferences:
+            def __init__(self, devices):
+                self.devices = devices
+                self.compute_device_type = "NONE"
+
+            def get_devices(self):
+                return None
+
+        class Cycles:
+            device = "CPU"
+
+        class Scene:
+            cycles = Cycles()
+
+        gpu = Device("NVIDIA TITAN Xp", "CUDA")
+        cpu = Device("CPU", "CPU")
+        scene = Scene()
+        selected = configure_cycles_device(scene, Preferences([gpu, cpu]))
+        self.assertEqual(scene.cycles.device, "GPU")
+        self.assertTrue(gpu.use)
+        self.assertFalse(cpu.use)
+        self.assertEqual(selected["device"], "NVIDIA TITAN Xp")
+
+        scene = Scene()
+        selected = configure_cycles_device(scene, Preferences([cpu]))
+        self.assertEqual(scene.cycles.device, "CPU")
+        self.assertEqual(selected["backend"], "CPU")
+
+    def spec(self, **overrides):
+        spec = {
+            "artifact": "model.step",
+            "directions": [
+                {"name": "hero", "reference": "ref1.png"},
+                {"name": "top", "reference": "ref2.png"},
+            ],
+            "materials": [{"pattern": "brushed", "family": "metal"}],
+            "lighting": {"key": "softbox", "fill": "bounce", "rim": "strip"},
+            "camera": {"lens": "85mm", "composition": "hero"},
+        }
+        spec.update(overrides)
+        return spec
+
+    def test_valid_spec_and_unknown_keys_fail_closed(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            artifact = tmp / "model.step"
+            artifact.write_text("step")
+            ref1 = _reference_image(tmp / "ref1.png")
+            ref2 = _reference_image(tmp / "ref2.png")
+            spec = self.spec(
+                artifact=str(artifact),
+                directions=[
+                    {"name": "hero", "reference": str(ref1)},
+                    {"name": "top", "reference": str(ref2)},
+                ],
+            )
+            ok, errors = validate_spec(spec)
+            self.assertTrue(ok, errors)
+
+        ok, errors = validate_spec(self.spec(vibe="moody"))
+        self.assertFalse(ok)
+        self.assertTrue(any("unknown keys" in e for e in errors))
+
+        ok, errors = validate_spec(self.spec(directions=[{"name": "only-one"}]))
+        self.assertFalse(ok)
+
+    def test_semantic_vocabulary_fails_closed(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            artifact = tmp / "model.step"
+            artifact.write_text("step")
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            base = self.spec(
+                artifact=str(artifact),
+                directions=[
+                    {"name": "hero", "reference": str(refs[0])},
+                    {"name": "top", "reference": str(refs[1])},
+                ],
+            )
+            # Unknown material family/pattern rejected.
+            ok, errors = validate_spec({**base, "materials": [{"pattern": "p", "family": "unobtainium"}]})
+            self.assertFalse(ok)
+            self.assertTrue(any("family" in e for e in errors))
+            # Lens without a focal length rejected.
+            ok, errors = validate_spec({**base, "camera": {"lens": "fuzzy", "composition": "hero"}})
+            self.assertFalse(ok)
+            self.assertTrue(any("lens" in e for e in errors))
+            # Unknown composition rejected.
+            ok, errors = validate_spec({**base, "camera": {"lens": "85mm", "composition": "vibes"}})
+            self.assertFalse(ok)
+            self.assertTrue(any("composition" in e for e in errors))
+
+    def test_assembly_definition_validated(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            artifact = tmp / "model.step"
+            artifact.write_text("step")
+            ref1 = _reference_image(tmp / "ref1.png")
+            ref2 = _reference_image(tmp / "ref2.png")
+            base = self.spec(
+                artifact=str(artifact),
+                directions=[
+                    {"name": "hero", "reference": str(ref1)},
+                    {"name": "top", "reference": str(ref2)},
+                ],
+            )
+
+            good = {"sequence": [{"step": 1, "installs": ["a"]}], "explodeDirections": {"a": [0, 0, 1]}}
+            ok, errors = validate_spec({**base, "assemblyDefinition": good})
+            self.assertTrue(ok, errors)
+
+            bad_vector = {"sequence": [{"step": 1, "installs": ["a"]}], "explodeDirections": {"a": [0, 1]}}
+            ok, errors = validate_spec({**base, "assemblyDefinition": bad_vector})
+            self.assertFalse(ok)
+            self.assertTrue(any("3-vector" in e for e in errors))
+
+            bad_keys = {"sequence": [], "colour": "blue"}
+            ok, errors = validate_spec({**base, "assemblyDefinition": bad_keys})
+            self.assertFalse(ok)
+
+    def test_stage_validate_needs_no_blender(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            artifact = tmp / "model.step"
+            artifact.write_text("step bytes")
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "artifact": str(artifact),
+                        "directions": [
+                            {"name": "hero", "reference": str(refs[0])},
+                            {"name": "top", "reference": str(refs[1])},
+                        ],
+                        "materials": [{"pattern": "brushed", "family": "metal"}],
+                        "lighting": {"key": "a", "fill": "b", "rim": "c"},
+                        "camera": {"lens": "85mm", "composition": "hero"},
+                    }
+                )
+            )
+            result = run_presentation(spec, tmp / "out", stage="validate")
+            self.assertEqual(result["status"], "validated")
+
+
+class PresentationBridgeBundle(unittest.TestCase):
+    @staticmethod
+    def declare_instances(artifact: Path, left, right) -> None:
+        from cadctl.identity import Assembly, reset, write_manifest
+
+        reset()
+        identity = Assembly("assy")
+        identity.part("assy/bracket-definition", label="Bracket")
+        identity.instance("assy/bracket-a", part="assy/bracket-definition", label="Bracket", shape=left)
+        identity.instance("assy/bracket-b", part="assy/bracket-definition", label="Bracket", shape=right)
+        write_manifest(identity, artifact)
+
+    def test_real_step_bundle_binds_hashes_and_each_identity(self):
+        import build123d as bd
+        from cadctl.presentation import _tessellate_step
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "assembly.step"
+            left = bd.Box(10, 8, 2)
+            right = bd.Pos(14, 0, 0) * bd.Box(10, 8, 2)
+            bd.export_step(bd.Compound([left, right]), artifact)
+            step_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            self.declare_instances(artifact, left, right)
+
+            paths = _tessellate_step(artifact, root / "mesh-bundle")
+            manifest = json.loads((root / "mesh-bundle" / "manifest.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(manifest["stepSha256"], step_hash)
+            self.assertTrue(manifest["identityBound"])
+            self.assertEqual([part["occurrenceId"] for part in manifest["parts"]], ["assy/bracket-a", "assy/bracket-b"])
+            self.assertEqual([part["partId"] for part in manifest["parts"]], ["assy/bracket-a", "assy/bracket-b"])
+            self.assertEqual([part["solidId"] for part in manifest["parts"]], ["assy/bracket-a:solid-1", "assy/bracket-b:solid-1"])
+            self.assertEqual(len(paths), 2)
+            self.assertEqual([hashlib.sha256(path.read_bytes()).hexdigest() for path in paths], [part["meshSha256"] for part in manifest["parts"]])
+
+    @skip_unless_system("blender", HAS_BLENDER, "Blender is not installed")
+    def test_headless_blender_import_preserves_manifest_identity(self):
+        import build123d as bd
+        from cadctl.presentation import _tessellate_step
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "assembly.step"
+            left = bd.Box(8, 6, 2)
+            right = bd.Pos(12, 0, 0) * bd.Box(8, 6, 2)
+            bd.export_step(bd.Compound([left, right]), artifact)
+            step_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            self.declare_instances(artifact, left, right)
+            bundle = root / "mesh-bundle"
+            _tessellate_step(artifact, bundle)
+            report_path = root / "bridge-report.json"
+            args_path = root / "bridge-args.json"
+            args_path.write_text(json.dumps({
+                "operation": "bridge-inspect",
+                "artifact": str(artifact),
+                "meshBundle": str(bundle),
+                "reportPath": str(report_path),
+            }), encoding="utf-8")
+
+            blender = shutil.which("blender")
+            assert blender is not None
+            result = subprocess.run([
+                blender, "--background", "--factory-startup", "-P",
+                str(ROOT / "python" / "cadctl" / "presentation_driver.py"), "--", str(args_path),
+            ], capture_output=True, text=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stderr[-3000:])
+            bridge = json.loads(report_path.read_text(encoding="utf-8"))["bridge"]
+            self.assertEqual(bridge["stepSha256"], step_hash)
+            self.assertEqual(bridge["objectCount"], 2)
+            self.assertEqual([item["occurrenceId"] for item in bridge["objects"]], ["assy/bracket-a", "assy/bracket-b"])
+
+
+@skip_unless_system("blender", HAS_BLENDER and HAS_FFMPEG, "blender/ffmpeg not installed")
+class PresentationRender(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = Path(tempfile.mkdtemp(prefix="pi-cad-present-"))
+        source = cls.tmp / "two_boxes.py"
+        source.write_text(TWO_BOXES_SOURCE)
+        cls.artifact = cls.tmp / "two_boxes.step"
+        # Build the STEP deterministically via the same backend the harness uses.
+        import subprocess
+        import sys
+
+        env = {"PYTHONPATH": str(ROOT / "python"), "PATH": "/usr/bin:/bin"}
+        result = subprocess.run(
+            [sys.executable, "-m", "cadctl", "build", "--source", str(source), "--output", str(cls.artifact), "--force"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=300,
+        )
+        assert cls.artifact.exists(), result.stderr[-500:]
+        cls.spec = cls.tmp / "spec.json"
+        cls.spec.write_text(
+            json.dumps(
+                {
+                    "artifact": str(cls.artifact),
+                    "directions": [
+                        {"name": "hero", "reference": str(_reference_image(cls.tmp / "ref1.png"))},
+                        {"name": "top", "reference": str(_reference_image(cls.tmp / "ref2.png"))},
+                    ],
+                    "materials": [{"pattern": "brushed", "family": "metal"}],
+                    "lighting": {"key": "softbox 45", "fill": "bounce", "rim": "strip"},
+                    "camera": {"lens": "85mm", "composition": "three-quarter hero"},
+                    "assemblyDefinition": {
+                        "sequence": [{"step": 1, "installs": ["base"]}, {"step": 2, "installs": ["tower"]}],
+                        "explodeDirections": {"tower": [0, 0, 1], "base": [0, 0, -0.3]},
+                    },
+                    "resolution": {"width": 160, "height": 120},
+                    "fps": 12,
+                    "outputs": {"hero": True, "exploded": True, "turntable": True, "assembly": True},
+                }
+            )
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_preview_renders_keyframes_and_manifest(self):
+        out = self.tmp / "preview"
+        result = run_presentation(self.spec, out, stage="preview")
+        self.assertEqual(result["status"], "rendered", result.get("reason"))
+        # The driver records how it consumed the spec's vocabulary.
+        report = json.loads((out / "render-report.json").read_text())
+        interp = report["interpretation"]
+        self.assertTrue(interp["camera"]["focalLengthMm"] > 0)
+        self.assertIn("composition", interp["camera"])
+        self.assertTrue(interp["materialAssignments"])
+        preview = [p for p in result.get("previewImages", [])]
+        self.assertTrue(any(p.endswith("hero.png") for p in preview), preview)
+        self.assertTrue(any(p.endswith("exploded.png") for p in preview), preview)
+        manifest = json.loads((out / "manifest.json").read_text())
+        self.assertEqual(manifest["status"], "rendered")
+        self.assertEqual(manifest["stage"], "preview")
+        self.assertEqual(manifest["rendererSettings"]["seed"], 0)
+        self.assertIn("hero.png", manifest["outputs"])
+        self.assertIn("exploded.png", manifest["outputs"])
+        self.assertIn("presentation.blend", manifest["outputs"])
+        # The manifest binds the subject design and the spec.
+        from cadctl.common import sha256_file
+
+        self.assertEqual(manifest["subjectArtifactHash"], sha256_file(self.artifact))
+        for entry in manifest["outputs"].values():
+            self.assertEqual(entry["sha256"], sha256_file(entry["path"]))
+
+    def test_run_renders_videos_and_hashes_them(self):
+        out = self.tmp / "final"
+        result = run_presentation(self.spec, out, stage="run")
+        self.assertEqual(result["status"], "rendered", result.get("reason"))
+        manifest = json.loads((out / "manifest.json").read_text())
+        self.assertIn("turntable.mp4", manifest["outputs"])
+        self.assertIn("assembly.mp4", manifest["outputs"])
+        self.assertGreater(Path(manifest["outputs"]["turntable.mp4"]["path"]).stat().st_size, 1000)
+        self.assertGreater(Path(manifest["outputs"]["assembly.mp4"]["path"]).stat().st_size, 1000)
+
+    def test_repeat_render_same_settings_and_outputs(self):
+        out1 = self.tmp / "repeat1"
+        out2 = self.tmp / "repeat2"
+        r1 = run_presentation(self.spec, out1, stage="preview")
+        r2 = run_presentation(self.spec, out2, stage="preview")
+        self.assertEqual(r1["status"], "rendered")
+        self.assertEqual(r2["status"], "rendered")
+        m1 = json.loads((out1 / "manifest.json").read_text())
+        m2 = json.loads((out2 / "manifest.json").read_text())
+        # Deterministic SETTINGS (seed, samples, resolution, camera math,
+        # light rig) and deterministic output sets. Pixel bytes may differ
+        # by small floating-point noise across runs; the manifest hashes
+        # bind what was actually produced, not a reproducibility promise.
+        self.assertEqual(m1["rendererSettings"], m2["rendererSettings"])
+        self.assertEqual(sorted(m1["outputs"]), sorted(m2["outputs"]))
+        self.assertEqual(m1["subjectArtifactHash"], m2["subjectArtifactHash"])
+
+
+class PresentationProvenance(unittest.TestCase):
+    """FrozenInputs: mid-render input mutation discards the result."""
+
+    def test_mid_render_artifact_mutation_discards(self):
+        import threading
+
+        reason = system_skip_reason("blender", HAS_BLENDER and HAS_FFMPEG, "blender/ffmpeg not installed")
+        if reason:
+            self.skipTest(reason)
+        tmp = Path(tempfile.mkdtemp(prefix="pi-cad-present-race-"))
+        try:
+            source = tmp / "box.py"
+            source.write_text(
+                "import build123d as bd\n"
+                "with bd.BuildPart() as p:\n"
+                "    bd.Box(30, 30, 12)\n"
+                "result = p.part\n"
+            )
+            import os
+            import subprocess
+            import sys
+
+            artifact = tmp / "box.step"
+            subprocess.run(
+                [sys.executable, "-m", "cadctl", "build", "--source", str(source), "--output", str(artifact), "--force"],
+                capture_output=True, text=True, timeout=300,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "artifact": str(artifact),
+                        "directions": [
+                            {"name": "hero", "reference": str(refs[0])},
+                            {"name": "top", "reference": str(refs[1])},
+                        ],
+                        "materials": [{"pattern": "machined", "family": "metal"}],
+                        "lighting": {"key": "softbox", "fill": "bounce", "rim": "strip"},
+                        "camera": {"lens": "50mm", "composition": "hero"},
+                        "resolution": {"width": 120, "height": 90},
+                        "fps": 12,
+                        "outputs": {"hero": True, "exploded": False, "turntable": False},
+                    }
+                )
+            )
+
+            # Mutate the artifact DURING the render. The freeze happens at
+            # the start of run_presentation, so tamper from a racing thread
+            # that waits for the render to actually begin (driver-args.json
+            # is written just before Blender launches).
+            def tamper():
+                args_path = tmp / "out" / "driver-args.json"
+                for _ in range(600):
+                    if args_path.exists():
+                        break
+                    time.sleep(0.05)
+                artifact.write_bytes(artifact.read_bytes() + b"tampered")
+
+            import time
+
+            thread = threading.Thread(target=tamper)
+            thread.start()
+            result = run_presentation(spec, tmp / "out", stage="preview")
+            thread.join()
+            self.assertEqual(result["status"], "discarded", result.get("reason"))
+            self.assertIn("changed during presentation", result["reason"])
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class PresentationFreezeBoundary(unittest.TestCase):
+    """The freeze spans the WHOLE invocation, including tessellation."""
+
+    def test_tessellation_window_tamper_discards(self):
+        import os
+        import subprocess
+        import sys
+        import threading
+        import time
+
+        reason = system_skip_reason("blender", HAS_BLENDER and HAS_FFMPEG, "blender/ffmpeg not installed")
+        if reason:
+            self.skipTest(reason)
+        tmp = Path(tempfile.mkdtemp(prefix="pi-cad-tess-race-"))
+        try:
+            source = tmp / "box.py"
+            source.write_text(
+                "import build123d as bd\n"
+                "with bd.BuildPart() as p:\n"
+                "    bd.Box(30, 30, 12)\n"
+                "result = p.part\n"
+            )
+            artifact = tmp / "box.step"
+            subprocess.run(
+                [sys.executable, "-m", "cadctl", "build", "--source", str(source), "--output", str(artifact), "--force"],
+                capture_output=True, text=True, timeout=300,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "artifact": str(artifact),
+                        "directions": [
+                            {"name": "hero", "reference": str(refs[0])},
+                            {"name": "top", "reference": str(refs[1])},
+                        ],
+                        "materials": [{"pattern": "machined", "family": "metal"}],
+                        "lighting": {"key": "softbox", "fill": "bounce", "rim": "strip"},
+                        "camera": {"lens": "50mm", "composition": "hero"},
+                        "resolution": {"width": 120, "height": 90},
+                        "fps": 12,
+                        "outputs": {"hero": True, "exploded": False, "turntable": False},
+                    }
+                )
+            )
+
+            # Tamper as soon as the mesh bundle appears: the tessellation is
+            # the first heavy read of the artifact and runs BEFORE the old
+            # (late) freeze point, so only the entry-time freeze catches it.
+            def tamper():
+                bundle = tmp / "out" / "mesh-bundle"
+                for _ in range(2000):
+                    if bundle.exists():
+                        break
+                    time.sleep(0.005)
+                artifact.write_bytes(artifact.read_bytes() + b"tampered")
+
+            thread = threading.Thread(target=tamper)
+            thread.start()
+            result = run_presentation(spec, tmp / "out", stage="preview")
+            thread.join()
+            self.assertEqual(result["status"], "discarded", result.get("reason"))
+            self.assertIn("changed during presentation", result["reason"])
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_cli_envelope_binds_reference_images(self):
+        """inputArtifacts carry spec, artifact, AND reference images."""
+        import os
+        import subprocess
+        import sys
+
+        reason = system_skip_reason("blender", HAS_BLENDER and HAS_FFMPEG, "blender/ffmpeg not installed")
+        if reason:
+            self.skipTest(reason)
+        tmp = Path(tempfile.mkdtemp(prefix="pi-cad-cli-roles-"))
+        try:
+            source = tmp / "box.py"
+            source.write_text(
+                "import build123d as bd\n"
+                "with bd.BuildPart() as p:\n"
+                "    bd.Box(24, 24, 10)\n"
+                "result = p.part\n"
+            )
+            artifact = tmp / "box.step"
+            subprocess.run(
+                [sys.executable, "-m", "cadctl", "build", "--source", str(source), "--output", str(artifact), "--force"],
+                capture_output=True, timeout=300,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            refs = [_reference_image(tmp / "ref1.png"), _reference_image(tmp / "ref2.png")]
+            spec = tmp / "spec.json"
+            spec.write_text(
+                json.dumps(
+                    {
+                        "artifact": str(artifact),
+                        "directions": [
+                            {"name": "hero", "reference": str(refs[0])},
+                            {"name": "top", "reference": str(refs[1])},
+                        ],
+                        "materials": [{"pattern": "machined", "family": "metal"}],
+                        "lighting": {"key": "softbox", "fill": "bounce", "rim": "strip"},
+                        "camera": {"lens": "50mm", "composition": "hero"},
+                        "resolution": {"width": 120, "height": 90},
+                        "fps": 12,
+                        "outputs": {"hero": True, "exploded": False, "turntable": False},
+                    }
+                )
+            )
+            proc = subprocess.run(
+                [sys.executable, "-m", "cadctl", "present", "preview", "--spec", str(spec), "--output-dir", str(tmp / "out")],
+                capture_output=True, text=True, timeout=900,
+                env={**os.environ, "PYTHONPATH": str(ROOT / "python")},
+            )
+            envelope = json.loads(proc.stdout)
+            self.assertTrue(envelope["ok"], envelope)
+            roles = sorted(entry["role"] for entry in envelope.get("inputArtifacts", []))
+            self.assertIn("artifact", roles)
+            self.assertIn("spec", roles)
+            self.assertTrue(any(r.startswith("reference:") for r in roles), roles)
+        finally:
+            import shutil
+
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,33 +1,18 @@
-import { canonicalDigest, jsonValue, type JsonValue } from "../harness/canonical.ts";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { commitWorkspace, loadWorkspaceCommit, workspaceHistory } from "../harness/commit.ts";
-import { reviseEvidenceRef, transitionRun } from "../harness/reducer.ts";
-import { HarnessProjectStoreV7, HarnessRunStoreV7 } from "../harness/run-store.ts";
+import { resolveRequestScope, resolveActiveRun, runWithRunScope, type RunScopeRequestV1 } from "../harness/run-scope.ts";
+import type { Operation, OperationAuthority } from "../harness/permissions.ts";
+import type { JsonValue } from "../harness/canonical.ts";
 import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
-import { executeCadProbe } from "../modules/probe/tool.ts";
-import { observeCandidate, projectRelativePath } from "./observe.ts";
 import { handlePartOperation } from "./part-ops.ts";
 import { handleTransferOperation } from "./transfer-ops.ts";
-import { artifactPathForKind, buildStep, envelopeArtifactHash, FULL_GEOMETRY_VALIDATION_TIMEOUT_MS, inspectGeometry, inspectVisual, runGeometryEvidencePath, runVisualEvidenceDir, visualPayload } from "../shared/capability.ts";
-import { executeMechanicalRecipeV7 } from "../domains/mechanical/recipe-actions-v7.ts";
-import { cadStartSnapshot } from "../harness/kernel.ts";
-import { discoverWorkflowPackages, resolveWorkflowPackage } from "../harness/workflow/packages.ts";
-import type { AgentApiRequest } from "./protocol.ts";
+import type { AgentApiRequest } from "../authority/protocol.ts";
 import { bootstrapAgentApiContracts } from "./bootstrap.ts";
 import { requireCurrentAuthorization } from "./authorization.ts";
-import type { Operation, OperationAuthority } from "../harness/permissions.ts";
-import { harnessStorageRoot } from "../authority/storage.ts";
-import { workflowCurrentView } from "../harness/card.ts";
-import { workflowRunStateView } from "../harness/workflow/phase-view.ts";
-import { resolveActiveRun, resolveRequestScope, runWithRunScope, type RunScopeRequestV1 } from "../harness/run-scope.ts";
-import { sha256File } from "../shared/store.ts";
-import { currentGitRevision, executeWorkflowGitActions, phaseGitActions, prepareWorkflowGit, type WorkflowGitResult } from "../authority/workflow-git.ts";
-import {
-  normalizeModelParameterDefinitions,
-  type ModelParameterManifestV1,
-  type StoredModelParameterManifest,
-} from "../shared/model-parameters.ts";
+import { workflowCurrent, workflowAdvance, workflowList, workflowStart, reviewCurrent } from "./workflow-ops.ts";
+import { commitHistory, commitWorkspaceOp, evidenceRead, loadCommit } from "./commit-ops.ts";
+import { viewerCatalog } from "./viewer-ops.ts";
+import { buildAndObserve } from "./model-ops.ts";
+import { probeOp } from "./probe-ops.ts";
+import { simulationRun } from "./simulation-ops.ts";
 
 /**
  * Every Agent API operation that can mutate an active run is admitted here,
@@ -52,145 +37,41 @@ export const AGENT_API_MUTATION_OPERATIONS = {
   "review-submit": "review.submit",
 } as const satisfies Partial<Record<AgentApiRequest["op"], Operation>>;
 
-async function current(cwd: string) {
-  const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
-  if (!loaded) return null;
-  const view = workflowCurrentView(loaded, mechanicalRegistries);
-  // A conversation-scoped caller is answered for its own run only. The phase
-  // picture travels with the view so a client (the Desktop workflow rail) can
-  // render every phase without deriving statuses itself.
-  return jsonValue({ ...view, ...workflowRunStateView(loaded, view) });
-}
+type Op = AgentApiRequest["op"];
+type Route<O extends Op> = (cwd: string, request: Extract<AgentApiRequest, { op: O }>) => unknown;
 
-async function recordGitResults(store: HarnessRunStoreV7, results: WorkflowGitResult[], moment: string): Promise<void> {
-  if (!results.length) return;
-  await store.mutate(mechanicalRegistries, ({ state }) => ({
-    state,
-    event: { type: "WorkflowGitActionsCompleted", data: jsonValue({ moment, results }) },
-  }));
-}
-
-async function viewerCatalog(cwd: string) {
-  const project = new HarnessProjectStoreV7(cwd);
-  const [{ state: projectState }, active] = await Promise.all([
-    project.load(),
-    resolveActiveRun(cwd, mechanicalRegistries),
-  ]);
-  // Commit history lives in the run that recorded it, so it follows the
-  // caller's conversation like the run does. Project HEAD stays visible to
-  // every conversation because it is the shared project artifact.
-  const commits = active ? await workspaceHistory(cwd, mechanicalRegistries) : [];
-  const simulationRuns: JsonValue[] = [];
-  const parameterManifests: StoredModelParameterManifest[] = [];
-  if (active) {
-    for (const [key, resultId] of Object.entries(active.state.domainMetadata ?? {})) {
-      if (!key.startsWith("recipe-result:") || typeof resultId !== "string") continue;
-      const result = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<{
-        run?: { runId?: string; recipeId?: string; recipeKind?: string; status?: string; createdAt?: string; completedAt?: string };
-        observation?: { observationId?: string; exports?: Array<{ name: string; type: string; value?: number; unit?: string; path?: string; sha256?: string }> };
-      }>(`records/recipe-results/${resultId}.json`);
-      if (!result?.run || result.run.recipeKind !== "simulation") continue;
-      simulationRuns.push(jsonValue({
-        id: result.run.runId ?? key.slice("recipe-result:".length),
-        recipeId: result.run.recipeId ?? "simulation",
-        status: result.run.status ?? "completed",
-        observationId: result.observation?.observationId ?? null,
-        createdAt: result.run.createdAt ?? null,
-        completedAt: result.run.completedAt ?? null,
-        outputs: (result.observation?.exports ?? []).map((output) => ({
-          ...output,
-          ...(output.path ? { path: `.pi-cad/runs/${active.state.runId}/recipe-runs/${result.run!.runId}/workspace/${output.path}` } : {}),
-        })),
-      }));
-    }
-  }
-  const parameterArtifacts = [
-    ...Object.values(active?.state.artifacts ?? {}),
-    ...Object.values(projectState.head.artifacts),
-    ...commits.flatMap((commit) => commit.artifacts),
-  ];
-  const seenParameterArtifacts = new Set<string>();
-  for (const artifact of parameterArtifacts) {
-    const identity = `${artifact.path}\0${artifact.sha256}`;
-    if (seenParameterArtifacts.has(identity)) continue;
-    seenParameterArtifacts.add(identity);
-    if (artifact.role !== "model-parameter-manifest") continue;
-    try {
-      const path = projectRelativePath(cwd, artifact.path);
-      const absolute = resolve(cwd, path);
-      if (await sha256File(absolute) !== artifact.sha256) continue;
-      const manifest = JSON.parse(await readFile(absolute, "utf8")) as ModelParameterManifestV1;
-      if (manifest.schema !== 1 || !Array.isArray(manifest.parameters)) continue;
-      const sourcePath = resolve(cwd, projectRelativePath(cwd, manifest.source.path));
-      const outputPath = resolve(cwd, projectRelativePath(cwd, manifest.output.path));
-      if (await sha256File(sourcePath) !== manifest.source.sha256) continue;
-      if (await sha256File(outputPath) !== manifest.output.sha256) continue;
-      parameterManifests.push({ path, sha256: artifact.sha256, manifest });
-    } catch {
-      // A loose, stale, or user-edited sidecar has no workflow authority.
-    }
-  }
-  if (active) {
-    const runStore = new HarnessRunStoreV7(cwd, active.state.runId);
-    for (const commit of commits) for (const artifact of commit.artifacts.filter((item) => item.role === "model-parameter-manifest" || /\.parameters\.json$/i.test(item.path))) {
-      const snapshot = commit.artifactSnapshots?.[artifact.sha256];
-      if (!snapshot) continue;
-      try {
-        const manifest = await runStore.transactions.readJson<ModelParameterManifestV1>(snapshot.path);
-        if (manifest?.schema === 1 && Array.isArray(manifest.parameters)) parameterManifests.push({ path: `@commit/${commit.id}/${artifact.path}`, sha256: artifact.sha256, manifest });
-      } catch { /* Corrupt historical metadata is omitted instead of gaining authority. */ }
-    }
-  }
-  return jsonValue({
-    projectId: projectState.projectId,
-    projectHead: { updatedAt: projectState.head.updatedAt, artifacts: Object.values(projectState.head.artifacts) },
-    currentRun: active ? {
-      id: active.state.runId,
-      phase: active.state.phase,
-      status: active.state.status,
-      updatedAt: active.state.updatedAt,
-      artifacts: Object.values(active.state.artifacts),
-    } : null,
-    commits,
-    simulationRuns,
-    parameterManifests,
-  });
-}
-
-async function buildAndObserve(cwd: string, request: Extract<AgentApiRequest, { op: "model-build" }>) {
-  const importingReference = request.importMode === "reference";
-  const solidifying = request.importMode === "solidify";
-  if ((importingReference || solidifying) && !/\.(step|stp)$/i.test(request.source)) throw new Error("STEP import requires a STEP file");
-  if ((importingReference || solidifying) && request.parameters) throw new Error("STEP import does not accept model parameters");
-  const activeBeforeBuild = await resolveActiveRun(cwd, mechanicalRegistries);
-  if (!activeBeforeBuild) throw new Error("model.build authorization lost its active workflow");
-  const parameterContract = request.parameters
-    ? normalizeModelParameterDefinitions(request.parameters)
-    : undefined;
-  const build = await buildStep(cwd, {
-    source: request.source,
-    output: request.output,
-    force: request.force,
-    parameters: parameterContract?.values,
-    solidify: solidifying,
-  });
-  if (!build.ok) return { build, visual: null, images: [] };
-
-  const artifact = artifactPathForKind(build, "step") ?? request.output;
-  const artifactHash = envelopeArtifactHash(build, "step");
-  if (!artifactHash) throw new Error("Pi-CAD model build lacks an authoritative STEP hash");
-  const observed = await observeCandidate(cwd, activeBeforeBuild, {
-    artifact,
-    sourcePath: projectRelativePath(cwd, request.source),
-    sourceHash: await sha256File(resolve(cwd, request.source)),
-    artifactHash,
-    validation: request.validation ?? "auto",
-    ...(request.importMode ? { importMode: request.importMode } : {}),
-    ...(parameterContract ? { parameters: parameterContract } : {}),
-    backend: "build123d",
-  });
-  return { build, ...observed };
-}
+/**
+ * Operation → handler. Each resource owns its handlers: workflow-ops (workflow
+ * lifecycle and review), commit-ops (workspace commits and evidence), viewer-ops,
+ * model-ops, probe-ops, simulation-ops, and the part and transfer modules.
+ */
+const ROUTES: { [O in Op]?: Route<O> } = {
+  "workflow-list": (cwd) => workflowList(cwd),
+  "workflow-current": (cwd) => workflowCurrent(cwd),
+  "workflow-start": (cwd, request) => workflowStart(cwd, request),
+  "workflow-advance": (cwd, request) => workflowAdvance(cwd, request),
+  commit: (cwd, request) => commitWorkspaceOp(cwd, request),
+  load: (cwd, request) => loadCommit(cwd, request),
+  history: (cwd) => commitHistory(cwd),
+  "viewer-catalog": (cwd) => viewerCatalog(cwd),
+  "evidence-read": (cwd, request) => evidenceRead(cwd, request),
+  probe: (cwd, request) => probeOp(cwd, request),
+  "model-build": (cwd, request) => buildAndObserve(cwd, request),
+  "part-open": (cwd, request) => handlePartOperation(cwd, request),
+  "part-apply": (cwd, request) => handlePartOperation(cwd, request),
+  "part-undo": (cwd, request) => handlePartOperation(cwd, request),
+  "part-try": (cwd, request) => handlePartOperation(cwd, request),
+  "part-tree": (cwd, request) => handlePartOperation(cwd, request),
+  "part-query": (cwd, request) => handlePartOperation(cwd, request),
+  "part-check": (cwd, request) => handlePartOperation(cwd, request),
+  "part-sweep": (cwd, request) => handlePartOperation(cwd, request),
+  "part-dfm": (cwd, request) => handlePartOperation(cwd, request),
+  "transfer-status": (cwd, request) => handleTransferOperation(cwd, request),
+  "transfer-features": (cwd, request) => handleTransferOperation(cwd, request),
+  "transfer-export": (cwd, request) => handleTransferOperation(cwd, request),
+  "simulation-run": (cwd, request) => simulationRun(cwd, request),
+  "review-current": (cwd) => reviewCurrent(cwd),
+};
 
 /**
  * Conversation-scoped callers (the Prime extension, the cad Python client,
@@ -209,7 +90,7 @@ export async function handleAgentApi(cwd: string, request: AgentApiRequest, auth
 async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, authority: OperationAuthority = "author") {
   bootstrapAgentApiContracts();
   if (!request || request.schema !== 1 || typeof request.op !== "string") throw new Error("invalid Agent API request");
-  const guardedOperation = AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS];
+  const guardedOperation = Object.hasOwn(AGENT_API_MUTATION_OPERATIONS, request.op) ? AGENT_API_MUTATION_OPERATIONS[request.op as keyof typeof AGENT_API_MUTATION_OPERATIONS] : undefined;
   if (guardedOperation) {
     const completedArtifactObservation = request.op === "probe"
       && request.subject !== undefined
@@ -220,120 +101,8 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
       && (await resolveActiveRun(cwd, mechanicalRegistries))?.state.status === "done";
     if (!completedArtifactObservation) await requireCurrentAuthorization(cwd, guardedOperation, authority);
   }
-  switch (request.op) {
-    case "workflow-list": {
-      const packages = await discoverWorkflowPackages(cwd, mechanicalRegistries);
-      return jsonValue(packages.map(({ id, description, tags, version }) => ({ id, description, tags, version })));
-    }
-    case "workflow-current": return jsonValue(await current(cwd));
-    case "workflow-start": {
-      const selected = await resolveWorkflowPackage(cwd, request.id, mechanicalRegistries);
-      const startResults = await prepareWorkflowGit(cwd, selected.workflow);
-      const enterResults = await executeWorkflowGitActions(cwd, selected.workflow, phaseGitActions(selected.workflow, selected.workflow.initialPhase, "onEnter"), `enter ${selected.workflow.initialPhase}`);
-      const started = await cadStartSnapshot({
-        cwd, registries: mechanicalRegistries, workflow: selected.workflow,
-        interactionMode: request.interactionMode ?? "interactive",
-      });
-      const store = new HarnessRunStoreV7(cwd, started.state.runId);
-      await recordGitResults(store, startResults, "workflow-start");
-      await recordGitResults(store, enterResults, `enter:${started.state.phase}`);
-      // The new run is the answer even when the caller's conversation scope
-      // was unbound at the moment it asked to start.
-      const fresh = await store.load(mechanicalRegistries) ?? started;
-      return jsonValue(workflowCurrentView(fresh, mechanicalRegistries));
-    }
-    case "workflow-advance": {
-      if (!request.event?.trim()) throw new Error("workflow event is required");
-      const active = await resolveActiveRun(cwd, mechanicalRegistries);
-      if (!active) throw new Error("no active Pi-CAD v7 run");
-      const store = new HarnessRunStoreV7(cwd, active.state.runId);
-      // Validate the state transition before producing any external Git side effect.
-      transitionRun(active.state, active.workflow, request.event);
-      const exitResults = await executeWorkflowGitActions(cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit"), `complete ${active.state.phase}`);
-      await recordGitResults(store, exitResults, `exit:${active.state.phase}`);
-      const next = await store.mutate(mechanicalRegistries, (loaded) => ({ state: transitionRun(loaded.state, loaded.workflow, request.event), event: { type: "WorkflowAdvancedByAgentApi", data: { event: request.event } } }));
-      const enterResults = await executeWorkflowGitActions(cwd, next.workflow, phaseGitActions(next.workflow, next.state.phase, "onEnter"), `enter ${next.state.phase}`);
-      await recordGitResults(store, enterResults, `enter:${next.state.phase}`);
-      return jsonValue({ phase: next.state.phase, status: next.state.status });
-    }
-    case "commit": {
-      const active = await resolveActiveRun(cwd, mechanicalRegistries);
-      const gitResults = active
-        ? await executeWorkflowGitActions(cwd, active.workflow, phaseGitActions(active.workflow, active.state.phase, "onExit").filter((action) => action === "commit"), `record ${request.name}`)
-        : [];
-      const sourceRevision = active?.workflow.versionControl ? await currentGitRevision(cwd) : undefined;
-      const manifest = await commitWorkspace({ cwd, registries: mechanicalRegistries, name: request.name, ...(request.parent === undefined ? {} : { parent: request.parent }), variables: request.variables, artifacts: request.artifacts, session: request.session, acceptance: request.acceptance, ...(sourceRevision ? { sourceRevision } : {}) });
-      if (active) await recordGitResults(new HarnessRunStoreV7(cwd, active.state.runId), gitResults, `record:${request.name}`);
-      return jsonValue(manifest);
-    }
-    case "load": return jsonValue(await loadWorkspaceCommit(cwd, mechanicalRegistries, request.id));
-    case "history": return jsonValue(await workspaceHistory(cwd, mechanicalRegistries));
-    case "viewer-catalog": return viewerCatalog(cwd);
-    case "evidence-read": {
-      if (!/^evidence\/[a-zA-Z0-9._/-]+\.json$/.test(request.path) || request.path.includes("..")) throw new Error("invalid evidence path");
-      const active = await resolveActiveRun(cwd, mechanicalRegistries);
-      if (!active) throw new Error("no active Pi-CAD v7 run");
-      const value = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<JsonValue>(request.path);
-      if (value === null) throw new Error(`evidence not found: ${request.path}`);
-      return value;
-    }
-    case "probe": {
-      const preset = request.preset?.trim() || "python";
-      const rendered = await executeCadProbe(cwd, {
-        preset,
-        // An explicit artifact is already the exact subject. Do not also
-        // synthesize `current`, because the probe contract rejects two targets.
-        subject: request.subject ?? (request.args?.artifact ? undefined : "current"),
-        purpose: request.purpose,
-        code: request.code,
-        script: request.script,
-        args: request.args,
-      });
-      const details = "details" in rendered ? rendered.details as any : undefined;
-      const rawValue = preset === "python" ? details?.envelope?.payload?.result : details?.envelope?.payload;
-      // Face fingerprints exist for change detection between builds; a probe
-      // answer must not carry thousands of them into the agent's context.
-      const value = rawValue && typeof rawValue === "object" && Array.isArray(rawValue.faceFingerprints)
-        ? (({ faceFingerprints, ...rest }) => ({ ...rest, faceFingerprintCount: faceFingerprints.length }))(rawValue)
-        : rawValue;
-      if (details?.presetFailed || value === undefined) throw new Error(rendered.content.map((item) => item.type === "text" ? item.text : "").join("\n") || `probe preset ${preset} failed`);
-      const visuals = Array.isArray(details?.observation?.visuals) ? details.observation.visuals : [];
-      const images = rendered.content.filter((item) => item.type === "image").map((item, index) => ({
-        name: visuals[index]?.name ?? `view-${index + 1}`,
-        data: item.data,
-        mimeType: item.mimeType,
-      }));
-      return jsonValue({
-        preset,
-        value,
-        ...(preset === "python" && typeof details?.envelope?.payload?.stdout === "string" && details.envelope.payload.stdout
-          ? { stdout: details.envelope.payload.stdout } : {}),
-        ...(images.length ? { images } : {}),
-        artifactHash: details.artifactHash ?? details.envelope?.inputHashes?.artifact,
-        scriptHash: details.envelope?.inputHashes?.script,
-        observationId: details.observationId,
-      });
-    }
-    case "model-build": {
-      return jsonValue(await buildAndObserve(cwd, request));
-    }
-    case "part-open": case "part-apply": case "part-undo": case "part-try":
-    case "part-tree": case "part-query": case "part-check": case "part-sweep": case "part-dfm":
-      return handlePartOperation(cwd, request);
-    case "transfer-status": case "transfer-features": case "transfer-export":
-      return handleTransferOperation(cwd, request);
-    case "simulation-run": {
-      const executed = await executeMechanicalRecipeV7({ cwd, kind: "simulation", recipe: request.recipe, action: request.action, obligationRef: request.obligationRef, outputs: request.outputs });
-      return jsonValue({
-        runId: executed.record.runId, recipeId: executed.record.recipeId, status: executed.record.status,
-        computeIdentity: executed.record.computeIdentity, observation: executed.observation,
-      });
-    }
-    case "review-current": {
-      const active = await resolveActiveRun(cwd, mechanicalRegistries);
-      if (!active) return null;
-      return jsonValue({ expectedProfile: active.workflow.phases[active.state.phase]?.reviewProfile ?? null, latest: active.state.latestReview ?? null });
-    }
-    default: throw new Error(`unsupported Agent API operation: ${(request as { op: string }).op}`);
-  }
+  // Own properties only: an op named like an Object.prototype member is unsupported.
+  const route = Object.hasOwn(ROUTES, request.op) ? ROUTES[request.op] as ((cwd: string, request: AgentApiRequest) => unknown) : undefined;
+  if (!route) throw new Error(`unsupported Agent API operation: ${(request as { op: string }).op}`);
+  return await route(cwd, request) as JsonValue;
 }

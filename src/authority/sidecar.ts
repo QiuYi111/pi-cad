@@ -4,12 +4,9 @@ import { extname, join, relative, resolve, sep } from "node:path";
 
 import { canonicalDigest, jsonValue } from "../harness/canonical.ts";
 import { loadWorkspaceCommit } from "../harness/commit.ts";
-import { currentAuthorization } from "../agent-api/authorization.ts";
-import { bootstrapAgentApiContracts } from "../agent-api/bootstrap.ts";
-import { agentApiErrorBody } from "../agent-api/errors.ts";
-import { handleAgentApi } from "../agent-api/handlers.ts";
-import type { AgentApiRequest, AgentApiResponse } from "../agent-api/protocol.ts";
-import { mechanicalRegistries } from "../domains/mechanical/registries.ts";
+import { agentApiErrorBody } from "./errors.ts";
+import type { AgentApiRequest, AgentApiResponse } from "./protocol.ts";
+import type { AuthorityDomain } from "./domain.ts";
 import { compilePhaseCard, compilePhaseContract, workflowCurrentView } from "../harness/card.ts";
 import { renderAuthorizationDenied, type Operation } from "../harness/permissions.ts";
 import { HarnessProjectStoreV7, HarnessRunStoreV7, type HarnessProjectStateV7, type LoadedHarnessRunV7 } from "../harness/run-store.ts";
@@ -25,7 +22,7 @@ import { writeStatusProjection } from "./storage.ts";
 import { ReviewRuntime, type ReviewerExecutor } from "./review-runtime.ts";
 import { findExperience, getExperience, readExperience, searchExperience } from "../experience/store.ts";
 import type { ExperienceSearchOptions } from "../experience/types.ts";
-import { sha256File } from "../shared/store.ts";
+import { sha256File } from "../shared/hash.ts";
 import { commitEvidenceRef } from "../harness/reducer.ts";
 
 export type SidecarRole = "author" | "reviewer";
@@ -104,29 +101,29 @@ const PROJECTION_TERMINAL_STATUSES = new Set(["done", "aborted", "blocked_user",
  * live conversation run so the workspace keeps showing active work while the
  * project-global pointer stays empty.
  */
-async function projectionRun(cwd: string, state: HarnessProjectStateV7): Promise<LoadedHarnessRunV7 | null> {
-  const scoped = await resolveActiveRun(cwd, mechanicalRegistries);
+async function projectionRun(domain: AuthorityDomain, cwd: string, state: HarnessProjectStateV7): Promise<LoadedHarnessRunV7 | null> {
+  const scoped = await resolveActiveRun(cwd, domain.registries);
   if (scoped || activeRunScope()) return scoped;
   for (const entry of [...state.runs].reverse().slice(0, 8)) {
-    const run = await new HarnessRunStoreV7(cwd, entry.runId).load(mechanicalRegistries);
+    const run = await new HarnessRunStoreV7(cwd, entry.runId).load(domain.registries);
     if (run && !PROJECTION_TERMINAL_STATUSES.has(run.state.status)) return run;
   }
   return null;
 }
 
-async function refreshProjection(cwd: string): Promise<void> {
+async function refreshProjection(domain: AuthorityDomain, cwd: string): Promise<void> {
   const project = new HarnessProjectStoreV7(cwd);
   const loadedProject = await project.load();
-  const run = await projectionRun(cwd, loadedProject.state);
+  const run = await projectionRun(domain, cwd, loadedProject.state);
   await writeStatusProjection(cwd, loadedProject.state, run ? {
     state: run.state,
     workflow: run.workflow,
-    view: workflowCurrentView(run, mechanicalRegistries),
+    view: workflowCurrentView(run, domain.registries),
   } : null);
 }
 
-async function refreshProjectionSafely(cwd: string): Promise<void> {
-  try { await refreshProjection(cwd); }
+async function refreshProjectionSafely(domain: AuthorityDomain, cwd: string): Promise<void> {
+  try { await refreshProjection(domain, cwd); }
   catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`[pi-cad] status projection unavailable: ${message}\n`);
@@ -158,19 +155,19 @@ async function scopeForRequest(role: SidecarRole, cwd: string, value: Record<str
   return resolveRequestScope(cwd, value as RunScopeRequestV1);
 }
 
-export async function dispatchSidecarRequest(role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
+export async function dispatchSidecarRequest(domain: AuthorityDomain, role: SidecarRole, cwd: string, value: unknown, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
   let scope: RunScopeV1 | undefined;
   try {
     validateRequest(value);
     scope = await scopeForRequest(role, cwd, value as unknown as Record<string, unknown>, reviewRuntime);
-    return await runWithRunScope(scope, async () => dispatchAuthorRequest(role, cwd, value, reviewRuntime, onAuthorModelSelection, options));
+    return await runWithRunScope(scope, async () => dispatchAuthorRequest(domain, role, cwd, value, reviewRuntime, onAuthorModelSelection, options));
   } catch (error) {
-    await runWithRunScope(scope, () => refreshProjectionSafely(cwd));
+    await runWithRunScope(scope, () => refreshProjectionSafely(domain, cwd));
     return errorResponse(error);
   }
 }
 
-async function dispatchAuthorRequest(role: SidecarRole, cwd: string, value: SidecarRequest, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
+async function dispatchAuthorRequest(domain: AuthorityDomain, role: SidecarRole, cwd: string, value: SidecarRequest, reviewRuntime?: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<AgentApiResponse> {
   if (role === "reviewer" && !REVIEWER_ALLOWED.has(value.op)) {
     throw new Error(`reviewer endpoint does not expose operation: ${value.op}`);
   }
@@ -197,11 +194,11 @@ async function dispatchAuthorRequest(role: SidecarRole, cwd: string, value: Side
     result = { recorded: true };
   } else if (value.op === "review-submit") {
     if (!reviewRuntime) throw new Error("review runtime is unavailable");
-    const decision = await currentAuthorization(cwd, "review.submit", "author");
+    const decision = await domain.currentAuthorization(cwd, "review.submit", "author");
     if (!decision?.allowed) throw new Error(decision && !decision.allowed ? renderAuthorizationDenied(decision) : "review.submit requires an active workflow");
     result = await reviewRuntime.submit(value.subjectCommit);
   } else if (value.op === "review-current") {
-    result = reviewRuntime ? await reviewRuntime.current(value.reviewId) : await handleAgentApi(cwd, value, role);
+    result = reviewRuntime ? await reviewRuntime.current(value.reviewId) : await domain.handleAgentApi(cwd, value, role);
   } else if (value.op === "review-evidence") {
     if (role !== "reviewer" || !reviewRuntime || !reviewerRequestId) throw new Error("review evidence requires reviewer authority");
     result = await reviewRuntime.evidence(reviewerRequestId);
@@ -213,27 +210,27 @@ async function dispatchAuthorRequest(role: SidecarRole, cwd: string, value: Side
     result = await reviewRuntime.watch(value.after);
   } else if (value.op === "mission-capture") {
     if (role !== "author") throw new Error("mission capture is author-scoped");
-    result = await captureMission(cwd, value.mission);
+    result = await captureMission(domain, cwd, value.mission);
   } else if (value.op === "image-generated") {
     if (role !== "author") throw new Error("generated image evidence is author-scoped");
-    result = await recordGeneratedImage(cwd, value.path);
+    result = await recordGeneratedImage(domain, cwd, value.path);
   } else if (value.op === "phase-card") {
     if (role !== "author") throw new Error("phase-card is author-scoped");
-    bootstrapAgentApiContracts();
-    result = await compilePhaseCard(cwd, { registries: mechanicalRegistries });
+    domain.prepare();
+    result = await compilePhaseCard(cwd, { registries: domain.registries });
   } else if (value.op === "phase-contract") {
     if (role !== "author") throw new Error("phase-contract is author-scoped");
-    bootstrapAgentApiContracts();
-    result = await compilePhaseContract(cwd, { registries: mechanicalRegistries });
+    domain.prepare();
+    result = await compilePhaseContract(cwd, { registries: domain.registries });
   } else if (value.op === "completion-gate") {
     if (role !== "author") throw new Error("completion-gate is author-scoped");
-    result = await completionGate(cwd);
+    result = await completionGate(domain, cwd);
   } else if (value.op === "authorize") {
     if (role !== "author") throw new Error("authorization query is author-scoped");
     if (options.authorReadOnly && READ_ONLY_OPERATIONS.has(value.operation)) {
       result = { allowed: false, reason: "Desktop is in read-only mode.", legalNextActions: ["Switch permission to Workspace."] };
     } else {
-      const decision = await currentAuthorization(cwd, value.operation, "author");
+      const decision = await domain.currentAuthorization(cwd, value.operation, "author");
       result = decision && !decision.allowed ? { ...decision, rendered: renderAuthorizationDenied(decision) } : decision;
     }
   } else if (value.op === "experience-search") {
@@ -246,13 +243,13 @@ async function dispatchAuthorRequest(role: SidecarRole, cwd: string, value: Side
     const read = await readExperience(value.identifier, value.startLine, value.endLine);
     result = { ...read, entry: agentExperienceEntry(read.entry as unknown as Record<string, unknown>) };
   } else {
-    result = await handleAgentApi(cwd, value, role);
+    result = await domain.handleAgentApi(cwd, value, role);
   }
-  await refreshProjectionSafely(cwd);
+  await refreshProjectionSafely(domain, cwd);
   return { schema: 1, ok: true, result: result as never };
 }
 
-async function recordGeneratedImage(cwd: string, requestedPath: string): Promise<{ recorded: boolean; path: string }> {
+async function recordGeneratedImage(domain: AuthorityDomain, cwd: string, requestedPath: string): Promise<{ recorded: boolean; path: string }> {
   if (typeof requestedPath !== "string" || !requestedPath.trim()) throw new Error("generated image path is required");
   const root = await realpath(cwd);
   const mapped = requestedPath.startsWith("/workspace/")
@@ -263,14 +260,14 @@ async function recordGeneratedImage(cwd: string, requestedPath: string): Promise
   if (extname(image).toLowerCase() !== ".png") throw new Error("concept image evidence must be a PNG");
   const bytes = await readFile(image);
   assertValidPng(bytes);
-  const active = await resolveActiveRun(root, mechanicalRegistries);
+  const active = await resolveActiveRun(root, domain.registries);
   if (!active) throw new Error("generated image evidence requires an active workflow");
   const obligation = active.workflow.phases[active.state.phase]?.evidenceObligations.find((item) => item.closeWith === "codex_generate_image");
   if (!obligation) throw new Error("the current phase does not require generated image evidence");
   const digest = await sha256File(image);
   const evidencePath = `evidence/concept-image/evidence-${digest.slice(0, 20)}.json`;
   const createdAt = new Date().toISOString();
-  await new HarnessRunStoreV7(root, active.state.runId).mutate(mechanicalRegistries, (loaded) => ({
+  await new HarnessRunStoreV7(root, active.state.runId).mutate(domain.registries, (loaded) => ({
     state: commitEvidenceRef(loaded.state, loaded.workflow, loaded.registryContract, {
       id: `evidence-concept-image-${digest.slice(0, 20)}`,
       obligationRef: obligation.ref,
@@ -288,16 +285,16 @@ async function recordGeneratedImage(cwd: string, requestedPath: string): Promise
   return { recorded: true, path: relative(root, image) };
 }
 
-async function captureMission(cwd: string, requested: string): Promise<{ captured: boolean }> {
+async function captureMission(domain: AuthorityDomain, cwd: string, requested: string): Promise<{ captured: boolean }> {
   const mission = typeof requested === "string" ? requested.trim() : "";
   if (!mission || Buffer.byteLength(mission) > 32 * 1024) throw new Error("original user request must be between 1 and 32768 bytes");
-  const active = await resolveActiveRun(cwd, mechanicalRegistries);
+  const active = await resolveActiveRun(cwd, domain.registries);
   if (!active) throw new Error("mission capture requires an active workflow");
   const run = new HarnessRunStoreV7(cwd, active.state.runId);
   const current = await run.transactions.readJson<Record<string, unknown>>("context/frame.json") ?? { schema: 1, fragments: [] };
   if (typeof current.mission === "string" && current.mission.trim()) return { captured: false };
   const now = new Date().toISOString();
-  await run.mutate(mechanicalRegistries, ({ state }) => ({
+  await run.mutate(domain.registries, ({ state }) => ({
     state: { ...state, updatedAt: now },
     event: { type: "OriginalUserRequestCaptured", data: { bytes: Buffer.byteLength(mission) } },
     payloads: { "context/frame.json": jsonValue({ ...current, schema: 1, mission, updatedAt: now }) },
@@ -305,7 +302,7 @@ async function captureMission(cwd: string, requested: string): Promise<{ capture
   return { captured: true };
 }
 
-async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<void> {
+async function handleSocket(domain: AuthorityDomain, socket: Socket, role: SidecarRole, cwd: string, reviewRuntime: ReviewRuntime, onAuthorModelSelection?: (selection: AuthorModelSelection) => void, options: { authorReadOnly?: boolean } = {}): Promise<void> {
   const chunks: Buffer[] = [];
   let size = 0;
   socket.setTimeout(SIDECAR_REQUEST_TIMEOUT_MS, () => socket.destroy(new Error("sidecar request timeout")));
@@ -319,7 +316,7 @@ async function handleSocket(socket: Socket, role: SidecarRole, cwd: string, revi
     let response: AgentApiResponse;
     try {
       const body = Buffer.concat(chunks).toString("utf-8");
-      response = await dispatchSidecarRequest(role, cwd, JSON.parse(body), reviewRuntime, onAuthorModelSelection, options);
+      response = await dispatchSidecarRequest(domain, role, cwd, JSON.parse(body), reviewRuntime, onAuthorModelSelection, options);
     } catch (error) {
       response = errorResponse(error);
     }
@@ -345,8 +342,9 @@ export interface AuthoritySidecar {
   close(): Promise<void>;
 }
 
-export async function startAuthoritySidecar(input: { cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor; onAuthorModelSelection?: (selection: AuthorModelSelection) => void; authorReadOnly?: boolean }): Promise<AuthoritySidecar> {
-  bootstrapAgentApiContracts();
+export async function startAuthoritySidecar(input: { domain: AuthorityDomain; cwd: string; runtimeDirectory: string; reviewerExecutor?: ReviewerExecutor; onAuthorModelSelection?: (selection: AuthorModelSelection) => void; authorReadOnly?: boolean }): Promise<AuthoritySidecar> {
+  const { domain } = input;
+  domain.prepare();
   const cwd = resolve(input.cwd);
   const authorDirectory = join(resolve(input.runtimeDirectory), "author");
   const reviewerDirectory = join(resolve(input.runtimeDirectory), "reviewer");
@@ -356,9 +354,9 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
   await chmod(reviewerDirectory, 0o700);
   const authorSocket = join(authorDirectory, "authority.sock");
   const reviewerSocket = join(reviewerDirectory, "authority.sock");
-  const reviewRuntime = new ReviewRuntime(cwd, input.reviewerExecutor ?? (async () => { throw new Error("reviewer executor is not configured"); }));
-  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection, { authorReadOnly: input.authorReadOnly }); });
-  const reviewerServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(socket, "reviewer", cwd, reviewRuntime); });
+  const reviewRuntime = new ReviewRuntime(domain, cwd, input.reviewerExecutor ?? (async () => { throw new Error("reviewer executor is not configured"); }));
+  const authorServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(domain, socket, "author", cwd, reviewRuntime, input.onAuthorModelSelection, { authorReadOnly: input.authorReadOnly }); });
+  const reviewerServer = createServer({ allowHalfOpen: true }, (socket) => { void handleSocket(domain, socket, "reviewer", cwd, reviewRuntime); });
   try {
     await listen(authorServer, authorSocket);
     await listen(reviewerServer, reviewerSocket);
@@ -367,7 +365,7 @@ export async function startAuthoritySidecar(input: { cwd: string; runtimeDirecto
     reviewerServer.close();
     throw error;
   }
-  await refreshProjectionSafely(cwd);
+  await refreshProjectionSafely(domain, cwd);
   return {
     authorSocket,
     reviewerSocket,
@@ -387,25 +385,25 @@ export interface CompletionGateResult {
   workflowId?: string;
 }
 
-async function selectedCompletionRun(cwd: string): Promise<LoadedHarnessRunV7 | null> {
+async function selectedCompletionRun(domain: AuthorityDomain, cwd: string): Promise<LoadedHarnessRunV7 | null> {
   const scope = activeRunScope();
   // A conversation is complete only through its own bound run. It never
   // inherits the project pointer or a previously promoted run.
-  if (scope) return scope.runId ? new HarnessRunStoreV7(cwd, scope.runId).load(mechanicalRegistries) : null;
+  if (scope) return scope.runId ? new HarnessRunStoreV7(cwd, scope.runId).load(domain.registries) : null;
   const { state } = await new HarnessProjectStoreV7(cwd).load();
   const runId = state.currentRunId ?? state.promotedRunId;
-  return runId ? new HarnessRunStoreV7(cwd, runId).load(mechanicalRegistries) : null;
+  return runId ? new HarnessRunStoreV7(cwd, runId).load(domain.registries) : null;
 }
 
 /** One-shot process success is subordinate to durable workflow completion. */
-export async function completionGate(cwd: string): Promise<CompletionGateResult> {
-  const loaded = await selectedCompletionRun(cwd);
+export async function completionGate(domain: AuthorityDomain, cwd: string): Promise<CompletionGateResult> {
+  const loaded = await selectedCompletionRun(domain, cwd);
   if (!loaded) return { complete: false, reason: activeRunScope() ? "this Prime conversation has no bound workflow run" : "no canonical workflow run exists" };
   const phase = loaded.workflow.phases[loaded.state.phase];
   if (loaded.state.interactionMode === "headless" && loaded.state.status === "waiting_user" && loaded.state.phase === "wait_for_user") {
     const review = loaded.state.latestReview;
     if (review?.verdict === "clarification_required"
-      && review.profileId === "mechanical.requirements-review"
+      && review.profileId === domain.requirementsReviewProfile
       && review.workflowHash === loaded.workflow.hash
       && review.registryContractHash === loaded.registryContract.hash) {
       return {
@@ -443,7 +441,7 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
     const review = loaded.state.latestReview;
     const requirements = loaded.state.records.requirements;
     if (review?.verdict === "pass"
-      && review.profileId === "mechanical.requirements-review"
+      && review.profileId === domain.requirementsReviewProfile
       && review.workflowHash === loaded.workflow.hash
       && review.registryContractHash === loaded.registryContract.hash
       && requirements?.type === "workspace_commit"
@@ -498,7 +496,7 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
   let releaseMatchesReview = review?.subjectHash === release.sha256;
   if (review?.artifactHash && review.subjectCommit) {
     const releaseManifest = await new HarnessRunStoreV7(cwd, loaded.state.runId).transactions.readJson<{ parent?: string | null; artifacts?: Array<{ path: string; sha256: string; role: string }> }>(release.path);
-    const reviewedManifest = await loadWorkspaceCommit(cwd, mechanicalRegistries, review.subjectCommit);
+    const reviewedManifest = await loadWorkspaceCommit(cwd, domain.registries, review.subjectCommit);
     releaseMatchesReview = releaseManifest?.parent === review.subjectCommit
       && Boolean(releaseManifest.artifacts)
       && canonicalArtifactContentHash(releaseManifest.artifacts!) === canonicalArtifactContentHash(reviewedManifest.manifest.artifacts);
@@ -511,11 +509,11 @@ export async function completionGate(cwd: string): Promise<CompletionGateResult>
 }
 
 /** Check one Prime conversation after its one-shot process has exited. */
-export async function completionGateForConversation(cwd: string, sessionId: string): Promise<CompletionGateResult> {
+export async function completionGateForConversation(domain: AuthorityDomain, cwd: string, sessionId: string): Promise<CompletionGateResult> {
   const binding = await new HarnessProjectStoreV7(cwd).conversationBinding(sessionId);
   return runWithRunScope(
     { sessionId, runId: binding?.runId ?? null },
-    () => completionGate(cwd),
+    () => completionGate(domain, cwd),
   );
 }
 

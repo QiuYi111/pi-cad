@@ -322,7 +322,7 @@ v1 不实现，只建空文件说明。内容（p.12）：材料 303/304 不锈�
 
 ### 9.1 端到端（主体）
 
-- 位置：`tests/freecad/test_dfm_e2e.py`，走真实 FreeCAD worker（和现有 `tests/freecad/test_part_backend.py` 一样的方式），通过 `part-dfm` 和 `apply` 的完整路径。
+- 位置：`tests/dfm/e2e/test_dfm_e2e.py`，走真实 FreeCAD worker（和现有 `tests/freecad-part/e2e/test_part_backend.py` 一样的方式），通过 `part-dfm` 和 `apply` 的完整路径。
 - 夹具：`tests/fixtures/dfm/<case>/part.ops.json` + `expect.json`（期望出现的规则 ID 和级别，以及必须不出现的规则 ID）。至少以下零件：
 
 | 夹具 | 期望 |

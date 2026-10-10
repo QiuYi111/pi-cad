@@ -10,7 +10,7 @@ The three reference families kept here are:
 ``occ-<hash12>-<traversal path>``
     Same spelling and same traversal as :func:`cadctl.assembly.assembly_tree`.
 ``surf-<hash10>``
-    Same derivation as :func:`cadctl.simulation.surface_selector.enumerate_surfaces`.
+    Same derivation as :func:`cadctl.shape_facts.enumerate_surfaces`.
 ``solidIndex``
     Ordinal position inside ``shape.solids()``: an internal mapping bound to
     the artifact hash, never an outward-stable identity.
@@ -18,7 +18,6 @@ The three reference families kept here are:
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -26,15 +25,9 @@ import build123d as bd
 from OCP.gp import gp_XYZ
 
 from ..assembly import _location_dict, assembly_tree_from_shape
+from ..common import sha256_file
+from ..shape_facts import _face_facts, surface_id
 from .protocol import IdentityError
-
-
-def _hash_file(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with open(path, "rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _location_point(location: bd.Location, point: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -96,7 +89,7 @@ class ArtifactModel:
         self.path = Path(artifact).resolve()
         if not self.path.is_file():
             raise IdentityError("missing-artifact", f"artifact does not exist: {self.path}")
-        self.artifact_hash = _hash_file(self.path)
+        self.artifact_hash = sha256_file(self.path)
         self.token = self.artifact_hash[:12]
         self.shape = shape if shape is not None else bd.import_step(str(self.path))
         self.face_shapes: dict[str, Any] = {}
@@ -168,8 +161,6 @@ class ArtifactModel:
     def _collect_faces(self) -> list[dict[str, Any]]:
         # Reuse the probe's fact extraction and hash-bound face ID so a
         # ``surf-*`` an agent saw in cad_inspect_surfaces resolves here too.
-        from ..simulation.surface_selector import _face_facts, surface_id
-
         solids = list(self.shape.solids())
         groups = [(f"solid-{index}", index, list(solid.faces())) for index, solid in enumerate(solids)]
         if not groups:

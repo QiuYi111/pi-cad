@@ -1,6 +1,7 @@
 name: desktop
 
 on:
+  workflow_call:
   pull_request:
     paths: ["apps/desktop/**", "cloud/protocol/**", "cloud/workspace-gateway/**", "src/**", "skills/cad/**", "python/**", "tests/fixtures/**", "scripts/desktop-inspect-vtk.py", "scripts/postinstall.mjs", "package.json", "package-lock.json", ".github/workflows/desktop.yml"]
   push:
@@ -14,7 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-14, windows-latest]
+        # PRs run Linux only. Nightly (workflow_call or schedule) adds macOS and Windows.
+        os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest","macos-14","windows-latest"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -44,6 +46,13 @@ jobs:
       - run: npm test
         working-directory: apps/desktop
       - run: npm run build
+        working-directory: apps/desktop
+      # The one Playwright scenario that runs in every desktop PR: it drives the
+      # built app under a virtual display. Other specs run only where they are listed.
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+        if: runner.os == 'Linux'
+      - run: xvfb-run -a npx playwright test tests/e2e/conversation-workflow.spec.ts
+        if: runner.os == 'Linux'
         working-directory: apps/desktop
 
   linux-package-smoke:
@@ -88,6 +97,7 @@ jobs:
 
   macos-package-smoke:
     name: macOS native package smoke
+    if: github.event_name != 'pull_request'
     runs-on: macos-14
     timeout-minutes: 45
     steps:

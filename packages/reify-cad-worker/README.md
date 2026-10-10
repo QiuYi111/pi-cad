@@ -52,7 +52,7 @@ to the Windows registration command.
 ## Local checks
 
 ```bash
-node tests/reify-cad-worker.test.mjs
+node tests/prime-integration/fast/reify-cad-worker.test.mjs
 ```
 
 The test suite covers lifecycle/follow-up/cancel/close/stale IDs, compact context boundary, canonical blocker/resume, repeated-failure monitoring, same-session steering/interrupt, MCP catalog/call mapping, and host path policy.

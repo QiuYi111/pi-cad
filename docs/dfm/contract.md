@@ -106,7 +106,7 @@ Stored as one `App::VarSet` named `DfmProfile` with properties `Rulepack`, `Mate
 
 ## Tests (WP6)
 
-- E2E: `tests/freecad/test_dfm_e2e.py`, same harness style as `tests/freecad/test_part_backend.py`
+- E2E: `tests/dfm/e2e/test_dfm_e2e.py`, same harness style as `tests/freecad-part/e2e/test_part_backend.py`
   (real `Worker`, skipped without FreeCAD).
 - Fixtures: `tests/fixtures/dfm/<case>/part.ops.json` (same op format as
   `skills/parametric-cad-modeling/assets/freecad-part/part.ops.json`, first op is
@@ -124,7 +124,7 @@ Run FreeCAD tests with:
 
 ```
 E=~/.local/share/pi-cad/runtimes/freecad/env
-PYTHONPATH=python:$E/lib PI_CAD_FREECAD_PYTHON=$E/bin/python $E/bin/python -m unittest discover -s tests/freecad
+PYTHONPATH=python:$E/lib PI_CAD_FREECAD_PYTHON=$E/bin/python node tests/run-py-tests.mjs --layer e2e --systems freecad --python $E/bin/python
 ```
 
 Known baseline failure before DFM work: `test_assembly.AssemblyTests.test_the_exported_assembly_names_every_occurrence`.

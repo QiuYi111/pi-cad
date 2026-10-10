@@ -1,16 +1,67 @@
 name: ci
 
 on:
+  workflow_call:
   push:
     branches: [master]
   pull_request:
   workflow_dispatch:
 
 jobs:
+  # Picks the test areas (tests/areas.yaml) that the PR touches. Pushes to master,
+  # workflow_dispatch and the nightly call run every area.
+  changes:
+    name: "Select test areas"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      areas: ${{ steps.select.outputs.areas }}
+      freecad: ${{ steps.select.outputs.freecad }}
+      blender: ${{ steps.select.outputs.blender }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # select-areas.mjs reads tests/areas.yaml with the root `yaml` package.
+      - name: Install the manifest parser
+        run: npm ci --omit=dev --ignore-scripts
+
+      - id: select
+        name: Select areas
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          if [ "$EVENT" = "pull_request" ]; then
+            git fetch --no-tags origin "+refs/heads/${BASE}:refs/remotes/origin/${BASE}"
+            areas="$(git diff --name-only "origin/${BASE}...HEAD" | node scripts/select-areas.mjs)"
+          else
+            areas="$(node scripts/select-areas.mjs --all)"
+          fi
+          has() { case ",$areas," in *",$1,"*) return 0 ;; esac; return 1; }
+          freecad=false
+          if has freecad-part || has transfer || has dfm; then freecad=true; fi
+          blender=false
+          if has blender-presentation; then blender=true; fi
+          echo "areas=$areas" >> "$GITHUB_OUTPUT"
+          echo "freecad=$freecad" >> "$GITHUB_OUTPUT"
+          echo "blender=$blender" >> "$GITHUB_OUTPUT"
+          echo "Selected areas: ${areas:-none}"
+
   test-linux-cpu:
     name: "Linux CPU: fresh install + full test suite"
+    needs: changes
+    if: needs.changes.outputs.areas != ''
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      AREAS: ${{ needs.changes.outputs.areas }}
 
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +74,12 @@ jobs:
         run: >
           sudo apt-get update && sudo apt-get install -y
           libglu1-mesa xvfb libxrender1 libxcursor1 libxft2 libxinerama1
-          blender ffmpeg
+
+      # Blender and ffmpeg only for the presentation area: the render tests and
+      # the Blender video renders run only when blender-presentation is selected.
+      - name: Install Blender and ffmpeg (blender-presentation only)
+        if: needs.changes.outputs.blender == 'true'
+        run: sudo apt-get install -y blender ffmpeg
 
       - uses: actions/setup-node@v4
         with:
@@ -45,14 +101,35 @@ jobs:
       - name: Fresh install (postinstall builds the Python runtime)
         run: npm install
         env:
-          # Blender comes from apt in CI; the 350MB pinned download is not
-          # worth the minutes. Presentation renders against the distro
-          # Blender and the pinned-manifest path is exercised by its
-          # fail-soft logic instead.
+          # Blender comes from apt in CI, and only when the presentation area
+          # is selected; the pinned 350MB download is not worth the minutes.
           PI_CAD_SKIP_BLENDER: "1"
 
-      - name: Full test suite (TypeScript harness + Python backend)
-        run: xvfb-run -a npm test
+      # Declare the real systems this job installed. Each one is required: a
+      # missing system fails the tests that need it (REIFY_REQUIRE_<SYSTEM>=1).
+      # FreeCAD, SU2, Prime and bubblewrap are not installed here; their e2e
+      # layers run in the FreeCAD job or are not run in PR CI.
+      - name: Declare the systems this job installs
+        run: |
+          systems="torch"
+          echo "REIFY_REQUIRE_TORCH=1" >> "$GITHUB_ENV"
+          if [ "${{ needs.changes.outputs.blender }}" = "true" ]; then
+            systems="$systems,blender,ffmpeg"
+            echo "REIFY_REQUIRE_BLENDER=1" >> "$GITHUB_ENV"
+            echo "REIFY_REQUIRE_FFMPEG=1" >> "$GITHUB_ENV"
+          fi
+          echo "REIFY_TEST_SYSTEMS=$systems" >> "$GITHUB_ENV"
+
+      - name: "Static checks (L0): agent contract"
+        run: npm run check:agent-contract
+
+      - name: TypeScript harness tests (selected areas)
+        run: xvfb-run -a node tests/run-ts-tests.mjs --areas "$AREAS" --systems "$REIFY_TEST_SYSTEMS"
+        env:
+          MPLCONFIGDIR: /tmp/matplotlib-cache
+
+      - name: Python backend tests (selected areas)
+        run: xvfb-run -a node tests/run-py-tests.mjs --areas "$AREAS" --systems "$REIFY_TEST_SYSTEMS" --extra simulation
         env:
           MPLCONFIGDIR: /tmp/matplotlib-cache
 
@@ -60,8 +137,13 @@ jobs:
   # above: a FreeCAD failure must not block the build123d path.
   freecad-backend:
     name: "FreeCAD part backend: install, worker tests, end to end"
+    needs: changes
+    if: needs.changes.outputs.freecad == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      AREAS: ${{ needs.changes.outputs.areas }}
+      REIFY_REQUIRE_FREECAD: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -96,31 +178,21 @@ jobs:
       - name: Install reify-asi
         run: bash scripts/bootstrap-asi.sh
 
-      # The e2e test needs the uv environment for identity binding and renders;
+      # The e2e tests need the uv environment for identity binding and renders;
       # install without the heavy simulation extra.
       - name: Install Node and Python (core only)
         run: |
           npm ci --ignore-scripts
           uv sync --project python --no-install-project
 
-      - name: Worker tests (run with the FreeCAD Python)
+      # Only the e2e layer of the selected areas that need FreeCAD: the fast
+      # layers run in the Linux CPU job. Run with the FreeCAD Python.
+      - name: Worker and end-to-end tests (FreeCAD Python and TypeScript)
         run: |
           runtime="$HOME/.local/share/pi-cad/runtimes/freecad"
           python_bin="$(python3 -c "import json,sys; print(json.load(open('$runtime/runtime.json'))['python'])")"
           lib_dir="$(python3 -c "import json,sys; print(json.load(open('$runtime/runtime.json'))['libPath'])")"
-          PI_CAD_FREECAD_PYTHON="$python_bin" PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/python:$lib_dir" \
-            "$python_bin" -m unittest discover -s tests/freecad -v
-
-      - name: Pure-Python and bridge tests
-        run: |
-          PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$PWD/skills/cad/src" uv run --project python python -m unittest tests.test_reify_freecad_pure tests.test_bind_identity tests.test_render_highlight tests.test_face_fingerprints tests.test_cad_package tests.test_cad_transfer tests.test_transfer_geometry_pure
-          node --import jiti/register tests/freecad-worker.test.ts
-          node --import jiti/register tests/part-ops-authorization.test.ts
-          node --import jiti/register tests/build-changes.test.ts
-          python3 -m unittest discover -s tests/fusion_addin
-          node --import jiti/register tests/transfer-ops.test.ts
-          node --import jiti/register tests/part-dfm.test.ts
-          node --import jiti/register tests/transfer-features-e2e.test.ts
-
-      - name: End to end through the Agent API
-        run: node --import jiti/register tests/part-e2e.test.ts
+          export PI_CAD_FREECAD_PYTHON="$python_bin"
+          export PYTHONPATH="$PWD/python:$lib_dir"
+          node tests/run-py-tests.mjs --areas "$AREAS" --layer e2e --systems freecad --python "$python_bin"
+          node tests/run-ts-tests.mjs --areas "$AREAS" --layer e2e --systems freecad

@@ -4,7 +4,7 @@ import { cp, lstat, mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { canonicalDigest, canonicalJson, jsonValue } from "../canonical.ts";
-import { harnessRunDirectory } from "../../authority/storage.ts";
+import { harnessRunDirectory } from "../../shared/storage-paths.ts";
 import { prepareRecipeObligation } from "../reducer.ts";
 import type { LoadedHarnessRunV7 } from "../run-store.ts";
 import type { RegistrySet } from "../registry.ts";

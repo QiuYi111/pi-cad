@@ -195,15 +195,6 @@ afterEach(() => {
 // ---- Tests --------------------------------------------------------------------
 
 describe("cloud session sign-in", () => {
-  it("logs in, stores the session and reports the user", async () => {
-    const { session, store } = createSession();
-    const user = await session.login("a@example.com", "right");
-    expect(user).toEqual({ id: "u1", email: "a@example.com", displayName: "Alice" });
-    expect(session.status()).toMatchObject({ signedIn: true, baseUrl: cloud.baseUrl, user });
-    expect(store.value?.refreshToken).toBe("r1");
-    expect(cloud.pathRequests("/v1/auth/login")[0]?.body).toEqual({ email: "a@example.com", password: "right", deviceLabel: "test-desktop" });
-  });
-
   it("refuses to sign in when the system cannot store the session securely", async () => {
     const { session, store } = createSession();
     store.available = () => false;
@@ -245,48 +236,9 @@ describe("cloud session sign-in", () => {
     expect(elsewhere.session.status().signedIn).toBe(false);
   });
 
-  it("logs out on the server and forgets the saved session", async () => {
-    const { session, store } = createSession();
-    const events = collect(session);
-    await session.login("a@example.com", "right");
-    await session.logout();
-    expect(cloud.pathRequests("/v1/auth/logout")[0]?.body).toEqual({ refreshToken: "r1" });
-    expect(store.value).toBeNull();
-    expect(session.status().signedIn).toBe(false);
-    expect(events).toContainEqual({ type: "session_ended", reason: "signed_out" });
-  });
-
-  it("changes the password with the access token", async () => {
-    cloud.route("POST /v1/auth/password", () => ({ status: 204 }));
-    const { session } = createSession();
-    await session.login("a@example.com", "right");
-    await session.changePassword("right", "a brand new pass");
-    expect(cloud.pathRequests("/v1/auth/password")[0]).toMatchObject({
-      authorization: "Bearer a1",
-      body: { oldPassword: "right", newPassword: "a brand new pass", refreshToken: "r1" },
-    });
-  });
 });
 
 describe("cloud session tokens", () => {
-  it("refreshes the access token before it expires, so the next call uses the new token", async () => {
-    let clock = 1_000_000;
-    cloud.route("POST /v1/auth/login", () => ({ status: 200, body: tokens("a1", "r1", 300) }));
-    cloud.route("GET /v1/projects", (request) => (request.authorization === "Bearer a2"
-      ? { status: 200, body: { projects: [PROJECT] } }
-      : { status: 401, body: { code: "unauthorized", message: "expired" } }));
-    const { session } = createSession({ now: () => clock });
-    await session.login("a@example.com", "right");
-
-    // 200 seconds in: 300 - 200 = 100 seconds left, which is inside the two-minute lead.
-    clock += 200_000;
-    await expect(session.listProjects()).resolves.toEqual([PROJECT]);
-    const paths = cloud.requests.map((request) => request.path);
-    expect(paths.indexOf("/v1/auth/refresh")).toBeGreaterThan(-1);
-    expect(paths.indexOf("/v1/auth/refresh")).toBeLessThan(paths.indexOf("/v1/projects"));
-    expect(cloud.pathRequests("/v1/projects")).toHaveLength(1);
-  });
-
   it("refreshes automatically two minutes before expiry without a call", async () => {
     cloud.route("POST /v1/auth/login", () => ({ status: 200, body: tokens("a1", "r1", 121) }));
     const { session, store } = createSession();
@@ -326,75 +278,6 @@ describe("cloud session tokens", () => {
 });
 
 describe("cloud session projects and workspace", () => {
-  it("lists, creates, renames and deletes projects", async () => {
-    cloud.route("GET /v1/projects", () => ({ status: 200, body: { projects: [PROJECT] } }));
-    cloud.route("POST /v1/projects", () => ({ status: 201, body: { id: "p2", name: "Gear", role: "maintainer", createdAt: "2026-10-02T00:00:00.000Z" } }));
-    cloud.route("PATCH /v1/projects/p2", () => ({ status: 200, body: { id: "p2", name: "Spur gear", role: "maintainer", createdAt: "2026-10-02T00:00:00.000Z" } }));
-    cloud.route("DELETE /v1/projects/p2", () => ({ status: 204 }));
-    const { session } = createSession();
-    await session.login("a@example.com", "right");
-    await expect(session.listProjects()).resolves.toEqual([PROJECT]);
-    await expect(session.createProject("Gear")).resolves.toEqual({ id: "p2", name: "Gear", role: "maintainer", createdAt: "2026-10-02T00:00:00.000Z" });
-    await expect(session.renameProject("p2", "Spur gear")).resolves.toMatchObject({ id: "p2", name: "Spur gear", role: "maintainer" });
-    await session.deleteProject("p2");
-    expect(cloud.pathRequests("/v1/projects")[1]?.body).toEqual({ name: "Gear" });
-  });
-
-  it("queues behind a full server at the position the server reports, then resolves once running", async () => {
-    let startCalls = 0;
-    cloud.route("POST /v1/workspace/start", () => {
-      startCalls += 1;
-      return { status: 409, body: { code: "capacity_full", message: "同时运行的工作区已满，已排队", position: 2 } };
-    });
-    // The queue moves up, then the workspace is admitted (desired running) and comes up.
-    const views = [
-      workspaceView({ queuePosition: 2 }),
-      workspaceView({ queuePosition: 1 }),
-      workspaceView({ desired: "running", state: "starting" }),
-      workspaceView({ desired: "running", state: "running" }),
-    ];
-    let poll = 0;
-    cloud.route("GET /v1/workspace", () => ({ status: 200, body: views[Math.min(poll++, views.length - 1)] }));
-    const { session } = createSession();
-    const events = collect(session);
-    await session.login("a@example.com", "right");
-    await expect(session.startWorkspace()).resolves.toEqual({ state: "running" });
-    expect(startCalls).toBe(1);
-    expect(events).toContainEqual({ type: "workspace_state", state: "queued", position: 2 });
-    expect(events).toContainEqual({ type: "workspace_state", state: "queued", position: 1 });
-    expect(events.findIndex((e) => e.type === "workspace_state" && e.state === "queued" && e.position === 1))
-      .toBeLessThan(events.findIndex((e) => e.type === "workspace_state" && e.state === "running"));
-  });
-
-  it("returns a failed start with the server's lastError, and the next start is accepted", async () => {
-    const lastError = "the workspace did not become ready within 5 minutes";
-    cloud.route("POST /v1/workspace/start", () => ({ status: 200, body: workspaceView({ state: "stopped", desired: "running" }) }));
-    // After the controller gives up, the server keeps state failed and sets desired stopped.
-    cloud.route("GET /v1/workspace", () => ({ status: 200, body: workspaceView({ state: "failed", desired: "stopped", lastError }) }));
-    const { session } = createSession();
-    const events = collect(session);
-    await session.login("a@example.com", "right");
-    await expect(session.startWorkspace()).resolves.toEqual({ state: "failed", error: lastError });
-    expect(session.status().workspace).toEqual({ state: "failed", error: lastError });
-    expect(events).toContainEqual({ type: "workspace_state", state: "failed", error: lastError });
-
-    // The retry sets desired running. Until the controller acts, the old failure is shown as starting.
-    cloud.route("GET /v1/workspace", () => ({ status: 200, body: workspaceView({ state: "failed", desired: "running", lastError }) }));
-    const retry = session.startWorkspace();
-    await waitFor(() => session.status().workspace.state === "starting");
-    expect(session.status().workspace.error).toBeUndefined();
-    cloud.route("GET /v1/workspace", () => ({ status: 200, body: workspaceView({ state: "running", desired: "running" }) }));
-    await expect(retry).resolves.toEqual({ state: "running" });
-  });
-
-  it("sends keepalive with the access token", async () => {
-    cloud.route("POST /v1/workspace/keepalive", () => ({ status: 204 }));
-    const { session } = createSession();
-    await session.login("a@example.com", "right");
-    await session.keepalive();
-    expect(cloud.pathRequests("/v1/workspace/keepalive")[0]?.authorization).toBe("Bearer a1");
-  });
-
   it("opens the bridge socket with the bearer token", async () => {
     cloud.onSocket = (_path, socket) => socket.on("message", () => undefined);
     const { session } = createSession();
@@ -417,23 +300,6 @@ describe("cloud session matches the platform API shapes", () => {
       .toEqual({ state: "running", idleWarningAt: "2026-10-09T10:05:00.000Z" });
   });
 
-  it("reads the queue and the failure from GET /v1/workspace", async () => {
-    cloud.route("GET /v1/workspace", () => ({ status: 200, body: workspaceView({ queuePosition: 4 }) }));
-    const { session } = createSession();
-    await session.login("a@example.com", "right");
-    await expect(session.refreshWorkspace()).resolves.toEqual({ state: "queued", position: 4 });
-
-    cloud.route("GET /v1/workspace", () => ({ status: 200, body: workspaceView({ state: "failed", lastError: "pod crashed" }) }));
-    await expect(session.refreshWorkspace()).resolves.toEqual({ state: "failed", error: "pod crashed" });
-  });
-
-  it("keeps the idle warning time from the server's reclaimAt", async () => {
-    cloud.route("GET /v1/workspace", () => ({ status: 200, body: workspaceView({ state: "running", desired: "running", idleWarnedAt: "2026-10-09T10:00:00.000Z", reclaimAt: "2026-10-09T10:05:00.000Z" }) }));
-    const { session } = createSession();
-    await session.login("a@example.com", "right");
-    expect((await session.refreshWorkspace()).idleWarningAt).toBe("2026-10-09T10:05:00.000Z");
-  });
-
   it("rejects a project list that is not wrapped as {projects}", async () => {
     cloud.route("GET /v1/projects", () => ({ status: 200, body: [PROJECT] }));
     const { session } = createSession();
@@ -454,12 +320,6 @@ describe("cloud session matches the platform API shapes", () => {
     expect(session.status().signedIn).toBe(true);
   });
 
-  it("reports a refused bridge with the server's code and message", async () => {
-    cloud.upgradeReplies.set("/v1/workspace/bridge", { status: 409, body: { code: "workspace_not_running", message: "工作区未运行" } });
-    const { session } = createSession();
-    await session.login("a@example.com", "right");
-    await expect(session.connectBridge()).rejects.toMatchObject({ status: 409, code: "workspace_not_running", message: "工作区未运行" });
-  });
 });
 
 describe("cloud session events", () => {

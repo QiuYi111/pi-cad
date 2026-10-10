@@ -19,11 +19,11 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 
 import { jsonValue, type JsonValue } from "../harness/canonical.ts";
-import { inspectGeometry } from "../shared/capability.ts";
+import { inspectGeometry } from "../shared/cadctl/commands.ts";
 import { PartOpError } from "../shared/freecad-worker.ts";
 import type { GeometryPayload } from "../shared/protocol.ts";
 import { partRequest, readDfmSummary, resolvePartPaths } from "./part-ops.ts";
-import type { AgentApiRequest } from "./protocol.ts";
+import type { AgentApiRequest } from "../authority/protocol.ts";
 import { projectRelativePath } from "./observe.ts";
 import { compareEquivalence, type FeatureVolume } from "./transfer-check.ts";
 

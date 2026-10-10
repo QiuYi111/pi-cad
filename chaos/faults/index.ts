@@ -3,7 +3,7 @@ import type { ChaosContext, FaultDefinition, Params } from "../types.ts";
 import type { Snapshot, WorkerView } from "../sut/server.ts";
 import { pickByIndex, runIndexParams } from "../actions/index.ts";
 import { PROXY_NAME } from "../sut/session.ts";
-import { isProcessAlive } from "../sut/proc.ts";
+import { isProcessAlive } from "../support/process.ts";
 
 const LATENCY_TOXIC = "chaos-latency";
 const DISCONNECT_TOXIC = "chaos-disconnect";

@@ -1,5 +1,7 @@
 import { Session } from "./sut/session.ts";
-import { resetHttpLog, sleep } from "./sut/http.ts";
+import { resetHttpLog } from "./sut/http.ts";
+import { sleep } from "./support/process.ts";
+import { boolFlag, parseArgs, type ParsedArgs } from "./support/args.ts";
 import { BUG_NAMES, type BugName } from "./sut/server.ts";
 import { invariantDefinitions } from "./invariants/index.ts";
 import { Trace } from "./types.ts";
@@ -20,31 +22,6 @@ const USAGE = `Reify chaos POC
 bug: ${BUG_NAMES.join(", ")}
 `;
 
-interface ParsedArgs {
-  positionals: string[];
-  flags: Record<string, string | boolean>;
-}
-
-function parseArgs(argv: string[]): ParsedArgs {
-  const positionals: string[] = [];
-  const flags: Record<string, string | boolean> = {};
-  for (let index = 0; index < argv.length; index += 1) {
-    const token = argv[index];
-    if (token.startsWith("--")) {
-      const [key, inline] = token.slice(2).split("=");
-      if (inline !== undefined) flags[key] = inline;
-      else if (argv[index + 1] && !argv[index + 1].startsWith("--")) flags[key] = argv[++index];
-      else flags[key] = true;
-    } else {
-      positionals.push(token);
-    }
-  }
-  return { positionals, flags };
-}
-
-function boolFlag(flags: Record<string, string | boolean>, key: string): boolean {
-  return flags[key] === true || flags[key] === "true";
-}
 
 function bugFrom(flags: Record<string, string | boolean>): BugName | null {
   const raw = typeof flags.bug === "string" ? flags.bug : null;

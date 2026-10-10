@@ -12,11 +12,12 @@ from pathlib import Path
 
 
 def main() -> int:
+    from .dfm import services as dfm_services
     from .session import DocumentSession
 
     with tempfile.TemporaryDirectory(prefix="reify-freecad-selftest-") as tmp:
         root = Path(tmp)
-        session = DocumentSession(root / "selftest.FCStd", root / "selftest.step", root / "history", "selftest")
+        session = DocumentSession(root / "selftest.FCStd", root / "selftest.step", root / "history", "selftest", dfm=dfm_services)
         session.open(create=True)
         try:
             result = session.apply(

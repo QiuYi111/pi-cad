@@ -1,8 +1,5 @@
 // Per-user push channel for GET /v1/events (plan 5.3). Subscribers are plain sinks, so tests need no sockets.
-export type UserEvent =
-  | { type: 'workspace_state'; state: string }
-  | { type: 'idle_warning'; reclaimAt: string }
-  | { type: 'reclaimed' };
+import type { UserEvent } from '../../../protocol/src/index.js';
 
 export type EventSink = (event: UserEvent) => void;
 

@@ -1,3 +1,4 @@
+import { sleep } from "../support/process.ts";
 import fc from "fast-check";
 import { join } from "node:path";
 
@@ -5,7 +6,7 @@ import { InvariantViolation } from "../types.ts";
 import { reifyActionDefinitions } from "./actions.ts";
 import { loadReifyArtifact, saveReifyArtifact, type ReifyFailureArtifact } from "./artifacts.ts";
 import { inspectReifyComponents, type ReifyComponents } from "./components.ts";
-import { reifyFaultDefinitions } from "./faults.ts";
+import { reifyFaultDefinitions } from "./faults/index.ts";
 import { checkInvariantsOn, checkReifyInvariants, reifyInvariantDefinitions } from "./invariants.ts";
 import { buildReifySequenceArbitrary, describeCommand, type Command } from "./model.ts";
 import { ReifySession } from "./session.ts";
@@ -64,7 +65,6 @@ const DEFAULT_MAX_COMMANDS = 9;
 const FINAL_SETTLE_MS = Number(process.env.CHAOS_REIFY_FINAL_SETTLE_MS ?? 1_200);
 const POLL_INTERVAL_MS = 75;
 
-export const sleep = (ms: number) => new Promise((accept) => setTimeout(accept, ms));
 
 /**
  * A real session in the same mode the run used. Runtime mode matters for

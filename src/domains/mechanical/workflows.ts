@@ -1,5 +1,5 @@
-import { PHASE_PURPOSES } from "../../core/agent-contract.ts";
-import { contractTools, phaseContract } from "../../control/phase-contract.ts";
+import { PHASE_PURPOSES } from "./purposes.ts";
+import { contractTools, phaseContract } from "./phase-contract.ts";
 import type { JsonValue } from "../../harness/canonical.ts";
 import type { BuiltinWorkflowResolver } from "../../harness/workflow/loader.ts";
 import type { WorkflowDefinitionV1, WorkflowObligationDefinition, WorkflowPhaseDefinition } from "../../harness/workflow/types.ts";
@@ -14,6 +14,13 @@ const RECORD_CLOSERS: Record<string, string> = {
   assembly_design: "cad_commit_assembly_design",
   interface_contracts: "cad_commit_interface_contracts",
 };
+
+/**
+ * Record-to-record dependencies, mirroring the v6 stale map: a revised
+ * assembly_design makes the interface_contracts record stale. Declared by
+ * record type and resolved to the obligation refs this workflow owes.
+ */
+const RECORD_DEPENDENCIES: Record<string, string[]> = { interface_contracts: ["assembly_design"] };
 
 function mutationPolicy(phase: CadPhase, overrides: Partial<Record<CadPhase, MutationPolicy>>): MutationPolicy {
   if (overrides[phase]) return overrides[phase]!;
@@ -135,6 +142,22 @@ export function mechanicalWorkflowDefinition(route: Route): WorkflowDefinitionV1
       ...(phase === "done" ? { terminal: true } : {}),
     };
   }
+  // Resolve record types to the obligation refs owed in this workflow. Entering
+  // a phase invalidates the records it declares stale (v6 recordStaleOnEnter).
+  const refsByType = new Map<string, string[]>();
+  for (const phase of Object.values(phases)) {
+    for (const item of phase.recordObligations) refsByType.set(item.type, [...(refsByType.get(item.type) ?? []), item.ref]);
+  }
+  for (const phase of Object.values(phases)) {
+    phase.recordObligations = phase.recordObligations.map((item) => {
+      const dependencies = (RECORD_DEPENDENCIES[item.type] ?? []).flatMap((type) => refsByType.get(type) ?? []);
+      return dependencies.length ? { ...item, dependsOn: [...new Set([...(item.dependsOn ?? []), ...dependencies])] } : item;
+    });
+    for (const [event, transition] of Object.entries(phase.transitions)) {
+      const invalidate = (spec.recordStaleOnEnter?.[transition.target as CadPhase] ?? []).flatMap((type) => refsByType.get(type) ?? []);
+      if (invalidate.length) phase.transitions[event] = { ...transition, invalidate };
+    }
+  }
   return {
     schema: 1,
     id: `mechanical/${routeKey(route)}`,
@@ -184,6 +207,9 @@ export function mechanicalPlanCWorkflowDefinition(route: Route): WorkflowDefinit
       ).concat(candidatePhase ? ["cad_build_step"] : [], Object.keys(phase.transitions).length ? ["transition"] : []))];
       return [phaseId, {
         ...phase,
+        transitions: Object.fromEntries(Object.entries(phase.transitions).map(([event, transition]) => [event, transition.invalidate
+          ? { ...transition, invalidate: transition.invalidate.map(dependency) }
+          : transition])),
         ...(["concept", "system_concept"].includes(phaseId)
           ? { grants: [...new Set([...phase.grants, "image_generate"])] }
           : {}),

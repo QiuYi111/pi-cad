@@ -1,100 +1,36 @@
 import { createJiti } from "jiti";
-import { cpSync, mkdtempSync, mkdirSync } from "node:fs";
+import { cpSync, mkdtempSync, mkdirSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { loadManifest, parseAreaList, parseSystemList, planRuns, ROOT, unassignedTestFiles } from "./support/areas.mjs";
 
-// Legacy behavior tests are explicit v6 compatibility gates. Individual v7
-// tests call the v7 services directly or override this variable.
-process.env.PI_CAD_KERNEL ??= "v6";
-// Python subprocesses import the canonical Plan C skill directly from its
-// source tree. Test execution must never leave bytecode inside a packaged skill.
+// Usage: node tests/run-ts-tests.mjs [--areas a,b|all] [--layer fast|e2e|all] [--systems s,t]
+// Defaults: every area, both layers. See tests/areas.yaml.
+const args = new Map();
+for (let i = 2; i < process.argv.length; i += 2) args.set(process.argv[i].replace(/^--/, ""), process.argv[i + 1]);
+const manifest = loadManifest();
+const layer = args.get("layer") ?? "all";
+if (!["fast", "e2e", "all"].includes(layer)) throw new Error(`--layer must be fast, e2e or all, got ${layer}`);
+const { runs, skipped } = planRuns(manifest, {
+  areas: parseAreaList(args.get("areas"), manifest),
+  layers: layer === "all" ? ["fast", "e2e"] : [layer],
+  systems: parseSystemList(args.get("systems")),
+});
+for (const skip of skipped) console.log(`not run here: ${skip.area}/${skip.layer} needs ${skip.need.join(", ")} (see tests/areas.yaml)`);
+for (const file of unassignedTestFiles(manifest)) console.warn(`warning: ${file} is not in any area in tests/areas.yaml`);
+
+// Process-wide environment, as before the area layout.
 process.env.PYTHONDONTWRITEBYTECODE ??= "1";
 process.env.PI_CAD_WORKFLOW_HOME = mkdtempSync(join(tmpdir(), "pi-cad-workflow-home-"));
 const testWorkflowRoot = join(process.env.PI_CAD_WORKFLOW_HOME, ".pi-cad", "workflows");
 mkdirSync(testWorkflowRoot, { recursive: true });
 cpSync(new URL("../workflow-packages/mechanical/default.yaml", import.meta.url), join(testWorkflowRoot, "mechanical-default.yaml"));
 
+const files = runs.flatMap(({ dir }) => readdirSync(dir).filter((name) => /\.test\.(ts|mjs)$/.test(name)).sort().map((name) => resolve(dir, name)));
+console.log(`running ${files.length} TS test files in ${runs.length} area directories`);
+
 const jiti = createJiti(import.meta.url, { moduleCache: false });
-await jiti.import("./state-machine.test.ts", { default: true });
-await jiti.import("./bounded-files.test.ts", { default: true });
-await jiti.import("./prompt-fast-path.test.ts", { default: true });
-await jiti.import("./process-runner.test.ts", { default: true });
-await jiti.import("./linux-runtime-boundary.test.ts", { default: true });
-await jiti.import("./requirements-revision.test.ts", { default: true });
-await jiti.import("./route-compiler.test.ts", { default: true });
-await jiti.import("./schema-migration.test.ts", { default: true });
-await jiti.import("./interference-tool.test.ts", { default: true });
-await jiti.import("./reroute.test.ts", { default: true });
-await jiti.import("./analysis-model.test.ts", { default: true });
-await jiti.import("./extensions-smoke.test.ts", { default: true });
-await jiti.import("./registry-contract.test.ts", { default: true });
-await jiti.import("./workflow-v7.test.ts", { default: true });
-await jiti.import("./transaction-v7.test.ts", { default: true });
-await jiti.import("./context-v7.test.ts", { default: true });
-await jiti.import("./plan-c.test.ts", { default: true });
-await jiti.import("./recipe-kernel.test.ts", { default: true });
-await jiti.import("./recipe-adapter.test.ts", { default: true });
-await jiti.import("./permissions-v7.test.ts", { default: true });
-await jiti.import("./authorization-v7.test.ts", { default: true });
-await jiti.import("./authority-sidecar.test.ts", { default: true });
-await jiti.import("./prime-credentials.test.ts", { default: true });
-await jiti.import("./conversation-lifecycle.test.ts", { default: true });
-await jiti.import("./prime-subagent-runtime-scope.test.ts", { default: true });
-await jiti.import("./desktop-conversation-projection.test.ts", { default: true });
-await jiti.import("./workflow-packages.test.ts", { default: true });
-await jiti.import("./workflow-git.test.ts", { default: true });
-await jiti.import("./review-runtime.test.ts", { default: true });
-await jiti.import("./mechanical-recipe-actions.test.ts", { default: true });
-await jiti.import("./recipe-templates.test.ts", { default: true });
-await jiti.import("./engine-router.test.ts", { default: true });
-await jiti.import("./v7-extension-routing.test.ts", { default: true });
-await jiti.import("./v7-walking-skeleton.test.ts", { default: true });
-await jiti.import("./review-v7.test.ts", { default: true });
-await jiti.import("./observations-v7.test.ts", { default: true });
-await jiti.import("./harness-boundary.test.ts", { default: true });
-await jiti.import("./harness-v0.test.ts", { default: true });
-await jiti.import("./restore.test.ts", { default: true });
-await jiti.import("./policy.test.ts", { default: true });
-await jiti.import("./plugin-composition.test.ts", { default: true });
-await jiti.import("./workflows-full.test.ts", { default: true });
-await jiti.import("./harness-convert.test.ts", { default: true });
-await jiti.import("./public-tool-catalog.test.ts", { default: true });
-await jiti.import("./drawing-presentation-tool.test.ts", { default: true });
-await jiti.import("./task-lifecycle.test.ts", { default: true });
-await jiti.import("./commands-lifecycle.test.ts", { default: true });
-await jiti.import("./context-memory.test.ts", { default: true });
-await jiti.import("./experience.test.ts", { default: true });
-await import("./reify-cad-worker.test.mjs");
-await import("./cadtestbench-metrics.test.mjs");
-await import("./cadtestbench-clarity-controls.test.mjs");
-await import("./cadtestbench-unit-normalization.test.mjs");
-await import("./cadtestbench-ambiguity-adjudication.test.mjs");
-await jiti.import("./golden-phase0.test.ts", { default: true });
-await jiti.import("./observations.test.ts", { default: true });
-await jiti.import("./probe-registry.test.ts", { default: true });
-await jiti.import("./cad-probe-tool.test.ts", { default: true });
-await jiti.import("./tool-error-results.test.ts", { default: true });
-await jiti.import("./finalizer.test.ts", { default: true });
-await jiti.import("./model-backend.test.ts", { default: true });
-await jiti.import("./model-parameters.test.ts", { default: true });
-await jiti.import("./build-changes.test.ts", { default: true });
-await jiti.import("./freecad-worker.test.ts", { default: true });
-await jiti.import("./part-ops-authorization.test.ts", { default: true });
-await jiti.import("./part-e2e.test.ts", { default: true });
-await jiti.import("./part-dfm.test.ts", { default: true });
-await jiti.import("./simulation-v2-protocol.test.ts", { default: true });
-await jiti.import("./simulation-v2-store.test.ts", { default: true });
-await jiti.import("./simulation-v2-runtime.test.ts", { default: true });
-await jiti.import("./simulation-v2-preflight.test.ts", { default: true });
-await jiti.import("./simulation-v2-spec04.test.ts", { default: true });
-await jiti.import("./phase-contract.test.ts", { default: true });
-await jiti.import("./observation-index.test.ts", { default: true });
-await jiti.import("./agent-contract.test.ts", { default: true });
-await jiti.import("./no-source-agent-smoke.test.ts", { default: true });
-await jiti.import("./skill-system.test.ts", { default: true });
-await jiti.import("./final-review.test.ts", { default: true });
-await jiti.import("./product-evaluation.test.ts", { default: true });
-await jiti.import("./chaos.test.ts", { default: true });
-await jiti.import("./chaos-reify.test.ts", { default: true });
-await jiti.import("./chaos-invariants.test.ts", { default: true });
-await jiti.import("./chaos-campaign.test.ts", { default: true });
+for (const file of files) {
+  if (file.endsWith(".mjs")) await import(file);
+  else await jiti.import(file, { default: true });
+}

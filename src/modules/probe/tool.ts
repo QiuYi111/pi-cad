@@ -3,17 +3,14 @@ import { createHash } from "node:crypto";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-import { DEFAULT_VIEWS, probePython } from "../../shared/capability.ts";
-import { CadProjectStore } from "../../shared/store.ts";
+import { DEFAULT_VIEWS, probePython } from "../../shared/cadctl/commands.ts";
 import { bundleFromEnvelope, type ObservationBundle } from "../../observations/bundle.ts";
-import { recordObservation } from "../../core/observation-index.ts";
 import { ensureProbePresets, probePreset, renderProbeResult } from "./index.ts";
-import { selectKernelEngine } from "../../harness/engine-router.ts";
 import { HarnessProjectStoreV7 } from "../../harness/run-store.ts";
 import { resolveActiveRun } from "../../harness/run-scope.ts";
-import { mechanicalRegistries } from "../../domains/mechanical/registries.ts";
+import type { RegistrySet } from "../../harness/registry.ts";
 import { recordObservationV7 } from "../../harness/observations.ts";
-import type { AgentArtifactSubject } from "../../agent-api/protocol.ts";
+import type { AgentArtifactSubject } from "../../authority/protocol.ts";
 
 export const CAD_PROBE_PRESET_NAMES = {
   visual: "visual",
@@ -77,7 +74,7 @@ export const CadProbeParametersSchema = Type.Union([
 
 export const CadRecallObservationParametersSchema = Type.Object(
   {
-    observationId: Type.Optional(Type.String({ minLength: 1, description: "Immutable observation ID, e.g. obs-000001" })),
+    observationId: Type.Optional(Type.String({ minLength: 1, description: "Immutable observation ID from the run index, e.g. observation-1728000000000-1a2b3c4d" })),
     collection: Type.Optional(Type.String({ minLength: 1, description: "Collection name from the observation catalog" })),
     where: Type.Optional(Type.Array(Type.Object({
       field: Type.String({ minLength: 1 }),
@@ -91,7 +88,7 @@ export const CadRecallObservationParametersSchema = Type.Object(
     }, { additionalProperties: false }))),
     cursor: Type.Optional(Type.String({ minLength: 1 })),
     tool: Type.Optional(Type.String({ description: "Filter by agent tool name, e.g. cad_probe" })),
-    evidenceKind: Type.Optional(Type.String({ description: "Filter by evidence kind, e.g. visual, geometry" })),
+    evidenceKind: Type.Optional(Type.String({ description: "Not recorded on v7 observations; setting it is rejected" })),
     artifactHash: Type.Optional(Type.String({ description: "Filter by artifact hash binding" })),
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
   },
@@ -107,7 +104,11 @@ export interface CadProbeParams {
   script?: string;
 }
 
-export async function executeCadProbe(cwd: string, params: CadProbeParams, signal?: AbortSignal) {
+/**
+ * `registries` is the caller's workflow registry set (the mechanical domain
+ * supplies it); the probe capability itself does not depend on any domain.
+ */
+export async function executeCadProbe(cwd: string, params: CadProbeParams, registries: RegistrySet, signal?: AbortSignal) {
   ensureProbePresets();
   if (params.preset === "python") {
     const rendered = await runPythonProbe(cwd, {
@@ -117,8 +118,8 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
       script: params.script,
       args: params.args as Record<string, unknown> | undefined,
       signal,
-    });
-    return persistProbeObservation(cwd, params.preset, rendered);
+    }, registries);
+    return persistProbeObservation(cwd, params.preset, rendered, registries);
   }
   const registryName = params.preset;
   const preset = probePreset(registryName);
@@ -135,7 +136,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
   const direct = params.subject && typeof params.subject !== "string" ? await resolveArtifactSubject(cwd, params.subject) : null;
   const targetSource = typeof args.artifact === "string" ? "explicit" : direct ? "artifact-ref" : params.subject ?? "current";
   if (!args.artifact && params.subject) {
-    const resolved = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline");
+    const resolved = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline", registries);
     if (resolved) args.artifact = resolved;
   }
   if (!args.artifact && !args.before) {
@@ -164,7 +165,7 @@ export async function executeCadProbe(cwd: string, params: CadProbeParams, signa
     : [{ source: targetSource, path: String(args.artifact), sha256: result.envelope.inputHashes.artifact }];
   result.extraDetails = { ...(result.extraDetails ?? {}), resolvedSubjects, ...(resolvedSubjects.length === 1 ? { resolvedSubject: resolvedSubjects[0] } : {}) };
   const rendered = await renderProbeResult(result, `cad_probe/${registryName}`);
-  return persistProbeObservation(cwd, params.preset, rendered);
+  return persistProbeObservation(cwd, params.preset, rendered, registries);
 }
 
 function applyPresetDefaults(preset: string, args: Record<string, unknown>): void {
@@ -179,20 +180,16 @@ function applyPresetDefaults(preset: string, args: Record<string, unknown>): voi
 async function resolveSubjectArtifact(
   cwd: string,
   subject: "current" | "baseline" | undefined,
+  registries: RegistrySet,
 ): Promise<string | null> {
-  if (await selectKernelEngine(cwd) === "v7") {
-    const project = new HarnessProjectStoreV7(cwd);
-    const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
-    if (!loaded) return null;
-    if ((subject ?? "current") === "baseline") {
-      const { state } = await project.load();
-      return Object.values(state.head.artifacts).find((item) => /authoritative|design|candidate/i.test(item.role))?.path ?? Object.values(state.head.artifacts)[0]?.path ?? null;
-    }
-    return Object.values(loaded.state.artifacts).find((item) => /authoritative|design|candidate/i.test(item.role))?.path ?? Object.values(loaded.state.artifacts)[0]?.path ?? null;
+  const project = new HarnessProjectStoreV7(cwd);
+  const loaded = await resolveActiveRun(cwd, registries);
+  if (!loaded) return null;
+  if ((subject ?? "current") === "baseline") {
+    const { state } = await project.load();
+    return Object.values(state.head.artifacts).find((item) => /authoritative|design|candidate/i.test(item.role))?.path ?? Object.values(state.head.artifacts)[0]?.path ?? null;
   }
-  const state = await new CadProjectStore(cwd).load();
-  if (!state) return null;
-  return (subject ?? "current") === "current" ? state.currentArtifactPath ?? null : state.baselineArtifactPath ?? null;
+  return Object.values(loaded.state.artifacts).find((item) => /authoritative|design|candidate/i.test(item.role))?.path ?? Object.values(loaded.state.artifacts)[0]?.path ?? null;
 }
 
 function inside(root: string, candidate: string): boolean {
@@ -220,9 +217,10 @@ async function resolveArtifactSubject(cwd: string, subject: AgentArtifactSubject
 async function runPythonProbe(
   cwd: string,
   params: { subject: "current" | "baseline" | AgentArtifactSubject; purpose: string; code: string; script?: string; args?: Record<string, unknown>; signal?: AbortSignal },
+  registries: RegistrySet,
 ) {
   const direct = typeof params.subject === "string" ? null : await resolveArtifactSubject(cwd, params.subject);
-  const rel = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline");
+  const rel = direct?.path ?? await resolveSubjectArtifact(cwd, params.subject as "current" | "baseline", registries);
   const label = typeof params.subject === "string" ? params.subject : params.subject.path;
   if (!rel) {
     return { content: [{ type: "text" as const, text: `cad_probe failed: no ${label} artifact bound in run state` }], isError: true };
@@ -289,75 +287,37 @@ async function persistProbeObservation(
   cwd: string,
   preset: string,
   rendered: Awaited<ReturnType<typeof renderProbeResult>>,
+  registries: RegistrySet,
 ) {
   if (!("details" in rendered) || !rendered.details) return rendered;
-  if (await selectKernelEngine(cwd) === "v7") {
-    const loaded = await resolveActiveRun(cwd, mechanicalRegistries);
-    if (!loaded) return rendered;
-    const envelope = rendered.details.envelope as any;
-    const observation = rendered.details.observation as ObservationBundle | undefined;
-    const bundle = observation ?? bundleFromEnvelope(envelope, { headline: envelope?.ok ? `cad_probe/${preset}` : `cad_probe/${preset} failed` });
-    try {
-      const artifacts = new Map((bundle.artifacts ?? []).map((item) => [item.path, item.sha256]));
-      const recorded = await recordObservationV7({
-        cwd,
-        workflowRunId: loaded.state.runId,
-        registries: mechanicalRegistries,
-        tool: "cad_probe",
-        headline: bundle.headline,
-        ...(typeof rendered.details.artifactHash === "string" ? { subjectHash: rendered.details.artifactHash } : {}),
-        facts: bundle.facts.map((item) => ({ key: item.key, value: item.value })),
-        visuals: bundle.visuals.flatMap((item) => artifacts.get(item.path) ? [{ name: item.name, path: item.path, sha256: artifacts.get(item.path)! }] : []),
-        diagnostics: bundle.diagnostics,
-        provenance: bundle.provenance as never,
-      });
-      const path = recorded.state.contextRefs!.latestObservation!;
-      const id = path.split("/").at(-1)!.replace(/\.json$/, "");
-      const text = rendered.content.find((item) => item.type === "text");
-      if (text) text.text = `${text.text ?? ""}\nobservationId=${id} immutablePath=${path}`;
-      rendered.details.observationId = id;
-      rendered.details.observationPath = path;
-      rendered.details.observationStored = true;
-      return rendered;
-    } catch (error) {
-      return { content: [{ type: "text" as const, text: `cad_probe failed to persist v7 immutable observation: ${error instanceof Error ? error.message : String(error)}` }], isError: true, details: { presetFailed: true, observationStorageFailed: true } };
-    }
-  }
-  const state = await new CadProjectStore(cwd).load();
-  if (!state) return rendered;
+  const loaded = await resolveActiveRun(cwd, registries);
+  if (!loaded) return rendered;
   const envelope = rendered.details.envelope as any;
   const observation = rendered.details.observation as ObservationBundle | undefined;
-  const bundle = observation ?? bundleFromEnvelope(envelope, {
-    headline: envelope?.ok ? `cad_probe/${preset}` : `cad_probe/${preset} failed`,
-  });
+  const bundle = observation ?? bundleFromEnvelope(envelope, { headline: envelope?.ok ? `cad_probe/${preset}` : `cad_probe/${preset} failed` });
   try {
-    const record = await recordObservation({
+    const artifacts = new Map((bundle.artifacts ?? []).map((item) => [item.path, item.sha256]));
+    const recorded = await recordObservationV7({
       cwd,
-      runId: state.runId,
-      phase: state.phase,
+      workflowRunId: loaded.state.runId,
+      registries,
       tool: "cad_probe",
-      bundle,
-      ...(typeof rendered.details.artifactHash === "string" ? { artifactHash: rendered.details.artifactHash } : {}),
-      ...(typeof rendered.details.kind === "string" ? { evidenceKind: rendered.details.kind } : {}),
-      preset,
-      resolvedSubjects: Array.isArray(rendered.details.resolvedSubjects) ? rendered.details.resolvedSubjects as any : undefined,
-      rawPayload: envelope?.payload,
+      headline: bundle.headline,
+      ...(typeof rendered.details.artifactHash === "string" ? { subjectHash: rendered.details.artifactHash } : {}),
+      facts: bundle.facts.map((item) => ({ key: item.key, value: item.value })),
+      visuals: bundle.visuals.flatMap((item) => artifacts.get(item.path) ? [{ name: item.name, path: item.path, sha256: artifacts.get(item.path)! }] : []),
+      diagnostics: bundle.diagnostics,
+      provenance: bundle.provenance as never,
     });
+    const path = recorded.state.contextRefs!.latestObservation!;
+    const id = path.split("/").at(-1)!.replace(/\.json$/, "");
     const text = rendered.content.find((item) => item.type === "text");
-    if (text) {
-      const resolved = Array.isArray(rendered.details.resolvedSubjects)
-        ? (rendered.details.resolvedSubjects as Array<{ source: string; path: string; sha256?: string }>).map((item) => `resolvedSubject.source=${item.source} path=${item.path} sha256=${item.sha256 ?? "unavailable"}`)
-        : [];
-      text.text = `${text.text ?? ""}\n${resolved.join("\n")}${resolved.length ? "\n" : ""}observationId=${record.observationId} collections=${record.collections?.map((item) => `${item.name}:${item.count}`).join(",") || "none"}`;
-    }
-    rendered.details.observationId = record.observationId;
+    if (text) text.text = `${text.text ?? ""}\nobservationId=${id} immutablePath=${path}`;
+    rendered.details.observationId = id;
+    rendered.details.observationPath = path;
     rendered.details.observationStored = true;
     return rendered;
   } catch (error) {
-    return {
-      content: [{ type: "text" as const, text: `cad_probe failed to persist its complete immutable observation: ${error instanceof Error ? error.message : String(error)}` }],
-      isError: true,
-      details: { presetFailed: true, observationStorageFailed: true, envelope: { ...envelope, ok: false }, preset },
-    };
+    return { content: [{ type: "text" as const, text: `cad_probe failed to persist v7 immutable observation: ${error instanceof Error ? error.message : String(error)}` }], isError: true, details: { presetFailed: true, observationStorageFailed: true } };
   }
 }

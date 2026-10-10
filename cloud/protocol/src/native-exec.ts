@@ -24,7 +24,7 @@ export class ExecExitError extends Error {
   }
 }
 
-// Shared by NativeBridge (desktop) and the workspace gateway. A non-zero exit
+// Used by the workspace gateway. A non-zero exit
 // rejects with an ExecExitError carrying the captured stdout/stderr, code and signal.
 export async function execCollect(args: string[], options: ExecCollectOptions = {}) {
   const [command, ...rest] = args;

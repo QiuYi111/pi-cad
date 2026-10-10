@@ -86,10 +86,6 @@ export function routeKey(route: Route): string {
   return `design/${route.lineage}/${route.structure}/${route.maturity}`;
 }
 
-export function routeLabel(route: Route | null | undefined): string {
-  return route ? routeKey(route) : "unset";
-}
-
 /** Release workstreams (whitepaper 6.1): maturity=release overlays all nine. */
 export const RELEASE_WORKSTREAMS = [
   "design_definition",

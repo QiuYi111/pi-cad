@@ -4,8 +4,8 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { routeKey, type CadRunState } from "../shared/protocol.ts";
-import { nowIso } from "../shared/store.ts";
+import { routeKey, type Route } from "../shared/protocol.ts";
+import { nowIso } from "../shared/hash.ts";
 import { runProcess, spawnDetachedProcess } from "../shared/process-runner.ts";
 import {
   EXPERIENCE_SCHEMA_VERSION,
@@ -137,7 +137,7 @@ function indexFrom(metadata: ExperienceMetadata, metrics: Record<string, any> | 
 }
 
 export interface FinalizeExperienceInput {
-  state?: CadRunState;
+  state?: { runId: string; route: Route | null };
   runId?: string;
   workflow?: string;
   projectPath: string;

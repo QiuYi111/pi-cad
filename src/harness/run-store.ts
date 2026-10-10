@@ -9,7 +9,7 @@ import { createHarnessRunState } from "./reducer.ts";
 import type { HarnessRunStateV7 } from "./state.ts";
 import { TransactionConflictError, TransactionStore, type HeadPointerV1, type TransactionEventV1 } from "./transaction-store.ts";
 import type { WorkflowSnapshotV1 } from "./workflow/types.ts";
-import { harnessProjectDirectory, harnessRunDirectory, harnessStorageRoot } from "../authority/storage.ts";
+import { harnessProjectDirectory, harnessRunDirectory, harnessStorageRoot } from "../shared/storage-paths.ts";
 
 export interface LoadedHarnessRunV7 {
   head: HeadPointerV1;

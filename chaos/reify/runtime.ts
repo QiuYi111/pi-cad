@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createConnection } from "node:net";
 
-import { isProcessAlive, LAUNCHER, REPO_ROOT } from "../sut/proc.ts";
+import { isProcessAlive, LAUNCHER, REPO_ROOT } from "../support/process.ts";
 
 const READY_TIMEOUT_MS = 30_000;
 const DEFAULT_CALL_TIMEOUT_MS = 180_000;

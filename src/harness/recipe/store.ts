@@ -2,7 +2,7 @@ import { realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { TransactionStore } from "../transaction-store.ts";
-import { harnessRunDirectory } from "../../authority/storage.ts";
+import { harnessRunDirectory } from "../../shared/storage-paths.ts";
 import type { RecipeObservationSnapshotV1, RecipeRunRecordV1 } from "./types.ts";
 
 function component(value: string, where: string): string {

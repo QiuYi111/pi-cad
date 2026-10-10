@@ -8,21 +8,34 @@
  */
 import { basename, join, resolve } from "node:path";
 
+import { assemblyTree, compareGeometry, inspectGeometry, inspectInterference, inspectSection, inspectSurfaces, inspectVisual, measure, scanSections } from "../../../shared/cadctl/commands.ts";
+import { resolveActiveRun } from "../../../harness/run-scope.ts";
 import {
-  assemblyTree,
-  compareGeometry,
-  currentGeometryEvidencePath,
-  currentRunEvidenceRoot,
-  inspectGeometry,
-  inspectInterference,
-  inspectSection,
-  inspectSurfaces,
-  inspectVisual,
-  currentVisualEvidenceDir,
-  measure,
-  scanSections,
-} from "../../../shared/capability.ts";
+  defaultGeometryEvidencePath,
+  defaultVisualEvidenceDir,
+  runEvidenceRoot,
+  runGeometryEvidencePath,
+  runVisualEvidenceDir,
+} from "../../../shared/evidence-paths.ts";
 import { registerProbe, type ProbePreset } from "../registry.ts";
+
+// Evidence placement follows the v7 harness run scope (the active run of this
+// conversation, or the project's current run). Without an active run there is
+// no run directory, so callers fall back to the project-level default.
+async function currentRunEvidenceRoot(cwd: string): Promise<string | null> {
+  const loaded = await resolveActiveRun(cwd);
+  return loaded ? runEvidenceRoot(cwd, loaded.state.runId) : null;
+}
+
+async function currentVisualEvidenceDir(cwd: string, artifact: string): Promise<string> {
+  const loaded = await resolveActiveRun(cwd);
+  return loaded ? runVisualEvidenceDir(cwd, loaded.state.runId, artifact) : defaultVisualEvidenceDir(cwd, artifact);
+}
+
+async function currentGeometryEvidencePath(cwd: string, artifact: string): Promise<string> {
+  const loaded = await resolveActiveRun(cwd);
+  return loaded ? runGeometryEvidencePath(cwd, loaded.state.runId, artifact) : defaultGeometryEvidencePath(cwd, artifact);
+}
 
 // --------------------------------------------------------------------------
 // visual

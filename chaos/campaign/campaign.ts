@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loadReifyArtifact, type ReifyFailureArtifact } from "../reify/artifacts.ts";
-import { FAULT_BOUNDARIES } from "../reify/faults.ts";
+import { FAULT_BOUNDARIES } from "../reify/faults/index.ts";
 import { reifyInvariantDefinitions } from "../reify/invariants.ts";
 import type { Command } from "../reify/model.ts";
 import { reifyChaosRun } from "../reify/runner.ts";
@@ -94,7 +94,6 @@ function environmentSnapshot(): Record<string, string | null> {
     "CHAOS_REIFY_PAUSE_MS",
     "CHAOS_REIFY_FINAL_SETTLE_MS",
     "CHAOS_REIFY_CPU_WORKERS",
-    "PI_CAD_KERNEL",
   ];
   return Object.fromEntries(keys.map((key) => [key, process.env[key] ?? null]));
 }

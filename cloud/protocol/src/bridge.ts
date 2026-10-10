@@ -43,7 +43,8 @@ export type ErrorCode =
   | "size_mismatch"
   | "failed";
 
-export type Message = ClientMessage | GatewayMessage;
+// Sent as a request header by the platform API when it connects to a gateway.
+export const GATEWAY_TOKEN_HEADER = "x-reify-gateway-token";
 
 export const CHANNEL_HEADER_BYTES = 4;
 

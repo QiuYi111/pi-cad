@@ -5,7 +5,7 @@ and does it match the 铨洲 tap-drill table (plan §5 table H3, `tables.tap_dri
 
 ## Method
 
-- Script: `tests/freecad/dfm_spike_e0c.py` (not a test; run with the FreeCAD Python, see its docstring).
+- Script: `scripts/spikes/dfm_spike_e0c.py` (not a test; run with the FreeCAD Python, see its docstring).
 - FreeCAD 1.1.0 (20260325) in `~/.local/share/pi-cad/runtimes/freecad/env`, through the real `Worker`.
 - Part: 40 x 30 x 10 mm plate, one blind hole, depth 7.5 mm, from the top face, with
   `{"op": "hole", "diameter": D, "depth": 7.5, "thread": "<size>"}` (`ModelThread` false, the op default).
@@ -44,7 +44,7 @@ Modelled thread (`ModelThread` true), M3 only, `diameter` 2.5:
 The modelled thread is a helical profile between 2.52 and 3.02 mm. It is not a drilled hole of 2.5 mm,
 which is why `hole.thread_modeled` (warn) stays in the rulepack.
 
-Raw rows: `tests/freecad/dfm_spike_e0c.py` prints them; the run on this checkout reproduces the values above.
+Raw rows: `scripts/spikes/dfm_spike_e0c.py` prints them; the run on this checkout reproduces the values above.
 
 ## Conclusion
 
