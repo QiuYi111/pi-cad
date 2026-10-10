@@ -8,7 +8,9 @@ const thin = process.argv.includes("--thin");
 const buildArgs = [builder, "--win", "nsis", "portable", ...(thin ? ["--config", "build/thin-client.cjs"] : [])];
 
 // Build the SolidWorks executor first (needs the .NET SDK; fails with a clear message when it is missing).
-try { buildSolidworksExecutor(); } catch (error) { console.error(error.message); process.exit(1); }
+if (!thin) {
+  try { buildSolidworksExecutor(); } catch (error) { console.error(error.message); process.exit(1); }
+}
 
 // Signing hook for the bundled CAD executors (executors/solidworks/publish). It is a no-op unless
 // REIFY_SIGN_PFX or REIFY_SIGN_CERT_SHA1 is set. See scripts/sign-executors.mjs for the variables.

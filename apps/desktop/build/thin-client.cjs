@@ -8,7 +8,14 @@ module.exports = {
     reifySourceCommit: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
   },
   extraResources: [{ from: "build/thin-client.json", to: "thin-client.json" }],
-  win: { artifactName: "Reify-Thin-Setup-${arch}.${ext}" },
+  win: {
+    artifactName: "Reify-Thin-Setup-${arch}.${ext}",
+    extraResources: [{
+      from: "../../executors/fusion/ReifyExport",
+      to: "executors/fusion/ReifyExport",
+      filter: ["**/*", "!**/__pycache__/**", "!**/*.pyc"],
+    }],
+  },
   portable: { artifactName: "Reify-Thin-Portable-${arch}.${ext}" },
   nsis: { runAfterFinish: false },
 };
