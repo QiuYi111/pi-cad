@@ -11,6 +11,12 @@ struct RootView: View {
                 AppHeader(projectsPage: $projectsPage)
                 if let error = app.error { NoticeView(text: error, error: true) { app.error = nil } }
                 if let notice = app.extensionNotice { NoticeView(text: notice) { app.extensionNotice = nil }.accessibilityIdentifier("extension.notice") }
+                if let next = app.newResult {
+                    HStack { Label("有新模型：\((next.path as NSString).lastPathComponent)", systemImage: "cube"); Spacer()
+                        Button("查看新结果") { app.selectVersion(nil); Task { await app.showArtifact(next) } }.accessibilityIdentifier("model.show-new")
+                        Button("稍后") { app.newResult = nil }.accessibilityIdentifier("model.dismiss-new")
+                    }.padding(12).background(ReifyDesign.panel).accessibilityIdentifier("model.new-result")
+                }
                 if app.reclaimAt != nil {
                     HStack { Label("云端即将因闲置暂停", systemImage: "clock"); Spacer(); Button("继续使用") { Task { await app.keepalive() } } }
                         .padding(12).background(ReifyDesign.panel)
@@ -285,7 +291,7 @@ struct ConversationView: View {
                         Color.clear.frame(height: 1).id("bottom")
                     }.frame(maxWidth: 744).padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 220).frame(maxWidth: .infinity)
                         .background(ReadingPosition(followsBottom: $followsBottom))
-                }.onChange(of: app.messages) { _, _ in if followsBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
+                }.onChange(of: followsBottom) { _, follows in app.readingHistory = !follows }.onChange(of: app.messages) { _, _ in if followsBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
                  .onChange(of: app.sessionID) { _, _ in followsBottom = true; proxy.scrollTo("bottom", anchor: .bottom) }
                 }
             }
@@ -325,6 +331,7 @@ struct CanvasView: View {
                 Divider().frame(height: 26).padding(.horizontal, 10)
                 Label(app.previewName.isEmpty ? "当前模型" : app.previewName, systemImage: "cube").accessibilityIdentifier("model.name")
                 Spacer()
+                Button("导入 STEP") { Task { await app.importStep() } }.disabled(!app.connected || app.selected?.role == "viewer" || app.permission == "read-only").accessibilityIdentifier("model.import-step")
                 Button { app.filesOpen.toggle() } label: { Label("项目文件", systemImage: "folder") }.accessibilityIdentifier("file.toggle")
                 if let file = app.files.first(where: { $0.name == app.previewName }) {
                     Button("导出") { Task { await app.export(file) } }.accessibilityIdentifier("model.export")
@@ -334,7 +341,11 @@ struct CanvasView: View {
                 ScrollView { EngineeringResultsView() }
                 Divider()
                 Group {
-                if let data = app.preview { ModelPreview(data: data).accessibilityIdentifier("model.preview") }
+                if let data = app.preview {
+                    if let other = app.comparisonPreview, let primary = app.selectedArtifact, let comparison = app.comparisonArtifact {
+                        ComparisonView(primary: primary, primaryData: data, secondary: comparison, secondaryData: other)
+                    } else { ModelPreview(data: data).accessibilityIdentifier("model.preview") }
+                }
                 else {
                     VStack(spacing: 14) {
                         ReifyMark(size: 50)

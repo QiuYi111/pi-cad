@@ -2,7 +2,8 @@
 import http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -34,7 +35,9 @@ triangles.forEach((t,i)=>t.flat().forEach((value,j)=>stl.writeFloatLE(value,84+i
 
 const files = new Map([['bracket.stl', stl], ['bracket.step', Buffer.from('ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;')], ['corrupt.stl', stl]]);
 files.set('bracket.py',Buffer.from('# disposable model source fixture\n'));
-let modelWidth=80;
+let modelWidth=80, expandedCatalog=false;
+files.set('history/bracket-80.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));
+files.set('engineering-report.json',Buffer.from('{"checks":[]}'));
 function parameterManifest(){const manifest={schema:1,modelId:'bracket',source:{path:'bracket.py',sha256:sha(files.get('bracket.py')),entrypoint:'build'},output:{path:'bracket.step',sha256:sha(files.get('bracket.step'))},parameters:[{id:'width',type:'number',default:80,value:modelWidth,min:20,max:160,step:1,unit:'mm',label:'宽度'}]};const data=Buffer.from(JSON.stringify(manifest));files.set('bracket.parameters.json',data);return {path:'bracket.parameters.json',sha256:sha(data),manifest}}
 const sessions = new Map();
 const generatedSessions = new Set();
@@ -53,6 +56,8 @@ const server = http.createServer(async (req, res) => {
   let b = {}; try { b = text ? JSON.parse(text) : {}; } catch { return respond(res,400,{message:'请求格式错误'}); }
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
+  if (path === '/__test/catalog-parity') { expandedCatalog=true;return respond(res,200,{ok:true}); }
+  if (path === '/__test/model-width') { modelWidth=Number(b.width);files.set('bracket.step',Buffer.from(`ISO-10303-21;\nWIDTH=${modelWidth};\nEND-ISO-10303-21;`));parameterManifest();return respond(res,200,{sha256:sha(files.get('bracket.step'))}); }
   if (path === '/__test/stats') return respond(res,200,{stats,audit,state});
   if (path === '/__test/start-mode') { startupMode=b.mode;return respond(res,200,{ok:true}); }
   if (path === '/__test/expire') { accesses.clear();refreshes.clear();return respond(res,200,{ok:true}); }
@@ -212,6 +217,15 @@ bridge.on('connection',ws=>{
       for(const bytes of old.replay)frame(r.ch,bytes);
     } else if(r.type==='exec') {
       const result=value=>send({type:'exec_result',ch:r.ch,code:0,stderr:'',stdout:typeof value==='string'?value:JSON.stringify(value)});
+      if(r.args.some(a=>a.includes('REIFY_STEP_IMPORT'))) {
+        // Execute the native adapter and the original desktop importer on real files.
+        const q=JSON.parse(r.input),root=join(fixtureHome,'projects',project.split('/').at(-1));mkdirSync(root,{recursive:true});
+        for(const [relative,bytes] of files){const target=join(root,relative);mkdirSync(join(target,'..'),{recursive:true});writeFileSync(target,bytes);}
+        const script=r.args[r.args.indexOf('-e')+1].replaceAll('/opt/reify/pi-cad',fixtureRepo),parts=[],errors=[];
+        const child=spawn(process.execPath,['-e',script],{cwd:fixtureRepo});child.stdout.on('data',x=>parts.push(x));child.stderr.on('data',x=>errors.push(x));
+        child.on('close',code=>{const stdout=Buffer.concat(parts).toString();if(code===0){const imported=JSON.parse(stdout);files.set(imported.path,readFileSync(join(root,imported.path)));}files.delete(q.staged);send({type:'exec_result',ch:r.ch,code,stdout,stderr:Buffer.concat(errors).toString()});});
+        child.stdin.end(JSON.stringify({...q,root}));return;
+      }
       if(r.args.some(a=>a.includes('REIFY_WORKFLOW_LIBRARY'))) {
         // Run the client's complete script and the real desktop compiler against
         // disposable local storage, rather than returning fabricated save results.
@@ -229,7 +243,15 @@ bridge.on('connection',ws=>{
         const artifact={id:`artifact-${q.sessionId}`,path:name,role:'model',sha256:sha(files.get(name)??Buffer.from(''))};
         const run=bound?{runId:`run-${q.sessionId}`,workflowId:'mechanical.naked',workflowVersion:'1.0.0',workflowHash:'hash-'+q.sessionId,phase:'work',status:'active',operations:[{capability:'cad_build_step'}],updatedAt:new Date().toISOString(),phaseHistory:['work'],phases:[{id:'work',title:'Work',purpose:'Build',status:'active',transitions:[],capabilities:['cad_build_step'],obligations:[]}]}:null;
         if(q.op==='workflow-current')return result({schema:1,ok:true,result:run});
-        if(q.op==='viewer-catalog')return result({schema:1,ok:true,result:{projectId:project,projectHead:{updatedAt:'',artifacts:[]},currentRun:run?{id:run.runId,phase:run.phase,status:run.status,updatedAt:run.updatedAt,artifacts:[artifact]}:null,commits:bound?[{id:'commit-'+q.sessionId,name:'Version '+q.sessionId,parent:null,phase:'work',createdAt:new Date().toISOString(),artifacts:[artifact]}]:[],simulationRuns:[],parameterManifests:bound&&name==='bracket.step'?[parameterManifest()]:[]}});
+        if(q.op==='viewer-catalog') {
+          const advanced=expandedCatalog&&generatedSessions.has(project+'/'+q.sessionId);
+          const historical={id:'historical-80',path:'history/bracket-80.step',role:'model',sha256:sha(files.get('history/bracket-80.step'))};
+          const report={id:'engineering-report',path:'engineering-report.json',role:'evidence',sha256:sha(files.get('engineering-report.json'))};
+          const commits=bound?[{id:'commit-'+q.sessionId,name:'Version '+q.sessionId,parent:null,phase:'work',createdAt:new Date().toISOString(),artifacts:[artifact]}]:[];
+          const manifests=bound&&name==='bracket.step'?[parameterManifest()]:[];
+          if(advanced){commits.push({id:'history-80',name:'Width 80',parent:null,phase:'work',createdAt:'2026-10-01T00:00:00Z',artifacts:[historical],sourceRevision:'1'.repeat(40),acceptanceSummary:{requirements:[{id:'bbox',category:'geometry',status:'pass',method:'bounding box'}],assumptions:['Fixture only']}});const manifest=JSON.parse(JSON.stringify(parameterManifest().manifest));manifest.output={path:historical.path,sha256:historical.sha256};manifest.parameters[0].value=80;manifests.push({path:'@commit/history-80/bracket.parameters.json',sha256:sha(Buffer.from(JSON.stringify(manifest))),manifest});}
+          return result({schema:1,ok:true,result:{projectId:project,projectHead:{updatedAt:'',artifacts:advanced?[report,artifact]:[]},currentRun:run?{id:run.runId,phase:run.phase,status:run.status,updatedAt:run.updatedAt,artifacts:[artifact]}:null,commits,simulationRuns:[],parameterManifests:manifests}});
+        }
         if(q.op==='model-build'&&bound){const width=q.parameters?.width?.value;if(width===66)return result({schema:1,ok:true,result:{build:{ok:false,payload:{error:'模拟参数建模失败'}}}});if(typeof width!=='number'||width<20||width>160)return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Invalid width',code:'PARAMETER_INVALID'}}),stderr:''});modelWidth=width;files.set('bracket.step',Buffer.from(`ISO-10303-21;\nWIDTH=${width};\nEND-ISO-10303-21;`));parameterManifest();return result({schema:1,ok:true,result:{build:{ok:true}}})}
         return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Unsupported fixture engineering operation',code:'INVALID_OPERATION'}}),stderr:''});
       }
@@ -258,9 +280,10 @@ bridge.on('connection',ws=>{
       if(r.args.some(a=>a.includes('REIFY_CONVERSATIONS')))return result([...histories].filter(([,s])=>s.rows.length).map(([id,s])=>({id,path:`/workspace/projects/${project.split('/').at(-1)}/.prime-sessions/${id}.jsonl`,title:s.title,updatedAt:Date.now(),model:`${selectedModel.provider}/${selectedModel.id}`,turns:s.rows.length,toolCalls:0,tokens:10})));
       if(r.args.some(a=>a.includes('REIFY_SESSION_PATH')))return result(r.args.at(-1).split('/').at(-1));
       if(r.args.includes('/opt/reify/pi-cad/scripts/desktop-export-mesh.py')) {
-        const bound=r.args.some(a=>a.includes('REIFY_BOUND_STEP')),path=bound?r.args.at(-4):r.args.at(-1),name=path.split('/').at(-1),bytes=files.get(name);
+        const bound=r.args.some(a=>a.includes('REIFY_BOUND_STEP')),path=bound?r.args.at(-4):r.args.at(-1),name=path.split('/').slice(4).join('/'),bytes=files.get(name);
         if(bound&&sha(bytes??Buffer.from(''))!==r.args.at(-3))return send({type:'exec_result',ch:r.ch,code:1,stdout:'',stderr:'文件已变化，请重新读取工程结果'});
-        const part=(group,name,color,ts)=>({id:'solid-'+group,partId:'part-'+group,occurrenceId:'occ-'+group,solidId:'solid-'+group,semanticId:'semantic-'+group,name,color,features:[{id:'feature-'+group}],datums:[{id:'datum-'+group}],positions:ts.flat(2).map((x,i)=>i%3===0?x*modelWidth/80:x),indices:Array.from({length:ts.length*3},(_,i)=>i)});
+        const width=Number(bytes?.toString().match(/WIDTH=(\d+)/)?.[1]??modelWidth);
+        const part=(group,name,color,ts)=>({id:'solid-'+group,partId:'part-'+group,occurrenceId:'occ-'+group,solidId:'solid-'+group,semanticId:'semantic-'+group,name,color,features:[{id:'feature-'+group}],datums:[{id:'datum-'+group}],positions:ts.flat(2).map((x,i)=>i%3===0?x*width/80:x),indices:Array.from({length:ts.length*3},(_,i)=>i)});
         return result({source:path,sha256:sha(bytes??Buffer.from('')),identityBound:true,identitySource:'identity',identityManifestSha256:'a'.repeat(64),parts:[part('base','底板','#9fa69b',triangles.slice(0,12)),part('support','支撑','#789982',triangles.slice(12))],bounds:{min:[0,0,0],max:[80,40,30]}});
       }
       if(r.args.some(a=>a.includes('REIFY_LATEST_SESSION')))return result(JSON.stringify((sessions.get('/workspace/state/'+r.args.at(-1).split('/')[3])?.length??0)>0?'fixture-session.jsonl':null));

@@ -36,6 +36,18 @@ import ReifyCloud
     @Published var engineeringError: String?
     @Published var selectedCommitID: String?
     @Published var selectedArtifact: EngineeringArtifact?
+    @Published var artifactFilter = "全部"
+    @Published var includesHistoricalArtifacts = false
+    @Published var comparisonArtifact: EngineeringArtifact?
+    @Published var comparisonPreview: Data?
+    @Published var comparisonLoading = false
+    @Published var comparisonError: String?
+    @Published var comparisonReset = 0
+    @Published var newResult: EngineeringArtifact?
+    @Published var readingHistory = false
+    var previewPinned = false
+    var previewSequence = 0
+    var comparisonSequence = 0
     @Published var parameterBusy = false
     @Published var parameterPreviewActive = false
     @Published var parameterError: String?
@@ -158,7 +170,7 @@ import ReifyCloud
         let switchingProject = selected?.id != project.id
         let wasConnected = connected
         generation += 1; let current = generation
-        clearEngineering()
+        clearEngineering(preserveViewer: reconnect && !switchingProject)
         busy = true; connected = false; generating = false; error = nil
         if !reconnect && (selected?.id != project.id || wasConnected || bridge.spawnID == nil) { await bridge.stop(api: api) }
         guard current == generation else { return }
@@ -286,7 +298,7 @@ import ReifyCloud
                     guard current == generation else { return }
                     let nextFiles = try await bridge.files()
                     guard current == generation else { return }
-                    files = nextFiles; await refreshConversations(); await refreshEngineering(); await drainQueue()
+                    files = nextFiles; await refreshConversations(); await refreshEngineering(offerNewResult: true); await drainQueue()
                 } catch { if current == generation { fail(error) } }
             }
         case "extension_ui_request":
@@ -308,19 +320,21 @@ import ReifyCloud
     }
     func refreshFiles() async { do { files = try await bridge.files() } catch { fail(error) } }
     func showFile(_ file: CloudFile) async {
-        let current = generation
+        let current = generation, scope = sessionID
+        previewSequence += 1; let sequence = previewSequence
         error = nil
         do {
             let ext = (file.name as NSString).pathExtension.lowercased()
             if ["step", "stp"].contains(ext) {
                 let next = try await bridge.previewStep(file.path)
-                guard current == generation else { return }
+                guard current == generation && scope == sessionID && sequence == previewSequence else { return }
+                closeComparison(); previewPinned = true
                 preview = next; previewName = file.name; selectedArtifact = nil
                 parameterPreviewActive = false; parameterOriginal = nil
             } else {
                 let data = try await bridge.download(file.path)
-                guard current == generation else { return }
-                if ext == "stl" { preview = data; previewName = file.name; selectedArtifact = nil; parameterPreviewActive = false; parameterOriginal = nil }
+                guard current == generation && scope == sessionID && sequence == previewSequence else { return }
+                if ext == "stl" { closeComparison(); previewPinned = true; preview = data; previewName = file.name; selectedArtifact = nil; parameterPreviewActive = false; parameterOriginal = nil }
                 else { save(data, name: file.name) }
             }
             if ["step", "stp", "stl"].contains(ext) { canvasMode = true; filesOpen = false; saveLayout() }
@@ -342,6 +356,9 @@ import ReifyCloud
             do {
                 let values = try url.resourceValues(forKeys: [.fileSizeKey])
                 guard (values.fileSize ?? 0) <= 64 * 1024 * 1024 else { throw CloudError("文件超过 64 MB") }
+                if ["step", "stp"].contains(url.pathExtension.lowercased()) {
+                    await importStep(try Data(contentsOf: url), fileName: url.lastPathComponent); return
+                }
                 if files.contains(where: { $0.path == url.lastPathComponent }) { throw CloudError("已有同名文件，请先改名") }
                 try await bridge.upload(Data(contentsOf: url), name: url.lastPathComponent)
                 files = try await bridge.files()

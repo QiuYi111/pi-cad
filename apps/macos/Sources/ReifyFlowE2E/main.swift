@@ -112,6 +112,8 @@ import ReifyCloud
         let beforeDrop = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/stats")!)
         let statsBefore = (try JSONSerialization.jsonObject(with: beforeDrop.0) as! [String: Any])["stats"] as! [String: Int]
         let spawn = app.bridge.spawnID, conversation = app.sessionID
+        let reconnectPreview = app.preview, reconnectArtifact = app.selectedArtifact?.sha256
+        app.previewPinned = true
         _ = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/drop")!)
         try await wait({ app.reconnecting }, "automatic reconnect starts")
         var whileReconnecting = app.settingsDraft; whileReconnecting.permission = "read-only"
@@ -119,6 +121,7 @@ import ReifyCloud
         precondition(!savingDisconnected && app.permission == "workspace", "changed permission while the old helper could still run")
         try await wait({ app.connected && !app.reconnecting }, "automatic reconnect completes")
         precondition(app.bridge.spawnID == spawn && app.sessionID == conversation && app.draft == "断线前保留草稿" && app.model == "glm-5.3-flash" && app.thinking == "high", "reconnect replaced process, session, draft or actual model")
+        precondition(app.previewPinned && app.preview == reconnectPreview && app.selectedArtifact?.sha256 == reconnectArtifact, "reconnect lost manual model selection")
         let afterDrop = try await URLSession.shared.data(from: URL(string: app.api.baseURL + "/__test/stats")!)
         let statsAfter = (try JSONSerialization.jsonObject(with: afterDrop.0) as! [String: Any])["stats"] as! [String: Int]
         precondition(statsBefore["spawn"] == statsAfter["spawn"] && statsBefore["prompt"] == statsAfter["prompt"] && statsBefore["start"] == statsAfter["start"], "reconnect duplicated a process, prompt or workspace start")
@@ -154,12 +157,81 @@ import ReifyCloud
         precondition(!app.connected && !app.busy && app.error == "测试工作区磁盘不足", "lost workspace startup failure")
         await app.open(project)
         precondition(app.connected && app.error == nil, "failed workspace cannot retry")
+        try await fixture("/__test/catalog-parity")
+        await app.refreshEngineering()
+        app.artifactFilter = "模型"
+        precondition(app.engineeringArtifacts.count == 1, "current model duplicated by shared head")
+        app.includesHistoricalArtifacts = true
+        precondition(app.engineeringArtifacts.count == 2, "history missing from model filter")
+        app.artifactFilter = "其他结果"
+        precondition(app.engineeringArtifacts.count == 1 && app.engineeringArtifacts.first?.role == "evidence", "non-model filter mixed model results")
+        app.artifactFilter = "全部"
+        guard let currentModel = app.engineeringArtifacts.first(where: { $0.path == "bracket.step" }),
+              let oldModel = app.engineeringArtifacts.first(where: { $0.path == "history/bracket-80.step" }) else { fatalError("Missing comparison sources") }
+        await app.showArtifact(currentModel)
+        await app.compareArtifact(oldModel)
+        precondition(app.comparisonError == nil && app.comparisonPreview != nil && app.comparisonArtifact?.sha256 == oldModel.sha256 && app.selectedArtifact?.sha256 == currentModel.sha256, "comparison replaced primary or lost exact revision")
+        precondition(app.parameterDifferences.first?.before == "120" && app.parameterDifferences.first?.after == "80", "comparison lost historical parameter snapshot")
+        let primaryMesh = try MeshModel.read(app.preview!), secondaryMesh = try MeshModel.read(app.comparisonPreview!)
+        precondition(primaryMesh.sha256 == currentModel.sha256 && secondaryMesh.sha256 == oldModel.sha256 && primaryMesh.parts.first?.positions != secondaryMesh.parts.first?.positions, "comparison used primary model bytes for both views")
+        let parameterRecord = app.selectedParameters!
+        await app.previewParameters(parameterRecord, values: ["width": .number(110)])
+        precondition(app.parameterPreviewActive && app.comparisonPreview == nil, "temporary parameter preview kept historical comparison labels")
+        app.restoreParameterPreview()
+        await app.compareArtifact(oldModel)
+        let cached = try await app.cachedArtifact(currentModel)
+        let cachedBytes = try Data(contentsOf: cached)
+        precondition(WorkspaceBridge.hash(cachedBytes) == currentModel.sha256, "reveal cache did not match selected revision")
+        try? FileManager.default.removeItem(at: cached.deletingLastPathComponent())
+        try await app.bridge.upload(Data("changed old model".utf8), name: oldModel.path)
+        let previousComparison = app.comparisonPreview
+        await app.compareArtifact(oldModel)
+        precondition(app.comparisonError != nil && app.comparisonPreview == previousComparison, "changed file masqueraded as historical model")
+        app.selectVersion("history-80")
+        precondition(app.selectedParameters == nil && app.comparisonPreview == nil, "historical model stayed editable")
+        app.selectVersion(nil)
+        let importedBytes = Data("ISO-10303-21;\nWIDTH=45;\nEND-ISO-10303-21;".utf8)
+        await app.importStep(importedBytes, fileName: "native import.step")
+        precondition(app.error == nil && app.canvasMode && app.preview != nil && app.previewName.hasSuffix("native_import.step"), "desktop STEP import did not open the verified model")
+        let importedHash = WorkspaceBridge.hash(importedBytes)
+        let importedPath = "imports/\(importedHash.prefix(16))-native_import.step"
+        let importedFile = try await app.bridge.download(importedPath)
+        precondition(importedFile == importedBytes && app.files.contains { $0.path == importedPath }, "STEP import not content-addressed in project")
+        await app.importStep(importedBytes, fileName: "native import.step")
+        precondition(app.error == nil && app.files.filter { $0.path == importedPath }.count == 1, "reimport duplicated or rejected identical STEP")
+        let savedImportPreview = app.preview
+        app.permission = "read-only"
+        await app.importStep(importedBytes, fileName: "readonly.step")
+        precondition(app.error == "当前项目没有写入权限" && app.preview == savedImportPreview, "read-only import changed project or preview")
+        app.permission = "workspace"; app.error = nil
+        let conflictingBytes = Data("conflicting destination".utf8)
+        try await app.bridge.upload(conflictingBytes, name: importedPath)
+        await app.importStep(importedBytes, fileName: "native import.step")
+        let conflictPreserved = try await app.bridge.download(importedPath)
+        precondition(app.error != nil && conflictPreserved == conflictingBytes && app.preview == savedImportPreview, "import overwrote conflict or lost saved canvas")
+        app.error = nil; app.draft = "有草稿时不抢画布"; app.previewPinned = false
+        try await fixture("/__test/model-width", ["width": "130"])
+        await app.refreshEngineering(offerNewResult: true)
+        precondition(app.newResult != nil && app.preview == savedImportPreview && app.draft == "有草稿时不抢画布", "new result took over active draft")
+        app.draft = ""; app.readingHistory = true
+        try await fixture("/__test/model-width", ["width": "140"])
+        await app.refreshEngineering(offerNewResult: true)
+        precondition(app.newResult != nil && app.preview == savedImportPreview, "new result interrupted history reading")
+        app.readingHistory = false; app.previewPinned = true
+        try await fixture("/__test/model-width", ["width": "145"])
+        await app.refreshEngineering(offerNewResult: true)
+        precondition(app.newResult != nil && app.preview == savedImportPreview, "new result replaced manually selected model")
+        app.previewPinned = false; app.newResult = nil
+        try await fixture("/__test/model-width", ["width": "150"])
+        app.draft = "自动展示新结果验收"; await app.submitDraft()
+        try await wait({ app.selectedArtifact?.sha256 == app.engineeringCatalog?.currentRun?.artifacts.first?.sha256 && app.preview != savedImportPreview && app.previewName == "bracket.step" && app.newResult == nil }, "automatic current model display after completed turn")
+        precondition(app.previewPinned == false && app.draft.isEmpty, "automatic display changed reading preference or draft")
         try await fixture("/__test/expire")
         await app.refreshProjects()
         precondition(app.user == nil && app.api.session == nil && !app.connected && app.error == "登录已失效，请重新登录。" && app.messages.isEmpty && app.projects.isEmpty && app.catalog.providers.isEmpty, "expired session stayed signed in")
         await app.shutdown()
         try await app.api.logout()
-        print("PASS: compiled native AppModel over HTTP/WebSocket, native GLM model settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
+        print("PASS: native desktop STEP importer reuse/conflict, filtered current/shared/history catalog, exact-revision comparison and parameter differences, verified Finder cache, new model notification and completed-turn auto preview; compiled native AppModel over HTTP/WebSocket, native GLM model settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
         print("PASS: settings load cannot close a newly selected project bridge, workspace queue position, startup failure and retry, expired login clears native account and connection")
         print("PASS: disconnect during a live task resumes it, suspends queued input, allows abort, and never restarts an idle-paused workspace")
         print("PASS: automatic native reconnect reattaches the same process/session, preserves drafts and never repeats prompts or starts the workspace")

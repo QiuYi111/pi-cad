@@ -5,6 +5,9 @@ import ReifyCloud
 struct ModelPreview: View {
     @EnvironmentObject var app: AppModel
     let data: Data
+    var artifactOverride: EngineeringArtifact? = nil
+    var compact = false
+    var resetEpoch = 0
     @State private var model: MeshModel?
     @State private var scene: SCNScene?
     @State private var error: String?
@@ -30,7 +33,7 @@ struct ModelPreview: View {
                         }
                     }.disabled(inspecting).accessibilityIdentifier("model.section")
                 }
-                Text("拖动旋转 · 滚动缩放").foregroundStyle(ReifyDesign.muted)
+                if !compact { Text("拖动旋转 · 滚动缩放").foregroundStyle(ReifyDesign.muted) }
             }.font(ReifyDesign.font(10)).buttonStyle(ReifyButtonStyle()).padding(12).background(ReifyDesign.paper)
             if let inspection {
                 HStack {
@@ -47,7 +50,7 @@ struct ModelPreview: View {
             if let inspectionError { Text(inspectionError).foregroundStyle(.red).padding(10) }
             if let scene, let model {
                 HStack(spacing: 0) {
-                    VStack(alignment: .leading, spacing: 10) {
+                    if !compact { VStack(alignment: .leading, spacing: 10) {
                         HStack { Text("装配"); Spacer(); Button("显示全部") { hidden = []; isolated = "" }.accessibilityIdentifier("assembly.show-all") }
                         ScrollView {
                             VStack(spacing: 8) {
@@ -71,12 +74,12 @@ struct ModelPreview: View {
                             Text(model.identityBound == true ? "身份已绑定" : "身份未绑定").font(ReifyDesign.font(9)).foregroundStyle(ReifyDesign.muted)
                         }
                     }.padding(12).frame(width: 210).background(ReifyDesign.paper)
-                    Divider()
+                    Divider() }
                     NativeSceneView(scene: scene, selected: $selected, hidden: hidden, isolated: isolated, camera: camera, reset: reset)
                 }
             } else if let error { Text(error).foregroundStyle(.red).padding(20).frame(maxWidth: .infinity, maxHeight: .infinity) }
             else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
-        }.task(id: data) {
+        }.onChange(of: resetEpoch) { _, _ in camera = "透视"; reset += 1 }.task(id: data) {
             do {
                 let mesh = try MeshModel.read(data)
                 let next = try ModelScene.make(mesh)
@@ -87,14 +90,14 @@ struct ModelPreview: View {
     }
     private func format(_ value: Double) -> String { String(format: "%.3f", value) }
     private func inspect(_ mesh: MeshModel, axis: String? = nil) async {
-        guard let source = app.selectedArtifact?.path ?? mesh.source, let sha = mesh.sha256, !inspecting else { return }
+        guard let source = artifactOverride?.path ?? app.selectedArtifact?.path ?? mesh.source, let sha = mesh.sha256, !inspecting else { return }
         let revision = data, generation = app.generation
         inspecting = true; inspectionError = nil
         do {
             let result = try await app.bridge.inspectGeometry(source, expectedSHA: sha, axis: axis)
-            guard generation == app.generation, app.preview == revision else { return }
+            guard generation == app.generation, (app.preview == revision || app.comparisonPreview == revision) else { return }
             inspection = result; inspecting = false
-        } catch { if generation == app.generation && app.preview == revision { inspectionError = error.localizedDescription; inspecting = false } }
+        } catch { if generation == app.generation && (app.preview == revision || app.comparisonPreview == revision) { inspectionError = error.localizedDescription; inspecting = false } }
     }
 }
 

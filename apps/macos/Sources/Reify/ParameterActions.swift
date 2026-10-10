@@ -13,6 +13,7 @@ extension AppModel {
     func previewParameters(_ manifest: StoredParameterManifest, values: [String: JSONValue]) async {
         guard connected, !parameterBusy, !generating else { return }
         let current = generation, selectedSHA = selectedArtifact?.sha256
+        closeComparison(); previewPinned = true
         parameterBusy = true; parameterError = nil
         defer { if current == generation { parameterBusy = false } }
         do {

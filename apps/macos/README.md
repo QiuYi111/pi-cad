@@ -60,3 +60,5 @@ npm run macos:test:e2e
 `Reify`：SwiftUI 界面、系统文件窗口、STL 预览。
 
 `ReifyE2E`、`tests/`：E2E 程序、测试服务与真实窗口脚本。
+
+模型结果支持当前/共享/历史分类、两版本原生并排预览、保存参数差异及双视图复位；STEP 导入复用 desktop 的文件校验和冲突处理。结果可校验后下载到本机并在 Finder 查看。任务产生新模型时，草稿、阅读历史和手动模型会保留并显示新结果提醒。新增窗口及正式云端仍待验，完整状态见 `PARITY-PROGRESS.zh-CN.md`。
