@@ -141,6 +141,12 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     const section = await page.evaluate((path) => (window as any).piCad.viewer.inspectSection(path, "z"), step.path);
     expect(section.totalArea).toBeCloseTo(40 * 20 - Math.PI * 3 ** 2, 4);
     await record("six-mm-through-hole-passed", section);
+    if (await page.getByLabel("切换到画布；拖动可移动输入框", { exact: true }).isVisible()) await page.getByLabel("切换到画布；拖动可移动输入框", { exact: true }).click();
+    const viewer = page.getByTestId("cad-viewer").first();
+    await expect(viewer.locator(".viewer-file-identity")).toContainText("thin-e2e-plate.step", { timeout: 60_000 });
+    await expect(viewer.locator("canvas")).toBeVisible();
+    await expect(viewer.getByText("3D preview unavailable", { exact: true })).toHaveCount(0);
+    await record("desktop-3d-viewer-passed");
     await page.screenshot({ path: join(evidenceDir, "workbench.png") });
     await record("real-model-turn-finished", { eventCount: result.eventTypes.length, catalog: result.catalog });
     const savedSession = await page.evaluate(async (id) => (await (window as any).piCad.traces.list()).find((s: any) => s.id === id), result.restored.status.sessionId);
@@ -160,6 +166,18 @@ test("installed thin client: first login, model setup, CAD save and restart", as
     expect(reopenedArtifacts.some((artifact: any) => artifact.sha256 === step.sha256 && artifact.path === step.path)).toBe(true);
     await record("saved-model-survives-restart");
     await page.evaluate(() => (window as any).piCad.runtime.stop());
+    await page.evaluate(() => { const w = window as any; w.__e2eStatus = null; w.piCad.runtime.onStatus((status: any) => { w.__e2eStatus = status; }); });
+    if (await page.getByLabel("展开对话；拖动可移动输入框", { exact: true }).isVisible()) await page.getByLabel("展开对话；拖动可移动输入框", { exact: true }).click();
+    const restartedComposer = page.getByPlaceholder("Ask anything about the design");
+    await restartedComposer.fill("只用一次 ipython 调用 import cad; print(await cad.workflow.current())。不要修改文件，简短报告状态。");
+    await restartedComposer.press("Enter");
+    await page.waitForFunction(() => Boolean((window as any).__e2eStatus?.terminalReason), undefined, { timeout: 180_000 });
+    expect(await page.evaluate(() => (window as any).__e2eStatus?.terminalReason)).toBe("completed");
+    await record("cloud-composer-starts-without-local-folder");
+
+    await page.evaluate(() => (window as any).piCad.runtime.stop());
+    await page.evaluate(() => (window as any).piCad.auth.signOut("zai"));
+    await record("test-model-key-removed");
     await page.evaluate(() => (window as any).piCad.cloud.workspaceStop());
     await record("workspace-stopped");
   } catch (error) {

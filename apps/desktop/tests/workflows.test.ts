@@ -39,6 +39,14 @@ describe("desktop workflow projection", () => {
     expect(current.phases[0]?.capabilities).toEqual(["probe.run"]);
   });
 
+  it("reads a cloud conversation without a local project folder", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    const store = new WorkflowStore(agentApiBridge({ runId: "cloud-run", workflowId: "mechanical.naked", phase: "done", status: "done", phases: [] }, requests) as never);
+    const current = await store.current({ mode: "cloud", projectPath: "", cloud: { baseUrl: "https://example.test", projectId: "cloud-project" } } as never, "cloud-session");
+    expect(current.runId).toBe("cloud-run");
+    expect(requests[0]).toMatchObject({ op: "workflow-current", sessionId: "cloud-session" });
+  });
+
   it("never projects the run another conversation left in the workspace", async () => {
     const requests: Array<Record<string, unknown>> = [];
     const projectPath = await mkdtemp(join(tmpdir(), "pi-cad-workflow-"));

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { assertCloudAvailable, createRuntimeBridge, runtimeBridgeKey, STAGE_1_CLOUD_UNAVAILABLE } from "../electron/main/cloud-mode";
 import { RemoteBridge } from "../electron/main/remote-bridge";
 import type { RuntimeBridge } from "../electron/main/runtime-bridge";
-import type { AppSettings } from "../src/shared/contracts";
+import { selectedProjectKey, type AppSettings } from "../src/shared/contracts";
 
 const settings = (value: Partial<AppSettings>): AppSettings => ({
   distro: "Ubuntu",
@@ -63,5 +63,15 @@ describe("cloud mode guards", () => {
 
   it("allows Blender and ParaView work in local mode", () => {
     expect(() => assertCloudAvailable(settings({ mode: "local" }), "Blender")).not.toThrow();
+  });
+});
+
+describe("selected project identity", () => {
+  it("uses account and project for cloud state, ignoring a previous local folder", () => {
+    const cloud = settings({ mode: "cloud", projectPath: "/old-local", cloud: { baseUrl: "https://example.test", userEmail: "ann@example.com", projectId: "first" } });
+    expect(selectedProjectKey(cloud)).toBe("cloud:https://example.test:ann@example.com:first");
+    expect(selectedProjectKey({ ...cloud, cloud: { ...cloud.cloud!, projectId: "second" } })).not.toBe(selectedProjectKey(cloud));
+    expect(selectedProjectKey({ ...cloud, cloud: { baseUrl: "https://example.test" } })).toBe("");
+    expect(selectedProjectKey(settings({ projectPath: "/local" }))).toBe("/local");
   });
 });

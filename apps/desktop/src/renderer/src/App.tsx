@@ -107,7 +107,7 @@ export function App() {
     {cloudMode && <CloudNotices view={cloud.view} onDismiss={cloud.dismiss} onReconnect={reconnectCloud} onRetryStart={retryWorkspaceStart} />}
     {cloudError && <div className="cloud-banner" role="alert">{cloudError}</div>}
     <main className="page-host">
-      {activePage === "workbench" && <Workbench settings={settings} prime={prime} cloudWorkspaceState={cloudMode ? cloud.view.status?.workspace.state : undefined} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}
+      {activePage === "workbench" && <Workbench settings={settings} prime={prime} cloudProjectName={cloudProjectName} cloudWorkspaceState={cloudMode ? cloud.view.status?.workspace.state : undefined} onSettingsChange={setSettings} onOpenSettings={() => setPage("settings")} />}
       {activePage === "projects" && <CloudProjects selectedId={cloudProjectId} view={cloud.view} onSelected={() => void selectCloudProject()} />}
       {activePage === "workflow" && <WorkflowEditor />}
       {activePage === "traces" && <Traces cloudMode={cloudMode} />}

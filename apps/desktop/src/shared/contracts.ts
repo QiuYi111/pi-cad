@@ -60,6 +60,13 @@ export interface AppSettings {
   cloud?: { baseUrl: string; userEmail?: string; projectId?: string };
 }
 
+/** Identity for selected local or hosted project; never treat a local path as a cloud selection. */
+export function selectedProjectKey(settings: Pick<AppSettings, "mode" | "projectPath" | "cloud">): string {
+  if (settings.mode !== "cloud") return settings.projectPath;
+  const cloud = settings.cloud;
+  return cloud?.projectId ? `cloud:${cloud.baseUrl}:${cloud.userEmail || ""}:${cloud.projectId}` : "";
+}
+
 export interface CloudUser { id: string; email: string; displayName: string | null }
 /** Project as platform-api returns it (GET /v1/projects, POST, PATCH). */
 export interface CloudProject { id: string; name: string; role: "maintainer" | "editor" | "viewer"; createdAt: string }
