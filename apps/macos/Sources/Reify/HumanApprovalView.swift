@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ReifyCloud
 
 struct HumanApprovalForm: View {
@@ -32,6 +33,7 @@ struct HumanApprovalRow: View {
             Text("\(record.approver.id) · \(record.decidedAt)").font(ReifyDesign.font(10)).foregroundStyle(ReifyDesign.muted)
             Text("范围：\(record.scope)")
             Text("理由：\(record.rationale)").textSelection(.enabled)
+            if record.valid { Button("发布并保存文件包") { Task { await app.chooseReleaseFolder(record) } }.disabled(app.releaseBusy || app.generating || app.selected?.role == "viewer").accessibilityIdentifier("release.prepare.\(record.id)") }
             if let revoked = record.revokedAt { Text("撤销：\(revoked) · \(record.revocationReason ?? "")").foregroundStyle(ReifyDesign.muted) }
             else if record.approver.id == NSUserName() {
                 TextField("撤销理由", text: $reason, axis: .vertical).textFieldStyle(.roundedBorder).accessibilityIdentifier("approval.revoke-reason.\(record.id)")

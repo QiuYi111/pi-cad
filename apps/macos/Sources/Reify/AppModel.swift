@@ -44,6 +44,11 @@ import ReifyCloud
     @Published var evidenceBusy = false
     var evidenceSequence = 0
     let nativeApprovals = NativeApprovals()
+    @Published var releaseBusy = false
+    @Published var releaseError: String?
+    @Published var releaseURL: URL?
+    var releaseJob: CloudReleaseJob?
+    var releaseSequence = 0
     @Published var selectedCommitID: String?
     @Published var selectedArtifact: EngineeringArtifact?
     @Published var artifactFilter = "全部"

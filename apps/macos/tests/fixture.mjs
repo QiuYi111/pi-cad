@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync as requireExists } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +38,7 @@ triangles.forEach((t,i)=>t.flat().forEach((value,j)=>stl.writeFloatLE(value,84+i
 
 const files = new Map([['bracket.stl', stl], ['bracket.step', Buffer.from('ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;')], ['corrupt.stl', stl]]);
 files.set('bracket.py',Buffer.from('# disposable model source fixture\n'));
+let releaseMode="normal", releaseChecks=0;
 let modelWidth=80, expandedCatalog=false, reviewVerified=false, approvalRevision=1, evidenceTampered=false;
 const evidenceDocument=session=>({schema:1,reviewId:'fixture-review-'+session,profileId:'fixture-independent',workflowHash:'hash-'+session,result:{verdict:'pass',summary:'Fixture independent check'}});
 const geometryDocument=session=>{const envelope={schema:1,ok:true,payload:{bbox:{x:80,y:40,z:30},volume:9600},artifacts:[]};return {schema:1,evidence:{path:'evidence/geometry/fixture.json',sha256:fixtureDigest(envelope),workflowHash:'hash-'+session},envelope}};
@@ -62,6 +63,8 @@ const server = http.createServer(async (req, res) => {
   let b = {}; try { b = text ? JSON.parse(text) : {}; } catch { return respond(res,400,{message:'请求格式错误'}); }
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
+  if (path === '/__test/release-mode') { releaseMode=b.mode;releaseChecks=0;return respond(res,200,{ok:true}); }
+  if (path === '/__test/release-checks') return respond(res,200,{checks:releaseChecks});
   if (path === '/__test/approval-version') { approvalRevision=Number(b.version);return respond(res,200,{ok:true}); }
   if (path === '/__test/evidence-tamper') { evidenceTampered=b.enabled==='true';return respond(res,200,{ok:true}); }
   if (path === '/__test/catalog-parity') { expandedCatalog=true;return respond(res,200,{ok:true}); }
@@ -126,10 +129,12 @@ bridge.on('connection',ws=>{
     else frame(1,bytes);
   };
   const reply = (r,data={}) => output({type:'response',id:r.id,command:r.type,success:true,data});
+  const releaseProcesses = new Map();
   const authProcesses = new Map();
   let currentSession='fixture-session', selectedModel={provider:'openai-codex',id:'gpt-5.6-sol'}, thinkingLevel='minimal';
   let histories = new Map([['fixture-session', {rows:[],title:'初始对话'}]]);
   let awaitingUI=null;
+  ws.on('close',()=>{for(const child of releaseProcesses.values())child.kill('SIGTERM')});
   ws.on('message',(data,binary)=>{
     if(binary) {
       const ch=data.readUInt32BE(0), bytes=data.subarray(4);
@@ -140,6 +145,7 @@ bridge.on('connection',ws=>{
           else frame(ch,JSON.stringify({type:'auth_error',message:'授权码错误'})+'\n');}
         return;
       }
+      if(releaseProcesses.has(ch)){releaseProcesses.get(ch).stdin.write(bytes);return;}
       if(upload?.ch===ch) { upload.data=Buffer.concat([upload.data,bytes]); return; }
       if(ch!==1) return;
       stdin=Buffer.concat([stdin,bytes]);
@@ -225,6 +231,25 @@ bridge.on('connection',ws=>{
     }
     const r=JSON.parse(data.toString());
     if(r.type==='spawn') {
+      if(r.args.some(a=>a.includes('REIFY_DESKTOP_RELEASE'))) {
+        const root=join(fixtureHome,'release-projects',project.split('/').at(-1));mkdirSync(root,{recursive:true});
+        for(const [path,bytes] of files){if(path.startsWith('.pi-cad/releases/'))continue;const target=join(root,path);mkdirSync(join(target,'..'),{recursive:true});writeFileSync(target,bytes);}
+        if(releaseMode==='rewritten-manifest'){const out=join(root,'.pi-cad','releases');if(requireExists(out))for(const name of readdirSync(out)){const manifestPath=join(out,name,'release-manifest.json');if(name.startsWith('Reify-')&&requireExists(manifestPath)){const manifest=JSON.parse(readFileSync(manifestPath,'utf8')),changed=Buffer.from('changed package with rewritten descriptor');writeFileSync(join(out,name,'files','bracket.step'),changed);manifest.files.find(x=>x.path==='files/bracket.step').sha256=sha(changed);writeFileSync(manifestPath,JSON.stringify(manifest,null,2)+'\n');}}}
+        const artifact={id:'artifact-'+currentSession,path:'bracket.step',role:'model',sha256:sha(files.get('bracket.step'))};
+        const commit={id:'commit-'+currentSession,name:'Version '+currentSession,parent:null,phase:'work',createdAt:'2026-10-11T00:00:00Z',artifacts:[artifact],sourceRevision:String(approvalRevision+1).repeat(40),workflowHash:'hash-'+currentSession,acceptanceSummary:{requirements:[{id:'machine',category:'machine',status:reviewVerified?'verified':'unverified',method:'Independent reviewer',evidence:{path:'reviews/fixture-machine.json',sha256:fixtureDigest(evidenceDocument(currentSession))}}],assumptions:['Fixture only']}};
+        const catalog={projectId:project,projectHead:{updatedAt:'',artifacts:[]},currentRun:null,commits:[commit],parameterManifests:[],simulationRuns:[]};
+        const stub=`let text='';process.stdin.on('data',x=>text+=x);process.stdin.on('end',()=>{const q=JSON.parse(text);if(q.op!=='viewer-catalog'||q.sessionId!==${JSON.stringify(currentSession)}){console.log(JSON.stringify({schema:1,ok:false,error:{message:'Wrong release conversation'}}));process.exitCode=1}else console.log(JSON.stringify({schema:1,ok:true,result:${JSON.stringify(catalog)}}))});`;
+        let native=r.args[r.args.indexOf('-e')+1].replaceAll('/opt/reify/pi-cad',fixtureRepo);
+        native=native.replace("const root=fs.realpathSync(q.root)",`const root=fs.realpathSync(${JSON.stringify(root)})`);
+        native=native.replace('const backend=new ViewerBackend',`const originalSpawn=cp.spawn.bind(cp);cp.spawn=(command,args,options)=>args.some(a=>a.endsWith('pi-cad-agent-api.mjs'))?originalSpawn(process.execPath,['-e',${JSON.stringify(stub)}],options):originalSpawn(command,args,options);const backend=new ViewerBackend`);
+        const child=spawn(process.execPath,['-e',native],{cwd:fixtureRepo,env:{...process.env,PI_CAD_CANONICAL_PROJECT_DIR:root}});releaseProcesses.set(r.ch,child);
+        send({type:'spawned',ch:r.ch,spawnId:randomUUID(),pid:child.pid});let pending='';
+        child.stdout.on('data',bytes=>{pending+=bytes.toString();for(let at;(at=pending.indexOf('\n'))>=0;){const line=pending.slice(0,at);pending=pending.slice(at+1);let event;try{event=JSON.parse(line.replaceAll(root,'/workspace/projects/'+project.split('/').at(-1)))}catch{return;}if(event.type==='approval_check'){releaseChecks++;audit.push({type:'release-approval-check',number:releaseChecks});if(releaseMode==='delay-validation'&&releaseChecks===2){setTimeout(()=>frame(r.ch,JSON.stringify(event)+'\n'),600);continue;}}frame(r.ch,JSON.stringify(event)+'\n');}});
+        child.stderr.on('data',bytes=>frame(r.ch+1,bytes));
+        child.on('close',code=>{const out=join(root,'.pi-cad','releases');if(releaseMode==='corrupt-final'&&requireExists(out)){for(const name of readdirSync(out)){if(name.startsWith('Reify-')){const file=join(out,name,'files','bracket.step');if(requireExists(file))writeFileSync(file,'changed released file');}}}
+          function copy(d,relative){if(!requireExists(d))return;for(const e of readdirSync(d,{withFileTypes:true})){const path=join(d,e.name),key=relative+'/'+e.name;if(e.isDirectory())copy(path,key);else if(e.isFile())files.set(key,readFileSync(path));}}copy(out,'.pi-cad/releases');releaseProcesses.delete(r.ch);send({type:'exit',ch:r.ch,code,signal:null});});return;
+      }
+
       if(r.args.includes('/opt/reify/pi-cad/scripts/desktop-openai-oauth.mjs')) {
         authProcesses.set(r.ch,{provider:r.args.at(-1),buffer:''});send({type:'spawned',ch:r.ch,spawnId:randomUUID(),pid:456});
         frame(r.ch,JSON.stringify({type:'auth_url',url:'https://example.com/oauth',instructions:'测试服务商登录'})+'\n');frame(r.ch,JSON.stringify({type:'auth_input',placeholder:'测试授权码'})+'\n');return;
@@ -332,7 +357,7 @@ bridge.on('connection',ws=>{
       if(upload.size!==upload.data.length||upload.sha256!==sha(upload.data)) return send({type:'error',ch:r.ch,message:'checksum mismatch'});
       stats.uploads++;const name=upload.path.split('/').slice(4).join('/');files.set(name,upload.data);send({type:'file_put_done',ch:r.ch,path:upload.path,size:upload.data.length,sha256:sha(upload.data)});upload=null;
     } else if(r.type==='stdin_end') {clearTimeout(timer);if(activeSpawn)spawns.delete(activeSpawn.id);setTimeout(()=>send({type:'exit',ch:r.ch,code:0,signal:null}),200);}
-    else if(r.type==='kill') {if(authProcesses.has(r.ch)){authProcesses.delete(r.ch);return send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'})}stats.kills++;clearTimeout(timer);clearTimeout(activeSpawn?.timer);if(activeSpawn)spawns.delete(activeSpawn.id);send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'});}
+    else if(r.type==='kill') {if(releaseProcesses.has(r.ch)){releaseProcesses.get(r.ch).kill('SIGTERM');return;}if(authProcesses.has(r.ch)){authProcesses.delete(r.ch);return send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'})}if(r.ch!==1)return send({type:'error',ch:r.ch,code:'no_such_spawn',message:'Process already exited'});stats.kills++;clearTimeout(timer);clearTimeout(activeSpawn?.timer);if(activeSpawn)spawns.delete(activeSpawn.id);send({type:'exit',ch:r.ch,code:0,signal:'SIGTERM'});}
     else if(r.type==='ping') send({type:'pong'});
   });
 

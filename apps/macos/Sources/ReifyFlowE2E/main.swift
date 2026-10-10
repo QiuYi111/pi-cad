@@ -6,6 +6,14 @@ import ReifyCloud
         for _ in 0..<200 { if condition() { return }; try await Task.sleep(for: .milliseconds(50)) }
         fatalError("Timed out: \(label)")
     }
+    @MainActor static func waitReleaseCheck(_ server: String, count: Int) async throws {
+        for _ in 0..<200 {
+            let (data, _) = try await URLSession.shared.data(from: URL(string: server + "/__test/release-checks")!)
+            if (try JSONSerialization.jsonObject(with: data) as? [String: Int])?["checks"] ?? 0 >= count { return }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        fatalError("Timed out waiting for original desktop release approval callback")
+    }
     @MainActor static func main() async throws {
         let scope = ProcessInfo.processInfo.environment["REIFY_PREFERENCES_SCOPE"]!
         AppPreferences.current.removePersistentDomain(forName: scope)
@@ -325,6 +333,41 @@ import ReifyCloud
         let catalogForReload = try await app.engineering.requestEnvelope("viewer-catalog")
         let reloadedApprovals: [HumanApprovalRecord] = try await NativeApprovals().request("list", catalogEnvelope: catalogForReload, root: app.approvalRoot)
         precondition(reloadedApprovals.contains { $0.id == approval.id && $0.valid }, "approval did not survive a fresh native component")
+        let releaseFolder = FileManager.default.temporaryDirectory.appendingPathComponent("reify-release-flow-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: releaseFolder, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: releaseFolder) }
+        await app.releaseVersion(approval, to: releaseFolder)
+        guard let savedRelease = app.releaseURL, app.releaseError == nil else { fatalError("Native release failed: \(app.releaseError ?? "unknown")") }
+        let packageManifest = try JSONSerialization.jsonObject(with: Data(contentsOf: savedRelease.appendingPathComponent("release-manifest.json"))) as! [String: Any]
+        precondition(packageManifest["approvalId"] as? String == approval.id && packageManifest["commitId"] as? String == reviewedVersion.id)
+        let releasedStep = try Data(contentsOf: savedRelease.appendingPathComponent("files/bracket.step"))
+        precondition(releasedStep == reviewBytes, "release downloaded different candidate bytes")
+        let packageFiles = packageManifest["files"] as! [[String: String]]
+        for file in packageFiles { let bytes = try Data(contentsOf: savedRelease.appendingPathComponent(file["path"]!)); precondition(WorkspaceBridge.hash(bytes) == file["sha256"]!) }
+        await app.releaseVersion(approval, to: releaseFolder)
+        precondition(app.releaseError == nil && app.releaseURL == savedRelease, "same approved release could not reuse exact saved package")
+        try Data("changed local package".utf8).write(to: savedRelease.appendingPathComponent("files/bracket.step"))
+        await app.releaseVersion(approval, to: releaseFolder)
+        precondition(app.releaseURL == nil && app.releaseError == "已保存的文件包被修改，未覆盖", "release overwrote modified local package")
+        try reviewBytes.write(to: savedRelease.appendingPathComponent("files/bracket.step"))
+        let writableProject = app.selected
+        var readOnlyRelease = try JSONSerialization.jsonObject(with: JSONEncoder().encode(app.selected!)) as! [String: Any]; readOnlyRelease["role"] = "viewer"
+        app.selected = try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: readOnlyRelease))
+        await app.releaseVersion(approval, to: releaseFolder)
+        precondition(!app.releaseBusy && app.releaseURL == nil, "read-only project started release")
+        app.selected = writableProject
+        try await fixture("/__test/release-mode", ["mode": "delay-validation"])
+        let cancelledRelease = Task { await app.releaseVersion(approval, to: releaseFolder) }
+        try await waitReleaseCheck(app.api.baseURL, count: 2)
+        await app.cancelRelease(); await cancelledRelease.value
+        precondition(app.releaseURL == nil && !app.releaseBusy && app.releaseError == "已取消发布", "cancelled package completed")
+        try await fixture("/__test/release-mode", ["mode": "corrupt-final"])
+        await app.releaseVersion(approval, to: releaseFolder)
+        precondition(app.releaseURL == nil && app.releaseError?.contains("发布文件校验失败") == true, "reused cloud package accepted corrupt file bytes")
+        try await fixture("/__test/release-mode", ["mode": "rewritten-manifest"])
+        await app.releaseVersion(approval, to: releaseFolder)
+        precondition(app.releaseURL == nil && app.releaseError == "文件包与批准版本不一致", "rewritten cloud manifest substituted another artifact under an unchanged approval")
+        try await fixture("/__test/release-mode", ["mode": "normal"])
         try await fixture("/__test/approval-version", ["version": "2"])
         await app.refreshEngineering()
         precondition(app.approvals.first { $0.id == approval.id }?.valid == false, "changed source version kept prior approval valid")
@@ -334,7 +377,12 @@ import ReifyCloud
         await app.refreshEngineering()
         await app.revokeApproval(approval.id, reason: "")
         precondition(app.approvalError != nil && app.approvals.first { $0.id == approval.id }?.revokedAt == nil, "revocation omitted reason")
+        try await fixture("/__test/release-mode", ["mode": "delay-validation"])
+        let revokedRelease = Task { await app.releaseVersion(approval, to: releaseFolder) }
+        try await waitReleaseCheck(app.api.baseURL, count: 2)
         await app.revokeApproval(approval.id, reason: "E2E revoke this test-only approval")
+        await revokedRelease.value
+        precondition(app.releaseURL == nil && app.releaseError != nil, "approval revoked during preparation still completed a release")
         precondition(app.approvalError == nil && app.approvals.first { $0.id == approval.id }?.valid == false && app.approvals.first { $0.id == approval.id }?.revokedAt != nil, "approval revocation did not persist")
         // Model a record made by another OS user within this disposable test store.
         var records = try JSONSerialization.jsonObject(with: Data(contentsOf: approvalFiles[0])) as! [[String: Any]]
@@ -344,11 +392,19 @@ import ReifyCloud
         precondition(app.approvalError?.contains("Only the verified approving OS user") == true, "native component revoked another OS user's approval")
         await app.refreshApprovals()
         precondition(app.approvals.first { $0.id == "other-os-user-record" }?.revokedAt == nil)
+        let spawnAfterRelease = app.bridge.spawnID, sessionAfterRelease = app.sessionID
+        try await fixture("/__test/drop")
+        try await wait({ app.reconnecting || !app.connected }, "release process reconnect begins")
+        try await wait({ app.connected && !app.reconnecting && app.bridge.spawnID == spawnAfterRelease && app.sessionID == sessionAfterRelease }, "release jobs leave the original conversation process alive")
+        let repliesAfterRelease = app.messages.filter { $0.role == "assistant" }.count
+        await app.send("发布检查后继续对话")
+        try await wait({ !app.generating && app.messages.filter { $0.role == "assistant" }.count > repliesAfterRelease }, "conversation continues after cancelled and rejected release jobs")
         try await fixture("/__test/expire")
         await app.refreshProjects()
         precondition(app.user == nil && app.api.session == nil && !app.connected && app.error == "登录已失效，请重新登录。" && app.messages.isEmpty && app.projects.isEmpty && app.catalog.providers.isEmpty, "expired session stayed signed in")
         await app.shutdown()
         try await app.api.logout()
+        print("PASS: original desktop cloud release backend with live native approval callbacks, exact manifest/file downloads, same-package reuse, local/cloud corruption refusal, read-only refusal, cancellation and revoke during preparation")
         print("PASS: exact-candidate independent review prompt, original desktop approval store in native JavaScriptCore, machine prerequisite, scope/reason, OS identity, private atomic persistence, reload, stale-version invalidation, reasoned revoke and other-user refusal, immutable transaction evidence verification/tamper/pinned-workflow/unbound refusal; generated/uploaded concept board state, exact-image and region/note/full-image prompt payload, outdated/invalid-region refusal, preserved draft and conversation isolation; native desktop STEP importer reuse/conflict, filtered current/shared/history catalog, exact-revision comparison and parameter differences, verified Finder cache, new model notification and completed-turn auto preview; compiled native AppModel over HTTP/WebSocket, native GLM model settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
         print("PASS: settings load cannot close a newly selected project bridge, workspace queue position, startup failure and retry, expired login clears native account and connection")
         print("PASS: disconnect during a live task resumes it, suspends queued input, allows abort, and never restarts an idle-paused workspace")

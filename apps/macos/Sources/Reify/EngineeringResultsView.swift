@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ReifyCloud
 
 struct EngineeringResultsView: View {
@@ -24,6 +25,9 @@ struct EngineeringResultsView: View {
                 .pickerStyle(.segmented).accessibilityIdentifier("engineering.filter")
             if app.selectedCommitID == nil { Toggle("包括历史结果", isOn: $app.includesHistoricalArtifacts).accessibilityIdentifier("engineering.include-history") }
             if let error = app.approvalError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            if app.releaseBusy { HStack { ProgressView("正在准备文件包"); Button("取消") { Task { await app.cancelRelease() } }.accessibilityIdentifier("release.cancel") } }
+            if let error = app.releaseError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            if let url = app.releaseURL { Button("在 Finder 查看文件包") { NSWorkspace.shared.activateFileViewerSelecting([url]) }.accessibilityIdentifier("release.reveal") }
             if let error = app.evidenceError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if let error = app.engineeringError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if app.engineeringArtifacts.isEmpty { Text("没有此类结果").foregroundStyle(ReifyDesign.muted) }

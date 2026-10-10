@@ -9,6 +9,7 @@ extension AppModel {
         return base.appendingPathComponent(key, isDirectory: true)
     }
     func clearApprovals() {
+        clearRelease()
         approvalSequence += 1; approvals = []; approvalError = nil; approvalBusy = false; approvalForm = nil
         evidenceSequence += 1; evidence = nil; evidenceError = nil; evidenceBusy = false
     }

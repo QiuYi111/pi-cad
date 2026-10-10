@@ -30,3 +30,8 @@ assert.equal(reviewSubmissions.length,1, 'changed candidate was submitted or rev
 assert(reviewSubmissions[0].message.includes('with SHA-256 '+reviewSubmissions[0].candidateSHA));
 assert(reviewSubmissions[0].message.includes('pinned workflow') && reviewSubmissions[0].message.includes('do not treat machine review as human approval'));
 console.log('PASS: server receives one exact-candidate review request with pinned workflow and separate human approval');
+
+const releaseChecks=audit.filter(x=>x.type==='release-approval-check');
+assert(releaseChecks.some(x=>x.number===3), 'original release backend did not revalidate after preparing the package');
+assert(releaseChecks.filter(x=>x.number===2).length>=4, 'reuse/cancel/revoke paths skipped the live native approval callback');
+console.log('PASS: original release backend asks the native approval store before/after package preparation and when reusing, cancelling or revoking a package');
