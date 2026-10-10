@@ -1,7 +1,9 @@
 const { execFileSync } = require("node:child_process");
+const base = require("../package.json").build;
 
 module.exports = {
-  directories: { output: "release-thin" },
+  ...base,
+  directories: { ...base.directories, output: "release-thin" },
   extraMetadata: {
     version: "0.1.1",
     reifyClientFlavor: "thin",
@@ -9,6 +11,7 @@ module.exports = {
   },
   extraResources: [{ from: "build/thin-client.json", to: "thin-client.json" }],
   win: {
+    ...base.win,
     artifactName: "Reify-Thin-Setup-${arch}.${ext}",
     extraResources: [{
       from: "../../executors/fusion/ReifyExport",
@@ -16,6 +19,6 @@ module.exports = {
       filter: ["**/*", "!**/__pycache__/**", "!**/*.pyc"],
     }],
   },
-  portable: { artifactName: "Reify-Thin-Portable-${arch}.${ext}" },
-  nsis: { runAfterFinish: false },
+  portable: { ...base.portable, artifactName: "Reify-Thin-Portable-${arch}.${ext}" },
+  nsis: { ...base.nsis, runAfterFinish: false },
 };
