@@ -1,5 +1,7 @@
 # macOS E2E 记录
 
+**这是基础流程测试记录，不是 desktop 功能完整性验收。** 设置、历史会话切换、图片与任务队列、工作流、记录评分、工程参数与版本、Fusion 等尚未补齐。见 [完整功能对比](DESKTOP-PARITY.zh-CN.md)。
+
 2026-10-10，Apple Silicon，macOS 26，Swift 6.4，macOS 26 SDK。应用最低支持 macOS 14；本次仅在当前系统实测。
 
 ## 视觉修正复验
