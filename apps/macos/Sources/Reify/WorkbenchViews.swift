@@ -37,6 +37,8 @@ struct RootView: View {
         .background(ReifyDesign.paper).preferredColorScheme(.light)
         .onReceive(NotificationCenter.default.publisher(for: .reifyShowProjects)) { _ in projectsPage = true }
         .onChange(of: app.connected) { _, connected in if connected { projectsPage = false } }
+        .sheet(item: $app.approvalForm) { commit in HumanApprovalForm(commit: commit) }
+        .sheet(isPresented: Binding(get: { app.evidence != nil }, set: { if !$0 { app.evidence = nil } })) { EvidenceView() }
         .sheet(isPresented: $app.newProjectPresented) { NewProjectView() }
         .sheet(isPresented: Binding(get: { app.uiRequest != nil }, set: { if !$0 { Task { await app.answer(["cancelled": true]) } } })) { ApprovalView() }
     }

@@ -7,8 +7,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 const fixtureHome = mkdtempSync(`${tmpdir()}/reify-native-workflows-`);
 const fixtureRepo = fileURLToPath(new URL('../../../', import.meta.url)).replace(/\/$/,'');
+const fixtureJiti=createRequire(import.meta.url)(fixtureRepo+'/node_modules/jiti').createJiti(fixtureRepo+'/package.json');
+const {canonicalDigest:fixtureDigest}=await fixtureJiti.import(fixtureRepo+'/src/harness/canonical.ts');
 const sha = data => createHash('sha256').update(data).digest('hex');
 const port = Number(process.env.REIFY_FIXTURE_PORT ?? 18765);
 const projects = [{id: '11111111-1111-4111-8111-111111111111', name: '桌面支架', role: 'maintainer', createdAt: new Date().toISOString()}];
@@ -35,7 +38,10 @@ triangles.forEach((t,i)=>t.flat().forEach((value,j)=>stl.writeFloatLE(value,84+i
 
 const files = new Map([['bracket.stl', stl], ['bracket.step', Buffer.from('ISO-10303-21;\nHEADER;\nENDSEC;\nEND-ISO-10303-21;')], ['corrupt.stl', stl]]);
 files.set('bracket.py',Buffer.from('# disposable model source fixture\n'));
-let modelWidth=80, expandedCatalog=false;
+let modelWidth=80, expandedCatalog=false, reviewVerified=false, approvalRevision=1, evidenceTampered=false;
+const evidenceDocument=session=>({schema:1,reviewId:'fixture-review-'+session,profileId:'fixture-independent',workflowHash:'hash-'+session,result:{verdict:'pass',summary:'Fixture independent check'}});
+const geometryDocument=session=>{const envelope={schema:1,ok:true,payload:{bbox:{x:80,y:40,z:30},volume:9600},artifacts:[]};return {schema:1,evidence:{path:'evidence/geometry/fixture.json',sha256:fixtureDigest(envelope),workflowHash:'hash-'+session},envelope}};
+const evidenceFor=(path,session)=>path.startsWith('evidence/geometry/')?geometryDocument(session):evidenceDocument(session);
 files.set('history/bracket-80.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));
 files.set('engineering-report.json',Buffer.from('{"checks":[]}'));
 function parameterManifest(){const manifest={schema:1,modelId:'bracket',source:{path:'bracket.py',sha256:sha(files.get('bracket.py')),entrypoint:'build'},output:{path:'bracket.step',sha256:sha(files.get('bracket.step'))},parameters:[{id:'width',type:'number',default:80,value:modelWidth,min:20,max:160,step:1,unit:'mm',label:'宽度'}]};const data=Buffer.from(JSON.stringify(manifest));files.set('bracket.parameters.json',data);return {path:'bracket.parameters.json',sha256:sha(data),manifest}}
@@ -56,6 +62,8 @@ const server = http.createServer(async (req, res) => {
   let b = {}; try { b = text ? JSON.parse(text) : {}; } catch { return respond(res,400,{message:'请求格式错误'}); }
   const path = new URL(req.url, 'http://localhost').pathname;
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
+  if (path === '/__test/approval-version') { approvalRevision=Number(b.version);return respond(res,200,{ok:true}); }
+  if (path === '/__test/evidence-tamper') { evidenceTampered=b.enabled==='true';return respond(res,200,{ok:true}); }
   if (path === '/__test/catalog-parity') { expandedCatalog=true;return respond(res,200,{ok:true}); }
   if (path === '/__test/model-width') { modelWidth=Number(b.width);files.set('bracket.step',Buffer.from(`ISO-10303-21;\nWIDTH=${modelWidth};\nEND-ISO-10303-21;`));parameterManifest();return respond(res,200,{sha256:sha(files.get('bracket.step'))}); }
   if (path === '/__test/stats') return respond(res,200,{stats,audit,state});
@@ -155,6 +163,12 @@ bridge.on('connection',ws=>{
             const message={role:'assistant',content:[],stopReason:'error',errorMessage:'测试模型服务不可用'};
             rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});continue;
           }
+          if(r.message.startsWith('Submit the current candidate ')) {
+            audit.push({type:'review-submission',message:r.message,candidateSHA:sha(files.get('bracket.step'))});
+            const call={type:'toolCall',id:'flow-review',name:'python',arguments:{code:'cad.review.submit(subject_commit="fixture")'}};
+            rows.push({role:'assistant',content:[call]});output({type:'tool_execution_start',toolCallId:call.id,toolName:call.name,args:call.arguments});
+            timer=activeSpawn.timer=setTimeout(()=>{reviewVerified=true;const result={role:'toolResult',toolCallId:call.id,toolName:call.name,content:[{type:'text',text:'Independent machine check passed (fixture)'}]};rows.push(result);output({type:'tool_execution_end',toolCallId:call.id,result});const message={role:'assistant',content:[{type:'text',text:'测试服务的独立机器审查已完成'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},350);continue;
+          }
           if(['概念图验收','概念图自动展示验收'].includes(r.message)) {
             const call={type:'toolCall',id:r.message==='概念图验收'?'flow-concept':'flow-concept-auto',name:'python',arguments:{code:'codex_generate_image(prompt="fixture concept")'}};
             rows.push({role:'assistant',content:[call]});output({type:'tool_execution_start',toolCallId:call.id,toolName:call.name,args:call.arguments});
@@ -226,6 +240,15 @@ bridge.on('connection',ws=>{
       for(const bytes of old.replay)frame(r.ch,bytes);
     } else if(r.type==='exec') {
       const result=value=>send({type:'exec_result',ch:r.ch,code:0,stderr:'',stdout:typeof value==='string'?value:JSON.stringify(value)});
+      if(r.args.some(a=>a.includes('REIFY_EVIDENCE_READ'))) {
+        // The native reader uses the original transaction verifier on real files.
+        const q=JSON.parse(r.input),root=join(fixtureHome,'evidence-project');mkdirSync(root,{recursive:true});
+        const native=r.args[r.args.indexOf('-e')+1].replaceAll('/opt/reify/pi-cad',fixtureRepo);
+        const setup=`const __fixtureCp=require('child_process'),__fixtureFs=require('fs'),__fixtureJiti=require(${JSON.stringify(fixtureRepo+'/node_modules/jiti')}).createJiti(${JSON.stringify(fixtureRepo+'/package.json')});const {HarnessRunStoreV7:__FixtureStore}=await __fixtureJiti.import(${JSON.stringify(fixtureRepo+'/src/harness/run-store.ts')});const __fixtureStore=new __FixtureStore(${JSON.stringify(root)},${JSON.stringify(q.runId)});__fixtureFs.rmSync(__fixtureStore.runDirectory,{recursive:true,force:true});const __fixtureHead=await __fixtureStore.transactions.readHead();const __fixtureNext=await __fixtureStore.transactions.commit({expectedGeneration:__fixtureHead?.generation??0,payloads:{[${JSON.stringify(q.path)}]:${JSON.stringify(evidenceFor(q.path,q.sessionId))}},event:{type:'FixtureEvidence'}});if(${evidenceTampered})__fixtureFs.writeFileSync(require('path').join(__fixtureStore.runDirectory,'transactions',__fixtureNext.txId,${JSON.stringify(q.path)}),'changed evidence');__fixtureCp.spawnSync=(command,args,options)=>{const request=JSON.parse(options.input);if(request.sessionId!==${JSON.stringify(q.sessionId)})return {status:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Wrong conversation'}})};return {status:0,stdout:JSON.stringify({schema:1,ok:true,result:{runId:${JSON.stringify('run-'+q.sessionId)},workflowHash:${JSON.stringify('hash-'+q.sessionId)}}}),stderr:''}};`;
+        const script='(async()=>{'+setup+native+'})().catch(error=>{console.error(error);process.exitCode=1})',parts=[],errors=[];
+        const child=spawn(process.execPath,['-e',script],{cwd:fixtureRepo,env:{...process.env,PI_CAD_CANONICAL_PROJECT_DIR:root}});child.stdout.on('data',x=>parts.push(x));child.stderr.on('data',x=>errors.push(x));
+        child.on('close',code=>send({type:'exec_result',ch:r.ch,code,stdout:Buffer.concat(parts).toString(),stderr:Buffer.concat(errors).toString()}));child.stdin.end(JSON.stringify({...q,root}));return;
+      }
       if(r.args.some(a=>a.includes('REIFY_STEP_IMPORT'))) {
         // Execute the native adapter and the original desktop importer on real files.
         const q=JSON.parse(r.input),root=join(fixtureHome,'projects',project.split('/').at(-1));mkdirSync(root,{recursive:true});
@@ -251,6 +274,7 @@ bridge.on('connection',ws=>{
         const bound=['engineering-a','engineering-b'].includes(q.sessionId)||generatedSessions.has(project+'/'+q.sessionId),name=q.sessionId==='engineering-b'?'sample.step':'bracket.step';
         const artifact={id:`artifact-${q.sessionId}`,path:name,role:'model',sha256:sha(files.get(name)??Buffer.from(''))};
         const run=bound?{runId:`run-${q.sessionId}`,workflowId:'mechanical.naked',workflowVersion:'1.0.0',workflowHash:'hash-'+q.sessionId,phase:'work',status:'active',operations:[{capability:'cad_build_step'}],updatedAt:new Date().toISOString(),phaseHistory:['work'],phases:[{id:'work',title:'Work',purpose:'Build',status:'active',transitions:[],capabilities:['cad_build_step'],obligations:[]}]}:null;
+        if(q.op==='evidence-read'){if(!bound)return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Conversation has no workflow',code:'CONVERSATION_UNBOUND'}}),stderr:''});if(!['reviews/fixture-machine.json','evidence/geometry/fixture.json'].includes(q.path))return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Invalid fixture evidence'}}),stderr:''});return result({schema:1,ok:true,result:evidenceFor(q.path,q.sessionId)})}
         if(q.op==='workflow-current')return result({schema:1,ok:true,result:run});
         if(q.op==='viewer-catalog') {
           const advanced=expandedCatalog&&generatedSessions.has(project+'/'+q.sessionId);
@@ -258,7 +282,7 @@ bridge.on('connection',ws=>{
           const report={id:'engineering-report',path:'engineering-report.json',role:'evidence',sha256:sha(files.get('engineering-report.json'))};
           const commits=bound?[{id:'commit-'+q.sessionId,name:'Version '+q.sessionId,parent:null,phase:'work',createdAt:new Date().toISOString(),artifacts:[artifact]}]:[];
           const manifests=bound&&name==='bracket.step'?[parameterManifest()]:[];
-          if(advanced){commits.push({id:'history-80',name:'Width 80',parent:null,phase:'work',createdAt:'2026-10-01T00:00:00Z',artifacts:[historical],sourceRevision:'1'.repeat(40),acceptanceSummary:{requirements:[{id:'bbox',category:'geometry',status:'pass',method:'bounding box'}],assumptions:['Fixture only']}});const manifest=JSON.parse(JSON.stringify(parameterManifest().manifest));manifest.output={path:historical.path,sha256:historical.sha256};manifest.parameters[0].value=80;manifests.push({path:'@commit/history-80/bracket.parameters.json',sha256:sha(Buffer.from(JSON.stringify(manifest))),manifest});}
+          if(advanced){commits[0].sourceRevision=String(approvalRevision+1).repeat(40);commits[0].workflowHash=run.workflowHash;commits[0].acceptanceSummary={requirements:[{id:'machine',category:'machine',status:reviewVerified?'verified':'unverified',method:'Independent reviewer',evidence:{path:'reviews/fixture-machine.json',sha256:fixtureDigest(evidenceDocument(q.sessionId))}}],assumptions:['Fixture only']};commits.push({id:'history-80',name:'Width 80',parent:null,phase:'work',createdAt:'2026-10-01T00:00:00Z',artifacts:[historical],sourceRevision:'1'.repeat(40),acceptanceSummary:{requirements:[{id:'bbox',category:'geometry',status:'pass',method:'bounding box'}],assumptions:['Fixture only']}});const manifest=JSON.parse(JSON.stringify(parameterManifest().manifest));manifest.output={path:historical.path,sha256:historical.sha256};manifest.parameters[0].value=80;manifests.push({path:'@commit/history-80/bracket.parameters.json',sha256:sha(Buffer.from(JSON.stringify(manifest))),manifest});}
           return result({schema:1,ok:true,result:{projectId:project,projectHead:{updatedAt:'',artifacts:advanced?[report,artifact]:[]},currentRun:run?{id:run.runId,phase:run.phase,status:run.status,updatedAt:run.updatedAt,artifacts:[artifact]}:null,commits,simulationRuns:[],parameterManifests:manifests}});
         }
         if(q.op==='model-build'&&bound){const width=q.parameters?.width?.value;if(width===66)return result({schema:1,ok:true,result:{build:{ok:false,payload:{error:'模拟参数建模失败'}}}});if(typeof width!=='number'||width<20||width>160)return send({type:'exec_result',ch:r.ch,code:1,stdout:JSON.stringify({schema:1,ok:false,error:{message:'Invalid width',code:'PARAMETER_INVALID'}}),stderr:''});modelWidth=width;files.set('bracket.step',Buffer.from(`ISO-10303-21;\nWIDTH=${width};\nEND-ISO-10303-21;`));parameterManifest();return result({schema:1,ok:true,result:{build:{ok:true}}})}

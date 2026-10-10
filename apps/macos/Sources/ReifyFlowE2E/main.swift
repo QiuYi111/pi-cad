@@ -14,6 +14,8 @@ import ReifyCloud
         try await app.api.logout()
         await app.login(email: "e2e@reify.test", password: "fixture-password", server: app.api.baseURL)
         precondition(app.user != nil && app.error == nil)
+        let approvalRootAtLogin = app.approvalRoot
+        defer { try? FileManager.default.removeItem(at: approvalRootAtLogin) }
         guard let project = app.projects.first else { fatalError("Missing fixture project") }
         let loadingSettings = Task { await app.loadCloudModels() }
         try await Task.sleep(for: .milliseconds(50))
@@ -268,12 +270,86 @@ import ReifyCloud
         await app.switchConversation(conceptHistory)
         precondition(app.conceptImages.contains { $0.id == uploadedConcept.id } && app.conceptImages.contains { $0.id == generatedConcept.id } && !app.conceptImages.contains { $0.id == "other-concept-e2e" }, "concept images mixed after restoring conversation")
         precondition(app.conceptAnnotations[uploadedConcept.id]?.region == badRegion.region && app.conceptAnnotations[generatedConcept.id]?.note == "使用整张生成图", "saved concept annotation changed after conversation switch")
+        await app.refreshEngineering()
+        guard let reviewModel = app.engineeringCatalog?.currentRun?.artifacts.first,
+              let unreviewedVersion = app.engineeringCatalog?.commits.first else { fatalError("Missing review candidate") }
+        let deniedApproval = await app.approveVersion(unreviewedVersion.id, scope: "E2E fixture only", reason: "Before review must fail")
+        precondition(deniedApproval == nil && app.approvalError != nil && app.approvals.isEmpty, "native approval bypassed independent review prerequisite")
+        await app.showArtifact(reviewModel)
+        app.draft = "未发送的审查草稿"
+        let reviewBytes = try await app.bridge.download(reviewModel.path)
+        try await app.bridge.upload(Data("changed candidate".utf8), name: reviewModel.path)
+        await app.submitIndependentReview()
+        precondition(!app.generating && app.error == "候选模型已变化，请重新读取工程结果" && app.draft == "未发送的审查草稿", "changed candidate submitted for review or lost draft")
+        try await app.bridge.upload(reviewBytes, name: reviewModel.path)
+        await app.submitIndependentReview()
+        try await wait({ !app.generating && app.engineeringCatalog?.commits.first?.acceptanceSummary?.requirements.contains { $0.category == "machine" && $0.status == "verified" } == true }, "independent review updates exact candidate acceptance")
+        precondition(app.draft == "未发送的审查草稿", "review submission replaced unsent draft")
+        guard let reviewedVersion = app.engineeringCatalog?.commits.first,
+              let evidenceRecord = reviewedVersion.acceptanceSummary?.requirements.first?.evidence,
+              let evidenceRun = app.workflowRun else { fatalError("Missing review evidence") }
+        await app.readEvidence(evidenceRecord)
+        precondition(app.evidenceError == nil && app.evidence?.sha256 == evidenceRecord.sha256 && app.evidence?.value["result"]?["verdict"]?.stringValue == "pass" && app.evidence?.bindingVerified == true, "native evidence did not validate exact immutable transaction bytes")
+        let savedEvidence = app.evidence
+        try await fixture("/__test/evidence-tamper", ["enabled": "true"])
+        await app.readEvidence(evidenceRecord)
+        precondition(app.evidenceError != nil && app.evidence?.sha256 == savedEvidence?.sha256, "corrupt transaction substituted unverified evidence")
+        try await fixture("/__test/evidence-tamper", ["enabled": "false"])
+        var wrongRun = try JSONSerialization.jsonObject(with: JSONEncoder().encode(evidenceRun)) as! [String: Any]
+        wrongRun["workflowHash"] = "wrong-workflow"
+        do { _ = try await app.engineering.evidence(evidenceRecord, run: JSONDecoder().decode(WorkflowRun.self, from: JSONSerialization.data(withJSONObject: wrongRun))); fatalError("Evidence escaped pinned workflow") } catch { precondition(error.localizedDescription.contains("工作流已变化")) }
+        do { _ = try await EngineeringService(bridge: app.bridge, sessionID: nil).evidence(evidenceRecord, run: evidenceRun); fatalError("Unbound conversation read another run's evidence") } catch { precondition(error.localizedDescription.contains("工作流已变化") || (error as? AuthorityError)?.code == "CONVERSATION_UNBOUND") }
+        await app.readEvidence(evidenceRecord)
+        precondition(app.evidenceError == nil)
+        let legacyEvidence = try JSONDecoder().decode(AcceptanceSummary.Requirement.Evidence.self, from: JSONSerialization.data(withJSONObject: ["path": evidenceRecord.path]))
+        let legacyRead = try await app.engineering.evidence(legacyEvidence, run: evidenceRun)
+        precondition(!legacyRead.bindingVerified && legacyRead.declaredSHA256 == nil && legacyRead.contentSHA256.count == 64, "legacy review fabricated a version digest or skipped transaction verification")
+        let geometryEnvelope: [String: Any] = ["schema": 1, "ok": true, "payload": ["bbox": ["x": 80, "y": 40, "z": 30], "volume": 9600], "artifacts": []]
+        // Obtain the real stored geometry record; its declared digest covers the
+        // canonical envelope, not the wrapper bytes shown in the evidence view.
+        let geometryRecord: JSONValue = try await app.engineering.request("evidence-read", fields: ["path": "evidence/geometry/fixture.json"])
+        precondition(geometryRecord["envelope"]?.foundationValue as? NSDictionary == geometryEnvelope as NSDictionary)
+        let geometryEvidence = try JSONDecoder().decode(AcceptanceSummary.Requirement.Evidence.self, from: JSONSerialization.data(withJSONObject: ["path": "evidence/geometry/fixture.json", "sha256": geometryRecord["evidence"]?["sha256"]!.stringValue!]))
+        let geometryRead = try await app.engineering.evidence(geometryEvidence, run: evidenceRun)
+        precondition(geometryRead.bindingVerified && geometryRead.sha256 == geometryEvidence.sha256 && geometryRead.sha256 != geometryRead.contentSHA256, "geometry envelope digest was mistaken for wrapper file digest")
+        let wrongEvidence = try JSONDecoder().decode(AcceptanceSummary.Requirement.Evidence.self, from: JSONSerialization.data(withJSONObject: ["path": geometryEvidence.path, "sha256": String(repeating: "0", count: 64)]))
+        do { _ = try await app.engineering.evidence(wrongEvidence, run: evidenceRun); fatalError("Evidence accepted a different saved version digest") } catch { precondition(error.localizedDescription.contains("证据内容与此版本记录不一致")) }
+        let emptyApproval = await app.approveVersion(reviewedVersion.id, scope: "", reason: "")
+        precondition(emptyApproval == nil && app.approvalError != nil && app.approvals.isEmpty, "approval omitted scope or rationale")
+        guard let approval = await app.approveVersion(reviewedVersion.id, scope: "E2E fixture only", reason: "Test the native store; no manufacturing approval") else { fatalError("Approval failed: \(app.approvalError ?? "unknown")") }
+        precondition(approval.valid && approval.commitId == reviewedVersion.id && approval.workflowHash == reviewedVersion.workflowHash && approval.sourceRevision == reviewedVersion.sourceRevision && approval.approver.id == NSUserName() && approval.approver.type == "local-os-user", "approval lost local OS identity or exact version binding")
+        let approvalFiles = try FileManager.default.contentsOfDirectory(at: app.approvalRoot, includingPropertiesForKeys: nil).filter { $0.pathExtension == "json" }
+        precondition(approvalFiles.count == 1)
+        let permissions = try FileManager.default.attributesOfItem(atPath: approvalFiles[0].path)[.posixPermissions] as! NSNumber
+        precondition(permissions.intValue == 0o600, "approval file not private to OS user")
+        let catalogForReload = try await app.engineering.requestEnvelope("viewer-catalog")
+        let reloadedApprovals: [HumanApprovalRecord] = try await NativeApprovals().request("list", catalogEnvelope: catalogForReload, root: app.approvalRoot)
+        precondition(reloadedApprovals.contains { $0.id == approval.id && $0.valid }, "approval did not survive a fresh native component")
+        try await fixture("/__test/approval-version", ["version": "2"])
+        await app.refreshEngineering()
+        precondition(app.approvals.first { $0.id == approval.id }?.valid == false, "changed source version kept prior approval valid")
+        let staleApproval = await app.approveVersion(reviewedVersion.id, scope: "E2E fixture only", reason: "Stale form must fail", expected: reviewedVersion)
+        precondition(staleApproval == nil && app.approvalError == "版本已变化，请重新打开批准窗口" && app.approvals.count == 1, "stale form approved a different version")
+        try await fixture("/__test/approval-version", ["version": "1"])
+        await app.refreshEngineering()
+        await app.revokeApproval(approval.id, reason: "")
+        precondition(app.approvalError != nil && app.approvals.first { $0.id == approval.id }?.revokedAt == nil, "revocation omitted reason")
+        await app.revokeApproval(approval.id, reason: "E2E revoke this test-only approval")
+        precondition(app.approvalError == nil && app.approvals.first { $0.id == approval.id }?.valid == false && app.approvals.first { $0.id == approval.id }?.revokedAt != nil, "approval revocation did not persist")
+        // Model a record made by another OS user within this disposable test store.
+        var records = try JSONSerialization.jsonObject(with: Data(contentsOf: approvalFiles[0])) as! [[String: Any]]
+        var another = records[0]; another["id"] = "other-os-user-record"; another["approver"] = ["type": "local-os-user", "id": "fixture-other-user"]; another.removeValue(forKey: "revokedAt"); another.removeValue(forKey: "revocationReason"); another["valid"] = true; records.append(another)
+        try JSONSerialization.data(withJSONObject: records).write(to: approvalFiles[0], options: .atomic)
+        await app.revokeApproval("other-os-user-record", reason: "Must refuse another OS user's approval")
+        precondition(app.approvalError?.contains("Only the verified approving OS user") == true, "native component revoked another OS user's approval")
+        await app.refreshApprovals()
+        precondition(app.approvals.first { $0.id == "other-os-user-record" }?.revokedAt == nil)
         try await fixture("/__test/expire")
         await app.refreshProjects()
         precondition(app.user == nil && app.api.session == nil && !app.connected && app.error == "登录已失效，请重新登录。" && app.messages.isEmpty && app.projects.isEmpty && app.catalog.providers.isEmpty, "expired session stayed signed in")
         await app.shutdown()
         try await app.api.logout()
-        print("PASS: generated/uploaded concept board state, exact-image and region/note/full-image prompt payload, outdated/invalid-region refusal, preserved draft and conversation isolation; native desktop STEP importer reuse/conflict, filtered current/shared/history catalog, exact-revision comparison and parameter differences, verified Finder cache, new model notification and completed-turn auto preview; compiled native AppModel over HTTP/WebSocket, native GLM model settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
+        print("PASS: exact-candidate independent review prompt, original desktop approval store in native JavaScriptCore, machine prerequisite, scope/reason, OS identity, private atomic persistence, reload, stale-version invalidation, reasoned revoke and other-user refusal, immutable transaction evidence verification/tamper/pinned-workflow/unbound refusal; generated/uploaded concept board state, exact-image and region/note/full-image prompt payload, outdated/invalid-region refusal, preserved draft and conversation isolation; native desktop STEP importer reuse/conflict, filtered current/shared/history catalog, exact-revision comparison and parameter differences, verified Finder cache, new model notification and completed-turn auto preview; compiled native AppModel over HTTP/WebSocket, native GLM model settings and unsupported thinking rollback, editable queue drains exactly once, local notes, new/switch conversation draft and engineering isolation, image upload and prompt payload")
         print("PASS: settings load cannot close a newly selected project bridge, workspace queue position, startup failure and retry, expired login clears native account and connection")
         print("PASS: disconnect during a live task resumes it, suspends queued input, allows abort, and never restarts an idle-paused workspace")
         print("PASS: automatic native reconnect reattaches the same process/session, preserves drafts and never repeats prompts or starts the workspace")

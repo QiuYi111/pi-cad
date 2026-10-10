@@ -23,6 +23,8 @@ struct EngineeringResultsView: View {
             Picker("结果分类", selection: $app.artifactFilter) { ForEach(["全部", "模型", "其他结果"], id: \.self) { Text($0) } }
                 .pickerStyle(.segmented).accessibilityIdentifier("engineering.filter")
             if app.selectedCommitID == nil { Toggle("包括历史结果", isOn: $app.includesHistoricalArtifacts).accessibilityIdentifier("engineering.include-history") }
+            if let error = app.approvalError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            if let error = app.evidenceError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if let error = app.engineeringError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if app.engineeringArtifacts.isEmpty { Text("没有此类结果").foregroundStyle(ReifyDesign.muted) }
             ForEach(app.engineeringArtifacts, id: \.revisionKey) { artifact in
@@ -37,6 +39,9 @@ struct EngineeringResultsView: View {
                     Button { Task { await app.revealArtifact(artifact) } } label: { Image(systemName: "folder") }.buttonStyle(.plain).help("在 Finder 查看副本").accessibilityIdentifier("engineering.reveal.\(artifact.id)")
                     Button { Task { await app.exportArtifact(artifact) } } label: { Image(systemName: "arrow.down.to.line") }.buttonStyle(.plain).help("下载结果").accessibilityIdentifier("engineering.download.\(artifact.id)")
                 }.padding(10).background(ReifyDesign.panel, in: RoundedRectangle(cornerRadius: 8))
+            }
+            if app.selectedArtifact != nil && app.selectedCommitID == nil {
+                Button("提交独立机器审查") { Task { await app.submitIndependentReview() } }.disabled(app.generating || !app.connected || app.selected?.role == "viewer").accessibilityIdentifier("review.submit")
             }
             if app.selectedArtifact != nil && !app.parameterPreviewActive {
                 Menu("与另一版本比较") {
@@ -71,12 +76,17 @@ struct EngineeringResultsView: View {
                 Text("版本：\(commit.name)").font(ReifyDesign.font(13, .medium))
                 Text(commit.createdAt).foregroundStyle(ReifyDesign.muted)
                 if let revision = commit.sourceRevision { Text("源码：\(revision.prefix(12))").textSelection(.enabled) }
+                Button("人工批准此版本") { app.approvalError = nil; app.approvalForm = commit }.disabled(app.approvalBusy || !app.connected || app.selected?.role == "viewer" || commit.acceptanceSummary?.requirements.contains { $0.category == "machine" && $0.status == "verified" } != true).accessibilityIdentifier("approval.open")
+                ForEach(app.approvals.filter { $0.commitId == commit.id }) { record in HumanApprovalRow(record: record) }
                 if let summary = commit.acceptanceSummary {
                     Text("验收记录").font(ReifyDesign.font(13, .medium))
                     ForEach(Set(summary.requirements.map(\.category)).sorted(), id: \.self) { category in
                         Text(category).font(ReifyDesign.font(12, .medium))
                         ForEach(summary.requirements.filter { $0.category == category }) { requirement in
-                            VStack(alignment: .leading, spacing: 4) { Text("\(requirement.id) · \(requirement.status)"); Text(requirement.method).foregroundStyle(ReifyDesign.muted) }
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("\(requirement.id) · \(requirement.status)"); Text(requirement.method).foregroundStyle(ReifyDesign.muted)
+                                if let record = requirement.evidence { Button("查看证据") { Task { await app.readEvidence(record) } }.disabled(app.evidenceBusy).accessibilityIdentifier("evidence.read.\(requirement.id)") }
+                            }
                         }
                     }
                     ForEach(summary.assumptions, id: \.self) { Text($0).foregroundStyle(ReifyDesign.muted) }

@@ -22,6 +22,7 @@ extension AppModel {
         engineeringSequence += 1; previewSequence += 1
         engineeringError = nil; engineeringLoading = false
         guard !preserveViewer else { return }
+        clearApprovals()
         workflowRun = nil; engineeringCatalog = nil
         selectedCommitID = nil; selectedArtifact = nil
         closeComparison(); newResult = nil; previewPinned = false; readingHistory = false
@@ -41,6 +42,8 @@ extension AppModel {
             let snapshot = try await (run, catalog)
             guard current == generation && scope == sessionID && sequence == engineeringSequence else { return }
             workflowRun = snapshot.0; engineeringCatalog = snapshot.1
+            await refreshApprovals()
+            guard current == generation && scope == sessionID && sequence == engineeringSequence else { return }
             if let selectedCommitID, !snapshot.1.commits.contains(where: { $0.id == selectedCommitID }) { self.selectedCommitID = nil; selectedArtifact = nil }
             if offerNewResult, let next = snapshot.1.currentRun?.artifacts.first(where: { $0.isModel && !previous.contains($0.revisionKey) }) {
                 newResult = next

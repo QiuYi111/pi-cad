@@ -34,6 +34,16 @@ import ReifyCloud
     @Published var engineeringLoading = false
     var engineeringSequence = 0
     @Published var engineeringError: String?
+    @Published var approvals: [HumanApprovalRecord] = []
+    @Published var approvalError: String?
+    @Published var approvalBusy = false
+    @Published var approvalForm: EngineeringCommit?
+    var approvalSequence = 0
+    @Published var evidence: VerifiedEvidence?
+    @Published var evidenceError: String?
+    @Published var evidenceBusy = false
+    var evidenceSequence = 0
+    let nativeApprovals = NativeApprovals()
     @Published var selectedCommitID: String?
     @Published var selectedArtifact: EngineeringArtifact?
     @Published var artifactFilter = "全部"

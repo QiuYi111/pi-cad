@@ -21,6 +21,7 @@ iconutil -c icns .build/manual/AppIcon.iconset -o dist/Reify.app/Contents/Resour
 cp Sources/Reify/Resources/* dist/Reify.app/Contents/Resources/
 node scripts/build-desktop-presentation.mjs .build/manual/DesktopPresentation.js
 cp .build/manual/DesktopPresentation.js dist/Reify.app/Contents/Resources/
+cp .build/manual/DesktopApprovals.js dist/Reify.app/Contents/Resources/
 cp .build/manual/DesktopThirdParty.txt dist/Reify.app/Contents/Resources/
 codesign --force --sign - dist/Reify.app/Contents/Frameworks/libReifyCloud.dylib
 codesign --force --sign - dist/Reify.app

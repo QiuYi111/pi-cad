@@ -15,6 +15,12 @@ public struct AuthorityError: Error, LocalizedError {
     public let sessionID: String?
     public init(bridge: WorkspaceBridge, sessionID: String?) { self.bridge = bridge; self.sessionID = sessionID }
     public func request<T: Decodable>(_ operation: String, fields: [String: Any] = [:], timeoutMs: Int = 60000) async throws -> T {
+        let output = try await requestEnvelope(operation, fields: fields, timeoutMs: timeoutMs)
+        let envelope = try JSONSerialization.jsonObject(with: Data(output.utf8)) as! [String: Any]
+        let bytes = try JSONSerialization.data(withJSONObject: envelope["result"] ?? NSNull(), options: .fragmentsAllowed)
+        return try JSONDecoder().decode(T.self, from: bytes)
+    }
+    public func requestEnvelope(_ operation: String, fields: [String: Any] = [:], timeoutMs: Int = 60000) async throws -> String {
         guard let root = bridge.projectRoot else { throw CloudError("请先打开项目") }
         var body = fields
         body["schema"] = 1; body["op"] = operation; body["sessionId"] = sessionID.map { $0 as Any } ?? NSNull()
@@ -29,8 +35,7 @@ public struct AuthorityError: Error, LocalizedError {
             throw AuthorityError(message: error["message"] as? String ?? "工程操作失败", code: error["code"] as? String, target: error["target"] as? String, hints: error["hints"] as? [String] ?? [])
         }
         guard execution["code"] as? Int == 0 else { throw CloudError("工程服务返回了异常结果") }
-        let bytes = try JSONSerialization.data(withJSONObject: envelope["result"] ?? NSNull(), options: .fragmentsAllowed)
-        return try JSONDecoder().decode(T.self, from: bytes)
+        return output
     }
     public func workflow() async throws -> WorkflowRun? { try await request("workflow-current") }
     public func catalog() async throws -> EngineeringCatalog { try await request("viewer-catalog") }
@@ -61,7 +66,7 @@ public struct WorkflowRun: Codable {
     public let phaseHistory: [String]
     public let phases: [WorkflowPhase]
 }
-public struct EngineeringArtifact: Codable, Identifiable {
+public struct EngineeringArtifact: Codable, Identifiable, Equatable {
     public let id: String
     public let path: String
     public let sha256: String
@@ -84,7 +89,7 @@ public struct AcceptanceSummary: Codable {
         public let category: String
         public let status: String
         public let method: String
-        public struct Evidence: Codable { public let path: String; public let sha256: String }
+        public struct Evidence: Codable { public let path: String; public let sha256: String? }
         public let evidence: Evidence?
     }
     public let requirements: [Requirement]

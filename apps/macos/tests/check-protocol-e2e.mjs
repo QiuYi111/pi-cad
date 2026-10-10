@@ -24,3 +24,9 @@ assert(conceptPrompts.every(x=>x.imageCount===1 && x.imageTypes[0]==='image/png'
 assert(conceptPrompts.some(x=>x.message.includes('x=0.100, y=0.200, width=0.300, height=0.400') && x.message.includes('只修改右上角')));
 assert(conceptPrompts.some(x=>x.message.includes('Use the full image.')));
 console.log('PASS: server receives original image bytes matching the concept hash, exact normalized region and note; invalid/outdated concepts are never sent');
+
+const reviewSubmissions=audit.filter(x=>x.type==='review-submission');
+assert.equal(reviewSubmissions.length,1, 'changed candidate was submitted or review duplicated');
+assert(reviewSubmissions[0].message.includes('with SHA-256 '+reviewSubmissions[0].candidateSHA));
+assert(reviewSubmissions[0].message.includes('pinned workflow') && reviewSubmissions[0].message.includes('do not treat machine review as human approval'));
+console.log('PASS: server receives one exact-candidate review request with pinned workflow and separate human approval');

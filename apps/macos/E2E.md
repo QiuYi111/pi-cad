@@ -111,3 +111,7 @@
 本批本地证据：`test-results/parity-import-compare-verified-e2e.log`。补充通过：重连保留手动模型；参数临时预览退出版本比较；只读设置拒绝导入。Finder 打开、两个三维视图的复位/相机/测量仍待窗口测试。
 
 概念图本地证据：`test-results/parity-concept-verified-e2e.log`。还验证了生成图在模型画布时只提醒、空闲对话时自动进入概念画板。所有新增窗口行为与正式云端图片生成仍待验。
+
+审查与批准本地证据：`test-results/parity-review-approval-verified-e2e.log`、`engineering-records-e2e.log`。实际原生 AppModel 提交一次原 desktop 独立审查提示，核对候选 SHA，保留草稿；真实桌面批准代码在 JavaScriptCore 执行，核对机器审查前置条件、范围/理由、本机用户、600 文件权限、重载、过期表单、版本变更、撤销及他人记录拒绝。未在正式项目创建人工批准。
+
+证据读取执行原不可变事务校验：文件损坏、工作流变化、空对话均拒绝；几何证据哈希针对计算结果，单独显示保存文件哈希；兼容旧审查记录未保存哈希的情况，不声称旧记录已与版本哈希匹配。另用真实工程 CLI 和临时 Git 项目验证保存审查哈希、读取 `reviews/`、缺失审查不通过、损坏文件及跨对话拒绝。审查结果在本地测试中是模拟结果，真实 GLM 独立审查和新增窗口待验。

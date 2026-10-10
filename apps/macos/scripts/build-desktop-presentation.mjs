@@ -77,3 +77,25 @@ for (const input of Object.keys(markdown.metafile.inputs)) {
   }
 }
 await writeFile(join(dirname(process.argv[2]), 'DesktopThirdParty.txt'), [...packages].sort(([a], [b]) => a.localeCompare(b)).map(([, text]) => text).join('\n\n-----\n\n'));
+
+const approvals = await moduleSource('apps/desktop/electron/main/approvals.ts', ['HumanApprovalStore']);
+const approvalSource = `// Generated from the existing desktop approval store. Native adapters provide OS identity and confined file access.
+const randomUUID=()=>nativeUUID();
+const userInfo=()=>({username:nativeIdentity()});
+const process={pid:nativePID()};
+const createHash=algorithm=>{if(algorithm!=='sha256')throw Error('Unsupported digest');let text='';const hash={update:value=>{text+=String(value);return hash},digest:format=>{if(format!=='hex')throw Error('Unsupported digest encoding');return nativeSHA256(text)}};return hash};
+const join=(...parts)=>parts.join('/').replace(/\\/+/g,'/');
+function fsCall(op,path,text='',other=''){const result=JSON.parse(nativeApprovalFS(op,path,text,other));if(!result.ok)throw Error(result.error);return result.value}
+const mkdir=async path=>{fsCall('mkdir',path)};
+const readFile=async path=>fsCall('read',path);
+const writeFile=async(path,text)=>{fsCall('write',path,text)};
+const rename=async(path,target)=>{fsCall('rename',path,'',target)};
+const DesktopApprovals=${approvals};
+const stores=new Map();
+globalThis.reifyApprovalRequest=(id,op,envelope,root,args)=>{
+  Promise.resolve().then(()=>{const response=JSON.parse(envelope);if(response.schema!==1||response.ok!==true)throw Error('Invalid catalog');let store=stores.get(root);if(!store){store=new DesktopApprovals.HumanApprovalStore(root);stores.set(root,store)}
+    if(!['list','approve','revoke'].includes(op))throw Error('Invalid approval action');return store[op](response.result,...args)
+  }).then(value=>nativeApprovalComplete(id,JSON.stringify(value),''),error=>nativeApprovalComplete(id,'',error.message||String(error)));
+};
+`;
+await writeFile(join(dirname(process.argv[2]),'DesktopApprovals.js'),approvalSource);
