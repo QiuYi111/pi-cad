@@ -168,7 +168,7 @@ import CryptoKit
             }
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: timeout)
-                if self?.pendingIDs[key] == requestID { self?.finish(key, error: CloudError("请求超时，请重连")) }
+                if self?.pendingIDs[key] == requestID { self?.finish(key, error: CloudError("请求超时，请重连", code: rpc ? "rpc_timeout" : "transport_timeout")) }
             }
         }
     }
@@ -295,8 +295,9 @@ import CryptoKit
         let relative: String
         if path.hasPrefix("/") {
             let roots = [projectRoot, projectID.isEmpty ? nil : "/workspace/state/\(projectID)"].compactMap { $0 }
-            guard let root = roots.first(where: { path.hasPrefix($0 + "/") }) else { throw CloudError("文件不属于当前项目") }
-            relative = String(path.dropFirst(root.count + 1))
+            if let root = roots.first(where: { path.hasPrefix($0 + "/") }) { relative = String(path.dropFirst(root.count + 1)) }
+            else if path.hasPrefix("/workspace/"), !path.hasPrefix("/workspace/projects/"), !path.hasPrefix("/workspace/state/") { relative = String(path.dropFirst("/workspace/".count)) }
+            else { throw CloudError("文件不属于当前项目") }
         } else { relative = path }
         _ = try absolute(relative)
         return relative

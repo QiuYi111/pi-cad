@@ -10,6 +10,7 @@ struct RootView: View {
             else {
                 AppHeader(projectsPage: $projectsPage)
                 if let error = app.error { NoticeView(text: error, error: true) { app.error = nil } }
+                if let notice = app.extensionNotice { NoticeView(text: notice) { app.extensionNotice = nil }.accessibilityIdentifier("extension.notice") }
                 if app.reclaimAt != nil {
                     HStack { Label("云端即将因闲置暂停", systemImage: "clock"); Spacer(); Button("继续使用") { Task { await app.keepalive() } } }
                         .padding(12).background(ReifyDesign.panel)
@@ -251,6 +252,7 @@ extension Notification.Name { static let reifyShowProjects = Notification.Name("
 
 struct ConversationView: View {
     @EnvironmentObject var app: AppModel
+    @State private var followsBottom = true
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -265,6 +267,8 @@ struct ConversationView: View {
                     .disabled(!app.connected || app.selected?.role == "viewer").accessibilityIdentifier("file.import")
             }.buttonStyle(.plain).padding(.horizontal, 24).frame(height: 58).overlay(alignment: .bottom) { Divider() }
             ScrollViewReader { proxy in
+                VStack(spacing: 0) {
+                HStack { Spacer(); Button(followsBottom ? "暂停跟随" : "跟随新消息") { followsBottom.toggle(); if followsBottom { proxy.scrollTo("bottom", anchor: .bottom) } }.buttonStyle(.plain).font(ReifyDesign.font(10)).foregroundStyle(ReifyDesign.muted).accessibilityIdentifier("chat.follow") }.padding(.horizontal, 24).padding(.top, 8)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 26) {
                         if app.messages.isEmpty {
@@ -275,13 +279,15 @@ struct ConversationView: View {
                             }.padding(.top, 45)
                         }
                         ForEach(app.messages) { message in
-                            MessageView(message: message).id(message.id)
+                            Group { if let activity = message.activity { ToolCardView(activity: activity) } else { MessageView(message: message) } }.id(message.id)
                         }
-                        if app.generating { HStack { ProgressView().controlSize(.mini); Text(app.activity ?? "正在思考").foregroundStyle(ReifyDesign.muted) } }
+                        TurnStatusView()
                         Color.clear.frame(height: 1).id("bottom")
                     }.frame(maxWidth: 744).padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 220).frame(maxWidth: .infinity)
-                }.onChange(of: app.messages.count) { _, _ in proxy.scrollTo("bottom", anchor: .bottom) }
-                 .onChange(of: app.generating) { _, running in if !running { proxy.scrollTo("bottom", anchor: .bottom) } }
+                        .background(ReadingPosition(followsBottom: $followsBottom))
+                }.onChange(of: app.messages) { _, _ in if followsBottom { proxy.scrollTo("bottom", anchor: .bottom) } }
+                 .onChange(of: app.sessionID) { _, _ in followsBottom = true; proxy.scrollTo("bottom", anchor: .bottom) }
+                }
             }
         }
     }
@@ -296,7 +302,7 @@ private struct MessageView: View {
             if message.role != "user" { ReifyMark(size: 18).padding(.top, 3) }
             VStack(alignment: .leading, spacing: 8) {
                 Text(message.role == "user" ? "你" : message.role == "note" ? "笔记" : "Reify").font(ReifyDesign.font(10, .medium)).foregroundStyle(ReifyDesign.muted)
-                Text(LocalizedStringKey(message.text)).font(ReifyDesign.font(14)).lineSpacing(5).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Group { if message.role == "user" || message.role == "note" { Text(message.text).font(ReifyDesign.font(14)).textSelection(.enabled) } else { MarkdownView(text: message.text) } }.fixedSize(horizontal: false, vertical: true)
                 if message.role == "user" {
                     HStack {
                         Button(copied ? "已复制" : "复制") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(message.text, forType: .string); copied = true }

@@ -134,12 +134,41 @@ bridge.on('connection',ws=>{
         else if(r.type==='prompt') {
           audit.push({type:'prompt',message:r.message,imageCount:r.images?.length??0,imageTypes:r.images?.map(i=>i.mimeType)??[]});
           if(r.images?.some(i=>!i.data||!i.mimeType?.startsWith('image/')))return output({type:'response',id:r.id,success:false,error:'Invalid image payload'});
+          if(r.message==='拒绝请求验收') { output({type:'response',id:r.id,success:false,error:'请求被拒绝'});continue; }
           stats.prompt++;rows.push({role:'user',content:r.message});reply(r);output({type:'agent_start'});
           histories.set(currentSession,{rows,title:histories.get(currentSession)?.title??'对话'});
           if(r.message==='弹窗协议测试') { awaitingUI={id:'ui-confirm',method:'confirm'};output({type:'extension_ui_request',...awaitingUI,title:'确认测试',message:'确认后继续'});continue; }
           if(r.message==='模拟模型错误') {
             const message={role:'assistant',content:[],stopReason:'error',errorMessage:'测试模型服务不可用'};
             rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});continue;
+          }
+          if(r.message==='工具卡片验收') {
+            const png='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a3ioAAAAASUVORK5CYII=';
+            output({type:'extension_ui_request',id:'notice-card',method:'notify',message:'工具通知'});
+            output({type:'extension_ui_request',id:'status-card',method:'setStatus',statusKey:'cad',statusText:'工作流已就绪'});
+            const buildCall={type:'toolCall',id:'flow-build',name:'python',arguments:{code:'cad.model.build(source="bracket.py")'}};
+            const simCall={type:'toolCall',id:'flow-sim',name:'python',arguments:{code:'cad.simulation.run()'}};
+            rows.push({role:'assistant',content:[buildCall]});
+            output({type:'tool_execution_start',toolCallId:buildCall.id,toolName:buildCall.name,args:buildCall.arguments});
+            setTimeout(()=>output({type:'tool_execution_update',toolCallId:buildCall.id,stage:'检查模型',progress:0.6}),100);
+            setTimeout(()=>{
+              const result={role:'toolResult',toolCallId:buildCall.id,toolName:buildCall.name,content:[{type:'text',text:'已生成 /workspace/bracket.step'},{type:'image',data:png,mimeType:'image/png'}],details:{attachments:[{data:png,mimeType:'image/png',label:'正视图'}]}};
+              rows.push(result);output({type:'tool_execution_end',toolCallId:buildCall.id,result});
+              rows.push({role:'assistant',content:[simCall]});output({type:'tool_execution_start',toolCallId:simCall.id,toolName:simCall.name,args:simCall.arguments});
+            },350);
+            timer=setTimeout(()=>{
+              const result={role:'toolResult',toolCallId:simCall.id,toolName:simCall.name,content:[{type:'text',text:'分析完成'}],details:{outputs:[{name:'最大应力',type:'scalar',value:12,unit:'MPa'},{name:'结果场',type:'field',path:'stress.vtk'}]}};
+              rows.push(result);output({type:'tool_execution_end',toolCallId:simCall.id,result});
+              const message={role:'assistant',content:[{type:'text',text:'工具卡片测试完成。\n\n| 项目 | 结果 |\n| --- | --- |\n| 应力 | **12 MPa** |\n\n```python\nprint(12)\n```\n\n1. 检查尺寸\n2. [下载结果](bracket.step)\n\n- [x] 已检查'}]};
+              rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;
+            },700);continue;
+          }
+          if(r.message==='重试状态验收') {
+            output({type:'auto_retry_start',attempt:1,maxAttempts:3,delayMs:2000,errorMessage:'Rate limit 429'});
+            timer=setTimeout(()=>{
+              output({type:'auto_retry_end',success:true});output({type:'message_update',assistantMessageEvent:{type:'thinking_delta',delta:'重新检查'}});
+              timer=setTimeout(()=>{const message={role:'assistant',content:[{type:'text',text:'重试成功'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},300);
+            },650);continue;
           }
           output({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'正在创建支架…'}});
           timer=setTimeout(()=>{modelWidth=80;files.set('bracket.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));parameterManifest();generatedSessions.add(project+'/'+currentSession);const message={role:'assistant',content:[{type:'text',text:'支架已完成。尺寸 80 × 40 × 30 mm，已生成 STL 和 STEP 文件。'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},r.message.includes('长任务') ? 30000 : 450);

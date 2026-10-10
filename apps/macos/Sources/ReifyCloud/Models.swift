@@ -38,11 +38,36 @@ public struct CloudError: LocalizedError {
     public var errorDescription: String? { message }
     public init(_ message: String, status: Int = 0, code: String? = nil) { self.message = message; self.status = status; self.code = code }
 }
-public struct ChatMessage: Identifiable, Equatable {
+public struct ChatMedia: Codable, Equatable, Identifiable {
+    public let id: String
+    public let mimeType: String
+    public let role: String
+    public let dataUrl: String?
+    public let path: String?
+    public let label: String?
+}
+public struct ChatActivity: Codable, Equatable, Identifiable {
+    public let id: String
+    public let kind: String
+    public let state: String
+    public let title: String
+    public let summary: String?
+    public let stage: String?
+    public let progress: Double?
+    public let startedAt: Double
+    public let finishedAt: Double?
+    public struct Metric: Codable, Equatable { public let label: String; public let value: String }
+    public let metrics: [Metric]?
+    public let media: [ChatMedia]?
+    public let artifactPath: String?
+    public let details: JSONValue?
+}
+public struct ChatMessage: Codable, Identifiable, Equatable {
     public let id: String
     public let role: String
     public var text: String
-    public init(id: String = UUID().uuidString, role: String, text: String) { self.id = id; self.role = role; self.text = text }
+    public var activity: ChatActivity?
+    public init(id: String = UUID().uuidString, role: String, text: String) { self.id = id; self.role = role; self.text = text; self.activity = nil }
     public static func decode(_ rows: [[String: Any]]) -> [ChatMessage] {
         rows.enumerated().compactMap { index, row in
             guard let role = row["role"] as? String, ["user", "assistant"].contains(role) else { return nil }

@@ -50,7 +50,7 @@ extension AppModel {
         let images = attachments
         if generating {
             if runningIntent == "note" {
-                messages.append(ChatMessage(role: "note", text: value)); notes.append(value)
+                notes.append(value); messages.append(noteMessages.last!)
                 AppPreferences.current.set(notes, forKey: "\(conversationKey).notes")
                 draft = ""; attachments = []; saveConversationDraft(); return
             }

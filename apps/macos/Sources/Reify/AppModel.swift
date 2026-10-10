@@ -17,6 +17,9 @@ import ReifyCloud
     @Published var generating = false
     @Published var connected = false
     @Published var activity: String?
+    @Published var extensionNotice: String?
+    @Published var extensionStatuses: [String: String] = [:]
+    private var noticeSequence = 0
     @Published var reclaimAt: String?
     @Published var preview: Data?
     @Published var previewName = ""
@@ -83,16 +86,17 @@ import ReifyCloud
     @Published var permission = AppPreferences.current.string(forKey: "permission") ?? "workspace"
     let api: CloudAPI
     let bridge = WorkspaceBridge()
+    let presentation = DesktopPresentation()
     private var events: URLSessionWebSocketTask?
     private var eventReader: Task<Void, Never>?
     var generation = 0
     private var turnSequence = 0
-    private var streamingID: String?
     init() {
         let env = ProcessInfo.processInfo.environment
         api = CloudAPI(baseURL: env["REIFY_CLOUD_URL"] ?? CloudAPI.defaultURL, scope: env["REIFY_SESSION_SCOPE"] ?? "production")
         bridge.onEvent = { [weak self] event in self?.handle(event) }
         bridge.onDisconnect = { [weak self] error in
+            self?.presentation.exited()
             self?.connected = false; self?.generating = false; self?.activity = nil
             self?.status = "连接已断开"; self?.error = "云端连接已断开，请重连。"
         }
@@ -145,7 +149,7 @@ import ReifyCloud
         busy = true; connected = false; generating = false; error = nil
         if selected?.id != project.id || wasConnected || bridge.spawnID == nil { await bridge.stop(api: api) }
         guard current == generation else { return }
-        selected = project; streamingID = nil; activity = nil; uiRequest = nil
+        selected = project; activity = nil; uiRequest = nil
         if switchingProject {
             messages = []; files = []; preview = nil; previewName = ""; conversations = []; sessionID = nil
             restoreLayout()
@@ -175,6 +179,7 @@ import ReifyCloud
             generating = state["isStreaming"] as? Bool ?? false
             sessionID = state["sessionId"] as? String
             syncRuntimeModel(state)
+            try resetPresentation()
             if AppPreferences.current.object(forKey: "\(conversationKey).draft") != nil { restoreConversationDraft() }
             restorePending()
             try await loadMessages()
@@ -190,22 +195,25 @@ import ReifyCloud
             do { catalog = try await configuration.catalog() } catch { configError = error.localizedDescription }
         } catch { if current == generation { fail(error); status = "连接失败" } }
     }
+    func resetPresentation() throws { noticeSequence += 1; extensionNotice = nil; extensionStatuses = [:]; try presentation.reset(sessionID: sessionID, thinking: thinking) }
+    var noteMessages: [ChatMessage] { notes.enumerated().map { ChatMessage(id: "\(conversationKey).note.\($0.offset)", role: "note", text: $0.element) } }
     func loadMessages() async throws {
         let current = generation
         let result = try await bridge.rpc("get_messages")
         guard current == generation else { return }
-        messages = ChatMessage.decode(result["messages"] as? [[String: Any]] ?? [])
+        messages = try presentation.load(result["messages"] as? [[String: Any]] ?? [])
         notes = AppPreferences.current.stringArray(forKey: "\(conversationKey).notes") ?? []
-        messages += notes.map { ChatMessage(role: "note", text: $0) }
-        streamingID = nil
+        messages += noteMessages
     }
     func send(_ text: String, images: [ImageAttachment] = []) async {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, connected, !generating, selected?.role != "viewer" else { return }
         turnSequence += 1
         let automaticTitle = messages.contains(where: { $0.role == "user" }) ? nil : String(text.replacingOccurrences(of: "\n", with: " ").prefix(80))
-        generating = true; error = nil; streamingID = nil
-        messages.append(ChatMessage(role: "user", text: text))
+        generating = true; error = nil
+        presentation.begin()
+        do { messages = try presentation.reduce(["type": "desktop_user_message", "id": UUID().uuidString, "text": text]) + noteMessages }
+        catch { generating = false; fail(error); return }
         do {
             let outgoing = images.isEmpty ? text : text + "\n\n附件（工作区路径）：\n" + images.map { "- \($0.remotePath)" }.joined(separator: "\n")
             var payload: [String: Any] = ["message": outgoing]
@@ -213,11 +221,12 @@ import ReifyCloud
             _ = try await bridge.rpc("prompt", payload: payload)
             if let automaticTitle { _ = try? await bridge.rpc("set_session_name", payload: ["name": automaticTitle]) }
         }
-        catch { generating = false; fail(error) }
+        catch { presentation.failed("prompt", error.localizedDescription, timeout: (error as? CloudError)?.code == "rpc_timeout"); generating = presentation.turn()?.terminal == false; fail(error) }
     }
     func abort() async {
         let current = generation
         let currentTurn = turnSequence
+        presentation.stopping()
         do {
             _ = try await bridge.rpc("abort")
             Task { @MainActor in
@@ -236,6 +245,7 @@ import ReifyCloud
         do {
             _ = try await bridge.rpc("new_session")
             let state = try await bridge.rpc("get_state"); sessionID = state["sessionId"] as? String
+            try resetPresentation()
             try await loadMessages(); draft = ""; restoreConversationDraft(); restorePending(); canvasMode = false; preview = nil; previewName = ""
             if let selected { AppPreferences.current.removeObject(forKey: "reify.native.active-session.\(api.baseURL).\(user?.id ?? "").\(selected.id)") }
             await refreshConversations(); saveLayout()
@@ -243,18 +253,10 @@ import ReifyCloud
         } catch { fail(error) }
     }
     private func handle(_ event: [String: Any]) {
+        do { messages = try presentation.reduce(event) + noteMessages }
+        catch { fail(error) }
         switch event["type"] as? String {
         case "agent_start": generating = true
-        case "message_update":
-            guard let update = event["assistantMessageEvent"] as? [String: Any], update["type"] as? String == "text_delta", let delta = update["delta"] as? String else { return }
-            if let id = streamingID, let i = messages.firstIndex(where: { $0.id == id }) { messages[i].text += delta }
-            else { let message = ChatMessage(role: "assistant", text: delta); streamingID = message.id; messages.append(message) }
-        case "message_end":
-            if let row = event["message"] as? [String: Any], let message = ChatMessage.decode([row]).first, message.role == "assistant" {
-                if let id = streamingID, let i = messages.firstIndex(where: { $0.id == id }) { messages[i].text = message.text }
-                else { messages.append(message) }
-            }
-            streamingID = nil
         case "tool_execution_start": activity = event["toolName"] as? String == nil ? "正在处理" : "正在制作模型"
         case "tool_execution_end": activity = nil
         case "agent_end":
@@ -272,7 +274,14 @@ import ReifyCloud
             }
         case "extension_ui_request":
             if ["confirm", "select", "input", "editor"].contains(event["method"] as? String ?? "") { uiRequest = event }
-            else if ["notify", "setStatus"].contains(event["method"] as? String ?? "") { activity = (event["message"] ?? event["text"]) as? String }
+            else if event["method"] as? String == "notify" {
+                noticeSequence += 1; let sequence = noticeSequence
+                extensionNotice = event["message"] as? String ?? event["text"] as? String
+                Task { @MainActor in try? await Task.sleep(for: .milliseconds(4500)); if sequence == noticeSequence { extensionNotice = nil } }
+            } else if event["method"] as? String == "setStatus" {
+                let key = event["statusKey"] as? String ?? "status"
+                extensionStatuses[key] = event["statusText"] as? String ?? event["text"] as? String ?? event["message"] as? String
+            }
         default: break
         }
     }

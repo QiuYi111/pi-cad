@@ -19,6 +19,9 @@ swiftc -sdk "$sdk" scripts/make-icon.swift -o .build/manual/make-icon
 .build/manual/make-icon ../desktop/build/icon.png .build/manual/AppIcon.iconset
 iconutil -c icns .build/manual/AppIcon.iconset -o dist/Reify.app/Contents/Resources/AppIcon.icns
 cp Sources/Reify/Resources/* dist/Reify.app/Contents/Resources/
+node scripts/build-desktop-presentation.mjs .build/manual/DesktopPresentation.js
+cp .build/manual/DesktopPresentation.js dist/Reify.app/Contents/Resources/
+cp .build/manual/DesktopThirdParty.txt dist/Reify.app/Contents/Resources/
 codesign --force --sign - dist/Reify.app/Contents/Frameworks/libReifyCloud.dylib
 codesign --force --sign - dist/Reify.app
 swiftc -sdk "$sdk" -target "$(uname -m)-apple-macosx14.0" -parse-as-library -swift-version 5 -I .build/manual -L .build/manual -lReifyCloud \

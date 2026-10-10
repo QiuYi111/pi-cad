@@ -29,6 +29,7 @@ extension AppModel {
         do {
             try await bridge.switchConversation(conversation.path)
             let state = try await bridge.rpc("get_state"); sessionID = state["sessionId"] as? String
+            try resetPresentation()
             syncRuntimeModel(state); try await loadMessages(); restoreConversationDraft(); restorePending()
             preview = nil; previewName = ""; canvasMode = false
             if let selected { AppPreferences.current.set(conversation.path, forKey: "reify.native.active-session.\(api.baseURL).\(user?.id ?? "").\(selected.id)") }
