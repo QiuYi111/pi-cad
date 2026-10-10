@@ -1,6 +1,7 @@
 // A disposable cloud protocol server. No production credentials or model calls.
 import http from 'node:http';
 import {fusionFixture} from './fusion-fixture.mjs';
+import {simulationFixture} from './simulation-fixture.mjs';
 import {tracesFixture} from './traces-fixture.mjs';
 import {rebuildFixture} from './rebuild-fixture.mjs';
 import {publishFixture} from './publish-fixture.mjs';
@@ -23,6 +24,7 @@ let state = 'stopped', accesses = new Set(), refreshes = new Set();
 let accountPassword = 'fixture-password';
 const stats = {login: 0, rejectedLogin: 0, refresh: 0, projects: 0, start: 0, stop: 0, spawn: 0, prompt: 0, abort: 0, uploads: 0, downloads: 0, kills: 0, attaches: 0};
 const audit = [];
+const simulation = simulationFixture(fixtureHome,fixtureRepo,audit);
 let customModels = '{"providers":{}}', favorites = [], defaults = {}, credentials = new Map([['openai-codex',true],['zai',true]]);
 function catalog() {
   const definitions = [
@@ -70,6 +72,7 @@ const server = http.createServer(async (req, res) => {
   if (!text && req.headers['content-type']?.startsWith('application/json')) return respond(res,400,{message:'请求格式不正确'});
   let b = {}; try { b = text ? JSON.parse(text) : {}; } catch { return respond(res,400,{message:'请求格式错误'}); }
   const path = new URL(req.url, 'http://localhost').pathname;
+  if (path === '/__test/simulation-mode') { simulation.setMode(b.mode);return respond(res,200,{ok:true}); }
   if (path === '/v1/healthz') return respond(res,200,{ok:true});
   if (path === '/__test/fusion-scope') { fusion.scopeRequests('/workspace/state/'+b.projectId,b.sessionId,b.enabled);return respond(res,200,{ok:true}); }
   if (path === '/__test/fusion-mode') { fusion.mode=b.mode;return respond(res,200,{ok:true}); }
@@ -226,9 +229,14 @@ bridge.on('connection',ws=>{
               timer=activeSpawn.timer=setTimeout(()=>{const message={role:'assistant',content:[{type:'text',text:'重试成功'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},300);
             },650);continue;
           }
+          if(r.message.startsWith('Run the managed simulation/torch-fem-linear-elastic Recipe')) {
+            activeSpawn.analysisRequest=true;
+            output({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'正在运行测试分析；没有真实求解验收。'}});
+            timer=activeSpawn.timer=setTimeout(()=>{activeSpawn.analysisRequest=false;output({type:'agent_end',messages:rows});timer=null;},30000);continue;
+          }
           output({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'正在创建支架…'}});
           timer=activeSpawn.timer=setTimeout(()=>{modelWidth=80;files.set('bracket.step',Buffer.from('ISO-10303-21;\nWIDTH=80;\nEND-ISO-10303-21;'));parameterManifest();generatedSessions.add(project+'/'+currentSession);const message={role:'assistant',content:[{type:'text',text:'支架已完成。尺寸 80 × 40 × 30 mm，已生成 STL 和 STEP 文件。'}]};rows.push(message);output({type:'message_end',message});output({type:'agent_end',messages:rows});timer=null;},r.message.includes('长任务') ? 30000 : 450);
-        } else if(r.type==='abort') {stats.abort++;clearTimeout(timer);clearTimeout(activeSpawn?.timer);timer=null;reply(r);output({type:'agent_end',messages:rows});}
+        } else if(r.type==='abort') {if(activeSpawn?.analysisRequest){audit.push({type:'simulation-abort',sessionId:currentSession});activeSpawn.analysisRequest=false;}stats.abort++;clearTimeout(timer);clearTimeout(activeSpawn?.timer);timer=null;reply(r);output({type:'agent_end',messages:rows});}
         else if(r.type==='extension_ui_response') {
           if(!awaitingUI||r.id!==awaitingUI.id)return;
           audit.push({type:'ui-answer',method:awaitingUI.method,value:r.value,cancelled:r.cancelled});
@@ -282,6 +290,7 @@ bridge.on('connection',ws=>{
       stats.attaches++;activeSpawn=old;activeSpawn.socket=ws;project=old.project;rows=old.rows;currentSession=old.sessionID??'fixture-session';histories=old.histories??histories;selectedModel=old.model??selectedModel;thinkingLevel=old.thinking??thinkingLevel;
       for(const bytes of old.replay)frame(r.ch,bytes);
     } else if(r.type==='exec') {
+      if(r.args.some(a=>a.includes('REIFY_SIMULATION_RUNTIME'))) { simulation.execute(r,project,value=>send({type:'exec_result',ch:r.ch,...value}));return; }
       if(r.args.some(a=>a.includes('REIFY_DESKTOP_TRACES'))) { traces.execute(r.args,r.input,project,histories,audit,{exit:(code,stdout,stderr)=>send({type:'exec_result',ch:r.ch,code,stdout,stderr})});return; }
       if(r.args.some(a=>a.includes('REIFY_TRANSFER_IO')||a.includes('REIFY_TRANSFER_VIEW'))) { fusion.execute(r,project,value=>send({type:'exec_result',ch:r.ch,...value}));return; }
       const result=value=>send({type:'exec_result',ch:r.ch,code:0,stderr:'',stdout:typeof value==='string'?value:JSON.stringify(value)});
@@ -374,6 +383,7 @@ bridge.on('connection',ws=>{
     else if(r.type==='file_get') {
       stats.downloads++;const name=r.path.split('/').slice(4).join('/'),bytes=files.get(name)??fusion.get(project,name);
       if(!bytes) return send({type:'error',ch:r.ch,message:'文件不存在'});
+      audit.push({type:'file-download',path:r.path,sha256:sha(bytes)});
       frame(r.ch,bytes);send({type:'file_end',ch:r.ch,size:bytes.length,sha256:name==='corrupt.stl'?'0'.repeat(64):sha(bytes)});
     } else if(r.type==='file_put_begin') {upload={...r,data:Buffer.alloc(0)};}
     else if(r.type==='file_put_end') {

@@ -64,13 +64,13 @@ Mac 当前锁屏，窗口读取明确被拒绝；本轮未重新打开 desktop �
 
 ## 原表外的补充检查
 
-**X01：结构分析入口缺失，云端计算能力另列。** desktop 的 CAD 画布仍显示结构分析入口，包含组件状态、材料、载荷、网格、确认和停止；原生没有对应界面。原云端返回“阶段 1 不可用”或“服务器管理”，不能据此宣称完整求解已有，也不能把整个界面从对比中删掉。此项追加核查，不改原始 87 项的历史数量。依据：[分析入口](../desktop/src/renderer/src/components/SimulationLauncher.tsx)、[画布挂载](../desktop/src/renderer/src/components/EngineeringViewer.tsx)、[云端状态](../desktop/electron/main/remote-bridge.ts)。
+**X01：结构分析入口已补代码，云端计算能力另验。** 原生工程结果区已有组件检查、材料、载荷、网格、确认和停止，使用原 desktop 的 Recipe 请求，绑定所看 STEP 的路径与哈希。运行前重新执行原云端组件检查，核对固定版本、实际 GPU 探测和运行环境哈希；缺组件、版本不符或 GPU 不可用均拒绝运行。原云端安装接口只返回“服务器管理”，没有实际安装；原生明确提示管理员安装后重新检查，不显示虚假的安装成功。此项追加核查，不改原始 87 项的历史数量。本批完整本地 E2E 与独立记录检查已通过，包含默认/修改参数、文件版本核对、停止和旧回复隔离；GPU 与求解输出模拟。窗口、真实 GPU 求解和结果验收未通过。依据：[原分析入口](../desktop/src/renderer/src/components/SimulationLauncher.tsx)、[原云端状态](../desktop/electron/main/remote-bridge.ts)、[原组件检查](../../src/modules/simulate-v2/runtime.ts)、[原生入口](Sources/Reify/SimulationView.swift)、[原生操作](Sources/Reify/SimulationActions.swift)。
 
 本地项目目录、WSL、本地 CAD 运行环境不是纯云端客户端必需功能；SolidWorks 是 Windows 专属。Blender、ParaView 和采纳经验规则在现有 desktop 云端明确禁用。**记录、评分、经验整理与重放验证没有被禁用**，不能一并省略。依据：[云端限制](../desktop/electron/main/cloud-mode.ts)、[采纳限制](../desktop/electron/main/traces.ts)、[平台检测](../desktop/electron/main/cad-transfer-detect.ts)。
 
 ## 验收缺口与补齐顺序
 
-设置默认同步、配置草稿刷新和画布导出已修。完成本批记录与经验 E2E，继续完成 Fusion 验收与分析入口，并完成所有新增窗口/正式云端验收。
+设置默认同步、配置草稿刷新和画布导出已修。完成本批记录与经验 E2E，继续完成 Fusion 与分析的真实运行，并完成所有新增窗口/正式云端验收。
 
 每个缺口从 desktop 原入口开始核对操作、调用、返回结果、失败与恢复。E2E 需要实际窗口点击、真实云端和 GLM；模型/图片/工作流/批准/发布须绑定具体项目、对话和版本。新增单元测试不能代替这些验收。
 

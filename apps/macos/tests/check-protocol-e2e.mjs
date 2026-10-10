@@ -2,6 +2,26 @@ import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 const {audit}=JSON.parse(readFileSync(process.argv[2],'utf8'));
 const prompts=audit.filter(x=>x.type==='prompt');
+const analysis=prompts.filter(x=>x.message.startsWith('Run the managed simulation/torch-fem-linear-elastic Recipe'));
+assert.equal(analysis.length,2,'Invalid/stale analysis reached the agent');
+assert.equal(audit.filter(x=>x.type==='simulation-abort').length,2,'Analysis Stop did not reach the cloud');
+for(const request of analysis){
+ assert.equal(request.imageCount,0,'Analysis sent unrelated draft attachments');
+ assert.match(request.message,/CAD artifact bracket\.step at SHA-256 [a-f0-9]{64}\./);
+ const checkedModel=audit.slice(0,audit.indexOf(request)).filter(x=>x.type==='file-download'&&/^\/workspace\/projects\/[^/]+\/bracket\.step$/.test(x.path)).at(-1);
+ assert(checkedModel&&request.message.includes('SHA-256 '+checkedModel.sha256+'.'),'Analysis hash differs from the exact current model bytes');
+}
+for(const text of ['E=210000.125 MPa, nu=0.49999999999999994','mesh size=0.25 mm','[0,0,250.5] N'])assert(analysis[1].message.includes(text),'Adjusted/boundary parameter value lost '+text);
+for(const text of ['E=70000 MPa, nu=0.33','mesh size=2 mm','fix all DOFs on the x-min face','[0,0,-100] N on the x-max face','managed CUDA solver','convergence, reaction balance, mesh refinement','Do not accept the result from exit code alone.'])assert(analysis[0].message.includes(text),'Analysis request lost '+text);
+const qualifications=audit.filter(x=>x.type==='simulation-qualification');
+for(const mode of ['normal','cpu','wrong-version','probe-error','missing','delay'])assert(qualifications.some(x=>x.mode===mode),'Missing qualification mode '+mode);
+for(const q of qualifications.filter(x=>['normal','delay'].includes(x.mode))){
+ assert(q.commands.some(c=>c.command==='test'&&c.args.includes('/usr/bin/bwrap')));
+ assert(q.commands.some(c=>c.command==='bash'&&c.args.join(' ').includes('sha256sum')),'Managed runtime hash was bypassed');
+ const probe=q.commands.find(c=>c.command==='env');assert(probe&&probe.args.includes('CUDA_VISIBLE_DEVICES=0')&&probe.args.includes('UV_NO_SYNC=1')&&probe.args.at(-1)==='cuda');
+ assert(probe.args[probe.args.indexOf('-c')+1].includes('spsolve'),'Original sparse qualification probe was bypassed');
+}
+console.log('PASS: independent server records confirm two exact-source analysis requests, default/adjusted material/load/mesh values without rounding the nu boundary, evidence binding, both aborts, draft attachments excluded, original fresh runtime qualification/hash and missing/GPU/version/failure/scoped-reply refusal (runtime and solver outputs synthetic)');
 assert.equal(prompts.filter(x=>x.message==='已编辑第一条').length,1);
 assert.equal(prompts.filter(x=>x.message==='排队第二条').length,1);
 assert.equal(prompts.filter(x=>x.message==='只保存在对话的笔记').length,0);

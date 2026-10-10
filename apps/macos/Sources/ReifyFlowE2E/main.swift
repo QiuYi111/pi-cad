@@ -555,6 +555,7 @@ import ReifyCloud
         precondition(app.publishedTag == nil && app.publishError?.contains("批准已撤销") == true && app.releaseURL == gitPackage)
         try await tracesE2E(app)
         try await fusionE2E(app)
+        try await simulationE2E(app)
         try await fixture("/__test/expire")
         await app.refreshProjects()
         precondition(app.user == nil && app.api.session == nil && !app.connected && app.error == "登录已失效，请重新登录。" && app.messages.isEmpty && app.projects.isEmpty && app.catalog.providers.isEmpty, "expired session stayed signed in")

@@ -57,6 +57,12 @@ import ReifyCloud
     var fusion: NativeFusion?
     var fusionAttached = false
     var fusionSequence = 0
+    @Published var simulationRuntime: SimulationRuntime?
+    @Published var simulationChecking = false
+    @Published var simulationStarting = false
+    @Published var simulationError: String?
+    var simulationSequence = 0
+    var simulationTurn: Int?
     @Published var workflowsPresented = false
     @Published var workflowRun: WorkflowRun?
     @Published var engineeringCatalog: EngineeringCatalog?
@@ -167,7 +173,7 @@ import ReifyCloud
     private var events: URLSessionWebSocketTask?
     private var eventReader: Task<Void, Never>?
     var generation = 0
-    private var turnSequence = 0
+    private(set) var turnSequence = 0
     init() {
         let env = ProcessInfo.processInfo.environment
         api = CloudAPI(baseURL: env["REIFY_CLOUD_URL"] ?? CloudAPI.defaultURL, scope: env["REIFY_SESSION_SCOPE"] ?? "production")
@@ -471,6 +477,7 @@ import ReifyCloud
         saveLayout()
         generation += 1
         clearTraces()
+        clearSimulation()
         await stopFusion()
         eventReader?.cancel(); events?.cancel(with: .goingAway, reason: nil)
         await bridge.stop(api: api)

@@ -19,6 +19,7 @@ extension AppModel {
     func clearEngineering(preserveViewer: Bool = false) {
         clearTraces()
         clearFusion()
+        clearSimulation()
         restoreParameterPreview()
         parameterBusy = false; parameterError = nil
         engineeringSequence += 1; previewSequence += 1

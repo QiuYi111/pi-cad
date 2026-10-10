@@ -31,6 +31,7 @@ struct EngineeringResultsView: View {
             if app.savedRelease != nil && app.releaseURL != nil { PublishView() }
             if let error = app.evidenceError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
             if let error = app.engineeringError { Text(error).foregroundStyle(.red).textSelection(.enabled) }
+            SimulationView()
             if app.engineeringArtifacts.isEmpty { Text("没有此类结果").foregroundStyle(ReifyDesign.muted) }
             ForEach(app.engineeringArtifacts, id: \.revisionKey) { artifact in
                 HStack(alignment: .top) {
