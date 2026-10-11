@@ -5,6 +5,7 @@
   "scripts": {
     "build": "bash scripts/build.sh",
     "test:e2e": "bash scripts/test-e2e.sh",
+    "test:render:e2e": "bash scripts/test-render-e2e.sh",
     "fixture": "node tests/fixture.mjs"
   },
   "devDependencies": {

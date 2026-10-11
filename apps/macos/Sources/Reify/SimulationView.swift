@@ -8,6 +8,7 @@ struct SimulationView: View {
     @State private var poisson = "0.33"
     @State private var force = "-100"
     @State private var meshSize = "2"
+    init(expanded: Bool = false) { _expanded = State(initialValue: expanded) }
     private var inputError: String? {
         do { _ = try SimulationInputs(youngs: youngs, poisson: poisson, force: force, meshSize: meshSize); return nil }
         catch { return error.localizedDescription }

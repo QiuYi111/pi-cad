@@ -2,6 +2,18 @@
 
 **这不是 desktop 功能完整性验收。** 初版缺口见 [完整功能对比](DESKTOP-PARITY.zh-CN.md)，后续代码与未完成项见 [87 项进度](PARITY-PROGRESS.zh-CN.md)，新确认的问题见 [全面复核](DESKTOP-COMPARISON-CURRENT.zh-CN.md)。下面旧窗口和正式云端结果只覆盖当时基础流程。
 
+## 锁屏时的替代验收
+
+按用户要求新增 `npm --prefix apps/macos run test:render:e2e`。同一份 SwiftUI 页面在隐藏的 AppKit 窗口中布局、绘制并输出 PNG，不读取桌面，不操作正在运行的客户端。页面加载仍调用真实 AppModel 和 HTTP/WebSocket 测试服务。原 Geist 字体、品牌图形、色值和 SceneKit 预览直接来自客户端源码。
+
+检查最小窗口 920×620、默认窗口 1320×850、整页设置、展开的分析表单、工程结果、工作流与记录。系统文字识别检查按钮/字段可见、顶部导航不换行；独立程序检查 PNG 尺寸、完整记录与非空模型图。由此发现并修复最小窗口导航换行，以及 NSColor 默认色彩空间造成的 desktop 色值偏差。截图和逐项结果保存在 `test-results/render-e2e/`，CI 保存同样产物。
+
+本地最新代码全部流程 E2E 通过，退出状态 0，日志 `test-results/alternative-acceptance-e2e.log`；离屏检查 13 项及独立文件检查通过。DMG 已重新构建并通过校验。CI 的标准离屏检查包含 12 项，第 13 项使用本机先前下载的真实云端文件。
+
+可附加检查已下载的真实云端模型：设置 `REIFY_ACCEPTANCE_STL`、`REIFY_ACCEPTANCE_SHA256` 和 `REIFY_ACCEPTANCE_DIMENSIONS`。本地使用 2026-10-10 真实 GLM 导出的 STL，核对原哈希、20×10×5 mm、12 个三角形，再由最新客户端的实际 SceneKit 视图渲染。它证明旧云端产物在最新客户端中可读、可画，不能证明新增云端流程已经运行。
+
+这套检查代替部分窗口布局验收。鼠标/键盘、系统文件对话框、Fusion 实际导出和云端 GPU 求解仍需分别验证；测试服务的 GLM 选择与分析结果不算真实 GLM/GPU 验收。
+
 ## 本轮全面复核与本地复跑
 
 2026-10-11，以 `60e10b7` 加当前工作区代码运行 `npm run macos:test:e2e`，退出状态 0。SwiftUI 应用、DMG 构建与校验及已有完整本地流程通过，日志 `test-results/parity-audit-current-e2e.log`。

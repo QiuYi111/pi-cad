@@ -41,6 +41,8 @@ for source in Sources/Reify/*.swift; do
 done
 swiftc -sdk "$sdk" -target "$(uname -m)-apple-macosx14.0" -parse-as-library -swift-version 5 -I .build/manual -L .build/manual -lReifyCloud \
   "${flow_sources[@]}" Sources/ReifyFlowE2E/*.swift -o .build/manual/ReifyFlowE2E -Xlinker -rpath -Xlinker @executable_path
+swiftc -sdk "$sdk" -target "$(uname -m)-apple-macosx14.0" -parse-as-library -swift-version 5 -I .build/manual -L .build/manual -lReifyCloud \
+  "${flow_sources[@]}" Sources/ReifyRenderE2E/*.swift -o .build/manual/ReifyRenderE2E -Xlinker -rpath -Xlinker @executable_path
 ditto -c -k --sequesterRsrc --keepParent dist/Reify.app "dist/Reify-macOS-$(uname -m).zip"
 bash scripts/package-dmg.sh
 printf 'Built %s/dist/Reify.app\n' "$PWD"

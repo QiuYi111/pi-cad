@@ -5,7 +5,7 @@ import CoreText
 enum ReifyDesign {
     static func color(_ hex: UInt32) -> Color { Color(nsColor: nsColor(hex)) }
     static func nsColor(_ hex: UInt32) -> NSColor {
-        NSColor(red: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255,
+        NSColor(srgbRed: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255,
                 blue: CGFloat(hex & 255) / 255, alpha: 1)
     }
     static let canvas = color(0xe8e6e1), paper = color(0xf8f6f1), panel = color(0xeeece6)

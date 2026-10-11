@@ -74,7 +74,7 @@ struct AppHeader: View {
             .background(ReifyDesign.paper).overlay(alignment: .bottom) { Divider() }
     }
     private func nav(_ title: String, active: Bool, id: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action).buttonStyle(.plain).padding(.horizontal, 15).padding(.vertical, 8)
+        Button(title, action: action).buttonStyle(.plain).fixedSize(horizontal: true, vertical: false).padding(.horizontal, 15).padding(.vertical, 8)
             .background(active ? ReifyDesign.darkGreen : .clear, in: Capsule())
             .foregroundStyle(active ? .white : ReifyDesign.muted).accessibilityIdentifier(id)
     }
