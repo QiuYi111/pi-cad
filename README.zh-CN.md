@@ -83,6 +83,17 @@ Agent 可以探索概念、定义接口、构建零件、检查装配体，并�
 不经过 WSL。首次启动前，用系统包管理器安装 Bubblewrap。应用内置 Prime、Reify
 和 Node，再通过 `uv` 准备 Python 环境。
 
+## macOS 原生云端客户端
+
+SwiftUI 版本已加入 [`apps/macos`](apps/macos/README.md)，支持云端项目、聊天、文件传输和原生 STEP / STL 预览。
+
+```sh
+npm run macos:build
+open apps/macos/dist/Reify.app
+```
+
+E2E：`npm ci --prefix apps/macos && npm run macos:test:e2e`。真实窗口测试见 [测试记录](apps/macos/E2E.md)。
+
 ## macOS 安装
 
 下载 `Reify-macOS-arm64.dmg`，把 Reify 拖入 Applications。Apple Silicon

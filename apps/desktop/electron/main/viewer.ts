@@ -212,7 +212,7 @@ export class ViewerBackend {
     const stored = catalog.parameterManifests.find((item) => normalizePath(item.path) === normalizePath(manifestPath));
     if (!stored) throw new Error(`Version ${commit.name} has no preserved parameter manifest; source, parameters, or input dependencies are incomplete.`);
     const expected = commit.artifacts.find((artifact) => normalizePath(artifact.path) === normalizePath(stored.manifest.output.path));
-    if (!expected) throw new Error(`Version ${commit.name} does not bind the parameterized output ${stored.manifest.output.path}.`);
+    if (!expected || expected.sha256 !== stored.manifest.output.sha256) throw new Error(`Version ${commit.name} does not bind the parameterized output ${stored.manifest.output.path}.`);
     const isolated = `/tmp/reify-source-rebuild-${process.pid}-${Date.now()}`;
     const output = `${projectPath}/.pi-cad/rebuilds/${commit.id}.step`;
     const python = `${piCadRepo}/python/.venv/bin/python`;
@@ -224,6 +224,7 @@ export class ViewerBackend {
       const source = `${isolated}/${normalizePath(stored.manifest.source.path)}`;
       const sourceCheck = await this.bridge.exec(["test", "-f", source]).then(() => true).catch(() => false);
       if (!sourceCheck) throw new Error(`Rebuild input is missing at source revision ${commit.sourceRevision}: ${stored.manifest.source.path}`);
+      if (!/^[0-9a-f]{64}$/.test(stored.manifest.source.sha256) || await hashRuntimeFile(this.bridge, source) !== stored.manifest.source.sha256) throw new Error("Preserved source hash does not match the recorded Git revision.");
       const built = await this.bridge.exec(["sh", "-c", 'cd "$1" && shift && exec "$@"', "sh", isolated, `${piCadRepo}/python/.venv/bin/cadctl`, "build", "--source", source, "--output", output, "--parameters-json", JSON.stringify(values), "--force"], { timeout: 180_000 });
       const envelope = this.parseEnvelope({ exitCode: 0, ...built }, "Isolated source rebuild");
       const actualSha256 = envelope.inputHashes?.output || (await this.bridge.exec(sha256Command(output))).stdout.split(/\s+/)[0]!;
@@ -232,7 +233,9 @@ export class ViewerBackend {
       try {
         const original = await this.resolveProjectPath(settings, expected.path);
         const originalGeometry = await this.inspectGeometry(settings, original);
+        if (originalGeometry.sha256 !== expected.sha256) throw new Error("The historical artifact was replaced after this version was saved.");
         const rebuiltGeometry = await this.inspectGeometry(settings, output);
+        if (rebuiltGeometry.sha256 !== actualSha256) throw new Error("Rebuilt artifact changed during inspection.");
         const axes = ["x", "y", "z"] as const;
         geometryMatch = axes.every((axis) => Math.abs(originalGeometry.bbox[axis] - rebuiltGeometry.bbox[axis]) <= 1e-6) && originalGeometry.solidCount === rebuiltGeometry.solidCount;
         geometryDetail = geometryMatch ? "Bounding box and solid count match." : `Geometry differs: expected ${JSON.stringify(originalGeometry.bbox)}/${originalGeometry.solidCount} solids, rebuilt ${JSON.stringify(rebuiltGeometry.bbox)}/${rebuiltGeometry.solidCount} solids.`;
@@ -382,7 +385,9 @@ export class ViewerBackend {
 
   async resolveProjectPath(settings: AppSettings, path: string): Promise<string> {
     const { projectPath } = await this.bridge.resolveRuntimePaths(settings);
-    const runtimePath = path.startsWith("/workspace/")
+    const runtimePath = projectPath && (path === projectPath || path.startsWith(`${projectPath}/`))
+      ? path
+      : path.startsWith("/workspace/")
       ? `${projectPath}/${path.slice("/workspace/".length)}`
       : !path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path)
         ? `${projectPath}/${path}`

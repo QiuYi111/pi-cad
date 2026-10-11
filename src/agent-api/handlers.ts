@@ -270,7 +270,7 @@ async function handleScopedAgentApi(cwd: string, request: AgentApiRequest, autho
     case "history": return jsonValue(await workspaceHistory(cwd, mechanicalRegistries));
     case "viewer-catalog": return viewerCatalog(cwd);
     case "evidence-read": {
-      if (!/^evidence\/[a-zA-Z0-9._/-]+\.json$/.test(request.path) || request.path.includes("..")) throw new Error("invalid evidence path");
+      if (!/^(?:evidence|reviews)\/[a-zA-Z0-9._/-]+\.json$/.test(request.path) || request.path.includes("..")) throw new Error("invalid evidence path");
       const active = await resolveActiveRun(cwd, mechanicalRegistries);
       if (!active) throw new Error("no active Pi-CAD v7 run");
       const value = await new HarnessRunStoreV7(cwd, active.state.runId).transactions.readJson<JsonValue>(request.path);

@@ -271,7 +271,8 @@ export class CadTransferService {
         await finish(target ?? "fusion", failure("EXECUTOR_FAILED", "The transfer request has a wrong schema, job id, target, or features or assembly path."));
         return;
       }
-      if (await io.exists(`${SPOOL_DIR}/cancel/${id}`)) {
+      const cancelFile = await io.exists(`${SPOOL_DIR}/cancel/${id}`);
+      if (cancelFile || this.cancelledJobs.has(id)) {
         await finish(target, failure("CANCELLED", "The export was cancelled."));
         await io.remove(`${SPOOL_DIR}/cancel/${id}`).catch(() => undefined);
         return;
@@ -325,7 +326,7 @@ export class CadTransferService {
     }
     return new Promise<SpoolResult>((resolve) => {
       const ctx: JobContext = {
-        jobId, request, io, cancelled: false, resolve, writes: Promise.resolve(),
+        jobId, request, io, cancelled: this.cancelledJobs.has(jobId), resolve, writes: Promise.resolve(),
         job: { jobId, target: request.target, state: "queued", message: "Waiting for the CAD program.", updatedAt: "", part: request.part },
       };
       this.jobs.set(jobId, ctx);
@@ -375,7 +376,9 @@ export class CadTransferService {
     // The executor part is done, but the agent still checks the shape: the final state comes from the agent.
     this.deps.emit?.({
       type: "job",
-      job: state === "done" && this.agentJobs.has(ctx.jobId) ? { ...ctx.job, state: "running", message: "Checking the shape." } : ctx.job,
+      job: ["done", "failed", "cancelled"].includes(state) && this.agentJobs.has(ctx.jobId)
+        ? { ...ctx.job, state: "running", message: state === "done" ? "Checking the shape." : state === "cancelled" ? "Finishing cancellation." : "Reading the export failure." }
+        : ctx.job,
     });
     const text = `${JSON.stringify({ jobId: ctx.jobId, state, message, updatedAt: ctx.job.updatedAt }, null, 2)}\n`;
     ctx.writes = ctx.writes.then(() => ctx.io.writeTextAtomic(`${SPOOL_DIR}/status/${ctx.jobId}.json`, text).catch(() => undefined));
@@ -613,15 +616,16 @@ export class CadTransferService {
         native: file, ...(nativeFolder ? { nativeFolder } : {}), ...(logPath ? { logPath } : {}), error: null,
       });
     } catch (error) {
-      const e = error as { message?: string; code?: string; target?: string; detail?: { feature?: unknown; log?: unknown } };
+      const e = error as { message?: string; code?: string; target?: string; detail?: { feature?: unknown; log?: unknown; step?: unknown } };
       const feature = typeof e.target === "string" ? e.target : typeof e.detail?.feature === "string" ? e.detail.feature : undefined;
+      const step = typeof e.detail?.step === "string" ? e.detail.step : undefined;
       const code = (e.code && /^(TRANSFER_[A-Z_]+|BAD_REQUEST)$/.test(e.code) ? e.code : "TRANSFER_EXECUTOR_FAILED") as CadTransferError["code"];
       const message = String(e.message ?? error);
       const log = typeof e.detail?.log === "string" ? e.detail.log : undefined;
       const logPath = log ? await io.toHostPath(log).catch(() => log) : this.logHosts.get(jobId);
       const cancelled = this.cancelledJobs.has(jobId);
       job = base(cancelled ? "cancelled" : "failed", cancelled ? "The export was cancelled." : feature ? `${message} (feature ${feature})` : message, {
-        error: cancelled ? failure("CANCELLED", "The export was cancelled.") : { code, message, ...(feature ? { feature } : {}) },
+        error: cancelled ? failure("CANCELLED", "The export was cancelled.") : { code, message, ...(feature ? { feature } : {}), ...(step ? { step } : {}) },
         ...(logPath ? { logPath } : {}),
       });
     } finally {

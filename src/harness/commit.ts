@@ -134,7 +134,10 @@ export async function commitWorkspace(input: {
       return { id: obligation.ref, category, status: evidence ? "verified" : "unverified", method: obligation.closeWith, ...(evidence ? { evidence: { path: evidence.path, sha256: evidence.sha256 } } : {}) } as const;
     });
     const review = loaded.state.latestReview;
-    if (phase.reviewProfile || review) requirements.push({ id: phase.reviewProfile || "independent-review", category: "machine", status: review?.verdict === "pass" ? "verified" : "unverified", method: "independent reviewer", ...(review ? { evidence: { path: review.path, sha256: review.sha256 } } : {}) } as never);
+    if (phase.reviewProfile || review) {
+      const reviewContent = review ? await run.transactions.readJson<JsonValue>(review.path) : null;
+      requirements.push({ id: phase.reviewProfile || "independent-review", category: "machine", status: review?.verdict === "pass" && reviewContent !== null ? "verified" : "unverified", method: "independent reviewer", ...(review && reviewContent !== null ? { evidence: { path: review.path, sha256: canonicalDigest(reviewContent) } } : {}) } as never);
+    }
     const acceptanceSummary = input.acceptance ? {
       requirements: input.acceptance.requirements.map((requirement) => {
         if (!requirement.id.trim() || !requirement.method.trim()) throw new Error("acceptance requirement needs an id and check method");
